@@ -67,3 +67,6 @@ Default development addresses:
 See [Development Guide](docs/DEVELOPMENT.md) and [Architecture](docs/architecture/ARCHITECTURE.md).
 Provider and model onboarding is specified in
 [Provider Extension Contract](docs/architecture/PROVIDER_EXTENSION.md).
+
+Production container images target `linux/arm64`; GitHub Actions publishes one immutable tag per
+component and source commit.

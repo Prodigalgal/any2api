@@ -1,0 +1,18 @@
+package com.any2api.provider;
+
+public enum ProviderCapability {
+    CHAT_COMPLETIONS,
+    RESPONSES,
+    STREAMING,
+    REASONING,
+    FUNCTION_TOOLS,
+    STRUCTURED_OUTPUT,
+    IMAGE_INPUT,
+    AUDIO_INPUT,
+    VIDEO_INPUT,
+    FILE_INPUT,
+    STORED_RESPONSES,
+    REGISTRATION,
+    REAUTHENTICATION
+}
+

@@ -1,0 +1,64 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: any2api-server
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/any2api}
+    username: ${DATABASE_USERNAME:any2api}
+    password: ${DATABASE_PASSWORD:any2api}
+    hikari:
+      maximum-pool-size: ${DATABASE_POOL_SIZE:20}
+      minimum-idle: ${DATABASE_POOL_MIN_IDLE:2}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+
+any2api:
+  security:
+    public-api-key: ${ANY2API_PUBLIC_API_KEY:}
+    admin-username: ${ANY2API_ADMIN_USERNAME:admin}
+    admin-password: ${ANY2API_ADMIN_PASSWORD:}
+    internal-token: ${ANY2API_INTERNAL_TOKEN:}
+  automation:
+    base-url: ${AUTOMATION_BASE_URL:http://localhost:8090}
+  providers:
+    grok:
+      base-url: ${ANY2API_PROVIDER_GROK_BASE_URL:}
+      api-key: ${ANY2API_PROVIDER_GROK_API_KEY:}
+    mimo:
+      base-url: ${ANY2API_PROVIDER_MIMO_BASE_URL:}
+      api-key: ${ANY2API_PROVIDER_MIMO_API_KEY:}
+    qwen:
+      base-url: ${ANY2API_PROVIDER_QWEN_BASE_URL:}
+      api-key: ${ANY2API_PROVIDER_QWEN_API_KEY:}
+    longcat:
+      base-url: ${ANY2API_PROVIDER_LONGCAT_BASE_URL:}
+      api-key: ${ANY2API_PROVIDER_LONGCAT_API_KEY:}

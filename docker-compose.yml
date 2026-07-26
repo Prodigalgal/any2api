@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-any2api}
+      POSTGRES_USER: ${POSTGRES_USER:-any2api}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-any2api}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-any2api} -d ${POSTGRES_DB:-any2api}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4-bookworm
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-any2api}"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-any2api}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  automation:
+    build:
+      context: ./automation
+    environment:
+      ANY2API_AUTOMATION_INTERNAL_TOKEN: ${ANY2API_INTERNAL_TOKEN:-local-internal-token}
+      ANY2API_AUTOMATION_REDIS_URL: redis://:${REDIS_PASSWORD:-any2api}@redis:6379/0
+      ANY2API_AUTOMATION_JAVA_BASE_URL: http://server:8080
+    ports:
+      - "8090:8090"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  server:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-any2api}
+      DATABASE_USERNAME: ${POSTGRES_USER:-any2api}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-any2api}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-any2api}
+      AUTOMATION_BASE_URL: http://automation:8090
+      ANY2API_PUBLIC_API_KEY: ${ANY2API_PUBLIC_API_KEY:-local-any2api-key}
+      ANY2API_ADMIN_USERNAME: ${ANY2API_ADMIN_USERNAME:-admin}
+      ANY2API_ADMIN_PASSWORD: ${ANY2API_ADMIN_PASSWORD:-local-admin}
+      ANY2API_INTERNAL_TOKEN: ${ANY2API_INTERNAL_TOKEN:-local-internal-token}
+      ANY2API_PROVIDER_GROK_BASE_URL: ${ANY2API_PROVIDER_GROK_BASE_URL:-}
+      ANY2API_PROVIDER_GROK_API_KEY: ${ANY2API_PROVIDER_GROK_API_KEY:-}
+      ANY2API_PROVIDER_MIMO_BASE_URL: ${ANY2API_PROVIDER_MIMO_BASE_URL:-}
+      ANY2API_PROVIDER_MIMO_API_KEY: ${ANY2API_PROVIDER_MIMO_API_KEY:-}
+      ANY2API_PROVIDER_QWEN_BASE_URL: ${ANY2API_PROVIDER_QWEN_BASE_URL:-}
+      ANY2API_PROVIDER_QWEN_API_KEY: ${ANY2API_PROVIDER_QWEN_API_KEY:-}
+      ANY2API_PROVIDER_LONGCAT_BASE_URL: ${ANY2API_PROVIDER_LONGCAT_BASE_URL:-}
+      ANY2API_PROVIDER_LONGCAT_API_KEY: ${ANY2API_PROVIDER_LONGCAT_API_KEY:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      automation:
+        condition: service_started
+
+  web:
+    build:
+      context: ./web
+      args:
+        ANY2API_BACKEND_URL: http://server:8080
+    environment:
+      ANY2API_BACKEND_URL: http://server:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+
+volumes:
+  postgres-data:
+  redis-data:
+

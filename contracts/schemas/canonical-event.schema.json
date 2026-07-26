@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://any2api.local/schemas/canonical-event.schema.json",
+  "title": "Canonical Inference Event",
+  "type": "object",
+  "required": ["schema_version", "request_id", "sequence_number", "type", "payload"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "request_id": { "type": "string", "minLength": 1 },
+    "sequence_number": { "type": "integer", "minimum": 0 },
+    "type": {
+      "enum": [
+        "response.started",
+        "reasoning.delta",
+        "output_text.delta",
+        "tool_call.started",
+        "tool_call.arguments.delta",
+        "tool_call.completed",
+        "usage",
+        "response.completed",
+        "response.failed"
+      ]
+    },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}
+

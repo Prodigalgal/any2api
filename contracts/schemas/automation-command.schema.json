@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://any2api.local/schemas/automation-command.schema.json",
+  "title": "Automation Command",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "command_id",
+    "job_id",
+    "idempotency_key",
+    "attempt",
+    "deadline",
+    "operation",
+    "provider",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "command_id": { "type": "string", "format": "uuid" },
+    "job_id": { "type": "string", "format": "uuid" },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "deadline": { "type": "string", "format": "date-time" },
+    "operation": { "enum": ["register", "reauth", "probe", "cancel"] },
+    "provider": { "enum": ["grok", "mimo", "qwen", "longcat"] },
+    "scoped_token_reference": { "type": ["string", "null"] },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}
+

@@ -25,6 +25,10 @@
 Provider onboarding and model routing rules are defined in
 [Provider Extension Contract](PROVIDER_EXTENSION.md).
 
+Concrete Java providers live in separate `provider/<id>/` packages and are discovered as
+`InferenceProvider` beans. Concrete Python browser strategies live in separate `providers/<id>.py`
+modules and are discovered at process startup. Neither registry contains a provider switch statement.
+
 ## Python automation monolith
 
 | Module | Ownership |

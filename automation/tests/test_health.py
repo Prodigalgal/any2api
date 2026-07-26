@@ -14,5 +14,8 @@ def test_live_health() -> None:
 def test_capabilities_include_all_providers() -> None:
     response = client.get("/internal/v1/capabilities")
     assert response.status_code == 200
-    providers = {item["id"] for item in response.json()["providers"]}
-    assert providers == {"grok", "mimo", "qwen", "longcat"}
+    providers = response.json()["providers"]
+    provider_ids = [item["id"] for item in providers]
+    assert provider_ids
+    assert len(provider_ids) == len(set(provider_ids))
+    assert all(item["challenge_types"] for item in providers)

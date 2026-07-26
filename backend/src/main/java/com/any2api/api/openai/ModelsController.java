@@ -41,6 +41,7 @@ public class ModelsController {
         result.put("object", "model");
         result.put("created", Instant.now().getEpochSecond());
         result.put("owned_by", provider.id());
+        result.put("provider_name", provider.displayName());
         result.put("available", provider.configured());
         result.put("capabilities", provider.capabilities());
         return result;

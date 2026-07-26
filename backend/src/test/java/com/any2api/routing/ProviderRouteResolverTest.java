@@ -19,34 +19,34 @@ class ProviderRouteResolverTest {
     @BeforeEach
     void setUp() {
         resolver = new ProviderRouteResolver(new ProviderRegistry(List.of(
-            provider("grok"),
-            provider("qwen"))));
+            provider("alpha"),
+            provider("beta"))));
     }
 
     @Test
     void unifiedRouteRequiresAndStripsProviderNamespace() {
-        assertThat(resolver.resolve("/v1/chat/completions", "grok/grok-4.5"))
-            .isEqualTo(new ResolvedRoute("grok", "grok-4.5"));
+        assertThat(resolver.resolve("/v1/chat/completions", "alpha/model-one"))
+            .isEqualTo(new ResolvedRoute("alpha", "model-one"));
     }
 
     @Test
     void providerPathAcceptsUnqualifiedModel() {
-        assertThat(resolver.resolve("/qwen/v1/chat/completions", "qwen3.7-plus"))
-            .isEqualTo(new ResolvedRoute("qwen", "qwen3.7-plus"));
+        assertThat(resolver.resolve("/beta/v1/chat/completions", "model-two"))
+            .isEqualTo(new ResolvedRoute("beta", "model-two"));
     }
 
     @Test
     void conflictingPathAndModelAreRejected() {
         assertThatThrownBy(() -> resolver.resolve(
-            "/qwen/v1/chat/completions",
-            "grok/grok-4.5"))
+            "/beta/v1/chat/completions",
+            "alpha/model-one"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("conflicts");
     }
 
     @Test
     void unqualifiedUnifiedModelIsRejected() {
-        assertThatThrownBy(() -> resolver.resolve("/v1/chat/completions", "grok-4.5"))
+        assertThatThrownBy(() -> resolver.resolve("/v1/chat/completions", "model-one"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("provider/model");
     }

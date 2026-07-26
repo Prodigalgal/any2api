@@ -5,6 +5,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface AccountRepository extends JpaRepository<AccountEntity, UUID> {
 
-    long countByProviderIdAndStatus(String providerId, AccountStatus status);
+    long countByStatus(AccountStatus status);
 }
-

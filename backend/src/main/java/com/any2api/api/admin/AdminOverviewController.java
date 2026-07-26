@@ -43,13 +43,9 @@ public class AdminOverviewController {
             result.put("providers", providers.list());
             result.put("accounts", Map.of(
                 "total", accounts.count(),
-                "active", accounts.countByProviderIdAndStatus("grok", AccountStatus.ACTIVE)
-                    + accounts.countByProviderIdAndStatus("mimo", AccountStatus.ACTIVE)
-                    + accounts.countByProviderIdAndStatus("qwen", AccountStatus.ACTIVE)
-                    + accounts.countByProviderIdAndStatus("longcat", AccountStatus.ACTIVE)));
+                "active", accounts.countByStatus(AccountStatus.ACTIVE)));
             result.put("automationUrl", properties.getAutomation().getBaseUrl());
             return Map.copyOf(result);
         }).subscribeOn(reactor.core.scheduler.Schedulers.fromExecutor(databaseExecutor));
     }
 }
-

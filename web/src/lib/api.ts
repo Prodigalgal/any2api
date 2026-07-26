@@ -1,6 +1,7 @@
 export type ProviderModel = {
   id: string;
   owned_by: string;
+  provider_name: string;
   available: boolean;
   capabilities: Record<string, string>;
 };

@@ -26,13 +26,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { api, type ProviderModel } from "@/lib/api";
 
-const providerNames: Record<string, string> = {
-  grok: "Grok",
-  mimo: "MiMo",
-  qwen: "Qwen",
-  longcat: "LongCat"
-};
-
 export function Overview() {
   const models = useQuery({ queryKey: ["models"], queryFn: api.models });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
@@ -56,7 +49,7 @@ export function Overview() {
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, border: 1, borderColor: "divider", bgcolor: "background.paper", mb: 2.5 }}>
         <StatusMetric label="控制面" value={health.data?.status ?? "未连接"} healthy={health.data?.status === "UP"} />
-        <StatusMetric label="已配置厂商" value={`${rows.filter((row) => row.available).length} / 4`} healthy={rows.some((row) => row.available)} />
+        <StatusMetric label="已配置厂商" value={`${rows.filter((row) => row.available).length} / ${rows.length}`} healthy={rows.some((row) => row.available)} />
         <StatusMetric label="生命周期积压" value="尚未采集" icon="schedule" />
       </Box>
 
@@ -74,7 +67,7 @@ export function Overview() {
                 {models.isLoading && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 5 }}><CircularProgress size={24} /></TableCell></TableRow>}
                 {!models.isLoading && rows.map((row) => (
                   <TableRow key={row.id} hover>
-                    <TableCell><Typography sx={{ fontWeight: 700, fontSize: 13 }}>{providerNames[row.id] ?? row.id}</Typography></TableCell>
+                    <TableCell><Typography sx={{ fontWeight: 700, fontSize: 13 }}>{row.displayName}</Typography></TableCell>
                     <TableCell><Chip size="small" variant="outlined" color={row.available ? "success" : "default"} label={row.available ? "已配置" : "待配置"} /></TableCell>
                     <TableCell><Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{row.models.join(", ") || "-"}</Typography></TableCell>
                     <TableCell>{formatCapability(row.capabilities.FUNCTION_TOOLS)}</TableCell>
@@ -92,7 +85,7 @@ export function Overview() {
             <Box sx={{ px: 2, py: 1.75 }}><Typography variant="h6">自动化资源</Typography></Box>
             <Divider />
             <Stack divider={<Divider flexItem />}>
-              <ResourceRow name="实时浏览器 lane" detail="Qwen 风控头预留" status="等待连接" />
+              <ResourceRow name="实时浏览器 lane" detail="高优先级风控状态" status="等待连接" />
               <ResourceRow name="批处理浏览器 lane" detail="注册与重新登录" status="等待连接" />
               <ResourceRow name="本地打码" detail="OCR、滑块、点选、连线" status="等待连接" />
             </Stack>
@@ -134,9 +127,9 @@ function Protection({ label }: { label: string }) {
 }
 
 function groupProviders(models: ProviderModel[]) {
-  const rows = new Map<string, { id: string; available: boolean; models: string[]; capabilities: Record<string, string> }>();
+  const rows = new Map<string, { id: string; displayName: string; available: boolean; models: string[]; capabilities: Record<string, string> }>();
   for (const model of models) {
-    const current = rows.get(model.owned_by) ?? { id: model.owned_by, available: false, models: [], capabilities: model.capabilities };
+    const current = rows.get(model.owned_by) ?? { id: model.owned_by, displayName: model.provider_name, available: false, models: [], capabilities: model.capabilities };
     current.available ||= model.available;
     current.models.push(model.id.includes("/") ? model.id.split("/").slice(1).join("/") : model.id);
     rows.set(model.owned_by, current);

@@ -7,11 +7,11 @@ import re
 import secrets
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from PIL import Image
 
+from ..captcha.artifacts import record_captcha_artifact
 from ..captcha.registry import registry
 from ..captcha.strategy import (
     ChallengeAttemptResult,
@@ -21,7 +21,6 @@ from ..captcha.strategy import (
     ChallengeRunResult,
     ChallengeStrategy,
 )
-from ..config import settings as core_settings
 from ..lifecycle.browser import first_visible
 from .longcat_settings import settings
 
@@ -535,13 +534,7 @@ def _safe_locator_screenshot(
 
 
 def _record_captcha_artifact(label: str, image: bytes | None) -> None:
-    directory = core_settings().captcha_diagnostics_dir.strip()
-    if not directory or not image:
-        return
-    target = Path(directory)
-    target.mkdir(parents=True, exist_ok=True)
-    name = f"{label}-{time.time_ns()}-{secrets.token_hex(3)}.png"
-    (target / name).write_bytes(image)
+    record_captcha_artifact(label, image)
 
 
 def _wait_painted_canvas(page):

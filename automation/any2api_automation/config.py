@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     captcha_ai_action_sample_timeout_seconds: int = 60
     captcha_ai_timeout_seconds: int = 90
     captcha_diagnostics_dir: str = ""
+    captcha_diagnostics_max_files: int = 200
     registration_headless: bool = True
     registration_timeout_seconds: int = 360
     registration_proxy_url: str = ""

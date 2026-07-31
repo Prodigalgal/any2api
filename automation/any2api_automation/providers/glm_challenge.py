@@ -11,6 +11,7 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw
 
+from ..captcha.artifacts import record_captcha_artifact
 from ..captcha.models import SolverEstimate, VisualAction
 from ..captcha.registry import registry
 from .glm_settings import settings
@@ -307,9 +308,12 @@ class GlmAliyunChallenge:
             semantic = self._semantic_slider_input(page, surface.image)
             image = semantic.image
             prompt = GLM_SLIDER_OFFSET_PROMPT
+            artifact = record_captcha_artifact("glm-semantic", image)
+            record_captcha_artifact("glm-surface", surface.image)
         else:
             image = surface.image
             prompt = GLM_VISUAL_ACTION_PROMPT
+            artifact = record_captcha_artifact("glm-visual", image)
         actions = registry.solve_visual_actions_sync(
             image,
             prompt,
@@ -329,7 +333,7 @@ class GlmAliyunChallenge:
                 return []
             self.last_diagnostic = (
                 f"ai={solver_diagnostic}:object_x={semantic.object_center_x:.3f}:"
-                f"target_x={target_x:.3f}"
+                f"target_x={target_x:.3f}:artifact={artifact or 'disabled'}"
             )
             return [
                 VisualAction(

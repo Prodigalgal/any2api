@@ -161,7 +161,7 @@ public class RegistrationJobScheduler {
                 .map(UUID::toString).toList();
             var errorClass = results.stream().filter(item -> !item.success())
                 .map(Attempt::errorClass).findFirst().orElse(null);
-            var delay = registrationDelay(job.id(), attempts);
+            var delay = nextRegistrationDelay(job.id(), attempts, failure > 0);
             var updated = jdbc.sql("""
                 UPDATE registration_jobs SET status = CASE WHEN cancel_requested THEN 'CANCELLED' ELSE :status END,
                     attempts = :attempts, success_count = :successes, failure_count = :failures,
@@ -210,6 +210,12 @@ public class RegistrationJobScheduler {
         var seconds = Math.min(900, 15L * (1L << Math.min(6, Math.max(0, attempts))));
         var jitter = Math.floorMod(31L * jobId.hashCode() + attempts, 30_000L);
         return Duration.ofSeconds(seconds).plusMillis(jitter);
+    }
+
+    static Duration nextRegistrationDelay(UUID jobId, int attempts, boolean failed) {
+        if (failed) return registrationDelay(jobId, attempts);
+        var jitter = Math.floorMod(31L * jobId.hashCode() + attempts, 10_000L);
+        return Duration.ofSeconds(5).plusMillis(jitter);
     }
 
     private static Instant instant(String value) {

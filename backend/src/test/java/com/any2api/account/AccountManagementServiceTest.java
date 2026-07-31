@@ -1,6 +1,7 @@
 package com.any2api.account;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -68,6 +69,30 @@ class AccountManagementServiceTest {
         verify(vault).store(any(), eq("beta"), any(), any());
         verify(schedules).scheduleInitialProbe(first.account().id(), "alpha");
         verify(schedules).scheduleInitialProbe(second.account().id(), "beta");
+    }
+
+    @Test
+    void registrationImportRejectsAnExistingProviderIdentityWithoutUpdatingIt() {
+        var repository = mock(AccountRepository.class);
+        var vault = mock(CredentialVault.class);
+        var existing = AccountEntity.create(
+            "alpha", "upstream-a", "original@example.com", null, Map.of());
+        when(repository.findByProviderIdAndExternalId("alpha", "upstream-a"))
+            .thenReturn(Optional.of(existing));
+        var service = new AccountManagementService(
+            repository,
+            vault,
+            new ProviderRegistry(List.of(provider("alpha"))),
+            mock(LifecycleScheduleService.class),
+            List.of());
+
+        assertThatThrownBy(() -> service.importNewAccount(command(
+                "alpha", "upstream-a", mapper.createObjectNode().put("token", "new"))))
+            .isInstanceOf(DuplicateAccountException.class);
+
+        verify(repository, never()).save(any());
+        verify(vault, never()).store(any(), any(), any(), any());
+        assertThat(existing.getEmail()).isEqualTo("original@example.com");
     }
 
     @Test

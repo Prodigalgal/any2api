@@ -49,6 +49,19 @@ public class AccountManagementService {
 
     @Transactional
     public ImportResult importAccount(ImportCommand command) {
+        return importAccount(command, false);
+    }
+
+    @Transactional
+    public ImportResult importNewAccount(ImportCommand command) {
+        return importAccount(command, true);
+    }
+
+    private ImportResult importAccount(ImportCommand command, boolean requireNewSource) {
+        if (requireNewSource && accounts.findByProviderIdAndExternalId(
+            command.providerId(), command.externalId()).isPresent()) {
+            throw new DuplicateAccountException(command.providerId(), command.externalId());
+        }
         var sourceMetadata = new LinkedHashMap<>(command.metadata());
         var derivedAccounts = new ArrayList<AccountDerivationPolicy.DerivedAccount>();
         var seed = new AccountDerivationPolicy.AccountSeed(

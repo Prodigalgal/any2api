@@ -135,7 +135,7 @@ public class RegistrationJobScheduler {
             result.path("ready_for_inference").asBoolean(false));
         metadata.put("registration_worker_ready_for_inference", admission.workerClaimedReady());
         metadata.put("inference_readiness_pending", true);
-        var imported = accounts.importAccount(new AccountManagementService.ImportCommand(
+        var imported = accounts.importNewAccount(new AccountManagementService.ImportCommand(
             job.providerId(), externalId, email.isBlank() ? null : email, expiresAt,
             credentialExpiresAt, metadata, null, null, null,
             admission.status(), admission.enabled(), credential, true));

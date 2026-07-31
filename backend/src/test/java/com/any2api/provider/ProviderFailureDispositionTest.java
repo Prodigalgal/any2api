@@ -50,21 +50,19 @@ class ProviderFailureDispositionTest {
     }
 
     @Test
-    void emptyModelOutputCoolsOnlyThatAccountAndModel() {
+    void emptyModelOutputDegradesTheAccountUntilLifecycleRechecksIt() {
         var accounts = mock(AccountSelectionService.class);
         var account = mock(LeasedProviderAccount.class);
-        when(accounts.reportModelCooldown(
-            account, "model-a", "empty", Duration.ofMinutes(2)))
+        when(accounts.reportFailure(account, "empty", Duration.ofHours(6)))
             .thenReturn(Mono.empty());
 
         new ProviderFailureDisposition(accounts).report(
             account, "model-a",
             new ProviderFailure("empty_model_response", "empty", false, Map.of())).block();
 
-        verify(accounts).reportModelCooldown(
-            account, "model-a", "empty", Duration.ofMinutes(2));
-        verify(accounts, never()).reportFailure(
+        verify(accounts).reportFailure(account, "empty", Duration.ofHours(6));
+        verify(accounts, never()).reportModelCooldown(
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 }

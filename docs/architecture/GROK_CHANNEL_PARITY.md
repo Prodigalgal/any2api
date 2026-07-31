@@ -29,7 +29,7 @@ not live-equivalent, and `MISSING` requires implementation.
 | Area | Reference behavior | Any2API status | Acceptance requirement |
 | --- | --- | --- | --- |
 | Account projection | SSO can project Web to Console and link Build | PARTIAL | Build SSO creates disabled Web/Console rows; refresh preserves independent state and context |
-| Chat Completions | Web and Console normalize to channel protocol | PARTIAL | Web Gateway text is live-proven across two finbot exits; finish tools, usage/cancellation/error fixtures, and Console parity |
+| Chat Completions | Web and Console normalize to channel protocol | PARTIAL | Web Gateway text is live-proven across two configured egress routes; finish tools, usage/cancellation/error fixtures, and Console parity |
 | Responses | Web stores conversation state; Console forces stateless | PARTIAL | Web two-turn continuation is live-proven; finish public endpoint CRUD/affinity acceptance and Console stateless parity |
 | Models | built-in catalogs; Web filtered by tier | PARTIAL | model availability reflects at least one eligible account, not merely any account |
 | Web tools | prompt injection plus streamed tool-call recovery | DONE | nested/flat schemas, forced choice, history, arbitrary chunk boundaries, parallel calls, undeclared-call rejection, and live forced call |
@@ -91,8 +91,8 @@ a distinct operation and places its parent on `response.create`; the two shapes 
 Java creates and decodes all Gateway events. Python only opens the real browser WebSocket with the
 session's exact proxy and cookies and moves bounded JSON frames across the internal transport API.
 
-Sanitized live acceptance currently covers a complete text response through two independent finbot
-VLESS exits, a Gateway handshake plus official mode/quota keepalive, and a two-turn Responses
+Sanitized live acceptance currently covers a complete text response through two independent
+configured egress routes, a Gateway handshake plus official mode/quota keepalive, and a two-turn Responses
 continuation where the second turn starts in a fresh browser context. The supplied HAR remains an
 external diagnostic artifact and is not copied into the repository.
 

@@ -26,6 +26,25 @@ public class RandomRouteCatalog {
               AND provider.enabled = TRUE
               AND provider.installed = TRUE
               AND :role = ANY(model.random_roles)
+              AND EXISTS (
+                  SELECT 1
+                  FROM accounts account
+                  WHERE account.provider_id = provider.id
+                    AND account.enabled = TRUE
+                    AND account.status IN ('ACTIVE', 'DEGRADED')
+                    AND (account.cooldown_until IS NULL
+                        OR account.cooldown_until <= CURRENT_TIMESTAMP)
+                    AND (account.expires_at IS NULL
+                        OR account.expires_at > CURRENT_TIMESTAMP)
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM account_model_cooldowns cooldown
+                        WHERE cooldown.account_id = account.id
+                          AND cooldown.provider_id = provider.id
+                          AND cooldown.model_id = model.upstream_id
+                          AND cooldown.cooldown_until > CURRENT_TIMESTAMP
+                    )
+              )
             ORDER BY model.provider_id, model.upstream_id
             """)
             .param("role", role.catalogValue())

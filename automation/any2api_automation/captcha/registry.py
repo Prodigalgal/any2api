@@ -6,10 +6,12 @@ import io
 import itertools
 import json
 import math
+import random
 import re
 import statistics
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -417,61 +419,100 @@ class SolverRegistry:
         data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
         prompt_prefix = config.captcha_ai_prompt_prefix.strip()
         effective_prompt = f"{prompt_prefix}\n\n{prompt}" if prompt_prefix else prompt
-        try:
-            response = httpx.post(
-                endpoint,
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": "random",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "Return only the requested machine-readable result. "
-                                "Do not explain or use Markdown."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": effective_prompt},
-                                {"type": "image_url", "image_url": {"url": data_url}},
-                            ],
-                        },
-                    ],
-                    "max_tokens": max_tokens,
-                    "reasoning_effort": "none",
-                    "temperature": 0,
-                },
-                timeout=max(
-                    1,
-                    min(
-                        180,
-                        config.captcha_ai_timeout_seconds,
-                        timeout_seconds
-                        if timeout_seconds is not None
-                        else config.captcha_ai_timeout_seconds,
+        request_body = {
+            "model": "random",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Return only the requested machine-readable result. "
+                        "Do not explain or use Markdown."
                     ),
-                ),
-            )
-            response.raise_for_status()
-            payload = response.json()
-            content = ((payload.get("choices") or [{}])[0].get("message") or {}).get("content", "")
-            if isinstance(content, list):
-                content = "".join(
-                    value if isinstance(value, str) else str(value.get("text") or "")
-                    for value in content
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": effective_prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+            "max_tokens": max_tokens,
+            "reasoning_effort": "none",
+            "temperature": 0,
+        }
+        budget = max(
+            1,
+            min(
+                180,
+                config.captcha_ai_timeout_seconds,
+                timeout_seconds
+                if timeout_seconds is not None
+                else config.captcha_ai_timeout_seconds,
+            ),
+        )
+        deadline = time.monotonic() + budget
+        for attempt in range(1, 4):
+            remaining = deadline - time.monotonic()
+            if remaining < 1:
+                break
+            try:
+                response = httpx.post(
+                    endpoint,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json=request_body,
+                    timeout=max(1, min(remaining, config.captcha_ai_timeout_seconds)),
                 )
-            headers = getattr(response, "headers", {})
-            provider = str(headers.get("X-Any2API-Provider") or "unknown")
-            model = str(headers.get("X-Any2API-Model") or "unknown")
-            self._diagnostics.visual = f"response_received:provider={provider}:model={model}"
-            return str(content)
-        except httpx.HTTPStatusError as error:
-            self._diagnostics.visual = f"http_status:{error.response.status_code}"
+                headers = getattr(response, "headers", {})
+                provider = str(headers.get("X-Any2API-Provider") or "unknown")
+                model = str(headers.get("X-Any2API-Model") or "unknown")
+                error_type = self._response_error_type(response)
+                if error_type == "account_unavailable" and attempt < 3:
+                    self._diagnostics.visual = (
+                        f"retrying_account_unavailable:provider={provider}:model={model}"
+                    )
+                    time.sleep(min(random.uniform(0.1, 0.4), max(0, remaining - 1)))
+                    continue
+                response.raise_for_status()
+                payload = response.json()
+                content = ((payload.get("choices") or [{}])[0].get("message") or {}).get(
+                    "content", ""
+                )
+                if isinstance(content, list):
+                    content = "".join(
+                        value if isinstance(value, str) else str(value.get("text") or "")
+                        for value in content
+                    )
+                if not str(content).strip() and attempt < 3:
+                    self._diagnostics.visual = (
+                        f"retrying_empty_response:provider={provider}:model={model}"
+                    )
+                    continue
+                self._diagnostics.visual = (
+                    f"response_received:provider={provider}:model={model}:attempt={attempt}"
+                )
+                return str(content)
+            except httpx.HTTPStatusError as error:
+                headers = error.response.headers
+                provider = str(headers.get("X-Any2API-Provider") or "unknown")
+                model = str(headers.get("X-Any2API-Model") or "unknown")
+                self._diagnostics.visual = (
+                    f"http_status:{error.response.status_code}:provider={provider}:model={model}"
+                )
+                return ""
+            except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+                self._diagnostics.visual = f"request_error:{type(error).__name__}"
+                return ""
+        return ""
+
+    def _response_error_type(self, response: object) -> str:
+        if int(getattr(response, "status_code", 200)) < 400:
             return ""
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
-            self._diagnostics.visual = f"request_error:{type(error).__name__}"
+        try:
+            payload = response.json()  # type: ignore[attr-defined]
+            error = payload.get("error") if isinstance(payload, dict) else None
+            return str(error.get("type") or "") if isinstance(error, dict) else ""
+        except (TypeError, ValueError):
             return ""
 
     def solve_slider_ddddocr_variant_sync(

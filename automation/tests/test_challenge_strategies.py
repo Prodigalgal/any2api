@@ -1,6 +1,7 @@
 import io
 from typing import Any, ClassVar
 
+import httpx
 from PIL import Image, ImageChops, ImageDraw
 
 from any2api_automation.captcha.models import SolverEstimate, VisualAction
@@ -311,6 +312,22 @@ class _VisionInvalidActionResponse:
         return {"choices": [{"message": {"content": "unable to format the result"}}]}
 
 
+class _VisionAccountUnavailableResponse:
+    status_code = 502
+    headers: ClassVar[dict[str, str]] = {
+        "X-Any2API-Provider": "minmax",
+        "X-Any2API-Model": "MiniMax-M3",
+    }
+
+    def raise_for_status(self) -> None:
+        request = httpx.Request("POST", "https://gateway.example")
+        response = httpx.Response(502, request=request, headers=self.headers)
+        raise httpx.HTTPStatusError("unavailable", request=request, response=response)
+
+    def json(self) -> dict[str, object]:
+        return {"error": {"type": "account_unavailable"}}
+
+
 def test_visual_solver_parses_normalized_points_without_exposing_response(
     monkeypatch,
 ) -> None:
@@ -377,6 +394,30 @@ def test_visual_text_solver_keeps_only_captcha_characters(monkeypatch) -> None:
     assert estimate is not None
     assert estimate.solver == "vision_text"
     assert estimate.value == "aB7x"
+
+
+def test_visual_completion_reroutes_transient_random_account_contention(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
+    settings.cache_clear()
+    responses = iter((_VisionAccountUnavailableResponse(), _VisionActionResponse()))
+    calls = 0
+
+    def post(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return next(responses)
+
+    monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
+
+    content = registry._visual_completion_sync(
+        b"fixture-image", "fixture prompt", max_tokens=100, timeout_seconds=10
+    )
+
+    settings.cache_clear()
+    assert calls == 2
+    assert content.startswith("ACTIONS=")
+    assert "attempt=2" in registry.visual_diagnostic()
 
 
 def test_visual_text_candidate_extracts_structured_or_emphasized_answers_only() -> None:

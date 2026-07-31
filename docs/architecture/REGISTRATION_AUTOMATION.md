@@ -76,6 +76,8 @@ HTTP 403 and `permission-denied` are not sufficient to ban an account. Grok clas
 
 MinMax is overseas-only. Its lifecycle flow uses `account.minimax.io` and `agent.minimax.io`; a redirect to `minimaxi.com` invalidates the attempt. The OAuth state, device profile, request token, and request-signing profile are discovered from the current official flow rather than copied from the domestic site. Official assets are restricted to provider-configured CDN hosts, currently including both `cdn.hailuo.ai` and the legacy `cdn.hailuoai.com`; signature salts and version codes are still extracted from the live scripts and are never fixed constants.
 
+MinMax's inference request `user_id` is a protocol field and is not an account identity. Registration accepts an account only after the official `/v1/api/user/info` response matches the registration mailbox. The stable `realUserID` (falling back to `userID`) becomes the provider account's external identity, while the request `user_id` remains isolated in the credential for upstream signing.
+
 The six full-lifecycle plugins for GLM, Grok, LongCat, MiMo, MinMax, and Qwen expose the same
 operations. Channel-only plugins such as Grok Console may advertise a strict subset:
 

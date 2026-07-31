@@ -39,7 +39,7 @@ from any2api_automation.providers.mimo_protocol import (
     _select_registration_public_key,
     _webpack_crypto_assets,
 )
-from any2api_automation.providers.minmax import _script_urls
+from any2api_automation.providers.minmax import _script_urls, _verified_profile_identity
 from any2api_automation.providers.minmax_settings import settings as minmax_settings
 from any2api_automation.providers.qwen_challenge import (
     _drag_slider_to_piece_target,
@@ -172,6 +172,45 @@ def test_minmax_official_asset_hosts_include_current_and_legacy_cdn() -> None:
         "https://cdn.hailuo.ai/current.js",
         "https://cdn.hailuoai.com/legacy.js",
     ]
+
+
+def test_minmax_registration_uses_verified_profile_identity_not_request_user_id() -> None:
+    identity = _verified_profile_identity(
+        {
+            "data": {
+                "userInfo": {
+                    "userID": "account-user",
+                    "realUserID": "stable-real-user",
+                    "email": "mail@example.test",
+                }
+            },
+            "statusInfo": {"code": 0},
+        },
+        "mail@example.test",
+    )
+
+    assert identity == {
+        "external_id": "stable-real-user",
+        "account_user_id": "account-user",
+        "real_user_id": "stable-real-user",
+    }
+
+
+def test_minmax_registration_rejects_a_profile_for_another_mailbox() -> None:
+    with pytest.raises(RuntimeError, match="does not match"):
+        _verified_profile_identity(
+            {
+                "data": {
+                    "userInfo": {
+                        "userID": "account-user",
+                        "realUserID": "stable-real-user",
+                        "email": "other@example.test",
+                    }
+                },
+                "statusInfo": {"code": 0},
+            },
+            "mail@example.test",
+        )
 
 
 @pytest.mark.asyncio

@@ -170,6 +170,8 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
     config = settings()
     account_events: list[str] = []
     session_values: dict[str, str] = {}
+    profile_identity: dict[str, str] = {}
+    profile_error: list[str] = []
 
     def capture_session(request) -> None:
         parsed = urlparse(request.url)
@@ -196,7 +198,12 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
         try:
             body = response.json()
             code = str((body.get("statusInfo") or {}).get("code", ""))
-            if parsed.path in {"/v1/api/user/info", "/v1/api/user/renewal"}:
+            if parsed.path == "/v1/api/user/info":
+                try:
+                    profile_identity.update(_verified_profile_identity(body, mailbox.address))
+                except (RuntimeError, TypeError) as error:
+                    profile_error[:] = [str(error)]
+            elif parsed.path == "/v1/api/user/renewal":
                 _extract_session_values(body, session_values)
         except Exception:  # noqa: BLE001,S110 - diagnostics never require a response body
             pass
@@ -259,21 +266,70 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
             f"MinMax overseas OAuth stopped at {parsed.hostname or 'unknown'}{parsed.path}; "
             f"events={','.join(account_events[-6:])}"
         )
-    session_deadline = time.monotonic() + 30
-    while time.monotonic() < session_deadline and not (
-        session_values.get("token") and session_values.get("user_id")
+    session_deadline = time.monotonic() + 45
+    while (
+        time.monotonic() < session_deadline
+        and not profile_error
+        and not (
+            session_values.get("token")
+            and session_values.get("user_id")
+            and profile_identity.get("external_id")
+        )
     ):
         page.wait_for_timeout(500)
+    if profile_error:
+        raise RuntimeError(profile_error[0])
+    if not profile_identity.get("external_id"):
+        raise RuntimeError("MinMax overseas login did not expose a verified account profile")
     value = credential_from_context(context, page, password, mailbox.jwt)
     value.update({"email": mailbox.address, "registration_backend": backend})
     value.update(session_values)
+    value.update(
+        {
+            "account_user_id": profile_identity["account_user_id"],
+            "real_user_id": profile_identity.get("real_user_id", ""),
+            "profile_email_verified": True,
+        }
+    )
     _normalize_minmax_storage(value)
     profile = _profile_from_browser(context, page)
     if profile:
         value["request_profile"] = profile
     if not value.get("token") or not value.get("user_id"):
         raise RuntimeError("MinMax overseas login completed without token and user_id")
-    return BrowserResult(str(value["user_id"]), mailbox.address, value)
+    return BrowserResult(profile_identity["external_id"], mailbox.address, value)
+
+
+def _verified_profile_identity(value: Any, expected_email: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise TypeError("MinMax account profile response is invalid")
+    status = value.get("statusInfo")
+    if isinstance(status, dict) and status.get("code") not in {None, 0, "0"}:
+        raise RuntimeError("MinMax account profile request was rejected")
+    data = value.get("data")
+    user_info = data.get("userInfo") if isinstance(data, dict) else None
+    if not isinstance(user_info, dict):
+        raise TypeError("MinMax account profile response is incomplete")
+    actual_email = str(user_info.get("email") or "").strip()
+    if not actual_email or actual_email.casefold() != expected_email.strip().casefold():
+        raise RuntimeError("MinMax account profile email does not match the registration mailbox")
+    account_user_id = str(
+        user_info.get("userID") or user_info.get("userId") or user_info.get("user_id") or ""
+    ).strip()
+    real_user_id = str(
+        user_info.get("realUserID")
+        or user_info.get("realUserId")
+        or user_info.get("real_user_id")
+        or ""
+    ).strip()
+    external_id = real_user_id or account_user_id
+    if not external_id or not account_user_id:
+        raise RuntimeError("MinMax account profile did not expose a stable identity")
+    return {
+        "external_id": external_id,
+        "account_user_id": account_user_id,
+        "real_user_id": real_user_id,
+    }
 
 
 def _extract_session_values(value: Any, target: dict[str, str]) -> None:

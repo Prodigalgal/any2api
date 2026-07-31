@@ -4,13 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.any2api.account.AccountEntity;
-import com.any2api.account.AccountModelCooldownStore;
-import com.any2api.account.AccountRepository;
+import com.any2api.account.AccountSelectionService;
+import com.any2api.account.AccountUnavailableException;
 import com.any2api.account.LeasedProviderAccount;
+import com.any2api.coordination.AccountLease;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.CanonicalRequestParser;
@@ -23,18 +24,21 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 
 class RandomInferenceRouterTest {
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
     @AfterEach
     void closeExecutor() {
@@ -48,19 +52,15 @@ class RandomInferenceRouterTest {
             new RandomRouteCatalog.ModelRoute("alpha", "bad-model"),
             new RandomRouteCatalog.ModelRoute("alpha", "good-model"),
             new RandomRouteCatalog.ModelRoute("beta", "other-model")));
-        var accounts = mock(AccountRepository.class);
-        var alphaAccount = AccountEntity.create(
-            "alpha", "external", null, null, Map.of("tier", "basic"));
-        when(accounts.findEligible(anyString(), any(), any())).thenAnswer(invocation ->
-            "alpha".equals(invocation.getArgument(0))
-                ? List.of(alphaAccount) : List.of());
-        var cooldowns = mock(AccountModelCooldownStore.class);
-        when(cooldowns.coolingAccounts(anyString(), anyString())).thenReturn(Set.of());
+        var accounts = mock(AccountSelectionService.class);
+        when(accounts.acquire(eq("alpha"), eq("good-model"), any()))
+            .thenReturn(Mono.just(leased("alpha")));
+        when(accounts.acquire(eq("beta"), eq("other-model"), any()))
+            .thenReturn(Mono.error(new AccountUnavailableException("beta")));
         var router = new RandomInferenceRouter(
             catalog,
             new ProviderRegistry(List.of(provider("alpha"), provider("beta"))),
             accounts,
-            cooldowns,
             new CanonicalRequestParser(new ObjectMapper()),
             executor);
         var request = new ObjectMapper().createObjectNode();
@@ -72,10 +72,12 @@ class RandomInferenceRouterTest {
             RandomModelRole.TOP_TEXT).block();
 
         assertThat(selected).isNotNull();
-        assertThat(selected.providerId()).isEqualTo("alpha");
-        assertThat(selected.model()).isEqualTo("good-model");
-        assertThat(selected.rawRequest().path("model").asText()).isEqualTo("good-model");
-        assertThat(selected.providerOptions()).containsEntry("flag", true);
+        assertThat(selected.request().providerId()).isEqualTo("alpha");
+        assertThat(selected.request().model()).isEqualTo("good-model");
+        assertThat(selected.request().rawRequest().path("model").asText())
+            .isEqualTo("good-model");
+        assertThat(selected.request().providerOptions()).containsEntry("flag", true);
+        assertThat(selected.account().providerId()).isEqualTo("alpha");
         assertThat(request.has("model")).isFalse();
     }
 
@@ -84,8 +86,7 @@ class RandomInferenceRouterTest {
         var router = new RandomInferenceRouter(
             mock(RandomRouteCatalog.class),
             new ProviderRegistry(List.of(provider("alpha"))),
-            mock(AccountRepository.class),
-            mock(AccountModelCooldownStore.class),
+            mock(AccountSelectionService.class),
             new CanonicalRequestParser(new ObjectMapper()),
             executor);
         var request = new ObjectMapper().createObjectNode().put("model", "alpha/model");
@@ -95,6 +96,59 @@ class RandomInferenceRouterTest {
                 RandomModelRole.TOP_TEXT).block())
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("model=random");
+    }
+
+    @Test
+    void distributesEachProviderOnceBeforeRefillingTheShuffleBag() {
+        var catalog = mock(RandomRouteCatalog.class);
+        when(catalog.installedModels(RandomModelRole.TOP_MULTIMODAL)).thenReturn(List.of(
+            new RandomRouteCatalog.ModelRoute("alpha", "alpha-model"),
+            new RandomRouteCatalog.ModelRoute("beta", "beta-model"),
+            new RandomRouteCatalog.ModelRoute("gamma", "gamma-model")));
+        var accounts = mock(AccountSelectionService.class);
+        when(accounts.acquire(anyString(), anyString(), any())).thenAnswer(invocation ->
+            Mono.just(leased(invocation.getArgument(0))));
+        var router = new RandomInferenceRouter(
+            catalog,
+            new ProviderRegistry(List.of(
+                provider("alpha"), provider("beta"), provider("gamma"))),
+            accounts,
+            new CanonicalRequestParser(new ObjectMapper()),
+            executor);
+        var request = new ObjectMapper().createObjectNode();
+        request.putArray("messages").addObject()
+            .put("role", "user").put("content", "hello");
+
+        var selected = Flux.range(0, 3)
+            .flatMap(ignored -> router.select(
+                CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+                request,
+                RandomModelRole.TOP_MULTIMODAL))
+            .map(selection -> selection.request().providerId())
+            .collectList()
+            .block();
+
+        assertThat(selected).doesNotHaveDuplicates();
+        assertThat(selected).containsExactlyInAnyOrder("alpha", "beta", "gamma");
+    }
+
+    private LeasedProviderAccount leased(String providerId) {
+        var accountId = UUID.randomUUID();
+        return new LeasedProviderAccount(
+            accountId,
+            providerId,
+            "external",
+            null,
+            1,
+            null,
+            JsonNodeFactory.instance.objectNode(),
+            Map.of(),
+            new AccountLease(
+                providerId,
+                accountId,
+                UUID.randomUUID().toString(),
+                1,
+                Instant.now().plusSeconds(300)));
     }
 
     private InferenceProvider provider(String id) {

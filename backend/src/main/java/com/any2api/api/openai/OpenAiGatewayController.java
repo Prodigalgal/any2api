@@ -106,13 +106,14 @@ public class OpenAiGatewayController {
         CanonicalRequest.Protocol protocol,
         RandomModelRole role
     ) {
-        return randomRouter.select(protocol, request, role).flatMap(canonical -> {
+        return randomRouter.select(protocol, request, role).flatMap(selection -> {
+            var canonical = selection.request();
             exchange.getResponse().getHeaders().set(
                 "X-Any2API-Provider", canonical.providerId());
             exchange.getResponse().getHeaders().set(
                 "X-Any2API-Model", canonical.model());
             return responseWriter.write(
-                canonical, coordinator.execute(canonical), exchange);
+                canonical, coordinator.execute(canonical, selection.account()), exchange);
         });
     }
 }

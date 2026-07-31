@@ -35,10 +35,47 @@ public class InferenceCoordinator {
         var provider = providers.require(request.providerId());
         ProviderRequestValidation.requireSupportedContent(request, provider.manifest());
         provider.validate(request);
-        return Flux.usingWhen(
+        return executeWithLease(request, provider,
             accounts.acquire(request.providerId(), request.model(),
-                account -> provider.supportsAccount(request, account)),
+                account -> provider.supportsAccount(request, account)));
+    }
+
+    public Flux<CanonicalEvent> execute(
+        CanonicalRequest request,
+        com.any2api.account.LeasedProviderAccount account
+    ) {
+        if (!request.providerId().equals(account.providerId())) {
+            return accounts.release(account).thenMany(Flux.error(
+                new IllegalArgumentException(
+                    "random route account provider does not match the request")));
+        }
+        var provider = providers.require(request.providerId());
+        return executeWithLease(
+            request, provider, reactor.core.publisher.Mono.just(account), true);
+    }
+
+    private Flux<CanonicalEvent> executeWithLease(
+        CanonicalRequest request,
+        InferenceProvider provider,
+        reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> lease
+    ) {
+        return executeWithLease(request, provider, lease, false);
+    }
+
+    private Flux<CanonicalEvent> executeWithLease(
+        CanonicalRequest request,
+        InferenceProvider provider,
+        reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> lease,
+        boolean validateInsideLease
+    ) {
+        return Flux.usingWhen(
+            lease,
             account -> {
+                if (validateInsideLease) {
+                    ProviderRequestValidation.requireSupportedContent(
+                        request, provider.manifest());
+                    provider.validate(request);
+                }
                 var failed = new AtomicBoolean();
                 var lastSequence = new AtomicLong();
                 var context = new ProviderExecutionContext(

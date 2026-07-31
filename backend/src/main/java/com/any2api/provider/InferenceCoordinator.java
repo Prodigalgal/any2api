@@ -35,9 +35,8 @@ public class InferenceCoordinator {
         var provider = providers.require(request.providerId());
         ProviderRequestValidation.requireSupportedRequest(request, provider.manifest());
         provider.validate(request);
-        return executeWithLease(request, provider,
-            accounts.acquire(request.providerId(), request.model(),
-                account -> provider.supportsAccount(request, account)));
+        return executeWithRetries(request, provider,
+            accountLease(request, provider), false, 1);
     }
 
     public Flux<CanonicalEvent> execute(
@@ -50,16 +49,35 @@ public class InferenceCoordinator {
                     "random route account provider does not match the request")));
         }
         var provider = providers.require(request.providerId());
-        return executeWithLease(
-            request, provider, reactor.core.publisher.Mono.just(account), true);
+        return executeWithRetries(
+            request, provider, reactor.core.publisher.Mono.just(account), true, 1);
     }
 
-    private Flux<CanonicalEvent> executeWithLease(
+    private reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> accountLease(
+        CanonicalRequest request,
+        InferenceProvider provider
+    ) {
+        return accounts.acquire(request.providerId(), request.model(),
+            account -> provider.supportsAccount(request, account));
+    }
+
+    private Flux<CanonicalEvent> executeWithRetries(
         CanonicalRequest request,
         InferenceProvider provider,
-        reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> lease
+        reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> lease,
+        boolean validateInsideLease,
+        int attempt
     ) {
-        return executeWithLease(request, provider, lease, false);
+        return executeWithLease(request, provider, lease, validateInsideLease)
+            .switchOnFirst((signal, events) -> {
+                if (signal.hasValue()
+                    && signal.get() instanceof CanonicalEvent.Failed failure
+                    && provider.retryPolicy().shouldRetry(failure.errorType(), attempt)) {
+                    return events.thenMany(executeWithRetries(
+                        request, provider, accountLease(request, provider), false, attempt + 1));
+                }
+                return events;
+            });
     }
 
     private Flux<CanonicalEvent> executeWithLease(
@@ -77,7 +95,6 @@ public class InferenceCoordinator {
                     provider.validate(request);
                 }
                 var failed = new AtomicBoolean();
-                var streamFailure = new java.util.concurrent.atomic.AtomicReference<ProviderFailure>();
                 var lastSequence = new AtomicLong();
                 var context = new ProviderExecutionContext(
                     request.requestId(),
@@ -88,13 +105,19 @@ public class InferenceCoordinator {
                     Instant.now().plus(REQUEST_DEADLINE));
                 return withLeaseRenewal(
                     Flux.defer(() -> provider.generate(request, context, account)), account)
-                    .doOnNext(event -> {
+                    .concatMap(event -> {
                         lastSequence.accumulateAndGet(event.sequenceNumber(), Math::max);
                         if (event instanceof CanonicalEvent.Failed failure) {
                             failed.set(true);
-                            streamFailure.compareAndSet(null, new ProviderFailure(
-                                failure.errorType(), failure.message(), false, failure.detail()));
+                            var providerFailure = new ProviderFailure(
+                                failure.errorType(), failure.message(), false, failure.detail());
+                            return accounts.mergeCredentialPatch(
+                                    account, context.credentialPatch())
+                                .onErrorReturn(false)
+                                .then(failures.report(account, request.model(), providerFailure))
+                                .thenReturn(event);
                         }
+                        return reactor.core.publisher.Mono.just(event);
                     })
                     .onErrorResume(error -> {
                         failed.set(true);
@@ -113,13 +136,6 @@ public class InferenceCoordinator {
                             .thenMany(Flux.just(event));
                     })
                     .concatWith(Flux.defer(() -> {
-                        if (streamFailure.get() != null) {
-                            return accounts.mergeCredentialPatch(
-                                    account, context.credentialPatch())
-                                .onErrorReturn(false)
-                                .then(failures.report(account, request.model(), streamFailure.get()))
-                                .thenMany(Flux.empty());
-                        }
                         return failed.get() ? Flux.empty()
                             : accounts.mergeCredentialPatch(account, context.credentialPatch())
                                 .onErrorReturn(false)

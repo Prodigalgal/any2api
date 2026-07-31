@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +17,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -61,6 +63,62 @@ class InferenceCoordinatorTest {
             .verifyComplete();
 
         verify(accounts, never()).reportSuccess(leased, "model");
+        verify(accounts).release(leased);
+    }
+
+    @Test
+    void retriesADeclaredFailureBeforeAnyClientVisibleEvent() {
+        var accounts = mock(AccountSelectionService.class);
+        var first = leased("alpha");
+        var second = leased("alpha");
+        when(accounts.acquire(eq("alpha"), eq("model"), any()))
+            .thenReturn(Mono.just(first), Mono.just(second));
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportModelCooldown(
+            first, "model", "empty", java.time.Duration.ofMinutes(5)))
+            .thenReturn(Mono.empty());
+        when(accounts.reportSuccess(second, "model")).thenReturn(Mono.empty());
+        var coordinator = new InferenceCoordinator(
+            new ProviderRegistry(List.of(new RetryingProvider())), accounts,
+            new ProviderFailureDisposition(accounts));
+
+        StepVerifier.create(coordinator.execute(request("alpha")))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
+            .verifyComplete();
+
+        verify(accounts, times(2)).acquire(eq("alpha"), eq("model"), any());
+        verify(accounts).reportModelCooldown(
+            first, "model", "empty", java.time.Duration.ofMinutes(5));
+        verify(accounts).reportSuccess(second, "model");
+        verify(accounts).release(first);
+        verify(accounts).release(second);
+    }
+
+    @Test
+    void doesNotRetryAfterAClientVisibleEvent() {
+        var accounts = mock(AccountSelectionService.class);
+        var leased = leased("alpha");
+        when(accounts.acquire(eq("alpha"), eq("model"), any()))
+            .thenReturn(Mono.just(leased));
+        when(accounts.release(leased)).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(eq(leased), any())).thenReturn(Mono.just(false));
+        when(accounts.reportModelCooldown(
+            leased, "model", "empty", java.time.Duration.ofMinutes(5)))
+            .thenReturn(Mono.empty());
+        var coordinator = new InferenceCoordinator(
+            new ProviderRegistry(List.of(new RetryingProvider(true))), accounts,
+            new ProviderFailureDisposition(accounts));
+
+        StepVerifier.create(coordinator.execute(request("alpha")))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(event -> event instanceof CanonicalEvent.Failed failed
+                && failed.errorType().equals("empty_model_response"))
+            .verifyComplete();
+
+        verify(accounts).acquire(eq("alpha"), eq("model"), any());
         verify(accounts).release(leased);
     }
 
@@ -141,6 +199,67 @@ class InferenceCoordinatorTest {
             LeasedProviderAccount account
         ) {
             return event == null ? Flux.empty() : Flux.just(event);
+        }
+
+        @Override
+        public ProviderFailure classify(Throwable error) {
+            return new ProviderFailure("test", error.getMessage(), false, Map.of());
+        }
+    }
+
+    private static final class RetryingProvider implements InferenceProvider {
+        private final AtomicInteger attempts = new AtomicInteger();
+        private final boolean exposeResponseBeforeFailure;
+
+        private RetryingProvider() {
+            this(false);
+        }
+
+        private RetryingProvider(boolean exposeResponseBeforeFailure) {
+            this.exposeResponseBeforeFailure = exposeResponseBeforeFailure;
+        }
+
+        @Override
+        public ProviderManifest manifest() {
+            return new ProviderManifest(
+                "alpha", "Alpha", "test", "1", List.of(),
+                Map.of(
+                    ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                    ProviderCapability.RESPONSES, SupportLevel.NATIVE),
+                true);
+        }
+
+        @Override
+        public ProviderRetryPolicy retryPolicy() {
+            return new ProviderRetryPolicy(2, java.util.Set.of("empty_model_response"));
+        }
+
+        @Override
+        public Flux<CanonicalEvent> generate(
+            CanonicalRequest request,
+            ProviderExecutionContext context,
+            LeasedProviderAccount account
+        ) {
+            if (attempts.getAndIncrement() == 0) {
+                if (exposeResponseBeforeFailure) {
+                    return Flux.just(
+                        new CanonicalEvent.ResponseStarted(
+                            1, request.requestId(), 0, "response-id"),
+                        new CanonicalEvent.Failed(
+                            1, request.requestId(), 1,
+                            "empty_model_response", "empty", Map.of()));
+                }
+                return Flux.just(new CanonicalEvent.Failed(
+                    1, request.requestId(), 0,
+                    "empty_model_response", "empty", Map.of()));
+            }
+            return Flux.just(
+                new CanonicalEvent.ResponseStarted(
+                    1, request.requestId(), 0, "response-id"),
+                new CanonicalEvent.OutputTextDelta(
+                    1, request.requestId(), 1, "ok"),
+                new CanonicalEvent.Completed(
+                    1, request.requestId(), 2, "stop"));
         }
 
         @Override

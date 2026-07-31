@@ -21,6 +21,10 @@ public interface InferenceProvider {
     default void validateCredential(JsonNode credential) {
     }
 
+    default ProviderRetryPolicy retryPolicy() {
+        return ProviderRetryPolicy.none();
+    }
+
     Flux<CanonicalEvent> generate(
         CanonicalRequest request,
         ProviderExecutionContext context,

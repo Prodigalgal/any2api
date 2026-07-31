@@ -107,6 +107,7 @@ class QwenProtocolTest {
 
         assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
             && failed.errorType().equals("empty_model_response"));
+        assertThat(events).noneMatch(CanonicalEvent.ResponseStarted.class::isInstance);
         assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
     }
 

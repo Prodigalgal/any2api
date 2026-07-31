@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -95,6 +96,11 @@ public final class QwenProvider implements InferenceProvider {
             throw new IllegalArgumentException(
                 "Qwen does not support tool types: " + String.join(", ", unsupportedTools));
         }
+    }
+
+    @Override
+    public ProviderRetryPolicy retryPolicy() {
+        return new ProviderRetryPolicy(4, Set.of("empty_model_response"));
     }
 
     @Override

@@ -14,11 +14,12 @@ final class QwenEventDecoder {
     private boolean started;
     private boolean completed;
     private boolean emittedOutput;
+    private String responseId;
 
     QwenEventDecoder(String requestId) { this.requestId = requestId; }
 
     List<CanonicalEvent> decode(String data) {
-        var output = start();
+        var output = new ArrayList<CanonicalEvent>();
         if (data == null || data.isBlank()) return output;
         if ("[DONE]".equals(data.trim())) {
             complete(output, "stop");
@@ -29,8 +30,7 @@ final class QwenEventDecoder {
             var created = object.path("response.created");
             if (created.isObject()) {
                 var id = created.path("response_id").asText("");
-                if (!id.isBlank()) output.add(new CanonicalEvent.ResponseStarted(
-                    1, requestId, next(), id));
+                if (!id.isBlank()) responseId = id;
             }
             var choice = firstChoice(object);
             if (choice != null) decodeChoice(choice, output);
@@ -52,7 +52,7 @@ final class QwenEventDecoder {
 
     List<CanonicalEvent> finish() {
         if (completed) return List.of();
-        var output = start();
+        var output = new ArrayList<CanonicalEvent>();
         complete(output, "stop");
         return output;
     }
@@ -78,6 +78,7 @@ final class QwenEventDecoder {
         var content = delta.path("content").asText(choice.path("text").asText(""));
         if (!content.isEmpty()) {
             if (List.of("think", "thinking", "reason", "reasoning").contains(phase)) {
+                start(output);
                 output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), content));
                 emittedOutput = true;
             } else {
@@ -86,6 +87,7 @@ final class QwenEventDecoder {
         }
         var reasoning = delta.path("reasoning_content").asText("");
         if (!reasoning.isEmpty()) {
+            start(output);
             output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), reasoning));
             emittedOutput = true;
         }
@@ -96,6 +98,7 @@ final class QwenEventDecoder {
 
     private void decodeTools(JsonNode calls, List<CanonicalEvent> output) {
         for (var call : calls) {
+            start(output);
             var id = call.path("id").asText("call_" + java.util.UUID.randomUUID().toString()
                 .replace("-", "").substring(0, 24));
             var function = call.path("function");
@@ -109,7 +112,7 @@ final class QwenEventDecoder {
     }
 
     private void usage(JsonNode usage, List<CanonicalEvent> output) {
-        if (!usage.isObject()) return;
+        if (!usage.isObject() || !emittedOutput) return;
         var input = usage.path("prompt_tokens").asLong(usage.path("input_tokens").asLong());
         var generated = usage.path("completion_tokens").asLong(usage.path("output_tokens").asLong());
         if (input > 0 || generated > 0) {
@@ -126,6 +129,7 @@ final class QwenEventDecoder {
     }
 
     private void text(List<CanonicalEvent> output, String value) {
+        start(output);
         output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), value));
         emittedOutput = true;
     }
@@ -140,14 +144,13 @@ final class QwenEventDecoder {
         completed = true;
     }
 
-    private ArrayList<CanonicalEvent> start() {
-        var output = new ArrayList<CanonicalEvent>();
+    private void start(List<CanonicalEvent> output) {
         if (!started) {
             output.add(new CanonicalEvent.ResponseStarted(1, requestId, next(),
-                "resp_" + requestId.replace("-", "")));
+                responseId == null || responseId.isBlank()
+                    ? "resp_" + requestId.replace("-", "") : responseId));
             started = true;
         }
-        return output;
     }
 
     private long next() { return sequence++; }

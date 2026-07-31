@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -27,3 +28,11 @@ class SolveResult(BaseModel):
     estimates: list[SolverEstimate]
     duration_ms: int
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class VisualAction:
+    type: Literal["click", "drag"]
+    at: tuple[float, float] | None = None
+    start: tuple[float, float] | None = None
+    end: tuple[float, float] | None = None

@@ -1,8 +1,6 @@
 package com.any2api.config;
 
 import java.net.URI;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "any2api")
@@ -10,7 +8,8 @@ public class Any2ApiProperties {
 
     private final Security security = new Security();
     private final Automation automation = new Automation();
-    private final Map<String, Provider> providers = new LinkedHashMap<>();
+    private final ProxyBootstrap proxyBootstrap = new ProxyBootstrap();
+    private final Media media = new Media();
 
     public Security getSecurity() {
         return security;
@@ -20,15 +19,19 @@ public class Any2ApiProperties {
         return automation;
     }
 
-    public Map<String, Provider> getProviders() {
-        return providers;
-    }
+    public ProxyBootstrap getProxyBootstrap() { return proxyBootstrap; }
+    public Media getMedia() { return media; }
+
 
     public static class Security {
         private String publicApiKey = "";
         private String adminUsername = "admin";
         private String adminPassword = "";
         private String internalToken = "";
+        private String credentialMasterKey = "";
+        private boolean adminSessionSecure;
+        private long adminSessionTtlSeconds = 28800;
+        private int loginPowDifficulty = 18;
 
         public String getPublicApiKey() {
             return publicApiKey;
@@ -61,6 +64,27 @@ public class Any2ApiProperties {
         public void setInternalToken(String internalToken) {
             this.internalToken = internalToken;
         }
+
+        public String getCredentialMasterKey() {
+            return credentialMasterKey;
+        }
+
+        public void setCredentialMasterKey(String credentialMasterKey) {
+            this.credentialMasterKey = credentialMasterKey;
+        }
+
+        public boolean isAdminSessionSecure() { return adminSessionSecure; }
+        public void setAdminSessionSecure(boolean adminSessionSecure) {
+            this.adminSessionSecure = adminSessionSecure;
+        }
+        public long getAdminSessionTtlSeconds() { return adminSessionTtlSeconds; }
+        public void setAdminSessionTtlSeconds(long adminSessionTtlSeconds) {
+            this.adminSessionTtlSeconds = adminSessionTtlSeconds;
+        }
+        public int getLoginPowDifficulty() { return loginPowDifficulty; }
+        public void setLoginPowDifficulty(int loginPowDifficulty) {
+            this.loginPowDifficulty = loginPowDifficulty;
+        }
     }
 
     public static class Automation {
@@ -75,28 +99,21 @@ public class Any2ApiProperties {
         }
     }
 
-    public static class Provider {
-        private URI baseUrl;
-        private String apiKey = "";
+    public static class ProxyBootstrap {
+        private String directory = "";
+        private String poolName = "Self-hosted Oracle";
 
-        public URI getBaseUrl() {
-            return baseUrl;
-        }
-
-        public void setBaseUrl(URI baseUrl) {
-            this.baseUrl = baseUrl;
-        }
-
-        public String getApiKey() {
-            return apiKey;
-        }
-
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
-
-        public boolean configured() {
-            return baseUrl != null && apiKey != null && !apiKey.isBlank();
-        }
+        public String getDirectory() { return directory; }
+        public void setDirectory(String directory) { this.directory = directory; }
+        public String getPoolName() { return poolName; }
+        public void setPoolName(String poolName) { this.poolName = poolName; }
     }
+
+    public static class Media {
+        private String publicBaseUrl = "";
+
+        public String getPublicBaseUrl() { return publicBaseUrl; }
+        public void setPublicBaseUrl(String value) { publicBaseUrl = value; }
+    }
+
 }

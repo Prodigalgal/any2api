@@ -1,6 +1,13 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
+
+from ..lifecycle.browser import (
+    BrowserContextProfile,
+    BrowserFingerprintPolicy,
+    BrowserLaunchProfile,
+)
 
 
 @dataclass(frozen=True)
@@ -10,7 +17,9 @@ class AutomationProviderManifest:
     fallback_backend: str | None
     isolation: str
     challenge_types: tuple[str, ...]
+    operations: tuple[str, ...] = ()
     realtime: bool = False
+    inference_transport: bool = False
 
 
 class AutomationProvider(ABC):
@@ -27,3 +36,21 @@ class AutomationProvider(ABC):
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError(f"keepalive is not implemented for {self.manifest.id}")
+
+    def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError(f"request transport is not implemented for {self.manifest.id}")
+
+    def transport_stream(self, payload: dict[str, Any]) -> Iterator[bytes]:
+        raise NotImplementedError(f"stream transport is not implemented for {self.manifest.id}")
+
+    def routers(self) -> tuple[Any, ...]:
+        return ()
+
+    def browser_context_profile(self) -> BrowserContextProfile:
+        return BrowserContextProfile()
+
+    def browser_launch_profile(self) -> BrowserLaunchProfile:
+        return BrowserLaunchProfile()
+
+    def browser_fingerprint_policy(self) -> BrowserFingerprintPolicy | None:
+        return None

@@ -38,6 +38,14 @@ async def solve(
         estimates = await registry.solve_slider(background_bytes, await piece.read())
         value, confidence, consensus = fuse_offsets(estimates)
         kind = "offset"
+    elif challenge_type == "dots":
+        estimates = await registry.solve_dots(background_bytes)
+        value, confidence, consensus = _points(estimates)
+        kind = "points"
+    elif challenge_type == "tap" and piece is not None:
+        estimates = await registry.solve_tap(await piece.read(), background_bytes)
+        value, confidence, consensus = _points(estimates)
+        kind = "points"
     else:
         return SolveResult(
             ok=False,
@@ -63,3 +71,11 @@ async def solve(
         duration_ms=int((time.monotonic() - started) * 1000),
         error=None if consensus.accepted else "insufficient_consensus",
     )
+
+
+def _points(estimates):
+    matches = [item for item in estimates if isinstance(item.value, list) and item.value]
+    if not matches:
+        return None, 0.0, {"accepted": False, "votes": 0}
+    best = max(matches, key=lambda item: item.confidence)
+    return best.value, best.confidence, {"accepted": True, "votes": len(matches)}

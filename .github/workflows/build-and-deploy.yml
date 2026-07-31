@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Update the GitOps repository after publishing images
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -64,7 +70,7 @@ jobs:
   build-images:
     if: github.event_name != 'pull_request'
     needs: [backend-quality, automation-quality, web-quality]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +83,6 @@ jobs:
             context: web
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -95,7 +100,7 @@ jobs:
           sbom: true
 
   update-gitops:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' || inputs.deploy
     needs: build-images
     runs-on: ubuntu-latest
     steps:

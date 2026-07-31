@@ -2,17 +2,23 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
+from .browser_transport import manager as browser_session_manager
+from .browser_transport import router as browser_transport_router
 from .captcha.api import router as captcha_router
 from .captcha.registry import registry
 from .config import settings
-from .providers import public_provider_manifests
+from .provider_api import router as provider_router
+from .providers import provider_registry, public_provider_manifests
 from .resources import lanes
 from .security import require_internal_token
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
+    try:
+        yield
+    finally:
+        browser_session_manager.close_all()
 
 
 app = FastAPI(
@@ -23,6 +29,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(captcha_router)
+app.include_router(provider_router)
+app.include_router(browser_transport_router)
+for provider_router_extension in provider_registry.routers():
+    app.include_router(provider_router_extension)
 
 
 @app.get("/health/live")

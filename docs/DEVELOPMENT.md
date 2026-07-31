@@ -80,7 +80,6 @@ A feature is complete only when its affected surface has evidence:
 
 - Java: unit/integration tests and successful build.
 - Python: solver/automation tests and capability health result.
-- Frontend: build plus browser verification at desktop and mobile widths.
+- Frontend: build plus browser verification at the supported desktop width.
 - Provider protocol: golden-fixture comparison and, before production claims, live stream and non-stream calls.
 - Lifecycle/registration: durable job state, lease behavior, retry/cancel behavior, and an end-to-end account probe.
-

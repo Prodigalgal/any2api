@@ -1,4 +1,21 @@
 databaseChangeLog:
   - include:
       file: db/changelog/releases/001-foundation.sql
-
+  - include:
+      file: db/changelog/releases/002-native-provider-runtime.sql
+  - include:
+      file: db/changelog/releases/003-provider-lifecycle.sql
+  - include:
+      file: db/changelog/releases/004-proxy-pools.sql
+  - include:
+      file: db/changelog/releases/005-provider-installation-state.sql
+  - include:
+      file: db/changelog/releases/006-provider-response-state.sql
+  - include:
+      file: db/changelog/releases/007-media-assets.sql
+  - include:
+      file: db/changelog/releases/008-account-model-cooldowns.sql
+  - include:
+      file: db/changelog/releases/009-random-model-roles.sql
+  - include:
+      file: db/changelog/releases/010-proxy-traffic-scopes.sql

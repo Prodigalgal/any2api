@@ -1,0 +1,606 @@
+.page {
+  width: 100vw;
+  min-width: 1120px;
+  height: 100vh;
+  min-height: 720px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 520px;
+  background: #f4f6f7;
+  color: #172126;
+}
+
+.visual {
+  position: relative;
+  overflow: hidden;
+  background: #162126;
+  color: #edf4f5;
+  border-right: 1px solid #314047;
+}
+
+.visual::before {
+  content: "";
+  position: absolute;
+  inset: 72px 58px 116px;
+  border: 1px solid rgb(127 174 177 / 13%);
+  box-shadow: inset 0 0 70px rgb(6 14 18 / 16%);
+  animation: frameBreath 9s ease-in-out infinite;
+}
+
+.lightRays,
+.surfaceTexture {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lightRays {
+  overflow: hidden;
+  opacity: 0.58;
+}
+
+.lightRays i {
+  position: absolute;
+  top: -24%;
+  width: 18%;
+  height: 105%;
+  display: block;
+  transform-origin: top center;
+  background: linear-gradient(180deg, rgb(105 216 209 / 10%), rgb(105 216 209 / 2%) 54%, transparent 86%);
+  clip-path: polygon(43% 0, 57% 0, 100% 100%, 0 100%);
+  filter: blur(12px);
+  animation: rayDrift 15s ease-in-out infinite alternate;
+}
+
+.lightRays i:first-child {
+  left: 5%;
+  transform: rotate(-9deg);
+}
+
+.lightRays i:nth-child(2) {
+  left: 39%;
+  width: 24%;
+  opacity: 0.62;
+  transform: rotate(2deg);
+  animation-delay: -6s;
+  animation-duration: 19s;
+}
+
+.lightRays i:last-child {
+  right: 4%;
+  opacity: 0.46;
+  transform: rotate(10deg);
+  animation-delay: -10s;
+  animation-duration: 17s;
+}
+
+.surfaceTexture {
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgb(132 173 176 / 7%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(132 173 176 / 7%) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, transparent 4%, #000 24%, #000 76%, transparent 96%);
+}
+
+.visualHeader {
+  position: absolute;
+  z-index: 2;
+  left: 48px;
+  top: 36px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.visualHeader p {
+  margin: 0;
+  color: transparent;
+  background: linear-gradient(110deg, #f5f9fa 34%, #9ceae5 49%, #f5f9fa 64%);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.1;
+  animation: brandShine 9s linear infinite;
+}
+
+.visualHeader span {
+  color: #819399;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 9px;
+}
+
+.visualMark,
+.brandMark,
+.hubMark {
+  position: relative;
+  border: 1px solid #4bbfb9;
+}
+
+.visualMark {
+  width: 30px;
+  height: 30px;
+}
+
+.visualMark span,
+.brandMark span,
+.hubMark span {
+  position: absolute;
+  display: block;
+  background: #69d8d1;
+}
+
+.visualMark span:first-child,
+.brandMark span:first-child,
+.hubMark span:first-child {
+  left: 7px;
+  right: 7px;
+  top: 13px;
+  height: 2px;
+}
+
+.visualMark span:last-child,
+.brandMark span:last-child,
+.hubMark span:last-child {
+  top: 7px;
+  bottom: 7px;
+  left: 13px;
+  width: 2px;
+}
+
+.topology {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: min(72%, 720px);
+  height: 360px;
+  transform: translate(-50%, -50%);
+}
+
+.topology::before,
+.topology::after,
+.topologyFrame::before,
+.topologyFrame::after {
+  content: "";
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: rgb(105 216 209 / 38%);
+  border-style: solid;
+  pointer-events: none;
+}
+
+.topology::before {
+  left: -1px;
+  top: -1px;
+  border-width: 1px 0 0 1px;
+}
+
+.topology::after {
+  right: -1px;
+  bottom: -1px;
+  border-width: 0 1px 1px 0;
+}
+
+.topologyGlow {
+  position: absolute;
+  left: 17%;
+  right: 17%;
+  top: calc(50% - 72px);
+  height: 144px;
+  background: linear-gradient(90deg, transparent, rgb(75 191 185 / 5%) 30%, rgb(75 191 185 / 9%) 50%, rgb(75 191 185 / 5%) 70%, transparent);
+  filter: blur(18px);
+  animation: topologyBreathe 8s ease-in-out infinite;
+}
+
+.topologyFrame {
+  position: absolute;
+  inset: 0;
+  border-top: 1px solid rgb(105 216 209 / 12%);
+  border-bottom: 1px solid rgb(105 216 209 / 12%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 1.5%), inset 0 -1px rgb(255 255 255 / 1.5%);
+}
+
+.topologyFrame::before {
+  right: -1px;
+  top: -1px;
+  border-width: 1px 1px 0 0;
+}
+
+.topologyFrame::after {
+  left: -1px;
+  bottom: -1px;
+  border-width: 0 0 1px 1px;
+}
+
+.routeBus {
+  position: absolute;
+  left: 7%;
+  right: 7%;
+  top: 50%;
+  top: calc(50% - 4px);
+  height: 9px;
+  background:
+    linear-gradient(to bottom, transparent 4px, rgb(105 216 209 / 64%) 4px, rgb(105 216 209 / 64%) 5px, transparent 5px),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgb(105 216 209 / 20%) 31px 32px);
+  box-shadow: 0 0 14px rgb(105 216 209 / 9%);
+}
+
+.routeBus::before,
+.routeBus::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #69d8d1;
+  background: #172126;
+}
+
+.routeBus::before { left: 0; }
+.routeBus::after { right: 0; }
+
+.routeBus i {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 5px;
+  height: 5px;
+  display: block;
+  background: #d8f27d;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgb(216 242 125 / 42%);
+  animation: packetFlow 6.8s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+
+.routeBus .packetTwo { animation-delay: -1.8s; }
+.routeBus .packetThree { animation-delay: -3.6s; }
+
+.branch {
+  position: absolute;
+  width: 21%;
+  height: 92px;
+  opacity: 0.82;
+  filter: drop-shadow(0 0 5px rgb(105 216 209 / 8%));
+}
+
+.branchTopLeft {
+  left: 16%;
+  top: calc(50% - 92px);
+  background: linear-gradient(to bottom right, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+}
+
+.branchBottomLeft {
+  left: 16%;
+  top: 50%;
+  background: linear-gradient(to top right, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+}
+
+.branchTopRight {
+  right: 16%;
+  top: calc(50% - 92px);
+  background: linear-gradient(to bottom left, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+}
+
+.branchBottomRight {
+  right: 16%;
+  top: 50%;
+  background: linear-gradient(to top left, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+}
+
+.endpoint {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  display: block;
+  background: #223138;
+  border: 1px solid #69d8d1;
+  box-shadow: 0 0 0 5px rgb(105 216 209 / 5%), 0 0 16px rgb(105 216 209 / 8%);
+  animation: endpointPulse 4.4s ease-in-out infinite;
+}
+
+.endpoint::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border: 1px solid rgb(105 216 209 / 18%);
+  clip-path: polygon(0 0, 44% 0, 44% 6%, 56% 6%, 56% 0, 100% 0, 100% 44%, 94% 44%, 94% 56%, 100% 56%, 100% 100%, 56% 100%, 56% 94%, 44% 94%, 44% 100%, 0 100%, 0 56%, 6% 56%, 6% 44%, 0 44%);
+  animation: reticleSpin 14s linear infinite;
+}
+
+.endpointOne { left: calc(16% - 4px); top: calc(50% - 97px); }
+.endpointTwo { left: calc(16% - 4px); top: calc(50% + 87px); animation-delay: -0.8s; }
+.endpointThree { right: calc(16% - 4px); top: calc(50% - 97px); animation-delay: -1.6s; }
+.endpointFour { right: calc(16% - 4px); top: calc(50% + 87px); animation-delay: -2.4s; }
+
+.hub {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  width: 174px;
+  height: 76px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  background: rgb(29 42 48 / 92%);
+  border: 1px solid rgb(105 216 209 / 72%);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 20%), inset 0 1px rgb(255 255 255 / 4%);
+  backdrop-filter: blur(8px);
+  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
+}
+
+.hubReticle {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
+  width: 210px;
+  height: 102px;
+  transform: translate(-50%, -50%);
+  border-top: 1px solid rgb(105 216 209 / 20%);
+  border-bottom: 1px solid rgb(105 216 209 / 20%);
+  clip-path: polygon(0 0, 18px 0, 18px 1px, calc(100% - 18px) 1px, calc(100% - 18px) 0, 100% 0, 100% 100%, calc(100% - 18px) 100%, calc(100% - 18px) calc(100% - 1px), 18px calc(100% - 1px), 18px 100%, 0 100%);
+  animation: hudLock 5.8s ease-in-out infinite;
+}
+
+.hubReticle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -6px;
+  width: 18px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-left: 1px solid #d8f27d;
+  border-right: 1px solid #d8f27d;
+  opacity: 0.55;
+}
+
+.hubMark {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+}
+
+.hub p {
+  margin: 0;
+  color: #f1f7f8;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.hub span {
+  color: #91a4aa;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 8px;
+}
+
+.scanLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, rgb(216 242 125 / 32%) 30%, rgb(216 242 125 / 32%) 70%, transparent);
+  opacity: 0;
+  filter: blur(0.5px);
+  animation: topologyScan 9s ease-in-out infinite;
+}
+
+.visualCopy {
+  position: absolute;
+  left: 48px;
+  bottom: 68px;
+}
+
+.visualCopy h2 {
+  margin: 0;
+  color: #f4f8f9;
+  font-size: 25px;
+  font-weight: 680;
+  line-height: 1.3;
+}
+
+.visualCopy p {
+  margin: 6px 0 0;
+  color: #819399;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+}
+
+.visualStatus {
+  position: absolute;
+  right: 48px;
+  bottom: 69px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 9px;
+  color: #819399;
+}
+
+.visualStatus span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.visualStatus i {
+  width: 6px;
+  height: 6px;
+  display: block;
+  background: #69d8d1;
+}
+
+.visualStatus b {
+  color: #d8f27d;
+  font-weight: 650;
+}
+
+.panel {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  --spotlight-x: 50%;
+  --spotlight-y: 32%;
+  background: #fbfcfc;
+  isolation: isolate;
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.48;
+  background: radial-gradient(circle 280px at var(--spotlight-x) var(--spotlight-y), rgb(8 127 140 / 8%), transparent 76%);
+  transition: opacity 420ms ease;
+}
+
+.panel::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12%;
+  bottom: 12%;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, rgb(8 127 140 / 22%), transparent);
+  pointer-events: none;
+}
+
+.panelInner {
+  width: 360px;
+  height: 100%;
+  position: relative;
+  padding-top: 38px;
+  z-index: 1;
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #172126;
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.brandMark {
+  width: 30px;
+  height: 30px;
+  border-color: #087f8c;
+  box-shadow: 0 0 0 5px rgb(8 127 140 / 5%);
+}
+
+.brandMark span { background: #087f8c; }
+
+.brandWord {
+  letter-spacing: 0;
+  text-shadow: 0 1px 0 rgb(255 255 255 / 80%);
+}
+
+.powState {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #68767c;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+}
+
+.powState i {
+  width: 7px;
+  height: 7px;
+  display: block;
+  background: #087f8c;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgb(8 127 140 / 7%), 0 0 12px rgb(8 127 140 / 12%);
+}
+
+.powState b {
+  margin-left: auto;
+  color: #4f5e64;
+  font-weight: 650;
+}
+
+.footer {
+  position: absolute;
+  left: 0;
+  bottom: 34px;
+  color: #93a0a5;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 9px;
+}
+
+@keyframes packetFlow {
+  0% { left: 0; opacity: 0; }
+  8% { opacity: 1; }
+  92% { opacity: 1; }
+  100% { left: calc(100% - 5px); opacity: 0; }
+}
+
+@keyframes endpointPulse {
+  0%, 100% { opacity: 0.46; box-shadow: 0 0 0 5px rgb(105 216 209 / 4%), 0 0 12px transparent; }
+  50% { opacity: 1; box-shadow: 0 0 0 7px rgb(105 216 209 / 7%), 0 0 18px rgb(105 216 209 / 12%); }
+}
+
+@keyframes topologyScan {
+  0%, 8% { left: 0; opacity: 0; }
+  18%, 82% { opacity: 0.6; }
+  92%, 100% { left: 100%; opacity: 0; }
+}
+
+@keyframes rayDrift {
+  from { translate: -6% 0; opacity: 0.44; }
+  to { translate: 8% 3%; opacity: 0.76; }
+}
+
+@keyframes brandShine {
+  from { background-position: 110% center; }
+  to { background-position: -110% center; }
+}
+
+@keyframes topologyBreathe {
+  0%, 100% { opacity: 0.44; transform: scaleX(0.96); }
+  50% { opacity: 0.82; transform: scaleX(1.03); }
+}
+
+@keyframes reticleSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes hudLock {
+  0%, 100% { opacity: 0.38; transform: scaleX(0.94); }
+  50% { opacity: 0.78; transform: scaleX(1); }
+}
+
+@keyframes frameBreath {
+  0%, 100% { border-color: rgb(127 174 177 / 10%); }
+  50% { border-color: rgb(127 174 177 / 17%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .routeBus i,
+  .endpoint,
+  .scanLine,
+  .lightRays i,
+  .visualHeader p,
+  .topologyGlow,
+  .visual::before,
+  .endpoint::before,
+  .hubReticle {
+    animation: none;
+  }
+
+  .panel::before { display: none; }
+}

@@ -20,6 +20,8 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+        type:
+          json_format_mapper: jackson3
   liquibase:
     enabled: true
     change-log: classpath:db/changelog/db.changelog-master.yaml
@@ -29,6 +31,14 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 3s
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:4}
+      thread-name-prefix: any2api-scheduler-
+      shutdown:
+        await-termination: true
+        await-termination-period: 30s
 
 management:
   endpoints:
@@ -42,23 +52,53 @@ management:
       show-details: when_authorized
 
 any2api:
+  media:
+    public-base-url: ${ANY2API_MEDIA_PUBLIC_BASE_URL:}
+  proxy-bootstrap:
+    directory: ${ANY2API_PROXY_BOOTSTRAP_DIRECTORY:}
+    pool-name: ${ANY2API_PROXY_BOOTSTRAP_POOL_NAME:Self-hosted Oracle}
   security:
     public-api-key: ${ANY2API_PUBLIC_API_KEY:}
     admin-username: ${ANY2API_ADMIN_USERNAME:admin}
     admin-password: ${ANY2API_ADMIN_PASSWORD:}
     internal-token: ${ANY2API_INTERNAL_TOKEN:}
+    credential-master-key: ${ANY2API_CREDENTIAL_MASTER_KEY:}
+    admin-session-secure: ${ANY2API_ADMIN_SESSION_SECURE:false}
+    admin-session-ttl-seconds: ${ANY2API_ADMIN_SESSION_TTL_SECONDS:28800}
+    login-pow-difficulty: ${ANY2API_LOGIN_POW_DIFFICULTY:18}
   automation:
     base-url: ${AUTOMATION_BASE_URL:http://localhost:8090}
-  providers:
+  provider:
     grok:
-      base-url: ${ANY2API_PROVIDER_GROK_BASE_URL:}
-      api-key: ${ANY2API_PROVIDER_GROK_API_KEY:}
+      base-url: ${ANY2API_PROVIDER_GROK_BASE_URL:https://cli-chat-proxy.grok.com/v1}
+      client-version: ${ANY2API_PROVIDER_GROK_CLIENT_VERSION:0.2.112}
+      token-auth: ${ANY2API_PROVIDER_GROK_TOKEN_AUTH:xai-grok-cli}
+      client-identifier: ${ANY2API_PROVIDER_GROK_CLIENT_IDENTIFIER:grok-shell}
+    grok-web:
+      base-url: ${ANY2API_PROVIDER_GROK_WEB_BASE_URL:https://grok.com}
+      accounts-base-url: ${ANY2API_PROVIDER_GROK_WEB_ACCOUNTS_BASE_URL:https://accounts.x.ai}
+      assets-base-url: ${ANY2API_PROVIDER_GROK_WEB_ASSETS_BASE_URL:https://assets.grok.com}
+      image-asset-origins: ${ANY2API_PROVIDER_GROK_WEB_IMAGE_ASSET_ORIGINS:https://assets.grok.com,https://imagine-public.x.ai,https://imgen.x.ai}
     mimo:
-      base-url: ${ANY2API_PROVIDER_MIMO_BASE_URL:}
-      api-key: ${ANY2API_PROVIDER_MIMO_API_KEY:}
+      base-url: ${ANY2API_PROVIDER_MIMO_BASE_URL:https://aistudio.xiaomimimo.com}
     qwen:
-      base-url: ${ANY2API_PROVIDER_QWEN_BASE_URL:}
-      api-key: ${ANY2API_PROVIDER_QWEN_API_KEY:}
+      base-url: ${ANY2API_PROVIDER_QWEN_BASE_URL:https://chat.qwen.ai}
+      source: ${ANY2API_PROVIDER_QWEN_SOURCE:web}
+      request-version: ${ANY2API_PROVIDER_QWEN_REQUEST_VERSION:2.1}
+      max-upload-bytes: ${ANY2API_PROVIDER_QWEN_MAX_UPLOAD_BYTES:20971520}
+    glm:
+      base-url: ${ANY2API_PROVIDER_GLM_BASE_URL:https://chat.z.ai}
+      frontend-version: ${ANY2API_PROVIDER_GLM_FRONTEND_VERSION:1.1.79}
+      signature-key: ${ANY2API_PROVIDER_GLM_SIGNATURE_KEY:key-@@@@)))()((9))-xxxx&&&%%%%%}
     longcat:
-      base-url: ${ANY2API_PROVIDER_LONGCAT_BASE_URL:}
-      api-key: ${ANY2API_PROVIDER_LONGCAT_API_KEY:}
+      base-url: ${ANY2API_PROVIDER_LONGCAT_BASE_URL:https://longcat.chat}
+      app-key: ${ANY2API_PROVIDER_LONGCAT_APP_KEY:fe_com.sankuai.friday.fe.longcat}
+      requested-with: ${ANY2API_PROVIDER_LONGCAT_REQUESTED_WITH:XMLHttpRequest}
+    minmax:
+      base-url: ${ANY2API_PROVIDER_MINMAX_BASE_URL:https://agent.minimax.io}
+      stream-base-url: ${ANY2API_PROVIDER_MINMAX_STREAM_BASE_URL:https://agent-stream.minimax.io}
+      signature-salt: ${ANY2API_PROVIDER_MINMAX_SIGNATURE_SALT:I*7Cf%WZ#S&%1RlZJ&C2}
+      yy-salt: ${ANY2API_PROVIDER_MINMAX_YY_SALT:ooui}
+      version-code: ${ANY2API_PROVIDER_MINMAX_VERSION_CODE:22201}
+      profile-asset-hosts: ${ANY2API_PROVIDER_MINMAX_PROFILE_ASSET_HOSTS:cdn.hailuoai.com}
+      max-upload-bytes: ${ANY2API_PROVIDER_MINMAX_MAX_UPLOAD_BYTES:20971520}

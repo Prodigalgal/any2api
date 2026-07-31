@@ -1,11 +1,39 @@
 import asyncio
+import base64
 import importlib.util
+import io
+import json
+import math
+import re
 import tempfile
 import threading
 from pathlib import Path
 
+import httpx
+
+from ..config import settings
 from ..resources import lanes
-from .models import SolverEstimate
+from .models import SolverEstimate, VisualAction
+
+_CAPTCHA_TEXT = r"[0-9A-Za-z\u4e00-\u9fff]{3,12}"
+
+
+def _captcha_text_candidate(content: str) -> str | None:
+    text = content.strip()
+    for pattern in (
+        rf"\bCAPTCHA\s*[:=]\s*[`*'\"]*({_CAPTCHA_TEXT})",
+        rf"\*\*({_CAPTCHA_TEXT})\*\*",
+        rf"`({_CAPTCHA_TEXT})`",
+        rf"['\"]({_CAPTCHA_TEXT})['\"]",
+        rf":\s*[`*'\"]*({_CAPTCHA_TEXT})[\s`*'\".!?]*$",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    if re.fullmatch(rf"[\s`*'\"]*{_CAPTCHA_TEXT}[\s`*'\"]*", text):
+        match = re.search(_CAPTCHA_TEXT, text)
+        return match.group(0) if match else None
+    return None
 
 
 class SolverRegistry:
@@ -14,6 +42,10 @@ class SolverRegistry:
         self._ddddocr_slider = None
         self._recognizer = None
         self._model_lock = threading.Lock()
+        self._diagnostics = threading.local()
+
+    def visual_diagnostic(self) -> str:
+        return str(getattr(self._diagnostics, "visual", "unavailable"))
 
     def capabilities(self) -> dict[str, dict[str, object]]:
         return {
@@ -42,6 +74,296 @@ class SolverRegistry:
                     estimates.append(result)
         return estimates
 
+    async def solve_dots(self, image: bytes, color: str = "any") -> list[SolverEstimate]:
+        async with lanes.ocr:
+            estimate = await asyncio.to_thread(self._solve_dots_sync, image, color)
+        return [estimate] if estimate else []
+
+    async def solve_tap(self, targets: bytes, panel: bytes) -> list[SolverEstimate]:
+        async with lanes.ocr:
+            estimate = await asyncio.to_thread(self._solve_tap_sync, targets, panel)
+        return [estimate] if estimate else []
+
+    def solve_text_sync(self, image: bytes) -> list[SolverEstimate]:
+        return self._solve_text_sync(image)
+
+    def solve_slider_sync(self, background: bytes, piece: bytes) -> list[SolverEstimate]:
+        estimates = [
+            self._solve_slider_ddddocr_sync(background, piece),
+            self._solve_slider_opencv_sync(background, piece),
+        ]
+        if self.capabilities()["captcha_recognizer"]["available"]:
+            estimates.append(self._solve_slider_recognizer_sync(background))
+        return [item for item in estimates if item is not None]
+
+    def solve_dots_sync(self, image: bytes, color: str = "any") -> list[SolverEstimate]:
+        estimate = self._solve_dots_sync(image, color)
+        return [estimate] if estimate else []
+
+    def solve_tap_sync(self, targets: bytes, panel: bytes) -> list[SolverEstimate]:
+        estimate = self._solve_tap_sync(targets, panel)
+        return [estimate] if estimate else []
+
+    def solve_visual_points_sync(self, image: bytes, prompt: str) -> SolverEstimate | None:
+        content = self._visual_completion_sync(image, prompt, max_tokens=120)
+        if not content:
+            return None
+        try:
+            match = re.search(r"POINTS\s*=\s*([0-9.,;\s]+)", content, re.IGNORECASE)
+            if not match:
+                self._diagnostics.visual = "response_without_points"
+                return None
+            points: list[tuple[float, float]] = []
+            for raw_point in match.group(1).split(";"):
+                values = [value.strip() for value in raw_point.split(",")]
+                if len(values) < 2:
+                    continue
+                x, y = float(values[0]), float(values[1])
+                if 0 <= x <= 1 and 0 <= y <= 1:
+                    points.append((x, y))
+            if not 2 <= len(points) <= 10:
+                self._diagnostics.visual = f"invalid_point_count:{len(points)}"
+                return None
+            spread = (max(x for x, _ in points) - min(x for x, _ in points)) + (
+                max(y for _, y in points) - min(y for _, y in points)
+            )
+            if spread < 0.12:
+                self._diagnostics.visual = f"points_too_clustered:{spread:.3f}"
+                return None
+            self._diagnostics.visual = f"points:{len(points)}:spread:{spread:.3f}"
+            return SolverEstimate(
+                solver="vision_points",
+                value=points,
+                confidence=0.55,
+                detail=f"count={len(points)}; spread={spread:.3f}",
+            )
+        except (TypeError, ValueError) as error:
+            self._diagnostics.visual = f"point_parse_error:{type(error).__name__}"
+            return None
+
+    def solve_visual_text_sync(self, image: bytes, prompt: str) -> SolverEstimate | None:
+        content = self._visual_completion_sync(
+            image,
+            prompt
+            + "\nReturn exactly CAPTCHA=<characters>. Do not add any other text or formatting.",
+            max_tokens=32,
+        )
+        if not content:
+            return None
+        candidate = _captcha_text_candidate(content)
+        if candidate is None:
+            self._diagnostics.visual = "response_without_captcha_text"
+            return None
+        return SolverEstimate(
+            solver="vision_text",
+            value=candidate,
+            confidence=0.55,
+            detail=f"length={len(candidate)}",
+        )
+
+    def solve_visual_actions_sync(
+        self,
+        image: bytes,
+        prompt: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> list[VisualAction]:
+        content = self._visual_completion_sync(
+            image,
+            prompt,
+            max_tokens=240,
+            timeout_seconds=timeout_seconds,
+        )
+        if not content:
+            return []
+        try:
+            marker = re.search(r"ACTIONS\s*=", content, re.IGNORECASE)
+            if marker is None:
+                self._diagnostics.visual = "response_without_actions"
+                return []
+            decoded, _ = json.JSONDecoder().raw_decode(content[marker.end() :].lstrip())
+            if not isinstance(decoded, list) or not 1 <= len(decoded) <= 4:
+                self._diagnostics.visual = "invalid_action_count"
+                return []
+            width, height = self._visual_image_size(image)
+            points = self._visual_action_points(decoded)
+            largest = max((max(abs(x), abs(y)) for x, y in points), default=0.0)
+            coordinate_mode = (
+                "normalized" if largest <= 1 else "percent" if largest <= 100 else "pixel"
+            )
+            actions: list[VisualAction] = []
+            for raw in decoded:
+                if not isinstance(raw, dict):
+                    raise TypeError("visual action must be an object")
+                kind = str(raw.get("type") or "").strip().lower()
+                if kind == "click":
+                    at = self._visual_point(
+                        raw.get("at", raw.get("point")), coordinate_mode, width, height
+                    )
+                    actions.append(VisualAction("click", at=at))
+                    continue
+                if kind == "drag":
+                    start = self._visual_point(
+                        raw.get("from", raw.get("start")), coordinate_mode, width, height
+                    )
+                    end = self._visual_point(
+                        raw.get("to", raw.get("end")), coordinate_mode, width, height
+                    )
+                    if math.dist(start, end) < 0.025:
+                        raise ValueError("visual drag is degenerate")
+                    actions.append(VisualAction("drag", start=start, end=end))
+                    continue
+                raise ValueError("unsupported visual action")
+            self._diagnostics.visual = f"actions:{len(actions)}:mode:{coordinate_mode}:" + ",".join(
+                action.type for action in actions
+            )
+            return actions
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            self._diagnostics.visual = f"action_parse_error:{type(error).__name__}"
+            return []
+
+    def _visual_image_size(self, image: bytes) -> tuple[float, float]:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image)) as source:
+            width, height = source.size
+        if width < 1 or height < 1:
+            raise ValueError("visual image has invalid dimensions")
+        return float(width), float(height)
+
+    def _visual_action_points(self, actions: list[object]) -> list[tuple[float, float]]:
+        points: list[tuple[float, float]] = []
+        for action in actions:
+            if not isinstance(action, dict):
+                raise TypeError("visual action must be an object")
+            kind = str(action.get("type") or "").strip().lower()
+            values = (
+                [action.get("at", action.get("point"))]
+                if kind == "click"
+                else [action.get("from", action.get("start")), action.get("to", action.get("end"))]
+            )
+            for value in values:
+                if not isinstance(value, list | tuple) or len(value) != 2:
+                    raise ValueError("visual action point is invalid")
+                point = (float(value[0]), float(value[1]))
+                if not all(math.isfinite(coordinate) and coordinate >= 0 for coordinate in point):
+                    raise ValueError("visual action coordinate is invalid")
+                points.append(point)
+        return points
+
+    def _visual_point(
+        self,
+        value: object,
+        mode: str,
+        width: float,
+        height: float,
+    ) -> tuple[float, float]:
+        if not isinstance(value, list | tuple) or len(value) != 2:
+            raise ValueError("visual action point is invalid")
+        x, y = float(value[0]), float(value[1])
+        if mode == "percent":
+            x, y = x / 100, y / 100
+        elif mode == "pixel":
+            x, y = x / width, y / height
+        if not (0 <= x <= 1 and 0 <= y <= 1):
+            raise ValueError("visual action coordinate is outside the image")
+        return x, y
+
+    def _visual_completion_sync(
+        self,
+        image: bytes,
+        prompt: str,
+        *,
+        max_tokens: int,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        config = settings()
+        api_key = config.public_api_key.strip() or config.captcha_ai_api_key.strip()
+        if not (config.captcha_ai_enabled and config.java_base_url.strip() and api_key and image):
+            self._diagnostics.visual = "disabled_or_unconfigured"
+            return ""
+        endpoint = f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions"
+        data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
+        try:
+            response = httpx.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "random",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Return only the requested machine-readable result. "
+                                "Do not explain or use Markdown."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                            ],
+                        },
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": 0,
+                },
+                timeout=max(
+                    1,
+                    min(
+                        180,
+                        config.captcha_ai_timeout_seconds,
+                        timeout_seconds
+                        if timeout_seconds is not None
+                        else config.captcha_ai_timeout_seconds,
+                    ),
+                ),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            content = ((payload.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+            if isinstance(content, list):
+                content = "".join(
+                    value if isinstance(value, str) else str(value.get("text") or "")
+                    for value in content
+                )
+            self._diagnostics.visual = "response_received"
+            return str(content)
+        except httpx.HTTPStatusError as error:
+            self._diagnostics.visual = f"http_status:{error.response.status_code}"
+            return ""
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+            self._diagnostics.visual = f"request_error:{type(error).__name__}"
+            return ""
+
+    def solve_slider_ddddocr_variant_sync(
+        self,
+        background: bytes,
+        piece: bytes,
+        *,
+        simple_target: bool,
+        solver_name: str,
+        confidence: float,
+    ) -> SolverEstimate | None:
+        try:
+            engine = self._get_ddddocr_slider()
+            result = engine.slide_match(piece, background, simple_target=simple_target)
+            target = result.get("target") if isinstance(result, dict) else None
+            if not target or float(target[0]) < 20:
+                return None
+            return SolverEstimate(
+                solver=solver_name,
+                value=float(target[0]),
+                confidence=confidence,
+                detail=f"simple_target={simple_target}; target={target}",
+            )
+        except Exception:  # noqa: BLE001 - one detector variant must not abort fusion
+            return None
+
+    def solve_slider_recognizer_sync(self, background: bytes) -> SolverEstimate | None:
+        return self._solve_slider_recognizer_sync(background)
+
     def _capability(
         self, module: str, challenge_types: tuple[str, ...], lazy: bool = False
     ) -> dict[str, object]:
@@ -65,9 +387,12 @@ class SolverRegistry:
             target = result.get("target") if isinstance(result, dict) else None
             if not target:
                 return None
+            x = float(target[0])
+            if x < 20:
+                return None
             return SolverEstimate(
                 solver="ddddocr_slider",
-                value=float(target[0]),
+                value=x,
                 confidence=0.82,
                 detail=f"target={target}",
             )
@@ -82,6 +407,8 @@ class SolverRegistry:
                 source.write_bytes(background)
                 box, confidence = recognizer.identify(source=str(source), show=False)
             x = box[0] if isinstance(box, (list, tuple)) else box.get("x")
+            if x is None or float(x) < 20:
+                return None
             return SolverEstimate(
                 solver="captcha_recognizer",
                 value=float(x),
@@ -110,6 +437,8 @@ class SolverRegistry:
             pc_edges = cv2.Canny(pc_gray, 80, 180)
             result = cv2.matchTemplate(bg_edges, pc_edges, cv2.TM_CCOEFF_NORMED)
             _, score, _, location = cv2.minMaxLoc(result)
+            if location[0] < 20:
+                return None
             return SolverEstimate(
                 solver="opencv_template",
                 value=float(location[0]),
@@ -117,6 +446,169 @@ class SolverRegistry:
                 detail=f"score={score:.3f}",
             )
         except Exception:  # noqa: BLE001 - malformed images and OpenCV errors reject this estimate
+            return None
+
+    def _solve_dots_sync(self, image: bytes, color: str) -> SolverEstimate | None:
+        try:
+            import cv2
+            import numpy as np
+
+            source = cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
+            if source is None:
+                return None
+            hsv = cv2.cvtColor(source, cv2.COLOR_BGR2HSV)
+            ranges = {
+                "yellow": ((20, 80, 80), (40, 255, 255)),
+                "green": ((35, 50, 50), (90, 255, 255)),
+                "orange": ((5, 80, 80), (25, 255, 255)),
+                "purple": ((120, 40, 40), (160, 255, 255)),
+                "blue": ((90, 50, 50), (130, 255, 255)),
+                "red": ((0, 80, 80), (10, 255, 255)),
+            }
+            low, high = ranges.get(color.lower(), ((0, 60, 60), (180, 255, 255)))
+            mask = cv2.inRange(hsv, np.array(low), np.array(high))
+            if color.lower() == "red":
+                mask = cv2.bitwise_or(
+                    mask, cv2.inRange(hsv, np.array((170, 80, 80)), np.array((180, 255, 255)))
+                )
+            mask = cv2.medianBlur(mask, 5)
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            height, width = source.shape[:2]
+            points: list[tuple[float, float, float]] = []
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area < max(20, width * height * 0.0003) or area > width * height * 0.08:
+                    continue
+                moments = cv2.moments(contour)
+                if not moments["m00"]:
+                    continue
+                points.append(
+                    (
+                        moments["m10"] / moments["m00"] / width,
+                        moments["m01"] / moments["m00"] / height,
+                        area,
+                    )
+                )
+            if len(points) < 2:
+                return None
+            remaining = [(x, y) for x, y, _ in sorted(points, key=lambda item: -item[2])[:12]]
+            ordered = [remaining.pop(0)]
+            while remaining:
+                last_x, last_y = ordered[-1]
+                index = min(
+                    range(len(remaining)),
+                    key=lambda item: (
+                        (remaining[item][0] - last_x) ** 2 + (remaining[item][1] - last_y) ** 2
+                    ),
+                )
+                ordered.append(remaining.pop(index))
+            return SolverEstimate(
+                solver="opencv_dots",
+                value=ordered,
+                confidence=min(0.95, 0.55 + len(ordered) * 0.05),
+                detail=f"color={color}; count={len(ordered)}",
+            )
+        except Exception:  # noqa: BLE001 - malformed images reject only this estimate
+            return None
+
+    def _solve_tap_sync(self, targets: bytes, panel: bytes) -> SolverEstimate | None:
+        try:
+            import cv2
+            import numpy as np
+
+            target = cv2.imdecode(np.frombuffer(targets, np.uint8), cv2.IMREAD_COLOR)
+            source = cv2.imdecode(np.frombuffer(panel, np.uint8), cv2.IMREAD_COLOR)
+            if target is None or source is None:
+                return None
+            target_gray = cv2.cvtColor(target, cv2.COLOR_BGR2GRAY)
+            ink = target_gray < 240
+            projection = ink.sum(axis=0)
+            threshold = max(1, int(target.shape[0] * 0.08))
+            runs: list[tuple[int, int]] = []
+            start: int | None = None
+            for index, value in enumerate(projection):
+                if value >= threshold and start is None:
+                    start = index
+                elif value < threshold and start is not None:
+                    if index - start >= 8:
+                        runs.append((start, index))
+                    start = None
+            if start is not None:
+                runs.append((start, target.shape[1]))
+            merged: list[list[int]] = []
+            for left, right in runs:
+                if merged and left - merged[-1][1] < 3:
+                    merged[-1][1] = right
+                else:
+                    merged.append([left, right])
+            runs = [(left, right) for left, right in merged if right - left >= 10]
+            if len(runs) < 2:
+                step = target.shape[1] / 4
+                runs = [(int(index * step), int((index + 1) * step)) for index in range(4)]
+
+            icons = []
+            for left, right in runs:
+                icon = target[:, max(0, left - 1) : min(target.shape[1], right + 1)]
+                gray = cv2.cvtColor(icon, cv2.COLOR_BGR2GRAY)
+                rows = (gray < 240).sum(axis=1)
+                ys = np.where(rows >= max(1, int((right - left) * 0.05)))[0]
+                if len(ys) > 2:
+                    icon = icon[
+                        max(0, int(ys[0]) - 1) : min(target.shape[0], int(ys[-1]) + 2),
+                        :,
+                    ]
+                if min(icon.shape[:2]) >= 8:
+                    icons.append(icon)
+
+            source_gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+            source_edges = cv2.Canny(source_gray, 50, 150)
+            points: list[tuple[float, float]] = []
+            scores: list[float] = []
+            used: list[tuple[int, int, int, int]] = []
+            for icon in icons:
+                best = None
+                for scale in (0.9, 1.0, 1.1, 1.25, 0.75, 1.4):
+                    width = max(8, int(icon.shape[1] * scale))
+                    height = max(8, int(icon.shape[0] * scale))
+                    if height >= source.shape[0] or width >= source.shape[1]:
+                        continue
+                    resized = cv2.resize(icon, (width, height), interpolation=cv2.INTER_AREA)
+                    icon_gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+                    icon_edges = cv2.Canny(icon_gray, 50, 150)
+                    edge_result = cv2.matchTemplate(source_edges, icon_edges, cv2.TM_CCOEFF_NORMED)
+                    gray_result = cv2.matchTemplate(source_gray, icon_gray, cv2.TM_CCOEFF_NORMED)
+                    result = 0.55 * edge_result + 0.45 * gray_result
+                    for x, y, used_width, used_height in used:
+                        result[
+                            max(0, y - height // 3) : min(result.shape[0], y + used_height),
+                            max(0, x - width // 3) : min(result.shape[1], x + used_width),
+                        ] = -1
+                    _, score, _, location = cv2.minMaxLoc(result)
+                    if best is None or score > best[0]:
+                        best = (float(score), location[0], location[1], width, height)
+                if best is None or best[0] < 0.25:
+                    continue
+                score, x, y, width, height = best
+                used.append((x, y, width, height))
+                points.append(
+                    (
+                        (x + width / 2) / source.shape[1],
+                        (y + height / 2) / source.shape[0],
+                    )
+                )
+                scores.append(score)
+            if len(points) < 2 or len(points) != len(icons):
+                return None
+            return SolverEstimate(
+                solver="opencv_tap",
+                value=points,
+                confidence=sum(scores) / len(scores),
+                detail=f"targets={len(points)}",
+            )
+        except Exception:  # noqa: BLE001 - malformed images reject only this estimate
             return None
 
     def _get_ddddocr_text(self):

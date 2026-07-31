@@ -17,22 +17,41 @@ class ProviderIsolationArchitectureTest {
     void providerIdsDoNotLeakIntoCoreJavaCode() throws IOException {
         try (var directories = Files.list(PROVIDER_ROOT)) {
             for (var providerDirectory : directories.filter(Files::isDirectory).toList()) {
-                assertProviderIdIsIsolated(providerDirectory);
+                assertProviderIdDoesNotLeakIntoCore(providerDirectory);
+                assertProviderDoesNotImportSiblingPackages(providerDirectory);
             }
         }
     }
 
-    private void assertProviderIdIsIsolated(Path providerDirectory) throws IOException {
+    private void assertProviderIdDoesNotLeakIntoCore(Path providerDirectory) throws IOException {
         var providerId = providerDirectory.getFileName().toString();
         var providerToken = Pattern.compile("\\b" + Pattern.quote(providerId) + "\\b");
         try (var sources = Files.walk(JAVA_ROOT)) {
             var leaks = sources
                 .filter(path -> path.toString().endsWith(".java"))
-                .filter(path -> !path.startsWith(providerDirectory))
+                .filter(path -> !path.startsWith(PROVIDER_ROOT)
+                    || path.getParent().equals(PROVIDER_ROOT))
                 .filter(path -> contains(path, providerToken))
                 .toList();
             assertThat(leaks)
                 .as("provider id %s must stay inside %s", providerId, providerDirectory)
+                .isEmpty();
+        }
+    }
+
+    private void assertProviderDoesNotImportSiblingPackages(Path providerDirectory)
+        throws IOException {
+        var ownPackage = providerDirectory.getFileName().toString();
+        var siblingImport = Pattern.compile(
+            "import\\s+com\\.any2api\\.provider\\.(?!" + Pattern.quote(ownPackage) + "\\.)"
+                + "[a-z][a-z0-9_]*\\.");
+        try (var sources = Files.walk(providerDirectory)) {
+            var imports = sources
+                .filter(path -> path.toString().endsWith(".java"))
+                .filter(path -> contains(path, siblingImport))
+                .toList();
+            assertThat(imports)
+                .as("provider %s must not import a sibling provider package", ownPackage)
                 .isEmpty();
         }
     }

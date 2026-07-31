@@ -1,17 +1,36 @@
 package com.any2api.provider;
 
-import tools.jackson.databind.node.ObjectNode;
+import com.any2api.account.LeasedProviderAccount;
+import com.any2api.protocol.CanonicalEvent;
+import com.any2api.protocol.CanonicalRequest;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import tools.jackson.databind.JsonNode;
 
-/** Provider protocol SPI. Implementations are isolated and auto-discovered by Spring. */
 public interface InferenceProvider {
 
     ProviderManifest manifest();
 
-    PreparedProviderRequest prepare(
-        ProviderOperation operation,
-        ObjectNode request,
-        String upstreamModel
+    default void validate(CanonicalRequest request) {
+    }
+
+    default boolean supportsAccount(CanonicalRequest request, ProviderAccountProfile account) {
+        return true;
+    }
+
+    default void validateCredential(JsonNode credential) {
+    }
+
+    Flux<CanonicalEvent> generate(
+        CanonicalRequest request,
+        ProviderExecutionContext context,
+        LeasedProviderAccount account
     );
 
     ProviderFailure classify(Throwable error);
+
+    default Mono<java.util.List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
+        return Mono.error(new UnsupportedOperationException(
+            "provider does not implement official model discovery: " + manifest().id()));
+    }
 }

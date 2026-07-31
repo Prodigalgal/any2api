@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import asyncio
+import random
+import string
+from typing import Any
+
+import httpx
+
+from ..lifecycle.account import (
+    RegistrationPasswordPolicy,
+    credential,
+    prepare_registration,
+    required,
+    strong_password,
+)
+from ..lifecycle.browser import (
+    BrowserContextProfile,
+    BrowserFingerprintPolicy,
+    BrowserFingerprintVariant,
+    BrowserLaunchProfile,
+    BrowserResult,
+    credential_from_context,
+    run_browser_flow,
+)
+from ..lifecycle.mail import Mailbox, TempMailClient
+from ..lifecycle.proxy import proxy_lease, proxy_parameters
+from ..lifecycle.registration import RegistrationStage, RegistrationTrace
+from .base import AutomationProvider, AutomationProviderManifest
+from .glm_challenge import GlmAliyunChallenge
+from .glm_settings import settings
+
+
+class GlmAutomationProvider(AutomationProvider):
+    manifest = AutomationProviderManifest(
+        id="glm",
+        browser_backend="camoufox",
+        fallback_backend="patchright",
+        isolation="process",
+        challenge_types=("aliyun_traceless", "semantic_slider", "semantic_drag", "semantic_click"),
+        operations=("register", "reauthenticate", "keepalive"),
+        realtime=True,
+    )
+
+    async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
+        trace = RegistrationTrace(self.manifest.id)
+        try:
+            mail, mailbox, password = await prepare_registration(
+                payload,
+                password_policy=RegistrationPasswordPolicy(
+                    lambda: strong_password(12),
+                    min_length=8,
+                    max_length=64,
+                ),
+            )
+            trace.mark(RegistrationStage.MAILBOX_CREATED)
+            flow_payload = {**payload}
+            flow_payload.setdefault("proxy_check_url", settings().glm_base_url)
+            result = await asyncio.to_thread(
+                run_browser_flow,
+                lambda page, context, backend, proxy_url: _register_browser(
+                    page,
+                    context,
+                    backend,
+                    mail,
+                    mailbox,
+                    password,
+                    trace,
+                ),
+                preferred=self.manifest.browser_backend,
+                fallback=self.manifest.fallback_backend,
+                payload=flow_payload,
+                context_profile=self.browser_context_profile(),
+                launch_profile=self.browser_launch_profile(),
+                fingerprint_policy=self.browser_fingerprint_policy(),
+            )
+            return result.response()
+        except Exception as error:
+            raise trace.failure(error) from error
+
+    async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        current = credential(payload)
+        result = await asyncio.to_thread(
+            run_browser_flow,
+            lambda page, context, backend, proxy_url: _reauthenticate_browser(
+                page,
+                context,
+                backend,
+                current,
+            ),
+            preferred=self.manifest.browser_backend,
+            fallback=self.manifest.fallback_backend,
+            payload={**payload, "proxy_check_url": settings().glm_base_url},
+            context_profile=self.browser_context_profile(),
+            launch_profile=self.browser_launch_profile(),
+            fingerprint_policy=self.browser_fingerprint_policy(),
+        )
+        return {
+            "healthy": True,
+            "ready_for_inference": False,
+            "credential_patch": result.credential,
+            "metadata": result.metadata,
+        }
+
+    async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
+
+    def routers(self) -> tuple[Any, ...]:
+        from .glm_runtime import router
+
+        return (router,)
+
+    def browser_context_profile(self) -> BrowserContextProfile:
+        return BrowserContextProfile(
+            ignore_https_errors=True,
+            locale="en-US",
+            timezone_id="Asia/Tokyo",
+            viewport_width=1440,
+            viewport_height=900,
+            accept_language="en-US,en;q=0.9",
+        )
+
+    def browser_launch_profile(self) -> BrowserLaunchProfile:
+        return BrowserLaunchProfile(humanize=True, camoufox_os="windows")
+
+    def browser_fingerprint_policy(self) -> BrowserFingerprintPolicy:
+        return BrowserFingerprintPolicy(
+            variants=tuple(
+                BrowserFingerprintVariant(
+                    id=f"glm-windows-{width}x{height}",
+                    os="windows",
+                    locale="en-US",
+                    timezone_id="Asia/Tokyo",
+                    viewport_width=width,
+                    viewport_height=height,
+                    accept_language="en-US,en;q=0.9",
+                )
+                for width, height in ((1365, 900), (1440, 900), (1536, 864))
+            ),
+            camoufox_mode="synthetic",
+        )
+
+
+def _register_browser(
+    page: Any,
+    context: Any,
+    backend: str,
+    mail: TempMailClient,
+    mailbox: Mailbox,
+    password: str,
+    trace: RegistrationTrace,
+) -> BrowserResult:
+    config = settings()
+    trace.mark(RegistrationStage.BROWSER_LAUNCHED)
+    page.goto(
+        f"{config.glm_base_url.rstrip('/')}/auth?mode=register",
+        wait_until="domcontentloaded",
+    )
+    page.wait_for_timeout(2_000 + random.randint(0, 1_500))
+    trace.mark(RegistrationStage.FORM_READY)
+    challenge = GlmAliyunChallenge.for_authentication()
+    ticket = challenge.solve(page)
+    trace.mark(RegistrationStage.CHALLENGE_CLEARED)
+    display_name = "glm" + "".join(random.choice(string.ascii_lowercase) for _ in range(10))
+    signup = _browser_auth_request(
+        page,
+        "/api/v1/auths/signup",
+        {
+            "name": display_name,
+            "email": mailbox.address,
+            "password": password,
+            "profile_image_url": "/user.png",
+            "sso_redirect": None,
+            "captcha_verify_param": ticket,
+        },
+    )
+    trace.mark(RegistrationStage.FORM_SUBMITTED)
+    if not signup["ok"]:
+        raise RuntimeError(
+            f"GLM signup rejected status={signup['status']} detail={signup['detail']}"
+        )
+    trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
+    activate_url = mail.wait_for_link_sync(mailbox, host_pattern=r"(?:chat\.)?z\.ai")
+    trace.mark(RegistrationStage.OTP_RECEIVED)
+    page.goto(activate_url, wait_until="domcontentloaded")
+    token, profile = _wait_for_profile(page)
+    if not token:
+        page.goto(config.glm_base_url, wait_until="domcontentloaded")
+        page.wait_for_timeout(1_500)
+        token, profile, signin_diagnostic = _signin(page, mailbox.address, password)
+    else:
+        signin_diagnostic = "activation_token"
+    trace.mark(RegistrationStage.ACTIVATED)
+    value = credential_from_context(context, page, password, mailbox.jwt)
+    value.update(
+        {
+            "email": mailbox.address,
+            "token": token,
+            "user_id": profile["id"],
+            "registration_backend": backend,
+        }
+    )
+    trace.mark(RegistrationStage.CREDENTIAL_CAPTURED)
+    return BrowserResult(
+        external_id=profile["id"],
+        email=mailbox.address,
+        credential=value,
+        metadata={
+            **trace.metadata(),
+            "captcha": challenge.last_diagnostic,
+            "authentication": signin_diagnostic,
+            "inference_probe_required": True,
+        },
+        ready_for_inference=False,
+    )
+
+
+def _reauthenticate_browser(
+    page: Any,
+    context: Any,
+    backend: str,
+    current: dict[str, Any],
+) -> BrowserResult:
+    config = settings()
+    page.goto(config.glm_base_url, wait_until="domcontentloaded")
+    page.wait_for_timeout(1_500)
+    email = required(current, "email")
+    password = required(current, "password")
+    token, profile, diagnostic = _signin(page, email, password)
+    value = credential_from_context(
+        context,
+        page,
+        password,
+        str(current.get("mail_jwt") or ""),
+    )
+    value.update(
+        {
+            "email": email,
+            "token": token,
+            "user_id": profile["id"],
+            "registration_backend": backend,
+        }
+    )
+    return BrowserResult(
+        profile["id"],
+        email,
+        value,
+        metadata={"authentication": diagnostic, "inference_probe_required": True},
+        ready_for_inference=False,
+    )
+
+
+def _signin(page: Any, email: str, password: str) -> tuple[str, dict[str, str], str]:
+    challenge = GlmAliyunChallenge.for_authentication()
+    ticket = challenge.solve(page)
+    result = _browser_auth_request(
+        page,
+        "/api/v1/auths/signin",
+        {"email": email, "password": password, "captcha_verify_param": ticket},
+    )
+    if not result["ok"] or not result["token"]:
+        raise RuntimeError(
+            f"GLM sign-in rejected status={result['status']} detail={result['detail']}"
+        )
+    profile = _browser_profile(page, result["token"])
+    return result["token"], profile, challenge.last_diagnostic
+
+
+def _wait_for_profile(page: Any) -> tuple[str, dict[str, str]]:
+    for _ in range(60):
+        token = str(page.evaluate("() => localStorage.getItem('token') || ''") or "")
+        if token:
+            try:
+                return token, _browser_profile(page, token)
+            except RuntimeError:
+                pass
+        page.wait_for_timeout(1_000)
+    return "", {}
+
+
+def _browser_profile(page: Any, token: str) -> dict[str, str]:
+    result = page.evaluate(
+        """async token => {
+          const response = await fetch('/api/v1/auths/', {
+            headers: {Authorization: `Bearer ${token}`}, credentials: 'include'
+          });
+          let data = {};
+          try { data = await response.json(); } catch (_) {}
+          return {ok: response.ok, status: response.status, id: String(data.id || '')};
+        }""",
+        token,
+    )
+    if not result.get("ok") or not result.get("id"):
+        raise RuntimeError(f"GLM profile probe failed status={result.get('status')}")
+    return {"id": str(result["id"])}
+
+
+def _browser_auth_request(page: Any, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    return page.evaluate(
+        """async args => {
+          const headers = {'Content-Type': 'application/json'};
+          for (let index = 0; index < localStorage.length; index += 1) {
+            const value = localStorage.getItem(localStorage.key(index));
+            if (/^uid_[A-Za-z0-9]{7,}$/.test(value || '')) {
+              headers['X-Device-ID'] = value;
+              break;
+            }
+          }
+          const response = await fetch(args.path, {
+            method: 'POST', headers, credentials: 'include', body: JSON.stringify(args.body)
+          });
+          let data = {};
+          try { data = await response.json(); } catch (_) {}
+          return {
+            ok: response.ok,
+            status: response.status,
+            detail: String(data.detail || '').replace(String(args.body.email || ''), '<email>').slice(0, 300),
+            token: String(data.token || data.access_token || ''),
+            id: String(data.id || '')
+          };
+        }""",
+        {"path": path, "body": body},
+    )
+
+
+def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    config = settings()
+    token = required(current, "token", "access_token")
+    with (
+        proxy_lease(check_url=config.glm_base_url, **proxy_parameters(payload)) as proxy_url,
+        httpx.Client(proxy=proxy_url or None, timeout=60) as client,
+    ):
+        response = client.get(
+            f"{config.glm_base_url.rstrip('/')}/api/v1/auths/",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+    if response.status_code in {401, 403}:
+        return {"healthy": False, "auth_expired": True, "ready_for_inference": False}
+    response.raise_for_status()
+    profile = response.json()
+    return {
+        "healthy": bool(profile.get("id")),
+        "auth_expired": not bool(profile.get("id")),
+        "ready_for_inference": False,
+        "inference_probe_required": True,
+    }

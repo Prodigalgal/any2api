@@ -21,11 +21,13 @@
     "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 255 },
     "attempt": { "type": "integer", "minimum": 1 },
     "deadline": { "type": "string", "format": "date-time" },
-    "operation": { "enum": ["register", "reauth", "probe", "cancel"] },
-    "provider": { "enum": ["grok", "mimo", "qwen", "longcat"] },
+    "operation": { "enum": ["register", "reauthenticate", "keepalive", "cancel"] },
+    "provider": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{1,31}$"
+    },
     "scoped_token_reference": { "type": ["string", "null"] },
     "payload": { "type": "object" }
   },
   "additionalProperties": false
 }
-

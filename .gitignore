@@ -27,6 +27,9 @@ automation/.pytest_cache/
 automation/.ruff_cache/
 automation/__pycache__/
 automation/**/*.pyc
+automation/**/sso_output/
+**/__pycache__/
+**/*.pyc
 
 # Runtime
 data/
@@ -34,4 +37,7 @@ logs/
 tmp/
 output/
 .playwright-cli/
+.playwright-mcp/
+/accounts-desktop-qa.png
+/start-coding-tools-mcp-here.cmd
 *.log

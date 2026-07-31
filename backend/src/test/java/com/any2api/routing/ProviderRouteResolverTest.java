@@ -2,15 +2,25 @@ package com.any2api.routing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-import com.any2api.config.Any2ApiProperties;
+import com.any2api.account.LeasedProviderAccount;
+import com.any2api.protocol.CanonicalEvent;
+import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.InferenceProvider;
-import com.any2api.provider.OpenAiBridgeProvider;
+import com.any2api.provider.ProviderExecutionContext;
+import com.any2api.provider.ProviderFailure;
+import com.any2api.provider.ProviderCapability;
+import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderInstallationCatalog;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.SupportLevel;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 
 class ProviderRouteResolverTest {
 
@@ -68,16 +78,45 @@ class ProviderRouteResolverTest {
             .hasMessageContaining("duplicate provider id");
     }
 
+    @Test
+    void administrativelyDisabledProviderIsAbsentFromEveryRoute() {
+        var installations = mock(ProviderInstallationCatalog.class);
+        when(installations.isEnabled("alpha")).thenReturn(false);
+        when(installations.isEnabled("beta")).thenReturn(true);
+        var registry = new ProviderRegistry(
+            List.of(provider("alpha"), provider("beta")), installations);
+        var filteredResolver = new ProviderRouteResolver(registry);
+
+        assertThat(registry.list()).extracting(ProviderManifest::id).containsExactly("beta");
+        assertThatThrownBy(() -> filteredResolver.resolve(
+            "/alpha/v1/chat/completions", "alpha-model"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("provider is disabled");
+    }
+
     private InferenceProvider provider(String id) {
-        var properties = new Any2ApiProperties();
-        properties.getProviders().put(id, new Any2ApiProperties.Provider());
-        return new OpenAiBridgeProvider(
-            properties,
-            id,
-            id,
-            "test-v1",
-            List.of(id + "-model"),
-            Map.of()
-        ) {};
+        return new InferenceProvider() {
+            @Override
+            public ProviderManifest manifest() {
+                return new ProviderManifest(
+                    id, id, "test-v1", "1", List.of(id + "-model"), Map.of(
+                        ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                        ProviderCapability.RESPONSES, SupportLevel.NATIVE), true);
+            }
+
+            @Override
+            public Flux<CanonicalEvent> generate(
+                CanonicalRequest request,
+                ProviderExecutionContext context,
+                LeasedProviderAccount account
+            ) {
+                return Flux.empty();
+            }
+
+            @Override
+            public ProviderFailure classify(Throwable error) {
+                return new ProviderFailure("test", "test", false, Map.of());
+            }
+        };
     }
 }

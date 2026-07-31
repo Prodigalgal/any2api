@@ -1,4 +1,6 @@
 import io
+import threading
+import time
 from typing import Any, ClassVar
 
 import httpx
@@ -531,8 +533,33 @@ def test_visual_action_solver_reports_only_safe_vote_diagnostics(monkeypatch) ->
     settings.cache_clear()
     diagnostic = registry.visual_diagnostic()
     assert actions == []
-    assert "votes=drag[0.000,0.500,0.200,0.500]" in diagnostic
+    assert "drag[0.000,0.500,0.200,0.500]" in diagnostic
     assert "private prompt" not in diagnostic
+
+
+def test_visual_action_batch_has_an_absolute_wall_clock_deadline(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "2")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLE_TIMEOUT_SECONDS", "1")
+    settings.cache_clear()
+    release = threading.Event()
+
+    def blocked(*args, **kwargs):
+        release.wait(5)
+        return ""
+
+    monkeypatch.setattr(registry, "_visual_completion_sync", blocked)
+    fixture = io.BytesIO()
+    Image.new("RGB", (200, 100), "white").save(fixture, format="PNG")
+
+    started = time.monotonic()
+    actions = registry.solve_visual_actions_sync(fixture.getvalue(), "fixture prompt")
+    elapsed = time.monotonic() - started
+    release.set()
+
+    settings.cache_clear()
+    assert actions == []
+    assert elapsed < 2
+    assert "completed=0/2" in registry.visual_diagnostic()
 
 
 class _GlmSuccessPage:

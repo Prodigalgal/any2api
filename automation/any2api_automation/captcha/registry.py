@@ -183,13 +183,23 @@ class SolverRegistry:
             content = self._visual_completion_sync(
                 image,
                 prompt,
-                max_tokens=1024,
+                max_tokens=256,
                 timeout_seconds=sample_timeout,
             )
             return content, self.visual_diagnostic()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=sample_count) as executor:
-            responses = list(executor.map(lambda _: sample(), range(sample_count)))
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=sample_count)
+        futures = [executor.submit(sample) for _ in range(sample_count)]
+        done, pending = concurrent.futures.wait(futures, timeout=sample_timeout)
+        for future in pending:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        responses: list[tuple[str, str]] = []
+        for future in done:
+            try:
+                responses.append(future.result())
+            except Exception as error:  # noqa: BLE001 - one failed vote must not fail the batch
+                responses.append(("", f"sample_error:{type(error).__name__}"))
 
         samples: list[list[VisualAction]] = []
         sources: list[str] = []
@@ -211,7 +221,8 @@ class SolverRegistry:
         votes = "|".join(self._visual_action_summary(actions) for actions in samples)
         source_summary = "|".join(sources)
         self._diagnostics.visual = (
-            f"consensus_rejected:valid={len(samples)}/{sample_count}:"
+            f"consensus_rejected:completed={len(done)}/{sample_count}:"
+            f"valid={len(samples)}/{sample_count}:"
             f"votes={votes}:sources={source_summary}:last={failure}"
         )[:1000]
         return []

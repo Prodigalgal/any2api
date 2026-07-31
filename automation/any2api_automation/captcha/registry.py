@@ -190,6 +190,7 @@ class SolverRegistry:
             responses = list(executor.map(lambda _: sample(), range(sample_count)))
 
         samples: list[list[VisualAction]] = []
+        sources: list[str] = []
         failures: list[str] = []
         for content, diagnostic in responses:
             if not content:
@@ -198,15 +199,19 @@ class SolverRegistry:
             actions = self._parse_visual_actions(image, content)
             if actions:
                 samples.append(actions)
+                sources.append(diagnostic)
             else:
                 failures.append(self.visual_diagnostic())
         consensus = self._visual_action_consensus(samples, sample_count)
         if consensus:
             return consensus
         failure = failures[-1] if failures else "coordinate_disagreement"
+        votes = "|".join(self._visual_action_summary(actions) for actions in samples)
+        source_summary = "|".join(sources)
         self._diagnostics.visual = (
-            f"consensus_rejected:valid={len(samples)}/{sample_count}:last={failure}"
-        )
+            f"consensus_rejected:valid={len(samples)}/{sample_count}:"
+            f"votes={votes}:sources={source_summary}:last={failure}"
+        )[:1000]
         return []
 
     def _visual_action_consensus(
@@ -273,6 +278,11 @@ class SolverRegistry:
             else:
                 raise ValueError("visual action is incomplete")
         return vector
+
+    def _visual_action_summary(self, actions: list[VisualAction]) -> str:
+        signature = ",".join(action.type for action in actions)
+        coordinates = ",".join(f"{value:.3f}" for value in self._visual_action_vector(actions))
+        return f"{signature}[{coordinates}]"
 
     def _visual_actions_from_vector(
         self,

@@ -467,6 +467,33 @@ def test_visual_action_consensus_rejects_broad_single_center_neighborhood() -> N
     assert registry._visual_action_consensus(samples, 5) == []
 
 
+def test_visual_action_solver_reports_only_safe_vote_diagnostics(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "3")
+    settings.cache_clear()
+    responses = iter(
+        (
+            'ACTIONS=[{"type":"drag","from":[0,50],"to":[20,50]}]',
+            'ACTIONS=[{"type":"drag","from":[0,50],"to":[50,50]}]',
+            'ACTIONS=[{"type":"drag","from":[0,50],"to":[80,50]}]',
+        )
+    )
+    monkeypatch.setattr(
+        registry,
+        "_visual_completion_sync",
+        lambda *args, **kwargs: next(responses),
+    )
+    fixture = io.BytesIO()
+    Image.new("RGB", (200, 100), "white").save(fixture, format="PNG")
+
+    actions = registry.solve_visual_actions_sync(fixture.getvalue(), "private prompt")
+
+    settings.cache_clear()
+    diagnostic = registry.visual_diagnostic()
+    assert actions == []
+    assert "votes=drag[0.000,0.500,0.200,0.500]" in diagnostic
+    assert "private prompt" not in diagnostic
+
+
 class _GlmSuccessPage:
     def __init__(self) -> None:
         self.state = {"status": "missing", "ticket": ""}

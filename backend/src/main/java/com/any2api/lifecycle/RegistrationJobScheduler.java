@@ -28,6 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 public class RegistrationJobScheduler {
     private static final int CLAIM_LIMIT = 2;
     private static final Duration LEASE_TTL = Duration.ofMinutes(12);
+    private static final Duration LEASE_RENEW_INTERVAL = Duration.ofMinutes(4);
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transactions;
@@ -106,13 +107,41 @@ public class RegistrationJobScheduler {
         var payload = proxyPools.runtimeForProvider(
                 job.providerId(), ProxyTrafficScope.REGISTRATION)
             .<Map<String, ?>>map(pool -> Map.of("proxy_pool", pool)).orElseGet(Map::of);
-        return Flux.range(0, batch)
+        var operation = Flux.range(0, batch)
             .flatMap(ignored -> automation.execute(job.providerId(), "register", payload)
                 .map(result -> importResult(job, result))
                 .onErrorResume(error -> Mono.just(Attempt.failed(error))), job.concurrency())
             .collectList()
             .doOnNext(results -> finalizeBatch(job, owner, results))
             .then();
+        return withLeaseRenewal(operation, job, owner);
+    }
+
+    private Mono<Void> withLeaseRenewal(Mono<Void> operation, Job job, String owner) {
+        return operation.publish(shared -> Mono.when(
+            shared,
+            Flux.interval(LEASE_RENEW_INTERVAL)
+                .takeUntilOther(shared)
+                .concatMap(ignored -> Mono.fromRunnable(() -> renewLease(job, owner)))
+                .then()
+        ));
+    }
+
+    private void renewLease(Job job, String owner) {
+        var updated = jdbc.sql("""
+            UPDATE registration_jobs
+            SET lease_expires_at = CURRENT_TIMESTAMP
+                    + CAST(:leaseSeconds || ' seconds' AS interval),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND status = 'RUNNING' AND lease_owner = :owner
+            """)
+            .param("leaseSeconds", Long.toString(LEASE_TTL.toSeconds()))
+            .param("id", job.id())
+            .param("owner", owner)
+            .update();
+        if (updated != 1) {
+            throw new IllegalStateException("registration job lease was lost during execution");
+        }
     }
 
     private Attempt importResult(Job job, JsonNode result) {

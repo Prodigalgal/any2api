@@ -80,9 +80,11 @@ def test_glm_activation_parameters_require_expected_https_mailbox() -> None:
 
 def test_glm_activation_executes_verify_finish_and_profile_probe() -> None:
     calls: list[dict[str, object]] = []
+    scripts: list[str] = []
 
     class ActivationPage:
         def evaluate(self, script: str, argument: object | None = None) -> object:
+            scripts.append(script)
             if isinstance(argument, dict):
                 calls.append(argument)
                 if argument["path"] == "/api/v1/auths/verify_email":
@@ -117,6 +119,7 @@ def test_glm_activation_executes_verify_finish_and_profile_probe() -> None:
         "/api/v1/auths/finish_signup",
     ]
     assert calls[2] == {"stored_token": "access-token"}
+    assert sum("AbortController" in script for script in scripts) == 3
 
 
 def test_longcat_login_url_is_built_from_provider_configuration() -> None:

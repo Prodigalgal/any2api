@@ -156,6 +156,7 @@ def _register_browser(
     page.goto(
         f"{config.glm_base_url.rstrip('/')}/auth?action=signup",
         wait_until="domcontentloaded",
+        timeout=90_000,
     )
     page.wait_for_timeout(2_000 + random.randint(0, 1_500))
     trace.mark(RegistrationStage.FORM_READY)
@@ -319,12 +320,20 @@ def _activation_parameters(activate_url: str, expected_email: str) -> tuple[str,
 def _browser_profile(page: Any, token: str) -> dict[str, str]:
     result = page.evaluate(
         """async token => {
-          const response = await fetch('/api/v1/auths/', {
-            headers: {Authorization: `Bearer ${token}`}, credentials: 'include'
-          });
-          let data = {};
-          try { data = await response.json(); } catch (_) {}
-          return {ok: response.ok, status: response.status, id: String(data.id || '')};
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 60000);
+          try {
+            const response = await fetch('/api/v1/auths/', {
+              headers: {Authorization: `Bearer ${token}`},
+              credentials: 'include',
+              signal: controller.signal
+            });
+            let data = {};
+            try { data = await response.json(); } catch (_) {}
+            return {ok: response.ok, status: response.status, id: String(data.id || '')};
+          } finally {
+            clearTimeout(timeout);
+          }
         }""",
         token,
     )
@@ -336,6 +345,8 @@ def _browser_profile(page: Any, token: str) -> dict[str, str]:
 def _browser_auth_request(page: Any, path: str, body: dict[str, Any]) -> dict[str, Any]:
     return page.evaluate(
         """async args => {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 60000);
           const headers = {'Content-Type': 'application/json'};
           for (let index = 0; index < localStorage.length; index += 1) {
             const value = localStorage.getItem(localStorage.key(index));
@@ -344,18 +355,23 @@ def _browser_auth_request(page: Any, path: str, body: dict[str, Any]) -> dict[st
               break;
             }
           }
-          const response = await fetch(args.path, {
-            method: 'POST', headers, credentials: 'include', body: JSON.stringify(args.body)
-          });
-          let data = {};
-          try { data = await response.json(); } catch (_) {}
-          return {
-            ok: response.ok,
-            status: response.status,
-            detail: String(data.detail || '').replace(String(args.body.email || ''), '<email>').slice(0, 300),
-            token: String(data.token || data.access_token || data.user?.token || ''),
-            id: String(data.id || data.user?.id || '')
-          };
+          try {
+            const response = await fetch(args.path, {
+              method: 'POST', headers, credentials: 'include',
+              body: JSON.stringify(args.body), signal: controller.signal
+            });
+            let data = {};
+            try { data = await response.json(); } catch (_) {}
+            return {
+              ok: response.ok,
+              status: response.status,
+              detail: String(data.detail || '').replace(String(args.body.email || ''), '<email>').slice(0, 300),
+              token: String(data.token || data.access_token || data.user?.token || ''),
+              id: String(data.id || data.user?.id || '')
+            };
+          } finally {
+            clearTimeout(timeout);
+          }
         }""",
         {"path": path, "body": body},
     )

@@ -191,7 +191,12 @@ class GlmAliyunChallenge:
             if state.get("status") == "error":
                 raise RuntimeError("GLM Aliyun captcha initialization failed")
             page.wait_for_timeout(200)
-        raise RuntimeError("GLM Aliyun captcha initialization timed out")
+        state = self._state(page)
+        status = str(state.get("status") or "unknown")[:40]
+        error = " ".join(str(state.get("error") or "none").split())[:160]
+        raise RuntimeError(
+            f"GLM Aliyun captcha initialization timed out status={status} error={error}"
+        )
 
     def _state(self, page: Any) -> dict[str, Any]:
         value = page.evaluate(

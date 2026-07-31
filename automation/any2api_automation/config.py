@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ANY2API_AUTOMATION_", extra="ignore")
 
     service_name: str = "any2api-automation"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     internal_token: str = ""
     redis_url: str = "redis://localhost:6379/0"
     java_base_url: str = "http://localhost:8080"

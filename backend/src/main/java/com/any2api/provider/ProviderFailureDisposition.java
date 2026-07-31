@@ -22,6 +22,8 @@ public final class ProviderFailureDisposition {
         return switch (failure.type()) {
             case "rate_limited" -> accounts.reportModelCooldown(
                 account, modelId, failure.message(), Duration.ofMinutes(5));
+            case "empty_model_response" -> accounts.reportModelCooldown(
+                account, modelId, failure.message(), Duration.ofMinutes(2));
             case "credential_rejected", "account_blocked" -> accounts.reportFailure(
                 account, failure.message(), Duration.ofHours(6));
             default -> Mono.empty();

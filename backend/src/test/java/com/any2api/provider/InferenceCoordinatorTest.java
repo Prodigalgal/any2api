@@ -65,13 +65,15 @@ class InferenceCoordinatorTest {
     }
 
     private CanonicalRequest request(String providerId) {
+        var message = JsonNodeFactory.instance.objectNode()
+            .put("role", "user").put("content", "hello");
         return new CanonicalRequest(
             "request-id",
             CanonicalRequest.Protocol.CHAT_COMPLETIONS,
             providerId,
             "model",
             false,
-            List.of(),
+            List.of(message),
             Map.of(),
             Map.of(),
             List.of(),

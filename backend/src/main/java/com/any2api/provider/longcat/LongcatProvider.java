@@ -73,6 +73,7 @@ public final class LongcatProvider implements InferenceProvider {
             "agent_id", "reason_enabled", "search_enabled"));
         ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of(
             "tool_choice", "parallel_tool_calls"));
+        toolProtocol.plan(request);
     }
 
     @Override

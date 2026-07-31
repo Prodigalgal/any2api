@@ -87,6 +87,18 @@ class ProviderRequestValidationTest {
             .hasMessageContaining("seed");
     }
 
+    @Test
+    void rejectsEmptyInputBeforeLeasingAnAccount() {
+        var request = new CanonicalRequest("guard", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "guarded", "model", false, List.of(), Map.of(), Map.of(), List.of(),
+            Map.of(), mapper.createObjectNode());
+
+        assertThatThrownBy(() -> ProviderRequestValidation.requireSupportedRequest(
+            request, manifest(Map.of(ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE))))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("input is required");
+    }
+
     private CanonicalRequest requestWith(String type) {
         var part = mapper.createObjectNode().put("type", type);
         var message = mapper.createObjectNode().put("role", "user");

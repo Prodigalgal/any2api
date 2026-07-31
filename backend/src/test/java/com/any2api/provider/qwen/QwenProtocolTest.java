@@ -102,6 +102,15 @@ class QwenProtocolTest {
     }
 
     @Test
+    void rejectsAnEmptySuccessfulStreamInsteadOfCompletingIt() {
+        var events = new QwenEventDecoder("empty").finish();
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("empty_model_response"));
+        assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
     void mapsUploadedVisionFilesWithoutFlatteningThemIntoPromptText() {
         var mapper = new ObjectMapper();
         var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");
@@ -123,5 +132,26 @@ class QwenProtocolTest {
         assertThat(upstream.path("files").get(0).path("id").asText()).isEqualTo("file-1");
         assertThat(upstream.path("files").get(0).path("file_class").asText())
             .isEqualTo("vision");
+    }
+
+    @Test
+    void foldsUnsupportedSystemRoleIntoTheFirstUserMessage() {
+        var mapper = new ObjectMapper();
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");
+        var system = mapper.createObjectNode().put("role", "system")
+            .put("content", "Reply exactly");
+        var user = mapper.createObjectNode().put("role", "user").put("content", "PROTO_OK");
+        var request = new CanonicalRequest("system", CanonicalRequest.Protocol.RESPONSES,
+            "qwen", "qwen3.7-plus", false, List.of(system, user), Map.of(), Map.of(),
+            List.of(), Map.of(), raw);
+
+        var body = new QwenRequestMapper(mapper, new QwenProperties()).prepare(request, "chat");
+
+        assertThat(body.path("messages")).hasSize(1);
+        assertThat(body.path("messages").get(0).path("role").asText()).isEqualTo("user");
+        assertThat(body.path("messages").get(0).path("content").asText())
+            .contains("[System instructions]")
+            .contains("Reply exactly")
+            .contains("PROTO_OK");
     }
 }

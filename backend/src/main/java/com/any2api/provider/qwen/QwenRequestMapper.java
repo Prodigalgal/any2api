@@ -37,7 +37,7 @@ final class QwenRequestMapper {
         String chatId,
         List<QwenPreparedMessage> preparedMessages
     ) {
-        var messages = new ArrayList<>(preparedMessages);
+        var messages = foldSystemMessages(preparedMessages);
         var ids = messages.stream().map(ignored -> UUID.randomUUID().toString()).toList();
         var upstream = mapper.createArrayNode();
         var feature = featureConfig(request);
@@ -88,6 +88,34 @@ final class QwenRequestMapper {
             body.put("max_tokens", ((Number) request.generation().get("max_output_tokens")).longValue());
         } else copyNumber(request, body, "max_tokens", "max_tokens");
         return body;
+    }
+
+    private ArrayList<QwenPreparedMessage> foldSystemMessages(
+        List<QwenPreparedMessage> source
+    ) {
+        var instructions = new ArrayList<String>();
+        var messages = new ArrayList<QwenPreparedMessage>();
+        for (var message : source) {
+            if (List.of("system", "developer").contains(message.role().toLowerCase())) {
+                if (!message.content().isBlank()) instructions.add(message.content());
+            } else {
+                messages.add(message);
+            }
+        }
+        if (instructions.isEmpty()) return messages;
+        var prefix = "[System instructions]\n" + String.join("\n\n", instructions);
+        for (var index = 0; index < messages.size(); index++) {
+            var message = messages.get(index);
+            if ("user".equalsIgnoreCase(message.role())) {
+                var content = message.content().isBlank()
+                    ? prefix : prefix + "\n\n" + message.content();
+                messages.set(index, new QwenPreparedMessage(
+                    message.role(), content, message.files()));
+                return messages;
+            }
+        }
+        messages.add(0, new QwenPreparedMessage("user", prefix, List.of()));
+        return messages;
     }
 
     private ObjectNode featureConfig(CanonicalRequest request) {

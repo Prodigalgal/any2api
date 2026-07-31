@@ -87,4 +87,13 @@ class MimoProtocolTest {
             event instanceof CanonicalEvent.Failed failed
                 && failed.errorType().equals("tool_call_generation_failed"));
     }
+
+    @Test
+    void rejectsAnEmptyMimoStream() {
+        var events = new MimoEventDecoder("empty", List.of(), false, true).finish();
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("empty_model_response"));
+        assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
 }

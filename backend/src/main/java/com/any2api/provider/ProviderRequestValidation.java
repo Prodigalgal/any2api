@@ -75,6 +75,14 @@ public final class ProviderRequestValidation {
         if (hasFunctionTools) {
             requireCapability(manifest, ProviderCapability.FUNCTION_TOOLS, "function tools");
         }
+        var toolChoice = request.rawRequest().path("tool_choice");
+        var toolRequired = toolChoice.isObject()
+            || toolChoice.isTextual()
+                && Set.of("required", "any").contains(toolChoice.asText().toLowerCase());
+        if (toolRequired && request.tools().isEmpty()) {
+            throw new IllegalArgumentException(
+                "tool_choice requires at least one declared tool");
+        }
         if (request.protocol() == CanonicalRequest.Protocol.RESPONSES) {
             var raw = request.rawRequest();
             if (raw.path("store").asBoolean(false)
@@ -93,6 +101,9 @@ public final class ProviderRequestValidation {
                 requireCapability(manifest, ProviderCapability.STRUCTURED_OUTPUT,
                     "structured output");
             }
+        }
+        if (request.messages().isEmpty()) {
+            throw new IllegalArgumentException("request input is required");
         }
     }
 

@@ -13,6 +13,7 @@ final class QwenEventDecoder {
     private long sequence;
     private boolean started;
     private boolean completed;
+    private boolean emittedOutput;
 
     QwenEventDecoder(String requestId) { this.requestId = requestId; }
 
@@ -78,6 +79,7 @@ final class QwenEventDecoder {
         if (!content.isEmpty()) {
             if (List.of("think", "thinking", "reason", "reasoning").contains(phase)) {
                 output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), content));
+                emittedOutput = true;
             } else {
                 text(output, content);
             }
@@ -85,6 +87,7 @@ final class QwenEventDecoder {
         var reasoning = delta.path("reasoning_content").asText("");
         if (!reasoning.isEmpty()) {
             output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), reasoning));
+            emittedOutput = true;
         }
         if (delta.path("tool_calls").isArray()) decodeTools(delta.path("tool_calls"), output);
         var finish = choice.path("finish_reason").asText("");
@@ -101,6 +104,7 @@ final class QwenEventDecoder {
             output.add(new CanonicalEvent.ToolCallStarted(1, requestId, next(), id, name));
             output.add(new CanonicalEvent.ToolArgumentsDelta(1, requestId, next(), id, arguments));
             output.add(new CanonicalEvent.ToolCallCompleted(1, requestId, next(), id, arguments));
+            emittedOutput = true;
         }
     }
 
@@ -123,10 +127,16 @@ final class QwenEventDecoder {
 
     private void text(List<CanonicalEvent> output, String value) {
         output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), value));
+        emittedOutput = true;
     }
 
     private void complete(List<CanonicalEvent> output, String reason) {
-        if (!completed) output.add(new CanonicalEvent.Completed(1, requestId, next(), reason));
+        if (!completed && !emittedOutput) {
+            output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                "empty_model_response", "Qwen returned no model output", Map.of()));
+        } else if (!completed) {
+            output.add(new CanonicalEvent.Completed(1, requestId, next(), reason));
+        }
         completed = true;
     }
 

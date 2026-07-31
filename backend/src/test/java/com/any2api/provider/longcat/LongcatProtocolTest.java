@@ -89,6 +89,19 @@ class LongcatProtocolTest {
         assertThat(events).noneMatch(CanonicalEvent.OutputTextDelta.class::isInstance);
     }
 
+    @Test
+    void rejectsAnEmptyLongcatStream() {
+        var mapper = new ObjectMapper();
+        var tools = new LongcatToolProtocol(mapper);
+        var plan = tools.plan(request(mapper, mapper.createArrayNode(), mapper.createObjectNode()));
+
+        var events = new LongcatEventDecoder("empty", false, plan, tools).finish();
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("empty_model_response"));
+        assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
     private CanonicalRequest request(
         ObjectMapper mapper,
         tools.jackson.databind.JsonNode toolNodes,

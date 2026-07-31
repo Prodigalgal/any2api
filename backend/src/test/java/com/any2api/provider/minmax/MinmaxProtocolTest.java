@@ -136,6 +136,15 @@ class MinmaxProtocolTest {
             .startsWith("data:image/png;base64,");
     }
 
+    @Test
+    void rejectsAnEmptyOfficialEventStream() {
+        var events = new MinmaxEventDecoder("empty").finish();
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("empty_model_response"));
+        assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
     private void assertOfficialSignature(
         MinmaxSignedRequest request,
         String body,

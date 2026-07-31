@@ -43,7 +43,12 @@ final class MinmaxEventDecoder {
     List<CanonicalEvent> finish() {
         if (completed) return List.of();
         var output = start();
-        output.add(new CanonicalEvent.Completed(1, requestId, next(), "stop"));
+        if (emittedText) {
+            output.add(new CanonicalEvent.Completed(1, requestId, next(), "stop"));
+        } else {
+            output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                "empty_model_response", "MinMax returned no model output", Map.of()));
+        }
         completed = true;
         return output;
     }

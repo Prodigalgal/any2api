@@ -134,6 +134,12 @@ final class LongcatEventDecoder {
     private void finishOutput(List<CanonicalEvent> output, String reason, String finalText) {
         var answer = resolvedAnswer(output, finalText);
         if (!toolPlan.enabled()) {
+            if (answer.isBlank()) {
+                output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                    "empty_model_response", "LongCat returned no model output", Map.of()));
+                completed = true;
+                return;
+            }
             if (reasoningEnabled && !answer.isBlank()) {
                 output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), answer));
             } else if (!reasoningEnabled && cumulative.isEmpty() && !answer.isBlank()) {
@@ -148,6 +154,12 @@ final class LongcatEventDecoder {
                 output.add(new CanonicalEvent.Failed(1, requestId, next(),
                     "tool_call_generation_failed",
                     "LongCat did not produce the required function tool call", Map.of()));
+                completed = true;
+                return;
+            }
+            if (answer.isBlank()) {
+                output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                    "empty_model_response", "LongCat returned no model output", Map.of()));
                 completed = true;
                 return;
             }

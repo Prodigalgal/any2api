@@ -58,7 +58,6 @@ public final class MimoProvider implements InferenceProvider {
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.STREAMING, SupportLevel.NATIVE,
-                ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
                 ProviderCapability.REASONING, SupportLevel.NATIVE,
                 ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
                 ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,

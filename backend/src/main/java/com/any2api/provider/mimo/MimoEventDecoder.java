@@ -41,6 +41,7 @@ final class MimoEventDecoder {
     private boolean started;
     private boolean completed;
     private boolean reasoning;
+    private boolean emittedAnswer;
 
     MimoEventDecoder(
         String requestId,
@@ -108,6 +109,12 @@ final class MimoEventDecoder {
             }
             buffer.setLength(0);
         }
+        if (emittedCalls.isEmpty() && !emittedAnswer) {
+            output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                "empty_model_response", "MiMo returned no model output", java.util.Map.of()));
+            completed = true;
+            return output;
+        }
         output.add(new CanonicalEvent.Completed(1, requestId, next(),
             emittedCalls.isEmpty() ? "stop" : "tool_calls"));
         completed = true;
@@ -154,7 +161,10 @@ final class MimoEventDecoder {
     private void emitText(String value, List<CanonicalEvent> output) {
         if (value.isEmpty()) return;
         if (reasoning) output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), value));
-        else output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), value));
+        else {
+            output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), value));
+            if (!value.isBlank()) emittedAnswer = true;
+        }
     }
 
     private void emitTools(String source, List<CanonicalEvent> output) {
@@ -247,6 +257,7 @@ final class MimoEventDecoder {
                     1, requestId, next(), value));
                 else output.add(new CanonicalEvent.OutputTextDelta(
                     1, requestId, next(), value));
+                if (!inReasoning && !value.isBlank()) emittedAnswer = true;
             }
             if (hit < 0) break;
             position = hit + token.length();

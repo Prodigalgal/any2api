@@ -12,7 +12,12 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from any2api_automation.captcha.registry import SolverRegistry
 from any2api_automation.lifecycle.browser import BrowserResult
 from any2api_automation.lifecycle.mail import Mailbox
-from any2api_automation.providers.glm import _activate_from_link, _activation_parameters
+from any2api_automation.lifecycle.registration import RegistrationStage, RegistrationTrace
+from any2api_automation.providers.glm import (
+    _activate_from_link,
+    _activation_parameters,
+    _retryable_registration_challenge,
+)
 from any2api_automation.providers.grok_protocol.antibot_service import (
     AntibotService,
     _parse_bot_flag_details,
@@ -76,6 +81,23 @@ def test_glm_activation_parameters_require_expected_https_mailbox() -> None:
         _activation_parameters(link.replace("chat.z.ai", "invalid.example"), "mail@example.test")
     with pytest.raises(RuntimeError, match="mailbox"):
         _activation_parameters(link, "other@example.test")
+
+
+def test_glm_registration_retries_only_before_form_submission() -> None:
+    trace = RegistrationTrace("glm")
+    trace.mark(RegistrationStage.FORM_READY)
+    error = RuntimeError("GLM Aliyun captcha initialization timed out")
+
+    assert _retryable_registration_challenge(trace, error) is True
+
+    trace.mark(RegistrationStage.FORM_SUBMITTED)
+    assert _retryable_registration_challenge(trace, error) is False
+    assert (
+        _retryable_registration_challenge(
+            RegistrationTrace("glm"), RuntimeError("unrelated failure")
+        )
+        is False
+    )
 
 
 def test_glm_activation_executes_verify_finish_and_profile_probe() -> None:

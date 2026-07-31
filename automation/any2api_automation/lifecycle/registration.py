@@ -40,9 +40,9 @@ class RegistrationTrace:
         return self.stages[-1].value if self.stages else "started"
 
     def mark(self, stage: RegistrationStage) -> None:
-        if not self.stages or self.stages[-1] != stage:
+        if stage not in self.stages:
             self.stages.append(stage)
-        logger.info(
+        logger.warning(
             "provider registration stage provider=%s stage=%s",
             self.provider_id,
             stage.value,

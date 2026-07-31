@@ -57,23 +57,13 @@ class GlmAutomationProvider(AutomationProvider):
             trace.mark(RegistrationStage.MAILBOX_CREATED)
             flow_payload = {**payload}
             flow_payload.setdefault("proxy_check_url", settings().glm_base_url)
-            result = await asyncio.to_thread(
-                run_browser_flow,
-                lambda page, context, backend, proxy_url: _register_browser(
-                    page,
-                    context,
-                    backend,
-                    mail,
-                    mailbox,
-                    password,
-                    trace,
-                ),
-                preferred=self.manifest.browser_backend,
-                fallback=self.manifest.fallback_backend,
-                payload=flow_payload,
-                context_profile=self.browser_context_profile(),
-                launch_profile=self.browser_launch_profile(),
-                fingerprint_policy=self.browser_fingerprint_policy(),
+            result = await _run_registration_browser(
+                self,
+                flow_payload,
+                mail,
+                mailbox,
+                password,
+                trace,
             )
             return result.response()
         except Exception as error:
@@ -140,6 +130,50 @@ class GlmAutomationProvider(AutomationProvider):
             ),
             camoufox_mode="synthetic",
         )
+
+
+async def _run_registration_browser(
+    provider: GlmAutomationProvider,
+    payload: dict[str, Any],
+    mail: TempMailClient,
+    mailbox: Mailbox,
+    password: str,
+    trace: RegistrationTrace,
+) -> BrowserResult:
+    attempts = max(1, min(3, settings().glm_registration_browser_attempts))
+    for attempt in range(1, attempts + 1):
+        try:
+            return await asyncio.to_thread(
+                run_browser_flow,
+                lambda page, context, backend, proxy_url: _register_browser(
+                    page,
+                    context,
+                    backend,
+                    mail,
+                    mailbox,
+                    password,
+                    trace,
+                ),
+                preferred=provider.manifest.browser_backend,
+                fallback=provider.manifest.fallback_backend,
+                payload=payload,
+                context_profile=provider.browser_context_profile(),
+                launch_profile=provider.browser_launch_profile(),
+                fingerprint_policy=provider.browser_fingerprint_policy(),
+            )
+        except RuntimeError as error:
+            if attempt >= attempts or not _retryable_registration_challenge(trace, error):
+                raise
+    raise RuntimeError("GLM registration browser attempts were exhausted")
+
+
+def _retryable_registration_challenge(
+    trace: RegistrationTrace,
+    error: Exception,
+) -> bool:
+    return trace.current == RegistrationStage.FORM_READY.value and str(error).startswith(
+        "GLM Aliyun captcha"
+    )
 
 
 def _register_browser(

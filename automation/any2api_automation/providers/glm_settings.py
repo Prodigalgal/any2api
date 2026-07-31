@@ -15,6 +15,7 @@ class GlmSettings(AutomationProviderSettings):
     glm_captcha_attempts: int = 3
     glm_captcha_rounds_per_attempt: int = 4
     glm_captcha_timeout_seconds: int = 120
+    glm_registration_browser_attempts: int = 2
 
 
 @lru_cache

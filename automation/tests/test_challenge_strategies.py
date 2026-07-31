@@ -766,3 +766,25 @@ def test_registration_trace_reports_last_confirmed_stage() -> None:
 
     assert trace.current == "challenge_cleared"
     assert "stage=challenge_cleared" in str(trace.failure(RuntimeError("failed")))
+
+
+def test_registration_trace_redacts_sensitive_failure_details(caplog) -> None:
+    trace = RegistrationTrace("fixture")
+    trace.mark(RegistrationStage.FORM_SUBMITTED)
+
+    failure = trace.failure(
+        RuntimeError(
+            "request for user@example.com failed at "
+            "https://example.com/activate?token=secret "
+            "password=guessme token=abc123"
+        )
+    )
+
+    assert "stage=form_submitted" in str(failure)
+    assert "user@example.com" not in caplog.text
+    assert "token=secret" not in caplog.text
+    assert "guessme" not in caplog.text
+    assert "abc123" not in caplog.text
+    assert "<email>" in caplog.text
+    assert "<url-with-query>" in caplog.text
+    assert "password=<redacted>" in caplog.text

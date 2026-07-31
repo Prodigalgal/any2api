@@ -7,6 +7,15 @@ from enum import StrEnum
 
 logger = logging.getLogger(__name__)
 
+_DATA_IMAGE = re.compile(r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=]+")
+_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])")
+_URL_WITH_QUERY = re.compile(r"https?://[^\s?#]+\?[^\s#]+")
+_SECRET_FIELD = re.compile(
+    r"(?i)(?P<key>password|token|authorization|cookie|jwt)"
+    r"(?P<separator>\s*[:=]\s*)"
+    r"(?P<quote>['\"]?)[^\s,}'\"]+(?P=quote)"
+)
+
 
 class RegistrationStage(StrEnum):
     MAILBOX_CREATED = "mailbox_created"
@@ -43,13 +52,26 @@ class RegistrationTrace:
         return {"registration_stages": [stage.value for stage in self.stages]}
 
     def failure(self, error: Exception) -> RuntimeError:
-        detail = re.sub(
-            r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=]+",
-            "<embedded-image>",
-            str(error),
+        detail = _sanitize_failure_detail(error)
+        logger.warning(
+            "provider registration failed provider=%s stage=%s error_type=%s detail=%s",
+            self.provider_id,
+            self.current,
+            type(error).__name__,
+            detail,
         )
-        detail = " ".join(detail.split())[:1200]
         return RuntimeError(
             f"provider registration failed at stage={self.current} "
             f"({type(error).__name__}: {detail})"
         )
+
+
+def _sanitize_failure_detail(error: Exception) -> str:
+    detail = _DATA_IMAGE.sub("<embedded-image>", str(error))
+    detail = _EMAIL.sub("<email>", detail)
+    detail = _URL_WITH_QUERY.sub("<url-with-query>", detail)
+    detail = _SECRET_FIELD.sub(
+        lambda match: f"{match.group('key')}{match.group('separator')}<redacted>",
+        detail,
+    )
+    return " ".join(detail.split())[:1200]

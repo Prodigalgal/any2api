@@ -1,10 +1,13 @@
 import asyncio
 import base64
+import concurrent.futures
 import importlib.util
 import io
+import itertools
 import json
 import math
 import re
+import statistics
 import tempfile
 import threading
 from pathlib import Path
@@ -168,14 +171,134 @@ class SolverRegistry:
         *,
         timeout_seconds: float | None = None,
     ) -> list[VisualAction]:
-        content = self._visual_completion_sync(
-            image,
-            prompt,
-            max_tokens=240,
-            timeout_seconds=timeout_seconds,
+        config = settings()
+        sample_count = max(1, min(5, config.captcha_ai_action_samples))
+        sample_timeout = float(max(1, config.captcha_ai_action_sample_timeout_seconds))
+        if timeout_seconds is not None:
+            sample_timeout = min(sample_timeout, timeout_seconds)
+
+        def sample() -> tuple[str, str]:
+            content = self._visual_completion_sync(
+                image,
+                prompt,
+                max_tokens=1024,
+                timeout_seconds=sample_timeout,
+            )
+            return content, self.visual_diagnostic()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=sample_count) as executor:
+            responses = list(executor.map(lambda _: sample(), range(sample_count)))
+
+        samples: list[list[VisualAction]] = []
+        failures: list[str] = []
+        for content, diagnostic in responses:
+            if not content:
+                failures.append(diagnostic)
+                continue
+            actions = self._parse_visual_actions(image, content)
+            if actions:
+                samples.append(actions)
+            else:
+                failures.append(self.visual_diagnostic())
+        consensus = self._visual_action_consensus(samples, sample_count)
+        if consensus:
+            return consensus
+        failure = failures[-1] if failures else "coordinate_disagreement"
+        self._diagnostics.visual = (
+            f"consensus_rejected:valid={len(samples)}/{sample_count}:last={failure}"
         )
-        if not content:
+        return []
+
+    def _visual_action_consensus(
+        self,
+        samples: list[list[VisualAction]],
+        sample_count: int,
+    ) -> list[VisualAction]:
+        valid_count = len(samples)
+        required = 1 if sample_count == 1 else max(2, valid_count // 2 + 1)
+        grouped: dict[tuple[str, ...], list[list[VisualAction]]] = {}
+        for actions in samples:
+            signature = tuple(action.type for action in actions)
+            grouped.setdefault(signature, []).append(actions)
+        if not grouped:
             return []
+        signature, candidates = max(grouped.items(), key=lambda item: len(item[1]))
+        if len(candidates) < required:
+            return []
+
+        action_vectors = list(
+            zip(candidates, map(self._visual_action_vector, candidates), strict=True)
+        )
+        cluster: tuple[tuple[list[VisualAction], list[float]], ...] = ()
+        for size in range(len(action_vectors), required - 1, -1):
+            qualifying = [
+                candidate
+                for candidate in itertools.combinations(action_vectors, size)
+                if self._visual_vector_spread([vector for _, vector in candidate]) <= 0.06
+            ]
+            if qualifying:
+                cluster = min(
+                    qualifying,
+                    key=lambda candidate: self._visual_vector_spread(
+                        [vector for _, vector in candidate]
+                    ),
+                )
+                break
+        if not cluster:
+            return []
+        clustered_vectors = [vector for _, vector in cluster]
+        median_vector = [statistics.median(values) for values in zip(*clustered_vectors, strict=True)]
+        result = self._visual_actions_from_vector(signature, median_vector)
+        spread = max(
+            max(abs(value - median) for value, median in zip(vector, median_vector, strict=True))
+            for vector in clustered_vectors
+        )
+        self._diagnostics.visual = (
+            f"consensus:{len(cluster)}/{sample_count}:spread={spread:.3f}:"
+            + ",".join(signature)
+        )
+        return result
+
+    def _visual_vector_spread(self, vectors: list[list[float]]) -> float:
+        return max(
+            max(values) - min(values)
+            for values in zip(*vectors, strict=True)
+        )
+
+    def _visual_action_vector(self, actions: list[VisualAction]) -> list[float]:
+        vector: list[float] = []
+        for action in actions:
+            if action.type == "click" and action.at is not None:
+                vector.extend(action.at)
+            elif action.type == "drag" and action.start is not None and action.end is not None:
+                vector.extend((*action.start, *action.end))
+            else:
+                raise ValueError("visual action is incomplete")
+        return vector
+
+    def _visual_actions_from_vector(
+        self,
+        signature: tuple[str, ...],
+        vector: list[float],
+    ) -> list[VisualAction]:
+        actions: list[VisualAction] = []
+        offset = 0
+        for kind in signature:
+            if kind == "click":
+                actions.append(VisualAction("click", at=(vector[offset], vector[offset + 1])))
+                offset += 2
+            else:
+                actions.append(
+                    VisualAction(
+                        "drag",
+                        start=(vector[offset], vector[offset + 1]),
+                        end=(vector[offset + 2], vector[offset + 3]),
+                    )
+                )
+                offset += 4
+        return actions
+
+    def _parse_visual_actions(self, image: bytes, content: str) -> list[VisualAction]:
         try:
             marker = re.search(r"ACTIONS\s*=", content, re.IGNORECASE)
             if marker is None:
@@ -284,6 +407,8 @@ class SolverRegistry:
             return ""
         endpoint = f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions"
         data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
+        prompt_prefix = config.captcha_ai_prompt_prefix.strip()
+        effective_prompt = f"{prompt_prefix}\n\n{prompt}" if prompt_prefix else prompt
         try:
             response = httpx.post(
                 endpoint,
@@ -301,12 +426,13 @@ class SolverRegistry:
                         {
                             "role": "user",
                             "content": [
-                                {"type": "text", "text": prompt},
+                                {"type": "text", "text": effective_prompt},
                                 {"type": "image_url", "image_url": {"url": data_url}},
                             ],
                         },
                     ],
                     "max_tokens": max_tokens,
+                    "reasoning_effort": "none",
                     "temperature": 0,
                 },
                 timeout=max(
@@ -328,7 +454,10 @@ class SolverRegistry:
                     value if isinstance(value, str) else str(value.get("text") or "")
                     for value in content
                 )
-            self._diagnostics.visual = "response_received"
+            headers = getattr(response, "headers", {})
+            provider = str(headers.get("X-Any2API-Provider") or "unknown")
+            model = str(headers.get("X-Any2API-Model") or "unknown")
+            self._diagnostics.visual = f"response_received:provider={provider}:model={model}"
             return str(content)
         except httpx.HTTPStatusError as error:
             self._diagnostics.visual = f"http_status:{error.response.status_code}"

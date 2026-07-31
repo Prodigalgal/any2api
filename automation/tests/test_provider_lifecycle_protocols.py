@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from any2api_automation.captcha.registry import SolverRegistry
 from any2api_automation.lifecycle.browser import BrowserResult
 from any2api_automation.lifecycle.mail import Mailbox
+from any2api_automation.providers.glm import _activate_from_link, _activation_parameters
 from any2api_automation.providers.grok_protocol.antibot_service import (
     AntibotService,
     _parse_bot_flag_details,
@@ -58,6 +59,64 @@ def test_registration_result_distinguishes_account_from_inference_readiness() ->
     assert result["healthy"] is False
     assert result["ready_for_inference"] is False
     assert result["credential"]["sso"] == "session-only"
+
+
+def test_glm_activation_parameters_require_expected_https_mailbox() -> None:
+    link = (
+        "https://chat.z.ai/auth/verify_email?"
+        "username=fixture-user&email=mail%40example.test&token=fixture-token"
+    )
+
+    assert _activation_parameters(link, "mail@example.test") == (
+        "fixture-user",
+        "mail@example.test",
+        "fixture-token",
+    )
+    with pytest.raises(RuntimeError, match="host"):
+        _activation_parameters(link.replace("chat.z.ai", "invalid.example"), "mail@example.test")
+    with pytest.raises(RuntimeError, match="mailbox"):
+        _activation_parameters(link, "other@example.test")
+
+
+def test_glm_activation_executes_verify_finish_and_profile_probe() -> None:
+    calls: list[dict[str, object]] = []
+
+    class ActivationPage:
+        def evaluate(self, script: str, argument: object | None = None) -> object:
+            if isinstance(argument, dict):
+                calls.append(argument)
+                if argument["path"] == "/api/v1/auths/verify_email":
+                    return {"ok": True, "status": 200, "detail": "", "token": "", "id": ""}
+                if argument["path"] == "/api/v1/auths/finish_signup":
+                    return {
+                        "ok": True,
+                        "status": 200,
+                        "detail": "",
+                        "token": "access-token",
+                        "id": "user-id",
+                    }
+            if "localStorage.setItem" in script:
+                calls.append({"stored_token": argument})
+                return None
+            if "/api/v1/auths/" in script:
+                return {"ok": True, "status": 200, "id": "user-id"}
+            raise AssertionError("unexpected browser evaluation")
+
+    token, profile = _activate_from_link(
+        ActivationPage(),
+        "https://chat.z.ai/auth/verify_email?"
+        "username=fixture-user&email=mail%40example.test&token=fixture-token",
+        "mail@example.test",
+        "StrongPassword123!",
+    )
+
+    assert token == "access-token"
+    assert profile == {"id": "user-id"}
+    assert [call.get("path") for call in calls[:2]] == [
+        "/api/v1/auths/verify_email",
+        "/api/v1/auths/finish_signup",
+    ]
+    assert calls[2] == {"stored_token": "access-token"}
 
 
 def test_longcat_login_url_is_built_from_provider_configuration() -> None:

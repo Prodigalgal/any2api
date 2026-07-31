@@ -4,6 +4,7 @@ import asyncio
 import random
 import string
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -153,7 +154,7 @@ def _register_browser(
     config = settings()
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
     page.goto(
-        f"{config.glm_base_url.rstrip('/')}/auth?mode=register",
+        f"{config.glm_base_url.rstrip('/')}/auth?action=signup",
         wait_until="domcontentloaded",
     )
     page.wait_for_timeout(2_000 + random.randint(0, 1_500))
@@ -182,14 +183,8 @@ def _register_browser(
     trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
     activate_url = mail.wait_for_link_sync(mailbox, host_pattern=r"(?:chat\.)?z\.ai")
     trace.mark(RegistrationStage.OTP_RECEIVED)
-    page.goto(activate_url, wait_until="domcontentloaded")
-    token, profile = _wait_for_profile(page)
-    if not token:
-        page.goto(config.glm_base_url, wait_until="domcontentloaded")
-        page.wait_for_timeout(1_500)
-        token, profile, signin_diagnostic = _signin(page, mailbox.address, password)
-    else:
-        signin_diagnostic = "activation_token"
+    token, profile = _activate_from_link(page, activate_url, mailbox.address, password)
+    signin_diagnostic = "activation_finish_signup"
     trace.mark(RegistrationStage.ACTIVATED)
     value = credential_from_context(context, page, password, mailbox.jwt)
     value.update(
@@ -266,16 +261,59 @@ def _signin(page: Any, email: str, password: str) -> tuple[str, dict[str, str], 
     return result["token"], profile, challenge.last_diagnostic
 
 
-def _wait_for_profile(page: Any) -> tuple[str, dict[str, str]]:
-    for _ in range(60):
-        token = str(page.evaluate("() => localStorage.getItem('token') || ''") or "")
-        if token:
-            try:
-                return token, _browser_profile(page, token)
-            except RuntimeError:
-                pass
-        page.wait_for_timeout(1_000)
-    return "", {}
+def _activate_from_link(
+    page: Any,
+    activate_url: str,
+    expected_email: str,
+    password: str,
+) -> tuple[str, dict[str, str]]:
+    username, email, token = _activation_parameters(activate_url, expected_email)
+    verified = _browser_auth_request(
+        page,
+        "/api/v1/auths/verify_email",
+        {"username": username, "email": email, "token": token},
+    )
+    if not verified["ok"]:
+        raise RuntimeError(
+            "GLM email verification rejected "
+            f"status={verified['status']} detail={verified['detail']}"
+        )
+    finished = _browser_auth_request(
+        page,
+        "/api/v1/auths/finish_signup",
+        {
+            "username": username,
+            "email": email,
+            "token": token,
+            "password": password,
+            "profile_image_url": "/user.png",
+            "sso_redirect": None,
+        },
+    )
+    access_token = str(finished.get("token") or "")
+    if not finished["ok"] or not access_token:
+        raise RuntimeError(
+            "GLM signup completion rejected "
+            f"status={finished['status']} detail={finished['detail']}"
+        )
+    page.evaluate("token => localStorage.setItem('token', token)", access_token)
+    return access_token, _browser_profile(page, access_token)
+
+
+def _activation_parameters(activate_url: str, expected_email: str) -> tuple[str, str, str]:
+    parsed = urlparse(activate_url)
+    expected_host = (urlparse(settings().glm_base_url).hostname or "").lower()
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != expected_host:
+        raise RuntimeError("GLM activation link host is invalid")
+    query = parse_qs(parsed.query, keep_blank_values=False)
+    username = str((query.get("username") or [""])[0]).strip()
+    email = str((query.get("email") or [""])[0]).strip()
+    token = str((query.get("token") or [""])[0]).strip()
+    if email.casefold() != expected_email.strip().casefold():
+        raise RuntimeError("GLM activation link email does not match the mailbox")
+    if not username or not token or len(token) > 4096:
+        raise RuntimeError("GLM activation link is incomplete")
+    return username, email, token
 
 
 def _browser_profile(page: Any, token: str) -> dict[str, str]:
@@ -315,8 +353,8 @@ def _browser_auth_request(page: Any, path: str, body: dict[str, Any]) -> dict[st
             ok: response.ok,
             status: response.status,
             detail: String(data.detail || '').replace(String(args.body.email || ''), '<email>').slice(0, 300),
-            token: String(data.token || data.access_token || ''),
-            id: String(data.id || '')
+            token: String(data.token || data.access_token || data.user?.token || ''),
+            id: String(data.id || data.user?.id || '')
           };
         }""",
         {"path": path, "body": body},

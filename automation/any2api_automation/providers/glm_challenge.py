@@ -6,7 +6,10 @@ import random
 import statistics
 import time
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any
+
+from PIL import Image, ImageChops, ImageDraw
 
 from ..captcha.models import SolverEstimate, VisualAction
 from ..captcha.registry import registry
@@ -27,13 +30,18 @@ Use either 0-1 normalized coordinates or 0-100 percentage coordinates. Return at
 """.strip()
 
 GLM_SLIDER_OFFSET_PROMPT = """
-This is an authorized image-placement UI test. The image is the exact square illustration used by
-the UI. A detached foreground object is currently at the far left and can move ONLY horizontally.
-Find the semantically matching EMPTY GAP in the background where that exact object belongs. Ignore
-similar objects already present. Compute horizontal displacement as target center x minus detached
-object center x. Return that displacement as a percentage of the image width with one decimal place.
-Your response MUST contain only this machine format, with percentage replaced by the result:
-ACTIONS=[{"type":"drag","from":[0,50],"to":[percentage,50]}]
+This is an authorized image-placement UI test. The left panel is a magnified view of the DETACHED
+OBJECT. The right panel is the exact 300x300 TARGET SCENE with the detached overlay removed. The
+object can move ONLY horizontally through the bottom handle.
+
+Understand the semantic relationship before choosing the target. Examples include placing a digit
+in the missing position on a clock, placing a lid on the matching open container, putting a cap on
+the matching bottle, or filling an object-shaped empty location. Ignore similar objects that are
+already complete. In the RIGHT panel, estimate only the correct target CENTER x as a percentage of
+the 300px target-scene width. The program already knows
+the object's current coordinate, so the from x MUST be 0. Reason silently and return only this
+machine format, replacing target_center_x with one percentage from 0 to 100:
+ACTIONS=[{"type":"drag","from":[0,50],"to":[target_center_x,50]}]
 """.strip()
 
 
@@ -41,6 +49,7 @@ ACTIONS=[{"type":"drag","from":[0,50],"to":[percentage,50]}]
 class GlmCaptchaProfile:
     scene_id: str
     mode: str
+    semantic_slider: bool = True
 
 
 @dataclass(frozen=True)
@@ -51,6 +60,12 @@ class GlmCaptchaSurface:
     width: float
     height: float
     slider: bool = False
+
+
+@dataclass(frozen=True)
+class GlmSemanticSliderInput:
+    image: bytes
+    object_center_x: float
 
 
 class GlmAliyunChallenge:
@@ -108,25 +123,14 @@ class GlmAliyunChallenge:
                     raise RuntimeError("GLM captcha service did not produce a usable challenge")
                 if state.get("status") == "failed":
                     break
+                if not self._wait_for_visual_surface(page, min(remaining, 12)):
+                    self.last_diagnostic = (
+                        f"mode=visual, attempt={attempt}, round={round_number}, "
+                        "surface=not_ready"
+                    )
+                    continue
                 surface = self._capture_surface(page)
-                local_action, candidates = self._local_slider_action(page, surface)
-                if local_action is not None:
-                    actions = [local_action]
-                else:
-                    prompt = (
-                        self._slider_candidate_prompt(candidates, surface.width)
-                        if surface.slider and candidates
-                        else GLM_SLIDER_OFFSET_PROMPT
-                        if surface.slider
-                        else GLM_VISUAL_ACTION_PROMPT
-                    )
-                    actions = registry.solve_visual_actions_sync(
-                        surface.image,
-                        prompt,
-                        timeout_seconds=remaining,
-                    )
-                    if surface.slider and candidates:
-                        actions = self._snap_slider_actions(actions, candidates, surface.width)
+                actions = self._solve_actions(page, surface, remaining)
                 if not actions:
                     self.last_diagnostic = (
                         f"mode=visual, attempt={attempt}, round={round_number}, "
@@ -203,21 +207,42 @@ class GlmAliyunChallenge:
             page.wait_for_timeout(1_800)
 
     def _start_if_required(self, page: Any) -> bool:
+        if self._visual_surface_ready(page):
+            return False
         try:
-            starter = (
-                page.locator("#any2api-glm-captcha-element")
-                .get_by_text(
-                    "Click to verify",
-                    exact=False,
-                )
-                .first
-            )
-            if starter.count() and starter.is_visible():
-                starter.click()
-                return True
+            for selector in (
+                "#aliyunCaptcha-float-wrapper",
+                "#any2api-glm-captcha-element",
+            ):
+                starter = page.locator(selector).get_by_text("Click to verify", exact=False).first
+                if starter.count() and starter.is_visible():
+                    starter.click()
+                    return True
         except Exception:  # noqa: BLE001,S110 - visual solving remains the fallback
             pass
         return False
+
+    def _wait_for_visual_surface(self, page: Any, timeout_seconds: float) -> bool:
+        deadline = time.monotonic() + max(0.5, timeout_seconds)
+        start_attempted = False
+        while time.monotonic() < deadline:
+            state = self._state(page)
+            if self._accepted_ticket(state):
+                return True
+            if state.get("status") in {"failed", "error", "closed"}:
+                return False
+            if self._visual_surface_ready(page):
+                return True
+            if not start_attempted:
+                start_attempted = self._start_if_required(page)
+            page.wait_for_timeout(200)
+        return False
+
+    def _visual_surface_ready(self, page: Any) -> bool:
+        try:
+            return bool(page.evaluate(_CAPTCHA_VISUAL_READY))
+        except Exception:  # noqa: BLE001 - a transient DOM replacement is not fatal
+            return False
 
     def _capture_surface(self, page: Any) -> GlmCaptchaSurface:
         viewport = page.evaluate("() => ({width: innerWidth, height: innerHeight})")
@@ -260,6 +285,48 @@ class GlmAliyunChallenge:
         )
         return GlmCaptchaSurface(image=image, x=x, y=y, width=width, height=height)
 
+    def _solve_actions(
+        self,
+        page: Any,
+        surface: GlmCaptchaSurface,
+        timeout_seconds: float,
+    ) -> list[VisualAction]:
+        if not self.profile.semantic_slider:
+            local_action, _ = self._local_slider_action(page, surface)
+            if local_action is not None:
+                return [local_action]
+        if surface.slider:
+            semantic = self._semantic_slider_input(page, surface.image)
+            image = semantic.image
+            prompt = GLM_SLIDER_OFFSET_PROMPT
+        else:
+            image = surface.image
+            prompt = GLM_VISUAL_ACTION_PROMPT
+        actions = registry.solve_visual_actions_sync(
+            image,
+            prompt,
+            timeout_seconds=timeout_seconds,
+        )
+        if surface.slider and (
+            len(actions) != 1
+            or actions[0].type != "drag"
+            or actions[0].start is None
+            or actions[0].end is None
+        ):
+            return []
+        if surface.slider:
+            target_x = actions[0].end[0]
+            if target_x <= semantic.object_center_x + 0.025:
+                return []
+            return [
+                VisualAction(
+                    type="drag",
+                    start=(semantic.object_center_x, 0.5),
+                    end=(target_x, 0.5),
+                )
+            ]
+        return actions
+
     def _local_slider_action(
         self,
         page: Any,
@@ -268,18 +335,136 @@ class GlmAliyunChallenge:
         if not surface.slider:
             return None, []
         try:
-            sources = page.evaluate(
-                """() => ({
-                  background: document.querySelector('#aliyunCaptcha-img')?.src || '',
-                  piece: document.querySelector('#aliyunCaptcha-puzzle')?.src || ''
-                })"""
-            )
-            background = self._data_image(str(sources.get("background") or ""))
-            piece = self._data_image(str(sources.get("piece") or ""))
+            background, piece = self._slider_images(page)
             estimates = registry.solve_slider_sync(background, piece)
         except (TypeError, ValueError):
             return None, []
         return self._slider_action_from_estimates(estimates, surface.width)
+
+    def _semantic_slider_input(
+        self,
+        page: Any,
+        rendered_scene: bytes,
+    ) -> GlmSemanticSliderInput:
+        object_center_x = self._slider_object_center_x(page)
+        try:
+            background, piece = self._slider_images(page)
+            image = self._compose_semantic_slider_input(rendered_scene, piece, background)
+        except (TypeError, ValueError):
+            buffer = BytesIO()
+            Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(buffer, format="PNG")
+            image = self._compose_semantic_slider_input(rendered_scene, buffer.getvalue())
+        return GlmSemanticSliderInput(image, object_center_x)
+
+    def _slider_object_center_x(self, page: Any) -> float:
+        try:
+            value = float(page.evaluate(_CAPTCHA_SLIDER_OBJECT_CENTER))
+            if 0 <= value <= 0.35:
+                return value
+        except Exception:  # noqa: BLE001,S110 - DOM may be replaced during refresh
+            pass
+        return 0.05
+
+    def _slider_images(self, page: Any) -> tuple[bytes, bytes]:
+        sources = page.evaluate(_CAPTCHA_IMAGE_SOURCES)
+        if not isinstance(sources, dict):
+            raise TypeError("GLM captcha image sources are unavailable")
+        return (
+            self._data_image(str(sources.get("background") or "")),
+            self._data_image(str(sources.get("piece") or "")),
+        )
+
+    def _compose_semantic_slider_input(
+        self,
+        rendered_scene: bytes,
+        piece: bytes,
+        background: bytes | None = None,
+    ) -> bytes:
+        with (
+            Image.open(BytesIO(rendered_scene)) as scene_source,
+            Image.open(BytesIO(piece)) as piece_source,
+        ):
+            scene = scene_source.convert("RGBA")
+            detached = piece_source.convert("RGBA")
+            object_box = self._foreground_box(detached)
+            if object_box is None and background:
+                detached, object_box = self._foreground_from_scene_difference(
+                    scene,
+                    background,
+                )
+            if object_box is None:
+                edge_width = max(64, round(scene.width * 0.35))
+                detached = scene.crop((0, 0, edge_width, scene.height)).resize(
+                    (260, 280),
+                    Image.Resampling.LANCZOS,
+                )
+            else:
+                detached = detached.crop(object_box)
+                scale = min(220 / detached.width, 220 / detached.height)
+                detached = detached.resize(
+                    (
+                        max(1, round(detached.width * scale)),
+                        max(1, round(detached.height * scale)),
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+            canvas = Image.new("RGB", (640, 340), "white")
+            draw = ImageDraw.Draw(canvas)
+            draw.text((16, 10), "DETACHED OBJECT", fill="black")
+            draw.text((326, 10), "TARGET SCENE (300px)", fill="black")
+            object_x = 160 - detached.width // 2
+            object_y = 180 - detached.height // 2
+            canvas.paste(detached.convert("RGB"), (object_x, object_y), detached.getchannel("A"))
+            target = scene
+            if background:
+                with Image.open(BytesIO(background)) as background_source:
+                    target = background_source.convert("RGBA")
+            target = target.resize((300, 300), Image.Resampling.LANCZOS).convert("RGB")
+            canvas.paste(target, (326, 32))
+            draw.rectangle((325, 31, 626, 332), outline="black", width=2)
+            output = BytesIO()
+            canvas.save(output, format="PNG")
+            return output.getvalue()
+
+    def _foreground_from_scene_difference(
+        self,
+        rendered_scene: Image.Image,
+        background: bytes,
+    ) -> tuple[Image.Image, tuple[int, int, int, int] | None]:
+        with Image.open(BytesIO(background)) as background_source:
+            baseline = background_source.convert("RGB").resize(
+                rendered_scene.size,
+                Image.Resampling.LANCZOS,
+            )
+        rendered = rendered_scene.convert("RGB")
+        difference = ImageChops.difference(rendered, baseline).convert("L")
+        mask = difference.point(lambda value: 255 if value >= 24 else 0)
+        left_width = max(1, round(rendered.width * 0.35))
+        left_mask = mask.crop((0, 0, left_width, rendered.height))
+        box = left_mask.getbbox()
+        if box is None:
+            return rendered_scene, None
+        padded = (
+            max(0, box[0] - 3),
+            max(0, box[1] - 3),
+            min(left_width, box[2] + 3),
+            min(rendered.height, box[3] + 3),
+        )
+        alpha = Image.new("L", rendered.size, 0)
+        alpha.paste(mask.crop(padded), padded)
+        detached = rendered_scene.copy().convert("RGBA")
+        detached.putalpha(alpha)
+        return detached, padded
+
+    def _foreground_box(self, image: Image.Image) -> tuple[int, int, int, int] | None:
+        alpha = image.getchannel("A")
+        if alpha.getextrema()[0] < 255:
+            box = alpha.getbbox()
+            if box is not None:
+                return box
+        background = Image.new("RGB", image.size, image.convert("RGB").getpixel((0, 0)))
+        difference = ImageChops.difference(image.convert("RGB"), background)
+        return difference.getbbox()
 
     def _slider_action_from_estimates(
         self,
@@ -302,39 +487,6 @@ class GlmAliyunChallenge:
                 end=(offset / width, 0.5),
             ), candidates
         return None, candidates
-
-    def _slider_candidate_prompt(self, candidates: list[float], width: float) -> str:
-        choices = ", ".join(f"{value:g}" for value in candidates)
-        midpoint = width / 2
-        return f"""
-This is an authorized image-placement UI test. The detached foreground object at the far left can
-move ONLY horizontally. Choose the one correct pixel displacement from these measured candidates:
-[{choices}]. Select the candidate that places it in the semantically matching EMPTY GAP, not over
-an existing object. The image width is {width:g}px. Return the chosen candidate exactly as end_x;
-the y value {midpoint:g} forces pixel units. Output only:
-ACTIONS=[{{"type":"drag","from":[0,{midpoint:g}],"to":[end_x,{midpoint:g}]}}]
-""".strip()
-
-    def _snap_slider_actions(
-        self,
-        actions: list[VisualAction],
-        candidates: list[float],
-        width: float,
-    ) -> list[VisualAction]:
-        if len(actions) != 1 or actions[0].start is None or actions[0].end is None:
-            return []
-        action = actions[0]
-        predicted = (action.end[0] - action.start[0]) * width
-        chosen = min(candidates, key=lambda value: abs(value - predicted))
-        if abs(chosen - predicted) > max(12, width * 0.08):
-            return []
-        return [
-            VisualAction(
-                type="drag",
-                start=(0, 0.5),
-                end=(chosen / width, 0.5),
-            )
-        ]
 
     def _data_image(self, value: str) -> bytes:
         if not value.startswith("data:image/") or "," not in value:
@@ -566,5 +718,61 @@ _CAPTCHA_SURFACE_RECT = """
     element = element.parentElement;
   }
   return {x: 0, y: 0, width: innerWidth, height: innerHeight};
+}
+"""
+
+_CAPTCHA_IMAGE_SOURCES = """
+() => {
+  const capture = selector => {
+    const image = document.querySelector(selector);
+    if (!(image instanceof HTMLImageElement)) return '';
+    const width = image.naturalWidth || Math.round(image.getBoundingClientRect().width);
+    const height = image.naturalHeight || Math.round(image.getBoundingClientRect().height);
+    if (width < 1 || height < 1) return image.currentSrc || image.src || '';
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) return image.currentSrc || image.src || '';
+      context.clearRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      return canvas.toDataURL('image/png');
+    } catch (_) {
+      return image.currentSrc || image.src || '';
+    }
+  };
+  return {
+    background: capture('#aliyunCaptcha-img'),
+    piece: capture('#aliyunCaptcha-puzzle')
+  };
+}
+"""
+
+_CAPTCHA_VISUAL_READY = """
+() => {
+  const image = document.querySelector('#aliyunCaptcha-img');
+  const windowElement = document.querySelector('#aliyunCaptcha-window-float');
+  if (!image || !windowElement) return false;
+  const imageRect = image.getBoundingClientRect();
+  const windowRect = windowElement.getBoundingClientRect();
+  const imageStyle = getComputedStyle(image);
+  const windowStyle = getComputedStyle(windowElement);
+  return imageRect.width >= 240 && imageRect.height >= 200 &&
+    windowRect.width >= 280 && windowRect.height >= 260 &&
+    imageStyle.visibility !== 'hidden' && imageStyle.opacity !== '0' &&
+    windowStyle.display !== 'none' && windowStyle.visibility !== 'hidden';
+}
+"""
+
+_CAPTCHA_SLIDER_OBJECT_CENTER = """
+() => {
+  const background = document.querySelector('#aliyunCaptcha-img');
+  const piece = document.querySelector('#aliyunCaptcha-puzzle');
+  if (!background || !piece) return 0.05;
+  const backgroundRect = background.getBoundingClientRect();
+  const pieceRect = piece.getBoundingClientRect();
+  if (backgroundRect.width < 1 || pieceRect.width < 1) return 0.05;
+  return (pieceRect.x + pieceRect.width / 2 - backgroundRect.x) / backgroundRect.width;
 }
 """

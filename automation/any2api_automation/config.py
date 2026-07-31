@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     captcha_ai_api_base: str = ""
     captcha_ai_api_key: str = ""
     captcha_ai_model: str = ""
+    captcha_ai_prompt_prefix: str = ""
+    captcha_ai_action_samples: int = 5
+    captcha_ai_action_sample_timeout_seconds: int = 60
     captcha_ai_timeout_seconds: int = 90
     captcha_diagnostics_dir: str = ""
     registration_headless: bool = True

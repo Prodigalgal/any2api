@@ -55,24 +55,48 @@ authentication: SceneId=36qgs6xb, mode=embed
 chat:           SceneId=didk33e0, mode=popup
 ```
 
-The shared vision client is configured only by environment variables. The API key is never stored
-in source, examples, diagnostics, or challenge artifacts. The current development fallback uses an
-OpenAI-compatible endpoint and model `mimo-v2.5`.
+The shared vision client is configured only by environment variables. The API key and the optional
+shared prompt prefix are never stored in source, examples, diagnostics, or challenge artifacts.
+Every semantic image is submitted to the internal `multimodal-random` endpoint several times. The
+provider and model returned by the gateway are retained only as non-secret diagnostics.
 
 For inpainting slider challenges, the SDK exposes a 300x300 background and a separate transparent
-foreground strip. The solver first computes local ddddocr/OpenCV offsets. It accepts local output
-only when the estimates differ by at most 12 pixels. Otherwise MiMo receives the original composite
-layer and selects among the measured pixel candidates. The browser anchors the action to
-`#aliyunCaptcha-sliding-slider` and applies only the selected horizontal displacement. Other visual
-layouts use a bounded click/drag action schema. Only the SDK success callback can accept a ticket.
+foreground strip. The solver reads the foreground center from the live DOM, magnifies the detached
+object in a left panel, and presents the pure background in a separate 300x300 target panel. Local
+pixel matchers never decide a GLM semantic slider because visually similar completed objects can
+produce a false geometric consensus. Five random multimodal samples run concurrently with an
+independent per-sample timeout. Valid actions are grouped by shape, then a minimum two-vote majority
+cluster is accepted only when every normalized coordinate spans no more than six percent. The
+median target x is combined with the DOM-derived object x and anchored to
+`#aliyunCaptcha-sliding-slider`. Other visual layouts use a bounded click/drag action schema. Only
+the SDK success callback can accept a ticket.
+
+The observed email activation state machine is explicit and does not depend on the frontend page
+eventually writing local storage:
+
+```text
+POST /api/v1/auths/signup
+activation link from temporary mail
+POST /api/v1/auths/verify_email
+POST /api/v1/auths/finish_signup
+GET  /api/v1/auths/
+```
+
+Activation links must use the configured provider host and match the exact mailbox. The nested
+`user.token` returned by `finish_signup` is persisted only after the authenticated profile probe
+succeeds.
 
 ## Current verification status
 
-Verified on 2026-07-29:
+Verified on 2026-07-31:
 
 - official chat-scene SDK initialization and a live 280-byte traceless ticket;
-- authentication-scene escalation to real inpainting challenges;
-- old MiMo service image transport and structured click/drag output;
+- authentication-scene escalation to real semantic challenges;
+- a live authentication semantic-slider challenge accepted by the official SDK success callback;
+- five-sample multimodal random aggregation against fixed known-target challenge images;
+- DOM foreground geometry, transparent-strip extraction, pure-background composition, and strict
+  drag-only execution guards;
+- HAR-derived `verify_email` and `finish_signup` request/response mapping;
 - request-signature equality against the supplied HAR;
 - Java Chat/Responses mapping, chunked SSE decoding, model parsing, provider isolation, and random
   route regression tests;
@@ -81,8 +105,6 @@ Verified on 2026-07-29:
 
 Not yet accepted as production-ready:
 
-- authentication semantic-slider attempts have not reached the official success callback;
-- the old MiMo endpoint has produced intermittent read timeouts and inconsistent semantic offsets;
 - no newly registered GLM account has completed activation and a real inference probe in Any2API;
 - the Java/Python same-proxy chat-ticket path has protocol tests but no end-to-end account live test.
 

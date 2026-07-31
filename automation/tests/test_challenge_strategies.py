@@ -1,7 +1,7 @@
 import io
 from typing import Any, ClassVar
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from any2api_automation.captcha.models import SolverEstimate, VisualAction
 from any2api_automation.captcha.registry import _captcha_text_candidate, registry
@@ -23,6 +23,7 @@ from any2api_automation.lifecycle.registration import RegistrationStage, Registr
 from any2api_automation.providers.glm_challenge import (
     GlmAliyunChallenge,
     GlmCaptchaSurface,
+    GlmSemanticSliderInput,
 )
 from any2api_automation.providers.longcat import LongcatAutomationProvider, _response_serial
 from any2api_automation.providers.longcat_challenge import (
@@ -302,6 +303,14 @@ class _VisionActionResponse:
         }
 
 
+class _VisionInvalidActionResponse:
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return {"choices": [{"message": {"content": "unable to format the result"}}]}
+
+
 def test_visual_solver_parses_normalized_points_without_exposing_response(
     monkeypatch,
 ) -> None:
@@ -328,7 +337,29 @@ def test_visual_solver_parses_normalized_points_without_exposing_response(
     assert estimate.value == [(0.2, 0.3), (0.65, 0.55), (0.8, 0.2)]
     assert request["url"] == "https://gateway.example/multimodal-random/v1/chat/completions"
     assert request["json"]["model"] == "random"
+    assert request["json"]["reasoning_effort"] == "none"
     assert request["headers"] == {"Authorization": "Bearer fixture-secret"}
+
+
+def test_visual_solver_prepends_private_shared_prompt(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_PROMPT_PREFIX", "shared header")
+    settings.cache_clear()
+    request: dict[str, object] = {}
+
+    def post(url, **kwargs):
+        del url
+        request.update(kwargs)
+        return _VisionResponse()
+
+    monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
+
+    registry.solve_visual_points_sync(b"fixture-image", "provider prompt")
+
+    settings.cache_clear()
+    content = request["json"]["messages"][1]["content"]
+    assert content[0]["text"] == "shared header\n\nprovider prompt"
 
 
 def test_visual_text_solver_keeps_only_captcha_characters(monkeypatch) -> None:
@@ -358,6 +389,7 @@ def test_visual_text_candidate_extracts_structured_or_emphasized_answers_only() 
 def test_visual_action_solver_normalizes_percentage_coordinates(monkeypatch) -> None:
     monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
     monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "3")
     settings.cache_clear()
     monkeypatch.setattr(
         "any2api_automation.captcha.registry.httpx.post",
@@ -373,7 +405,66 @@ def test_visual_action_solver_normalizes_percentage_coordinates(monkeypatch) -> 
     assert actions[0].type == "drag"
     assert actions[0].start == (0.74, 0.23)
     assert actions[0].end == (0.28, 0.32)
-    assert "mode:percent" in registry.visual_diagnostic()
+    assert "consensus:3/3" in registry.visual_diagnostic()
+
+
+def test_visual_action_solver_aggregates_same_image_random_samples(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "3")
+    settings.cache_clear()
+    responses = iter(
+        (_VisionInvalidActionResponse(), _VisionActionResponse(), _VisionActionResponse())
+    )
+    calls: list[str] = []
+
+    def post(*args, **kwargs):
+        calls.append(kwargs["json"]["messages"][1]["content"][1]["image_url"]["url"])
+        return next(responses)
+
+    monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
+    fixture = io.BytesIO()
+    Image.new("RGB", (200, 100), "white").save(fixture, format="PNG")
+
+    actions = registry.solve_visual_actions_sync(
+        fixture.getvalue(),
+        "fixture prompt",
+        timeout_seconds=10,
+    )
+
+    settings.cache_clear()
+    assert len(actions) == 1
+    assert len(calls) == 3
+    assert calls[0] == calls[1] == calls[2]
+    assert "consensus:2/3" in registry.visual_diagnostic()
+
+
+def test_visual_action_consensus_uses_majority_cluster_median() -> None:
+    samples = [
+        [VisualAction(type="drag", start=(0.05, 0.5), end=(0.75, 0.5))],
+        [VisualAction(type="drag", start=(0.07, 0.5), end=(0.79, 0.5))],
+        [VisualAction(type="drag", start=(0.2, 0.5), end=(0.4, 0.5))],
+    ]
+
+    actions = registry._visual_action_consensus(samples, 3)
+
+    assert len(actions) == 1
+    assert tuple(round(value, 2) for value in actions[0].start) == (0.06, 0.5)
+    assert tuple(round(value, 2) for value in actions[0].end) == (0.77, 0.5)
+    assert "consensus:2/3" in registry.visual_diagnostic()
+
+
+def test_visual_action_consensus_rejects_broad_single_center_neighborhood() -> None:
+    samples = [
+        [VisualAction(type="drag", start=(0, 0.5), end=(0.36, 0.5))],
+        [VisualAction(type="drag", start=(0, 0.5), end=(0.42, 0.5))],
+        [VisualAction(type="drag", start=(0, 0.5), end=(0.47, 0.5))],
+        [VisualAction(type="drag", start=(0, 0.5), end=(0.57, 0.5))],
+    ]
+
+    assert registry._visual_action_consensus(samples, 5) == []
 
 
 class _GlmSuccessPage:
@@ -439,6 +530,7 @@ def test_glm_challenge_uses_separate_authentication_profile() -> None:
 
     assert challenge.profile.scene_id == "36qgs6xb"
     assert challenge.profile.mode == "embed"
+    assert challenge.profile.semantic_slider is True
 
 
 def test_glm_challenge_maps_normalized_click_and_drag_to_viewport() -> None:
@@ -499,6 +591,172 @@ def test_glm_slider_uses_local_estimates_only_when_they_reach_consensus() -> Non
 
     assert action is None
     assert candidates == [148, 194]
+
+
+def test_glm_semantic_slider_does_not_force_conflicting_local_candidates(monkeypatch) -> None:
+    challenge = GlmAliyunChallenge()
+    surface = GlmCaptchaSurface(b"rendered", x=10, y=20, width=300, height=300, slider=True)
+    expected = VisualAction(type="drag", start=(0.05, 0.5), end=(0.85, 0.5))
+    request: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        challenge,
+        "_local_slider_action",
+        lambda page, captured: (None, [157.0, 164.0, 268.26]),
+    )
+    monkeypatch.setattr(
+        challenge,
+        "_semantic_slider_input",
+        lambda page, image: GlmSemanticSliderInput(b"semantic-input", 0.05),
+    )
+
+    def solve(image, prompt, **kwargs):
+        request.update({"image": image, "prompt": prompt, **kwargs})
+        return [expected]
+
+    monkeypatch.setattr(registry, "solve_visual_actions_sync", solve)
+
+    actions = challenge._solve_actions(object(), surface, 42)
+
+    assert actions == [expected]
+    assert request["image"] == b"semantic-input"
+    assert "magnified view" in request["prompt"]
+    assert "measured candidates" not in request["prompt"]
+    assert request["timeout_seconds"] == 42
+
+
+def test_glm_semantic_slider_never_executes_false_local_consensus(monkeypatch) -> None:
+    challenge = GlmAliyunChallenge()
+    surface = GlmCaptchaSurface(b"rendered", x=10, y=20, width=300, height=300, slider=True)
+    expected = VisualAction(type="drag", start=(0.02, 0.5), end=(0.82, 0.5))
+
+    def unexpected_local_solver(page, captured):
+        raise AssertionError("semantic slider must not use geometric local consensus")
+
+    monkeypatch.setattr(challenge, "_local_slider_action", unexpected_local_solver)
+    monkeypatch.setattr(
+        challenge,
+        "_semantic_slider_input",
+        lambda page, image: GlmSemanticSliderInput(b"semantic-input", 0.02),
+    )
+    monkeypatch.setattr(
+        registry,
+        "solve_visual_actions_sync",
+        lambda *args, **kwargs: [expected],
+    )
+
+    assert challenge._solve_actions(object(), surface, 42) == [expected]
+
+
+def test_glm_semantic_slider_rejects_click_action(monkeypatch) -> None:
+    challenge = GlmAliyunChallenge()
+    surface = GlmCaptchaSurface(b"rendered", x=10, y=20, width=300, height=300, slider=True)
+
+    monkeypatch.setattr(
+        challenge,
+        "_local_slider_action",
+        lambda page, captured: (None, []),
+    )
+    monkeypatch.setattr(
+        challenge,
+        "_semantic_slider_input",
+        lambda page, image: GlmSemanticSliderInput(b"semantic-input", 0.05),
+    )
+    monkeypatch.setattr(
+        registry,
+        "solve_visual_actions_sync",
+        lambda *args, **kwargs: [VisualAction(type="click", at=(0.5, 0.5))],
+    )
+
+    assert challenge._solve_actions(object(), surface, 42) == []
+
+
+def test_glm_semantic_slider_input_magnifies_detached_object() -> None:
+    scene = Image.new("RGB", (300, 300), "white")
+    piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(piece).rectangle((2, 130, 12, 142), fill="black")
+    scene_bytes = io.BytesIO()
+    piece_bytes = io.BytesIO()
+    scene.save(scene_bytes, format="PNG")
+    piece.save(piece_bytes, format="PNG")
+
+    result = GlmAliyunChallenge()._compose_semantic_slider_input(
+        scene_bytes.getvalue(),
+        piece_bytes.getvalue(),
+    )
+
+    with Image.open(io.BytesIO(result)) as composed:
+        assert composed.size == (640, 340)
+        assert composed.convert("RGB").getpixel((160, 180)) == (0, 0, 0)
+        assert composed.convert("RGB").getpixel((336, 161)) == (255, 255, 255)
+
+
+def test_glm_semantic_slider_extracts_object_from_rendered_background_delta() -> None:
+    background = Image.new("RGB", (300, 300), "white")
+    scene = background.copy()
+    ImageDraw.Draw(scene).ellipse((3, 120, 25, 138), fill="black")
+    empty_piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    result = GlmAliyunChallenge()._compose_semantic_slider_input(
+        png(scene),
+        png(empty_piece),
+        png(background),
+    )
+
+    with Image.open(io.BytesIO(result)) as composed:
+        assert composed.size == (640, 340)
+        assert composed.convert("RGB").getpixel((160, 180)) == (0, 0, 0)
+
+
+def test_glm_semantic_slider_always_provides_left_edge_fallback_panel() -> None:
+    scene = Image.new("RGB", (300, 300), "white")
+    ImageDraw.Draw(scene).text((2, 220), "5", fill="black")
+    empty_piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    result = GlmAliyunChallenge()._compose_semantic_slider_input(
+        png(scene),
+        png(empty_piece),
+    )
+
+    with Image.open(io.BytesIO(result)) as composed:
+        assert composed.size == (640, 340)
+        panel = composed.convert("RGB").crop((20, 40, 300, 320))
+        assert ImageChops.difference(panel, Image.new("RGB", panel.size, "white")).getbbox()
+
+
+def test_glm_slider_images_accept_browser_canvas_data_urls() -> None:
+    background = Image.new("RGB", (300, 300), "white")
+    piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(piece).ellipse((2, 120, 18, 136), fill="black")
+
+    def data_url(image: Image.Image) -> str:
+        encoded = io.BytesIO()
+        image.save(encoded, format="PNG")
+        import base64
+
+        return "data:image/png;base64," + base64.b64encode(encoded.getvalue()).decode("ascii")
+
+    class CanvasPage:
+        def evaluate(self, script: str) -> dict[str, str]:
+            assert "canvas.toDataURL('image/png')" in script
+            return {"background": data_url(background), "piece": data_url(piece)}
+
+    background_bytes, piece_bytes = GlmAliyunChallenge()._slider_images(CanvasPage())
+
+    with Image.open(io.BytesIO(background_bytes)) as decoded_background:
+        assert decoded_background.size == (300, 300)
+    with Image.open(io.BytesIO(piece_bytes)) as decoded_piece:
+        assert decoded_piece.size == (300, 300)
 
 
 def test_registration_trace_reports_last_confirmed_stage() -> None:

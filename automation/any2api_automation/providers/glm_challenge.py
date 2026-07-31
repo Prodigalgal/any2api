@@ -125,8 +125,7 @@ class GlmAliyunChallenge:
                     break
                 if not self._wait_for_visual_surface(page, min(remaining, 12)):
                     self.last_diagnostic = (
-                        f"mode=visual, attempt={attempt}, round={round_number}, "
-                        "surface=not_ready"
+                        f"mode=visual, attempt={attempt}, round={round_number}, surface=not_ready"
                     )
                     continue
                 surface = self._capture_surface(page)

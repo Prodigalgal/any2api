@@ -247,23 +247,21 @@ class SolverRegistry:
         if not cluster:
             return []
         clustered_vectors = [vector for _, vector in cluster]
-        median_vector = [statistics.median(values) for values in zip(*clustered_vectors, strict=True)]
+        median_vector = [
+            statistics.median(values) for values in zip(*clustered_vectors, strict=True)
+        ]
         result = self._visual_actions_from_vector(signature, median_vector)
         spread = max(
             max(abs(value - median) for value, median in zip(vector, median_vector, strict=True))
             for vector in clustered_vectors
         )
         self._diagnostics.visual = (
-            f"consensus:{len(cluster)}/{sample_count}:spread={spread:.3f}:"
-            + ",".join(signature)
+            f"consensus:{len(cluster)}/{sample_count}:spread={spread:.3f}:" + ",".join(signature)
         )
         return result
 
     def _visual_vector_spread(self, vectors: list[list[float]]) -> float:
-        return max(
-            max(values) - min(values)
-            for values in zip(*vectors, strict=True)
-        )
+        return max(max(values) - min(values) for values in zip(*vectors, strict=True))
 
     def _visual_action_vector(self, actions: list[VisualAction]) -> list[float]:
         vector: list[float] = []

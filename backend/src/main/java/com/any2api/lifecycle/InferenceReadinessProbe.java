@@ -46,12 +46,11 @@ final class InferenceReadinessProbe {
             .put("content", "Reply with exactly " + MARKER);
         var raw = mapper.createObjectNode()
             .put("model", model)
-            .put("stream", false)
-            .put("max_tokens", 32);
+            .put("stream", false);
         var request = new CanonicalRequest(
             requestId, CanonicalRequest.Protocol.CHAT_COMPLETIONS,
             account.getProviderId(), model, false, List.of(message),
-            Map.of("max_tokens", 32), Map.of(), List.of(), Map.of(), raw);
+            Map.of(), Map.of(), List.of(), Map.of(), raw);
         var lease = new AccountLease(
             account.getProviderId(), account.getId(), "readiness-probe", 0,
             Instant.now().plus(TIMEOUT));

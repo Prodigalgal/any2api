@@ -31,6 +31,7 @@ public final class LongcatProvider implements InferenceProvider {
     private final ProxyPoolService proxyPools;
     private final LongcatProperties properties;
     private final LongcatRequestMapper requestMapper;
+    private final LongcatToolProtocol toolProtocol;
     private final ObjectMapper mapper;
 
     public LongcatProvider(
@@ -38,12 +39,14 @@ public final class LongcatProvider implements InferenceProvider {
         ProxyPoolService proxyPools,
         LongcatProperties properties,
         LongcatRequestMapper requestMapper,
+        LongcatToolProtocol toolProtocol,
         ObjectMapper mapper
     ) {
         this.transport = transport;
         this.proxyPools = proxyPools;
         this.properties = properties;
         this.requestMapper = requestMapper;
+        this.toolProtocol = toolProtocol;
         this.mapper = mapper;
     }
 
@@ -68,6 +71,8 @@ public final class LongcatProvider implements InferenceProvider {
     public void validate(CanonicalRequest request) {
         ProviderRequestValidation.requireKnownOptions(request, Set.of(
             "agent_id", "reason_enabled", "search_enabled"));
+        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of(
+            "tool_choice", "parallel_tool_calls"));
     }
 
     @Override
@@ -83,7 +88,8 @@ public final class LongcatProvider implements InferenceProvider {
             transport.open(sessionCommand(credential, affinityKey)),
             session -> createSession(session, prepared.agentId())
             .flatMapMany(conversationId -> {
-                var decoder = new LongcatEventDecoder(request.requestId(), prepared.reasonEnabled());
+                var decoder = new LongcatEventDecoder(request.requestId(), prepared.reasonEnabled(),
+                    prepared.toolPlan(), toolProtocol);
                 var sse = new SseDataDecoder();
                 var body = prepared.chatBody(conversationId);
                 return transport.stream(session.id(), request(

@@ -27,6 +27,31 @@ class CanonicalRequestParserTest {
     }
 
     @Test
+    void prependsResponsesInstructionsAsSystemContext() {
+        var raw = mapper.createObjectNode()
+            .put("model", "qwen/qwen3.7-plus")
+            .put("instructions", "Reply in JSON")
+            .put("input", "hello");
+
+        var request = parser.parse(CanonicalRequest.Protocol.RESPONSES, route, raw);
+
+        assertThat(request.messages()).hasSize(2);
+        assertThat(request.messages().getFirst().path("role").asText()).isEqualTo("system");
+        assertThat(request.messages().getFirst().path("content").asText())
+            .isEqualTo("Reply in JSON");
+    }
+
+    @Test
+    void rejectsNonTextResponsesInstructions() {
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");
+        raw.putObject("instructions").put("unexpected", true);
+
+        assertThatThrownBy(() -> parser.parse(CanonicalRequest.Protocol.RESPONSES, route, raw))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("instructions must be a string");
+    }
+
+    @Test
     void normalizesResponsesFunctionOutputIntoToolMessage() {
         var output = mapper.createObjectNode()
             .put("type", "function_call_output")

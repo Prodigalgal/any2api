@@ -19,9 +19,21 @@ final class MimoEventDecoder {
     private static final Pattern PARAMETER = Pattern.compile(
         "<\\|MiMoML\\|parameter\\s+name=[\\\"']([^\\\"']+)[\\\"']\\s*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:]]>)?</\\|MiMoML\\|parameter>",
         Pattern.CASE_INSENSITIVE);
+    private static final Pattern XML_CALL = Pattern.compile(
+        "<tool_call>([\\s\\S]*?)</tool_call>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern XML_FUNCTION = Pattern.compile(
+        "<function=([\\w.-]+)>([\\s\\S]*?)</function>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern XML_PARAMETER = Pattern.compile(
+        "<parameter=([\\w.-]+)>([\\s\\S]*?)</parameter>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern TAGGED_FUNCTION = Pattern.compile(
+        "<function_calls?>([\\s\\S]*?)</function_calls?>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PLAIN_CALL = Pattern.compile(
+        "TOOL_CALL:\\s*([\\w.-]+)\\s*\\(([^\\n]*)\\)", Pattern.CASE_INSENSITIVE);
 
     private final String requestId;
     private final List<MimoTool> tools;
+    private final boolean toolRequired;
+    private final boolean parallelToolCalls;
     private final ObjectMapper mapper = new ObjectMapper();
     private final StringBuilder buffer = new StringBuilder();
     private final Set<String> emittedCalls = new HashSet<>();
@@ -30,9 +42,16 @@ final class MimoEventDecoder {
     private boolean completed;
     private boolean reasoning;
 
-    MimoEventDecoder(String requestId, List<MimoTool> tools) {
+    MimoEventDecoder(
+        String requestId,
+        List<MimoTool> tools,
+        boolean toolRequired,
+        boolean parallelToolCalls
+    ) {
         this.requestId = requestId;
         this.tools = tools;
+        this.toolRequired = toolRequired;
+        this.parallelToolCalls = parallelToolCalls;
     }
 
     List<CanonicalEvent> decode(String data) {
@@ -44,7 +63,7 @@ final class MimoEventDecoder {
                 var text = event.path("content").asText("");
                 if (!text.isBlank() && !INTERNAL_TOKENS.contains(text.trim())) {
                     buffer.append(text.replace("\0", ""));
-                    output.addAll(drain(false));
+                    if (tools.isEmpty()) output.addAll(drain(false));
                 }
             } else if (event.has("promptTokens")) {
                 output.add(new CanonicalEvent.Usage(1, requestId, next(),
@@ -59,7 +78,36 @@ final class MimoEventDecoder {
     List<CanonicalEvent> finish() {
         if (completed) return List.of();
         var output = start();
-        output.addAll(drain(true));
+        if (tools.isEmpty()) {
+            output.addAll(drain(true));
+        } else {
+            emitTools(buffer.toString(), output);
+            if (!parallelToolCalls && emittedCalls.size() > 1) {
+                output.removeIf(event -> event instanceof CanonicalEvent.ToolCallStarted
+                    || event instanceof CanonicalEvent.ToolArgumentsDelta
+                    || event instanceof CanonicalEvent.ToolCallCompleted);
+                output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                    "tool_call_generation_failed",
+                    "MiMo produced parallel calls while parallel_tool_calls=false",
+                    java.util.Map.of()));
+                completed = true;
+                return output;
+            }
+            if (emittedCalls.isEmpty()) {
+                if (looksLikeToolSyntax(buffer.toString()) || toolRequired) {
+                    output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                        "tool_call_generation_failed",
+                        toolRequired
+                            ? "MiMo did not produce the required function tool call"
+                            : "MiMo emitted tool syntax that could not be parsed",
+                        java.util.Map.of()));
+                    completed = true;
+                    return output;
+                }
+                output.addAll(drainText(buffer.toString()));
+            }
+            buffer.setLength(0);
+        }
         output.add(new CanonicalEvent.Completed(1, requestId, next(),
             emittedCalls.isEmpty() ? "stop" : "tool_calls"));
         completed = true;
@@ -110,10 +158,12 @@ final class MimoEventDecoder {
     }
 
     private void emitTools(String source, List<CanonicalEvent> output) {
+        var calls = new ArrayList<ParsedCall>();
         var matcher = INVOKE.matcher(source);
         while (matcher.find()) {
             var name = matcher.group(1).trim();
-            if (tools.stream().noneMatch(tool -> tool.name().equals(name))) continue;
+            name = resolveName(name);
+            if (name == null) continue;
             var arguments = mapper.createObjectNode();
             var parameter = PARAMETER.matcher(matcher.group(2));
             while (parameter.find()) {
@@ -121,13 +171,115 @@ final class MimoEventDecoder {
                 try { arguments.set(parameter.group(1), mapper.readTree(raw)); }
                 catch (Exception ignored) { arguments.put(parameter.group(1), raw); }
             }
-            var serialized = mapper.writeValueAsString(arguments);
-            if (!emittedCalls.add(name + ":" + serialized)) continue;
+            calls.add(new ParsedCall(name, arguments));
+        }
+        var xml = XML_CALL.matcher(source);
+        while (xml.find()) {
+            var function = XML_FUNCTION.matcher(xml.group(1));
+            if (!function.find()) continue;
+            var name = resolveName(function.group(1));
+            if (name == null) continue;
+            var arguments = mapper.createObjectNode();
+            var parameter = XML_PARAMETER.matcher(function.group(2));
+            while (parameter.find()) putAuto(arguments, parameter.group(1), parameter.group(2));
+            calls.add(new ParsedCall(name, arguments));
+        }
+        var tagged = TAGGED_FUNCTION.matcher(source);
+        while (tagged.find()) {
+            try {
+                var value = mapper.readTree(tagged.group(1).trim());
+                var values = value.isArray() ? value
+                    : value.path("tool_calls").isArray() ? value.path("tool_calls")
+                    : mapper.createArrayNode().add(value);
+                for (var item : values) {
+                    var function = item.path("function").isObject()
+                        ? item.path("function") : item;
+                    var name = resolveName(function.path("name").asText(""));
+                    if (name == null) continue;
+                    var arguments = function.path("arguments");
+                    if (arguments.isTextual()) arguments = mapper.readTree(arguments.asText());
+                    calls.add(new ParsedCall(name, arguments.isObject()
+                        ? (tools.jackson.databind.node.ObjectNode) arguments
+                        : mapper.createObjectNode()));
+                }
+            } catch (RuntimeException ignored) {
+                // Other supported tool syntaxes may still match this response.
+            }
+        }
+        var plain = PLAIN_CALL.matcher(source);
+        while (plain.find()) {
+            var name = resolveName(plain.group(1));
+            if (name == null) continue;
+            var arguments = mapper.createObjectNode();
+            var raw = plain.group(2).trim();
+            try {
+                var parsed = mapper.readTree(raw);
+                if (parsed.isObject()) arguments = (tools.jackson.databind.node.ObjectNode) parsed;
+            } catch (RuntimeException ignored) {
+                for (var pair : raw.split(",")) {
+                    var parts = pair.split("=", 2);
+                    if (parts.length == 2) putAuto(arguments, parts[0], parts[1]);
+                }
+            }
+            calls.add(new ParsedCall(name, arguments));
+        }
+        for (var call : calls) {
+            var serialized = mapper.writeValueAsString(call.arguments());
+            if (!emittedCalls.add(call.name() + ":" + serialized)) continue;
             var id = "call_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
-            output.add(new CanonicalEvent.ToolCallStarted(1, requestId, next(), id, name));
+            output.add(new CanonicalEvent.ToolCallStarted(1, requestId, next(), id, call.name()));
             output.add(new CanonicalEvent.ToolArgumentsDelta(1, requestId, next(), id, serialized));
             output.add(new CanonicalEvent.ToolCallCompleted(1, requestId, next(), id, serialized));
         }
+    }
+
+    private List<CanonicalEvent> drainText(String source) {
+        var output = new ArrayList<CanonicalEvent>();
+        var position = 0;
+        var inReasoning = false;
+        while (position < source.length()) {
+            var token = inReasoning ? "</think>" : "<think>";
+            var hit = source.indexOf(token, position);
+            var end = hit < 0 ? source.length() : hit;
+            var value = source.substring(position, end);
+            if (!value.isEmpty()) {
+                if (inReasoning) output.add(new CanonicalEvent.ReasoningDelta(
+                    1, requestId, next(), value));
+                else output.add(new CanonicalEvent.OutputTextDelta(
+                    1, requestId, next(), value));
+            }
+            if (hit < 0) break;
+            position = hit + token.length();
+            inReasoning = !inReasoning;
+        }
+        return output;
+    }
+
+    private String resolveName(String raw) {
+        var normalized = raw == null ? "" : raw.trim().toLowerCase();
+        for (var tool : tools) {
+            if (tool.name().equalsIgnoreCase(normalized)) return tool.name();
+            var compact = normalized.replace("_", "").replace("-", "");
+            if (tool.name().toLowerCase().replace("_", "").replace("-", "")
+                .equals(compact)) return tool.name();
+        }
+        return null;
+    }
+
+    private void putAuto(
+        tools.jackson.databind.node.ObjectNode target,
+        String name,
+        String raw
+    ) {
+        var value = raw == null ? "" : raw.trim()
+            .replaceFirst("^<!\\[CDATA\\[", "").replaceFirst("]]>$", "").trim();
+        try { target.set(name.trim(), mapper.readTree(value)); }
+        catch (RuntimeException ignored) { target.put(name.trim(), value); }
+    }
+
+    private boolean looksLikeToolSyntax(String source) {
+        return List.of("<|MiMoML|tool_calls>", "<tool_call>", "<function_call>",
+            "<function_calls>", "TOOL_CALL:").stream().anyMatch(source::contains);
     }
 
     private int partialControlSuffix(String source) {
@@ -151,4 +303,6 @@ final class MimoEventDecoder {
     }
 
     private long next() { return sequence++; }
+
+    private record ParsedCall(String name, tools.jackson.databind.node.ObjectNode arguments) {}
 }

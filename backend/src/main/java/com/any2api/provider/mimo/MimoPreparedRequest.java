@@ -6,6 +6,8 @@ import tools.jackson.databind.node.ObjectNode;
 record MimoPreparedRequest(
     ObjectNode body,
     List<MimoTool> tools,
+    boolean toolRequired,
+    boolean parallelToolCalls,
     List<MimoMediaSource> media
 ) {
 }

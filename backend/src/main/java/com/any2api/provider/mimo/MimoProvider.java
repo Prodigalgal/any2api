@@ -74,6 +74,8 @@ public final class MimoProvider implements InferenceProvider {
     public void validate(CanonicalRequest request) {
         ProviderRequestValidation.requireKnownOptions(request, Set.of(
             "conversation_id", "thinking", "web_search_status"));
+        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of(
+            "temperature", "top_p", "tool_choice", "parallel_tool_calls"));
     }
 
     @Override
@@ -92,7 +94,9 @@ public final class MimoProvider implements InferenceProvider {
                 .flatMapMany(media -> Flux.defer(() -> {
                     var upstreamMedia = prepared.body().putArray("multiMedias");
                     media.forEach(upstreamMedia::add);
-                    var decoder = new MimoEventDecoder(request.requestId(), prepared.tools());
+                    var decoder = new MimoEventDecoder(
+                        request.requestId(), prepared.tools(), prepared.toolRequired(),
+                        prepared.parallelToolCalls());
                     var sse = new SseDataDecoder();
                     return transport.stream(session.id(), request(
                             "POST", chatPath(credential), prepared.body(), 300))

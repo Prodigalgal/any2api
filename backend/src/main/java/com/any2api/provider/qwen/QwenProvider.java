@@ -62,7 +62,6 @@ public final class QwenProvider implements InferenceProvider {
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.STREAMING, SupportLevel.NATIVE,
                 ProviderCapability.REASONING, SupportLevel.NATIVE,
-                ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
                 ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
                 ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
@@ -77,6 +76,25 @@ public final class QwenProvider implements InferenceProvider {
     public void validate(CanonicalRequest request) {
         ProviderRequestValidation.requireKnownOptions(request, Set.of(
             "thinking_mode", "thinking_budget", "web_search"));
+        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of(
+            "temperature", "top_p", "max_tokens", "max_completion_tokens",
+            "max_output_tokens", "tool_choice"));
+        var toolChoice = request.rawRequest().path("tool_choice");
+        if (!toolChoice.isMissingNode() && !toolChoice.isNull()
+            && (!toolChoice.isTextual()
+                || !Set.of("auto", "none").contains(toolChoice.asText().toLowerCase()))) {
+            throw new IllegalArgumentException(
+                "Qwen tool_choice supports only auto or none for search tools");
+        }
+        var unsupportedTools = request.tools().stream()
+            .map(tool -> tool.path("type").asText("function"))
+            .filter(type -> !Set.of("web_search", "web_search_preview", "search").contains(type))
+            .sorted()
+            .toList();
+        if (!unsupportedTools.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Qwen does not support tool types: " + String.join(", ", unsupportedTools));
+        }
     }
 
     @Override

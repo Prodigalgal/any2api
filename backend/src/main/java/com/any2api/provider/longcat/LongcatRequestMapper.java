@@ -20,8 +20,12 @@ final class LongcatRequestMapper {
         "longcat-pro", new ModelMode("2", true, true));
 
     private final ObjectMapper mapper;
+    private final LongcatToolProtocol toolProtocol;
 
-    LongcatRequestMapper(ObjectMapper mapper) { this.mapper = mapper; }
+    LongcatRequestMapper(ObjectMapper mapper, LongcatToolProtocol toolProtocol) {
+        this.mapper = mapper;
+        this.toolProtocol = toolProtocol;
+    }
 
     LongcatPreparedRequest prepare(CanonicalRequest request) {
         var mode = MODEL_MODES.getOrDefault(request.model(), new ModelMode("1", false, false));
@@ -34,11 +38,12 @@ final class LongcatRequestMapper {
             ? rawReason.asBoolean() : reasoning(request, mode.reason()));
         var search = bool(options.get("search_enabled"), rawSearch.isBoolean()
             ? rawSearch.asBoolean() : mode.search());
-        return new LongcatPreparedRequest(prompt(request.messages(), request.tools()),
-            agentId, reason, search, mapper);
+        var toolPlan = toolProtocol.plan(request);
+        var prompt = toolProtocol.appendContract(prompt(request.messages()), toolPlan);
+        return new LongcatPreparedRequest(prompt, agentId, reason, search, toolPlan, mapper);
     }
 
-    private String prompt(List<JsonNode> messages, List<JsonNode> tools) {
+    private String prompt(List<JsonNode> messages) {
         var blocks = new ArrayList<String>();
         for (var message : messages) {
             var role = message.path("role").asText("user").toUpperCase();
@@ -47,10 +52,6 @@ final class LongcatRequestMapper {
                 content += "\n" + message.path("tool_calls").toString();
             }
             if (!content.isBlank()) blocks.add("[" + role + "]\n" + content);
-        }
-        if (!tools.isEmpty()) {
-            blocks.add(0, "Available function tools (return JSON tool calls when needed):\n"
-                + mapper.writeValueAsString(tools));
         }
         return String.join("\n\n", blocks);
     }

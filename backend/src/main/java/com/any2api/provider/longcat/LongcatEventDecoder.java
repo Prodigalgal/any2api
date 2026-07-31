@@ -9,15 +9,25 @@ import tools.jackson.databind.ObjectMapper;
 final class LongcatEventDecoder {
     private final String requestId;
     private final boolean reasoningEnabled;
+    private final LongcatToolProtocol.Plan toolPlan;
+    private final LongcatToolProtocol toolProtocol;
     private final ObjectMapper mapper = new ObjectMapper();
     private final StringBuilder cumulative = new StringBuilder();
+    private final List<String> contentParts = new ArrayList<>();
     private long sequence;
     private boolean started;
     private boolean completed;
 
-    LongcatEventDecoder(String requestId, boolean reasoningEnabled) {
+    LongcatEventDecoder(
+        String requestId,
+        boolean reasoningEnabled,
+        LongcatToolProtocol.Plan toolPlan,
+        LongcatToolProtocol toolProtocol
+    ) {
         this.requestId = requestId;
         this.reasoningEnabled = reasoningEnabled;
+        this.toolPlan = toolPlan;
+        this.toolProtocol = toolProtocol;
     }
 
     List<CanonicalEvent> decode(String data) {
@@ -42,10 +52,9 @@ final class LongcatEventDecoder {
                 case "finish" -> {
                     var finalText = event.path("finalContentX").asText(
                         event.path("finalContent").asText(""));
-                    if (!finalText.isBlank() && cumulative.isEmpty()) text(output, finalText, false);
                     usage(output, event.path("usage"), chunk.path("tokenInfo"));
-                    complete(output, event.path("finishType").asText("").equals("sensitive")
-                        ? "content_filter" : "stop");
+                    finishOutput(output, event.path("finishType").asText("").equals("sensitive")
+                        ? "content_filter" : "stop", finalText);
                 }
                 case "event_error" -> {
                     output.add(new CanonicalEvent.Failed(1, requestId, next(),
@@ -60,7 +69,9 @@ final class LongcatEventDecoder {
                     }
                 }
             }
-            if (chunk.path("lastOne").asBoolean(false) && !completed) complete(output, "stop");
+            if (chunk.path("lastOne").asBoolean(false) && !completed) {
+                finishOutput(output, "stop", "");
+            }
             return output;
         } catch (Exception error) {
             throw new IllegalArgumentException("LongCat upstream emitted invalid SSE JSON", error);
@@ -70,7 +81,7 @@ final class LongcatEventDecoder {
     List<CanonicalEvent> finish() {
         if (completed) return List.of();
         var output = start();
-        complete(output, "stop");
+        finishOutput(output, "stop", "");
         return output;
     }
 
@@ -83,8 +94,10 @@ final class LongcatEventDecoder {
             cumulative.setLength(0);
             cumulative.append(value);
         } else cumulative.append(value);
-        if (!delta.isEmpty()) output.add(new CanonicalEvent.OutputTextDelta(
-            1, requestId, next(), delta));
+        if (!delta.isEmpty()) contentParts.add(delta);
+        if (!delta.isEmpty() && !toolPlan.enabled() && !reasoningEnabled) {
+            output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), delta));
+        }
     }
 
     private void reasoning(List<CanonicalEvent> output, String value) {
@@ -116,6 +129,71 @@ final class LongcatEventDecoder {
     private void complete(List<CanonicalEvent> output, String reason) {
         if (!completed) output.add(new CanonicalEvent.Completed(1, requestId, next(), reason));
         completed = true;
+    }
+
+    private void finishOutput(List<CanonicalEvent> output, String reason, String finalText) {
+        var answer = resolvedAnswer(output, finalText);
+        if (!toolPlan.enabled()) {
+            if (reasoningEnabled && !answer.isBlank()) {
+                output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), answer));
+            } else if (!reasoningEnabled && cumulative.isEmpty() && !answer.isBlank()) {
+                output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), answer));
+            }
+            complete(output, reason);
+            return;
+        }
+        var calls = toolProtocol.parse(answer, toolPlan);
+        if (calls.isEmpty()) {
+            if (toolPlan.required()) {
+                output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                    "tool_call_generation_failed",
+                    "LongCat did not produce the required function tool call", Map.of()));
+                completed = true;
+                return;
+            }
+            if (!answer.isBlank()) {
+                output.add(new CanonicalEvent.OutputTextDelta(
+                    1, requestId, next(), answer));
+            }
+            complete(output, reason);
+            return;
+        }
+        if (!toolPlan.parallel() && calls.size() > 1) {
+            output.add(new CanonicalEvent.Failed(1, requestId, next(),
+                "tool_call_generation_failed",
+                "LongCat produced parallel calls while parallel_tool_calls=false", Map.of()));
+            completed = true;
+            return;
+        }
+        for (var call : calls) {
+            output.add(new CanonicalEvent.ToolCallStarted(
+                1, requestId, next(), call.id(), call.name()));
+            output.add(new CanonicalEvent.ToolArgumentsDelta(
+                1, requestId, next(), call.id(), call.arguments()));
+            output.add(new CanonicalEvent.ToolCallCompleted(
+                1, requestId, next(), call.id(), call.arguments()));
+        }
+        complete(output, "tool_calls");
+    }
+
+    private String resolvedAnswer(List<CanonicalEvent> output, String finalText) {
+        if (!reasoningEnabled) {
+            return cumulative.isEmpty() ? finalText : cumulative.toString();
+        }
+        if (!finalText.isBlank()) {
+            var reasoning = String.join("", contentParts);
+            if (!reasoning.isBlank()) {
+                output.add(new CanonicalEvent.ReasoningDelta(
+                    1, requestId, next(), reasoning));
+            }
+            return finalText;
+        }
+        if (contentParts.size() <= 1) return cumulative.toString();
+        var reasoning = String.join("", contentParts.subList(0, contentParts.size() - 1));
+        if (!reasoning.isBlank()) {
+            output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), reasoning));
+        }
+        return contentParts.getLast();
     }
 
     private ArrayList<CanonicalEvent> start() {

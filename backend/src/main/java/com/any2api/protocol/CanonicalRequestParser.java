@@ -37,6 +37,16 @@ public class CanonicalRequestParser {
         var messages = protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
             ? elements(raw.path("messages"))
             : responseMessages(raw.path("input"));
+        if (protocol == CanonicalRequest.Protocol.RESPONSES && raw.has("instructions")
+            && !raw.path("instructions").isNull()) {
+            if (!raw.path("instructions").isTextual()) {
+                throw new IllegalArgumentException("Responses instructions must be a string");
+            }
+            var withInstructions = new ArrayList<JsonNode>(messages.size() + 1);
+            withInstructions.add(message("system", raw.path("instructions").deepCopy()));
+            withInstructions.addAll(messages);
+            messages = List.copyOf(withInstructions);
+        }
         var generation = new LinkedHashMap<String, Object>();
         for (var field : GENERATION_FIELDS) {
             if (raw.has(field) && !raw.path(field).isNull()) {

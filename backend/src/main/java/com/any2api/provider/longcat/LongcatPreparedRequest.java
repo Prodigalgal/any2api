@@ -8,6 +8,7 @@ record LongcatPreparedRequest(
     String agentId,
     boolean reasonEnabled,
     boolean searchEnabled,
+    LongcatToolProtocol.Plan toolPlan,
     ObjectMapper mapper
 ) {
     ObjectNode chatBody(String conversationId) {

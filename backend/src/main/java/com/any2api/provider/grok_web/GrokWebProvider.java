@@ -36,6 +36,7 @@ public final class GrokWebProvider implements InferenceProvider {
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
             ProviderCapability.REASONING, SupportLevel.NATIVE,
             ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
+            ProviderCapability.STORED_RESPONSES, SupportLevel.NATIVE,
             ProviderCapability.IMAGE_GENERATION, SupportLevel.NATIVE,
             ProviderCapability.IMAGE_EDITING, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE),

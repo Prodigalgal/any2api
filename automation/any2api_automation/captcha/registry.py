@@ -448,9 +448,7 @@ class SolverRegistry:
                     ],
                 },
             ],
-            "max_tokens": max_tokens,
             "reasoning_effort": "none",
-            "temperature": 0,
         }
         budget = max(
             1,

@@ -38,11 +38,6 @@ final class QwenRequestMapper {
         List<QwenPreparedMessage> preparedMessages
     ) {
         var messages = new ArrayList<>(preparedMessages);
-        if (!request.tools().isEmpty()) {
-            messages.add(0, new QwenPreparedMessage("system",
-                "Available function tools. Return a JSON function call when one is required:\n"
-                    + mapper.writeValueAsString(request.tools()), List.of()));
-        }
         var ids = messages.stream().map(ignored -> UUID.randomUUID().toString()).toList();
         var upstream = mapper.createArrayNode();
         var feature = featureConfig(request);
@@ -89,6 +84,8 @@ final class QwenRequestMapper {
         copyNumber(request, body, "top_p", "top_p");
         if (request.generation().containsKey("max_completion_tokens")) {
             body.put("max_tokens", ((Number) request.generation().get("max_completion_tokens")).longValue());
+        } else if (request.generation().containsKey("max_output_tokens")) {
+            body.put("max_tokens", ((Number) request.generation().get("max_output_tokens")).longValue());
         } else copyNumber(request, body, "max_tokens", "max_tokens");
         return body;
     }
@@ -110,7 +107,10 @@ final class QwenRequestMapper {
         var rawSearch = request.rawRequest().path("web_search");
         if (!rawSearch.isBoolean()) rawSearch = request.rawRequest().path("enable_search");
         if (!rawSearch.isBoolean()) rawSearch = request.rawRequest().path("search");
-        var searchFallback = rawSearch.isBoolean() ? rawSearch.asBoolean() : hasSearchTool(request.tools());
+        var toolChoiceNone = "none".equalsIgnoreCase(
+            request.rawRequest().path("tool_choice").asText(""));
+        var searchFallback = toolChoiceNone ? false
+            : rawSearch.isBoolean() ? rawSearch.asBoolean() : hasSearchTool(request.tools());
         var search = bool(options.get("web_search"), searchFallback);
         var output = mapper.createObjectNode()
             .put("thinking_enabled", !"Fast".equalsIgnoreCase(mode))

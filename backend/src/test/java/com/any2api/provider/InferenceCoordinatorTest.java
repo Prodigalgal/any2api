@@ -1,6 +1,9 @@
 package com.any2api.provider;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +43,27 @@ class InferenceCoordinatorTest {
         verify(accounts).release(leased);
     }
 
+    @Test
+    void doesNotReportSuccessWhenAProviderEmitsCanonicalFailure() {
+        var accounts = mock(AccountSelectionService.class);
+        var leased = leased("alpha");
+        when(accounts.release(leased)).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(eq(leased), any(tools.jackson.databind.JsonNode.class)))
+            .thenReturn(Mono.just(true));
+        var provider = new TestProvider(false, new CanonicalEvent.Failed(
+            1, "request-id", 1, "tool_call_generation_failed", "missing tool", Map.of()));
+        var coordinator = new InferenceCoordinator(
+            new ProviderRegistry(List.of(provider)), accounts,
+            new ProviderFailureDisposition(accounts));
+
+        StepVerifier.create(coordinator.execute(request("alpha"), leased))
+            .expectNextMatches(CanonicalEvent.Failed.class::isInstance)
+            .verifyComplete();
+
+        verify(accounts, never()).reportSuccess(leased, "model");
+        verify(accounts).release(leased);
+    }
+
     private CanonicalRequest request(String providerId) {
         return new CanonicalRequest(
             "request-id",
@@ -76,9 +100,15 @@ class InferenceCoordinatorTest {
 
     private static final class TestProvider implements InferenceProvider {
         private final boolean reject;
+        private final CanonicalEvent event;
 
         private TestProvider(boolean reject) {
+            this(reject, null);
+        }
+
+        private TestProvider(boolean reject, CanonicalEvent event) {
             this.reject = reject;
+            this.event = event;
         }
 
         @Override
@@ -108,7 +138,7 @@ class InferenceCoordinatorTest {
             ProviderExecutionContext context,
             LeasedProviderAccount account
         ) {
-            return Flux.empty();
+            return event == null ? Flux.empty() : Flux.just(event);
         }
 
         @Override

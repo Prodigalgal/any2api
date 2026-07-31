@@ -69,6 +69,10 @@ public final class MinmaxProvider implements InferenceProvider {
     public void validate(CanonicalRequest request) {
         ProviderRequestValidation.requireKnownOptions(request, Set.of(
             "variant", "agent_role", "enable_team", "worktree_mode"));
+        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of());
+        if (!request.tools().isEmpty()) {
+            throw new IllegalArgumentException("MinMax does not support tools");
+        }
     }
 
     @Override

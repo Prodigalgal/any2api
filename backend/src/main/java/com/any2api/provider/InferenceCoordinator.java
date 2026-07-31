@@ -33,7 +33,7 @@ public class InferenceCoordinator {
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request) {
         var provider = providers.require(request.providerId());
-        ProviderRequestValidation.requireSupportedContent(request, provider.manifest());
+        ProviderRequestValidation.requireSupportedRequest(request, provider.manifest());
         provider.validate(request);
         return executeWithLease(request, provider,
             accounts.acquire(request.providerId(), request.model(),
@@ -72,11 +72,12 @@ public class InferenceCoordinator {
             lease,
             account -> {
                 if (validateInsideLease) {
-                    ProviderRequestValidation.requireSupportedContent(
+                    ProviderRequestValidation.requireSupportedRequest(
                         request, provider.manifest());
                     provider.validate(request);
                 }
                 var failed = new AtomicBoolean();
+                var streamFailure = new java.util.concurrent.atomic.AtomicReference<ProviderFailure>();
                 var lastSequence = new AtomicLong();
                 var context = new ProviderExecutionContext(
                     request.requestId(),
@@ -87,8 +88,14 @@ public class InferenceCoordinator {
                     Instant.now().plus(REQUEST_DEADLINE));
                 return withLeaseRenewal(
                     Flux.defer(() -> provider.generate(request, context, account)), account)
-                    .doOnNext(event -> lastSequence.accumulateAndGet(
-                        event.sequenceNumber(), Math::max))
+                    .doOnNext(event -> {
+                        lastSequence.accumulateAndGet(event.sequenceNumber(), Math::max);
+                        if (event instanceof CanonicalEvent.Failed failure) {
+                            failed.set(true);
+                            streamFailure.compareAndSet(null, new ProviderFailure(
+                                failure.errorType(), failure.message(), false, failure.detail()));
+                        }
+                    })
                     .onErrorResume(error -> {
                         failed.set(true);
                         var failure = provider.classify(error);
@@ -105,12 +112,20 @@ public class InferenceCoordinator {
                             .then(failures.report(account, request.model(), failure))
                             .thenMany(Flux.just(event));
                     })
-                    .concatWith(Flux.defer(() -> failed.get()
-                        ? Flux.empty()
-                        : accounts.mergeCredentialPatch(account, context.credentialPatch())
-                            .onErrorReturn(false)
-                            .then(accounts.reportSuccess(account, request.model()))
-                            .thenMany(Flux.empty())));
+                    .concatWith(Flux.defer(() -> {
+                        if (streamFailure.get() != null) {
+                            return accounts.mergeCredentialPatch(
+                                    account, context.credentialPatch())
+                                .onErrorReturn(false)
+                                .then(failures.report(account, request.model(), streamFailure.get()))
+                                .thenMany(Flux.empty());
+                        }
+                        return failed.get() ? Flux.empty()
+                            : accounts.mergeCredentialPatch(account, context.credentialPatch())
+                                .onErrorReturn(false)
+                                .then(accounts.reportSuccess(account, request.model()))
+                                .thenMany(Flux.empty());
+                    }));
             },
             accounts::release,
             (account, ignored) -> accounts.release(account),

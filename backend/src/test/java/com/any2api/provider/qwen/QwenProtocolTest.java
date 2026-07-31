@@ -84,6 +84,24 @@ class QwenProtocolTest {
     }
 
     @Test
+    void mapsResponsesTokenLimitAndEmitsUpstreamUsageOnlyOnce() {
+        var mapper = new ObjectMapper();
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus")
+            .put("max_output_tokens", 128);
+        var request = new CanonicalRequest("usage", CanonicalRequest.Protocol.RESPONSES,
+            "qwen", "qwen3.7-plus", true, List.of(),
+            Map.of("max_output_tokens", 128), Map.of(), List.of(), Map.of(), raw);
+
+        var body = new QwenRequestMapper(mapper, new QwenProperties()).prepare(request, "chat");
+        var events = new QwenEventDecoder("usage").decode(
+            "{\"choices\":[{\"delta\":{\"content\":\"ok\"}}],"
+                + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}");
+
+        assertThat(body.path("max_tokens").asInt()).isEqualTo(128);
+        assertThat(events.stream().filter(CanonicalEvent.Usage.class::isInstance)).hasSize(1);
+    }
+
+    @Test
     void mapsUploadedVisionFilesWithoutFlatteningThemIntoPromptText() {
         var mapper = new ObjectMapper();
         var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");

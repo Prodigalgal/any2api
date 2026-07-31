@@ -32,7 +32,7 @@ final class QwenEventDecoder {
                     1, requestId, next(), id));
             }
             var choice = firstChoice(object);
-            if (choice != null) decodeChoice(choice, object, output);
+            if (choice != null) decodeChoice(choice, output);
             else {
                 var content = firstText(object, "response", "text", "content");
                 if (!content.isBlank()) text(output, content);
@@ -71,7 +71,7 @@ final class QwenEventDecoder {
         return null;
     }
 
-    private void decodeChoice(JsonNode choice, JsonNode root, List<CanonicalEvent> output) {
+    private void decodeChoice(JsonNode choice, List<CanonicalEvent> output) {
         var delta = choice.path("delta").isObject() ? choice.path("delta") : choice.path("message");
         var phase = delta.path("phase").asText("");
         var content = delta.path("content").asText(choice.path("text").asText(""));
@@ -87,7 +87,6 @@ final class QwenEventDecoder {
             output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), reasoning));
         }
         if (delta.path("tool_calls").isArray()) decodeTools(delta.path("tool_calls"), output);
-        usage(root.path("usage"), output);
         var finish = choice.path("finish_reason").asText("");
         if (!finish.isBlank()) complete(output, finish);
     }

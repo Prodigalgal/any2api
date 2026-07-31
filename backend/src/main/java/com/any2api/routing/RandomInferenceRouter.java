@@ -91,7 +91,7 @@ public class RandomInferenceRouter {
             var canonical = parser.parse(
                 protocol, new ResolvedRoute(route.providerId(), route.modelId()), raw);
             try {
-                ProviderRequestValidation.requireSupportedContent(
+                ProviderRequestValidation.requireSupportedRequest(
                     canonical, provider.manifest());
                 provider.validate(canonical);
             } catch (IllegalArgumentException ignored) {

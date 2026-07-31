@@ -45,6 +45,26 @@ machine format, replacing target_center_x with one percentage from 0 to 100:
 ACTIONS=[{"type":"drag","from":[0,50],"to":[target_center_x,50]}]
 """.strip()
 
+GLM_SLIDER_COARSE_CHOICE_PROMPT = """
+Every labeled panel shows the exact same target scene. The same detached foreground object has
+been moved horizontally to a different candidate position while preserving its original size and
+vertical coordinate. Choose the ONE panel where the object has the correct semantic relationship
+to the scene, such as a backpack on the child, a lid on its container, or a missing clock part in
+its proper location. Judge position and relationship, not drawing style.
+""".strip()
+
+GLM_SLIDER_FINE_CHOICE_PROMPT = """
+Every labeled panel shows the same scene and the same foreground object near one coarse target.
+Choose the ONE panel that is in the correct local region. Reject panels that cover an already
+complete object or break a symmetric sequence. Compare semantic relationship before precision.
+""".strip()
+
+GLM_SLIDER_PRECISION_CHOICE_PROMPT = """
+Every labeled panel shows the same already-identified object in the same local target region.
+Choose the ONE panel with the most precise natural horizontal placement. Compare attachment-point
+alignment, symmetry, contact, and overlap. Judge position only.
+""".strip()
+
 
 @dataclass(frozen=True)
 class GlmCaptchaProfile:
@@ -67,6 +87,8 @@ class GlmCaptchaSurface:
 class GlmSemanticSliderInput:
     image: bytes
     object_center_x: float
+    background: bytes = b""
+    piece: bytes = b""
 
 
 class GlmAliyunChallenge:
@@ -144,17 +166,20 @@ class GlmAliyunChallenge:
                     + ",".join(action.type for action in actions)
                     + execution_diagnostic
                 )
-                for _ in range(12):
-                    page.wait_for_timeout(200)
-                    state = self._state(page)
-                    ticket = self._accepted_ticket(state)
-                    if ticket:
-                        self.last_diagnostic = (
-                            f"mode=visual, attempt={attempt}, round={round_number}, ticket=accepted"
-                        )
-                        return ticket
-                    if state.get("status") in {"failed", "error", "closed"}:
-                        break
+                state = self._wait_for_challenge_result(
+                    page,
+                    min(30.0, max(1.0, deadline - time.monotonic())),
+                )
+                ticket = self._accepted_ticket(state)
+                if ticket:
+                    self.last_diagnostic = (
+                        f"mode=visual, attempt={attempt}, round={round_number}, ticket=accepted"
+                    )
+                    return ticket
+                if state.get("status") == "running":
+                    raise RuntimeError(
+                        f"GLM captcha official callback remained pending ({self.last_diagnostic})"
+                    )
                 if state.get("status") in {"error", "closed"}:
                     raise RuntimeError("GLM captcha service did not produce a usable challenge")
                 if state.get("status") == "failed":
@@ -206,6 +231,20 @@ class GlmAliyunChallenge:
             "() => ({...(window.__any2apiGlmCaptchaState || {status: 'missing'})})"
         )
         return value if isinstance(value, dict) else {"status": "missing"}
+
+    def _wait_for_challenge_result(
+        self,
+        page: Any,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + max(0.2, timeout_seconds)
+        state = self._state(page)
+        while state.get("status") not in {"success", "failed", "error", "closed"}:
+            if time.monotonic() >= deadline:
+                break
+            page.wait_for_timeout(200)
+            state = self._state(page)
+        return state
 
     def _refresh(self, page: Any) -> None:
         page.evaluate(_REFRESH_CAPTCHA)
@@ -259,8 +298,15 @@ class GlmAliyunChallenge:
             raise RuntimeError("GLM captcha viewport geometry is unavailable")
         try:
             captcha_image = page.locator("#aliyunCaptcha-img").first
+            slider = page.locator("#aliyunCaptcha-sliding-slider").first
             image_box = captcha_image.bounding_box() if captcha_image.is_visible() else None
-            if image_box and float(image_box.get("width") or 0) >= 240:
+            slider_visible = bool(slider.count() and slider.is_visible())
+            if (
+                image_box
+                and slider_visible
+                and float(image_box.get("width") or 0) >= 160
+                and float(image_box.get("height") or 0) >= 160
+            ):
                 x = float(image_box["x"])
                 y = float(image_box["y"])
                 width = float(image_box["width"])
@@ -307,19 +353,31 @@ class GlmAliyunChallenge:
         if surface.slider:
             semantic = self._semantic_slider_input(page, surface.image)
             image = semantic.image
-            prompt = GLM_SLIDER_OFFSET_PROMPT
             artifact = record_captcha_artifact("glm-semantic", image)
             record_captcha_artifact("glm-surface", surface.image)
+            target_x, solver_diagnostic = self._semantic_slider_target(
+                semantic,
+                timeout_seconds,
+            )
+            if target_x is None:
+                return []
+            actions = [
+                VisualAction(
+                    type="drag",
+                    start=(semantic.object_center_x, 0.5),
+                    end=(target_x, 0.5),
+                )
+            ]
         else:
             image = surface.image
             prompt = GLM_VISUAL_ACTION_PROMPT
             artifact = record_captcha_artifact("glm-visual", image)
-        actions = registry.solve_visual_actions_sync(
-            image,
-            prompt,
-            timeout_seconds=timeout_seconds,
-        )
-        solver_diagnostic = registry.visual_diagnostic()
+            actions = registry.solve_visual_actions_sync(
+                image,
+                prompt,
+                timeout_seconds=timeout_seconds,
+            )
+            solver_diagnostic = registry.visual_diagnostic()
         if surface.slider and (
             len(actions) != 1
             or actions[0].type != "drag"
@@ -344,6 +402,139 @@ class GlmAliyunChallenge:
             ]
         return actions
 
+    def _semantic_slider_target(
+        self,
+        semantic: GlmSemanticSliderInput,
+        timeout_seconds: float,
+    ) -> tuple[float | None, str]:
+        if not semantic.background or not semantic.piece:
+            actions = registry.solve_visual_actions_sync(
+                semantic.image,
+                GLM_SLIDER_OFFSET_PROMPT,
+                timeout_seconds=timeout_seconds,
+            )
+            diagnostic = registry.visual_diagnostic()
+            if len(actions) == 1 and actions[0].type == "drag" and actions[0].end is not None:
+                return actions[0].end[0], f"legacy={diagnostic}"
+            return None, f"legacy={diagnostic}"
+        feasible = self._slider_feasible_centers(semantic.background, semantic.piece)
+        if feasible is None:
+            return None, "candidate_piece_unavailable"
+        minimum, maximum = feasible
+        if maximum - minimum < 0.2:
+            return None, "candidate_range_too_small"
+        deadline = time.monotonic() + max(1.0, timeout_seconds)
+        span = maximum - minimum
+        coarse = tuple(minimum + span * fraction for fraction in (0.2, 0.5, 0.8))
+        coarse_target, coarse_diagnostic, coarse_artifact = self._choose_semantic_candidate(
+            semantic,
+            coarse,
+            tuple("ABC"),
+            GLM_SLIDER_COARSE_CHOICE_PROMPT,
+            "glm-semantic-coarse",
+            min(35.0, max(10.0, deadline - time.monotonic() - 75.0)),
+        )
+        if coarse_target is None:
+            return None, f"coarse={coarse_diagnostic}"
+        remaining = deadline - time.monotonic()
+        if remaining < 45:
+            return None, f"coarse={coarse_diagnostic}:fine=deadline"
+        local_radius = span * 0.15
+        fine = tuple(
+            sorted(
+                {
+                    max(minimum, min(maximum, coarse_target + offset))
+                    for offset in (
+                        -local_radius,
+                        -local_radius / 2,
+                        0.0,
+                        local_radius / 2,
+                        local_radius,
+                    )
+                }
+            )
+        )
+        if len(fine) < 3:
+            return None, f"coarse={coarse_diagnostic}:fine=range"
+        fine_labels = tuple("ABCDE"[: len(fine)])
+        fine_target, fine_diagnostic, fine_artifact = self._choose_semantic_candidate(
+            semantic,
+            fine,
+            fine_labels,
+            GLM_SLIDER_FINE_CHOICE_PROMPT,
+            "glm-semantic-fine",
+            min(35.0, max(10.0, remaining - 40.0)),
+        )
+        if fine_target is None:
+            return None, f"coarse={coarse_diagnostic}:fine={fine_diagnostic}"
+        remaining = deadline - time.monotonic()
+        if remaining < 12:
+            return None, f"coarse={coarse_diagnostic}:fine={fine_diagnostic}:precision=deadline"
+        precision_radius = min(0.06, max(0.04, span * 0.07))
+        precision = tuple(
+            sorted(
+                {
+                    max(minimum, min(maximum, fine_target + offset))
+                    for offset in (
+                        -precision_radius,
+                        -precision_radius / 2,
+                        0.0,
+                        precision_radius / 2,
+                        precision_radius,
+                    )
+                }
+            )
+        )
+        precision_labels = tuple("ABCDE"[: len(precision)])
+        target, precision_diagnostic, precision_artifact = self._choose_semantic_candidate(
+            semantic,
+            precision,
+            precision_labels,
+            GLM_SLIDER_PRECISION_CHOICE_PROMPT,
+            "glm-semantic-precision",
+            min(35.0, max(10.0, remaining - 5.0)),
+        )
+        if target is None:
+            return None, (
+                f"coarse={coarse_diagnostic}:fine={fine_diagnostic}:"
+                f"precision={precision_diagnostic}"
+            )
+        return target, (
+            f"coarse={coarse_diagnostic}:fine={fine_diagnostic}:"
+            f"precision={precision_diagnostic}:target={target:.3f}:"
+            f"coarse_artifact={coarse_artifact or 'disabled'}:"
+            f"fine_artifact={fine_artifact or 'disabled'}:"
+            f"precision_artifact={precision_artifact or 'disabled'}"
+        )
+
+    def _choose_semantic_candidate(
+        self,
+        semantic: GlmSemanticSliderInput,
+        candidates: tuple[float, ...],
+        labels: tuple[str, ...],
+        prompt: str,
+        artifact_label: str,
+        timeout_seconds: float,
+    ) -> tuple[float | None, str, str]:
+        image = self._candidate_contact_sheet(
+            semantic.background,
+            semantic.piece,
+            candidates,
+            labels,
+        )
+        image = self._candidate_sheet_with_reference(semantic.image, image)
+        artifact = record_captcha_artifact(artifact_label, image)
+        choice = registry.solve_visual_choice_sync(
+            image,
+            prompt,
+            labels,
+            timeout_seconds=timeout_seconds,
+        )
+        diagnostic = registry.visual_diagnostic()
+        if choice is None:
+            return None, diagnostic, artifact
+        return candidates[labels.index(choice)], f"{choice}:{diagnostic}", artifact
+
     def _local_slider_action(
         self,
         page: Any,
@@ -367,11 +558,174 @@ class GlmAliyunChallenge:
         try:
             background, piece = self._slider_images(page)
             image = self._compose_semantic_slider_input(rendered_scene, piece, background)
+            return GlmSemanticSliderInput(image, object_center_x, background, piece)
         except (TypeError, ValueError):
             buffer = BytesIO()
             Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(buffer, format="PNG")
             image = self._compose_semantic_slider_input(rendered_scene, buffer.getvalue())
-        return GlmSemanticSliderInput(image, object_center_x)
+            return GlmSemanticSliderInput(image, object_center_x)
+
+    def _slider_feasible_centers(
+        self,
+        background: bytes,
+        piece: bytes,
+    ) -> tuple[float, float] | None:
+        with (
+            Image.open(BytesIO(background)) as background_source,
+            Image.open(BytesIO(piece)) as piece_source,
+        ):
+            scene = background_source.convert("RGBA")
+            foreground = self._slider_foreground_canvas(scene, piece_source)
+            box = self._foreground_box(foreground)
+            if box is None:
+                return None
+            half_width = (box[2] - box[0]) / (2 * scene.width)
+            margin = max(0.015, half_width)
+            return margin, 1.0 - margin
+
+    def _candidate_contact_sheet(
+        self,
+        background: bytes,
+        piece: bytes,
+        candidates: tuple[float, ...],
+        labels: tuple[str, ...],
+    ) -> bytes:
+        if len(candidates) != len(labels) or not candidates:
+            raise ValueError("GLM candidate labels do not match candidate positions")
+        with (
+            Image.open(BytesIO(background)) as background_source,
+            Image.open(BytesIO(piece)) as piece_source,
+        ):
+            scene = background_source.convert("RGBA")
+            foreground = self._slider_foreground_canvas(scene, piece_source)
+            box = self._foreground_box(foreground)
+            if box is None:
+                raise ValueError("GLM candidate foreground is unavailable")
+            object_center = (box[0] + box[2]) / 2
+            tile_size = 220
+            label_height = 28
+            gap = 12
+            columns = min(3, len(candidates))
+            rows = math.ceil(len(candidates) / columns)
+            canvas = Image.new(
+                "RGB",
+                (
+                    gap + columns * (tile_size + gap),
+                    gap + rows * (label_height + tile_size + gap),
+                ),
+                "white",
+            )
+            draw = ImageDraw.Draw(canvas)
+            for index, (candidate, label) in enumerate(zip(candidates, labels, strict=True)):
+                shift = round(candidate * scene.width - object_center)
+                layer = Image.new("RGBA", scene.size, (0, 0, 0, 0))
+                layer.paste(foreground, (shift, 0), foreground)
+                completed = (
+                    Image.alpha_composite(scene, layer)
+                    .convert("RGB")
+                    .resize(
+                        (tile_size, tile_size),
+                        Image.Resampling.LANCZOS,
+                    )
+                )
+                column = index % columns
+                row = index // columns
+                x = gap + column * (tile_size + gap)
+                y = gap + row * (label_height + tile_size + gap)
+                draw.rectangle((x, y, x + tile_size, y + label_height - 2), fill="black")
+                draw.text((x + 8, y + 6), label, fill="white")
+                canvas.paste(completed, (x, y + label_height))
+            return self._encode_candidate_sheet(canvas)
+
+    def _encode_candidate_sheet(self, canvas: Image.Image) -> bytes:
+        smallest = b""
+        for scale in (1.0, 0.85, 0.7, 0.6):
+            candidate = canvas
+            if scale < 1:
+                candidate = canvas.resize(
+                    (
+                        max(1, round(canvas.width * scale)),
+                        max(1, round(canvas.height * scale)),
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+            for colors in (128, 96, 64):
+                output = BytesIO()
+                candidate.quantize(colors=colors).save(
+                    output,
+                    format="PNG",
+                    optimize=True,
+                )
+                encoded = output.getvalue()
+                if not smallest or len(encoded) < len(smallest):
+                    smallest = encoded
+                if len(encoded) <= 120_000:
+                    return encoded
+        return smallest
+
+    def _candidate_sheet_with_reference(
+        self,
+        reference: bytes,
+        candidates: bytes,
+    ) -> bytes:
+        with (
+            Image.open(BytesIO(reference)) as reference_source,
+            Image.open(BytesIO(candidates)) as candidate_source,
+        ):
+            candidate_image = candidate_source.convert("RGB")
+            reference_image = reference_source.convert("RGB")
+            reference_height = round(
+                reference_image.height * candidate_image.width / reference_image.width
+            )
+            reference_image = reference_image.resize(
+                (candidate_image.width, reference_height),
+                Image.Resampling.LANCZOS,
+            )
+            gap = 12
+            canvas = Image.new(
+                "RGB",
+                (
+                    candidate_image.width,
+                    reference_image.height + gap + candidate_image.height,
+                ),
+                "white",
+            )
+            canvas.paste(reference_image, (0, 0))
+            ImageDraw.Draw(canvas).line(
+                (
+                    0,
+                    reference_image.height + gap // 2,
+                    canvas.width,
+                    reference_image.height + gap // 2,
+                ),
+                fill="black",
+                width=2,
+            )
+            canvas.paste(candidate_image, (0, reference_image.height + gap))
+            return self._encode_candidate_sheet(canvas)
+
+    def _slider_foreground_canvas(
+        self,
+        scene: Image.Image,
+        piece_source: Image.Image,
+    ) -> Image.Image:
+        piece = piece_source.convert("RGBA")
+        if piece.width < 1 or piece.height < 1:
+            raise ValueError("GLM candidate foreground has invalid dimensions")
+        scale = min(scene.width / piece.width, scene.height / piece.height)
+        if piece.height == scene.height and piece.width <= scene.width:
+            scale = 1.0
+        if abs(scale - 1.0) > 0.001:
+            piece = piece.resize(
+                (
+                    max(1, round(piece.width * scale)),
+                    max(1, round(piece.height * scale)),
+                ),
+                Image.Resampling.LANCZOS,
+            )
+        canvas = Image.new("RGBA", scene.size, (0, 0, 0, 0))
+        canvas.alpha_composite(piece, (0, 0))
+        return canvas
 
     def _slider_object_center_x(self, page: Any) -> float:
         try:
@@ -543,15 +897,18 @@ class GlmAliyunChallenge:
                 page.mouse.click(x, y, delay=random.randint(45, 120))
             elif action.type == "drag" and action.start is not None and action.end is not None:
                 if slider_box is not None:
-                    start, end = self._slider_drag_points(
+                    adaptive_diagnostic = self._drag_slider_to_scene_target(
+                        page,
                         action,
                         surface,
                         slider_box,
                         scene_width,
                     )
-                    self.last_diagnostic += (
-                        f":scene_width={scene_width:.1f}:surface_width={surface.width:.1f}"
-                    )
+                    if adaptive_diagnostic is not None:
+                        self.last_diagnostic += f":{adaptive_diagnostic}"
+                        page.wait_for_timeout(random.randint(250, 600))
+                        continue
+                    start, end = self._slider_drag_points(action, surface, slider_box, scene_width)
                 else:
                     start = self._screen_point(action.start, surface)
                     end = self._screen_point(action.end, surface)
@@ -570,6 +927,120 @@ class GlmAliyunChallenge:
         except Exception:  # noqa: BLE001,S110 - direct-drag challenges have no slider
             pass
         return None
+
+    def _drag_slider_to_scene_target(
+        self,
+        page: Any,
+        action: VisualAction,
+        surface: GlmCaptchaSurface,
+        slider_box: dict[str, float],
+        scene_width: float,
+    ) -> str | None:
+        if action.end is None:
+            return None
+        try:
+            image_box = page.locator("#aliyunCaptcha-img").first.bounding_box()
+            piece_box = page.locator("#aliyunCaptcha-puzzle").first.bounding_box()
+            track_box = page.locator("#aliyunCaptcha-sliding-body").first.bounding_box()
+            if not image_box or not piece_box or not track_box:
+                return None
+            image = {key: float(image_box[key]) for key in ("x", "y", "width", "height")}
+            piece = {key: float(piece_box[key]) for key in ("x", "y", "width", "height")}
+            track = {key: float(track_box[key]) for key in ("x", "y", "width", "height")}
+        except Exception:  # noqa: BLE001 - the SDK can replace its DOM during refresh
+            return None
+        max_handle_delta = track["width"] - slider_box["width"]
+        max_piece_delta = image["width"] - piece["width"]
+        if max_handle_delta < 40 or max_piece_delta < 40:
+            return None
+        desired_piece_left = image["x"] + action.end[0] * image["width"] - piece["width"] / 2
+        desired_piece_left = max(
+            image["x"],
+            min(image["x"] + max_piece_delta, desired_piece_left),
+        )
+        target_piece_delta = desired_piece_left - piece["x"]
+        if target_piece_delta <= 2:
+            return None
+        target_fraction = max(0.001, min(1.0, target_piece_delta / max_piece_delta))
+        start = (
+            slider_box["x"] + slider_box["width"] / 2,
+            slider_box["y"] + slider_box["height"] / 2,
+        )
+        predicted_handle_delta = max_handle_delta * math.sqrt(target_fraction)
+        calibration_delta = min(
+            max_handle_delta * 0.45,
+            max(18.0, predicted_handle_delta * 0.62),
+        )
+        pointer = start
+        page.mouse.move(*start, steps=random.randint(4, 8))
+        page.wait_for_timeout(random.randint(90, 180))
+        page.mouse.down()
+        try:
+            pointer = self._move_held_slider(
+                page,
+                pointer,
+                (start[0] + calibration_delta, start[1]),
+            )
+            page.wait_for_timeout(random.randint(50, 90))
+            observed_piece = page.locator("#aliyunCaptcha-puzzle").first.bounding_box()
+            observed_delta = float((observed_piece or {}).get("x") or piece["x"]) - piece["x"]
+            handle_fraction = calibration_delta / max_handle_delta
+            piece_fraction = observed_delta / max_piece_delta
+            exponent = 2.0
+            if 0.001 < piece_fraction < 0.999 and 0.001 < handle_fraction < 0.999:
+                measured = math.log(piece_fraction) / math.log(handle_fraction)
+                if 0.4 <= measured <= 4.0:
+                    exponent = measured
+            final_error = target_piece_delta - observed_delta
+            for _ in range(3):
+                desired_handle_delta = max_handle_delta * target_fraction ** (1.0 / exponent)
+                desired_handle_delta = max(4.0, min(max_handle_delta, desired_handle_delta))
+                pointer = self._move_held_slider(
+                    page,
+                    pointer,
+                    (start[0] + desired_handle_delta, start[1]),
+                )
+                page.wait_for_timeout(random.randint(45, 80))
+                current_piece = page.locator("#aliyunCaptcha-puzzle").first.bounding_box()
+                current_delta = float((current_piece or {}).get("x") or piece["x"]) - piece["x"]
+                final_error = target_piece_delta - current_delta
+                if abs(final_error) <= 1.5:
+                    break
+                current_handle_fraction = desired_handle_delta / max_handle_delta
+                current_piece_fraction = current_delta / max_piece_delta
+                if (
+                    0.001 < current_handle_fraction < 0.999
+                    and 0.001 < current_piece_fraction < 0.999
+                ):
+                    measured = math.log(current_piece_fraction) / math.log(current_handle_fraction)
+                    if 0.4 <= measured <= 4.0:
+                        exponent = measured
+            return (
+                f"adaptive_curve={exponent:.3f}:final_error={final_error:.2f}:"
+                f"scene_width={scene_width:.1f}:surface_width={surface.width:.1f}"
+            )
+        finally:
+            page.wait_for_timeout(random.randint(80, 160))
+            page.mouse.up()
+
+    def _move_held_slider(
+        self,
+        page: Any,
+        start: tuple[float, float],
+        end: tuple[float, float],
+    ) -> tuple[float, float]:
+        distance = math.dist(start, end)
+        steps = max(6, min(24, round(distance / 10)))
+        bend = random.uniform(-1.5, 1.5)
+        for index in range(1, steps + 1):
+            progress = index / steps
+            eased = 3 * progress**2 - 2 * progress**3
+            x = start[0] + (end[0] - start[0]) * eased
+            y = start[1] + (end[1] - start[1]) * eased
+            y += math.sin(math.pi * progress) * bend
+            page.mouse.move(x, y)
+            page.wait_for_timeout(random.randint(7, 18))
+        return end
 
     def _slider_drag_points(
         self,
@@ -818,15 +1289,20 @@ _CAPTCHA_IMAGE_SOURCES = """
 _CAPTCHA_VISUAL_READY = """
 () => {
   const image = document.querySelector('#aliyunCaptcha-img');
+  const slider = document.querySelector('#aliyunCaptcha-sliding-slider');
   const windowElement = document.querySelector('#aliyunCaptcha-window-float');
-  if (!image || !windowElement) return false;
+  if (!image || !slider || !windowElement) return false;
   const imageRect = image.getBoundingClientRect();
+  const sliderRect = slider.getBoundingClientRect();
   const windowRect = windowElement.getBoundingClientRect();
   const imageStyle = getComputedStyle(image);
+  const sliderStyle = getComputedStyle(slider);
   const windowStyle = getComputedStyle(windowElement);
-  return imageRect.width >= 240 && imageRect.height >= 200 &&
+  return imageRect.width >= 160 && imageRect.height >= 160 &&
+    sliderRect.width >= 24 && sliderRect.height >= 24 &&
     windowRect.width >= 280 && windowRect.height >= 260 &&
     imageStyle.visibility !== 'hidden' && imageStyle.opacity !== '0' &&
+    sliderStyle.display !== 'none' && sliderStyle.visibility !== 'hidden' &&
     windowStyle.display !== 'none' && windowStyle.visibility !== 'hidden';
 }
 """

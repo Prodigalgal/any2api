@@ -5,6 +5,7 @@ from .base import AutomationProvider
 
 _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 _PROVIDER_OPERATIONS = frozenset({"register", "reauthenticate", "keepalive"})
+_REGISTRATION_ATTEMPT_MODES = frozenset({"new_identity", "single_identity"})
 
 
 class AutomationProviderRegistry:
@@ -18,6 +19,11 @@ class AutomationProviderRegistry:
             if unknown_operations:
                 names = ", ".join(sorted(unknown_operations))
                 raise ValueError(f"unsupported automation operations for {provider_id}: {names}")
+            if provider.manifest.registration_attempt_mode not in _REGISTRATION_ATTEMPT_MODES:
+                raise ValueError(
+                    "unsupported registration attempt mode for "
+                    f"{provider_id}: {provider.manifest.registration_attempt_mode}"
+                )
             if provider_id in self._providers:
                 raise ValueError(f"duplicate automation provider id: {provider_id}")
             self._providers[provider_id] = provider

@@ -12,6 +12,7 @@ import statistics
 import tempfile
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 
 import httpx
@@ -165,6 +166,119 @@ class SolverRegistry:
             confidence=0.55,
             detail=f"length={len(candidate)}",
         )
+
+    def solve_visual_choice_sync(
+        self,
+        image: bytes,
+        prompt: str,
+        choices: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> str | None:
+        normalized = tuple(dict.fromkeys(choice.strip().upper() for choice in choices))
+        if not 2 <= len(normalized) <= 20 or any(
+            not re.fullmatch(r"[A-Z][A-Z0-9_-]{0,15}", choice) for choice in normalized
+        ):
+            raise ValueError("visual choices must contain 2-20 unique machine labels")
+        config = settings()
+        sample_count = max(1, min(5, config.captcha_ai_action_samples))
+        sample_timeout = float(max(1, config.captcha_ai_action_sample_timeout_seconds))
+        if timeout_seconds is not None:
+            sample_timeout = min(sample_timeout, timeout_seconds)
+        choice_prompt = (
+            "The first characters of your response MUST be CHOICE=<label>. "
+            "Write the choice before any analysis. "
+            + prompt
+            + "\n<label> must be one of: "
+            + ", ".join(normalized)
+            + "."
+        )
+
+        def sample() -> tuple[str, str]:
+            content = self._visual_completion_sync(
+                image,
+                choice_prompt,
+                max_tokens=128,
+                timeout_seconds=sample_timeout,
+            )
+            return content, self.visual_diagnostic()
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=sample_count)
+        futures = [executor.submit(sample) for _ in range(sample_count)]
+        done, pending = concurrent.futures.wait(futures, timeout=sample_timeout)
+        for future in pending:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        raw_votes: list[tuple[str, str, int]] = []
+        sources: list[str] = []
+        for index, future in enumerate(done):
+            try:
+                content, diagnostic = future.result()
+            except Exception as error:  # noqa: BLE001 - one failed vote must not fail the batch
+                sources.append(f"sample_error:{type(error).__name__}")
+                continue
+            candidate = self._visual_choice_candidate(content, normalized)
+            if candidate:
+                raw_votes.append((candidate, diagnostic, index))
+                sources.append(diagnostic)
+        votes, provider_summary = self._visual_provider_choice_votes(raw_votes)
+        counts = Counter(votes)
+        required = 1 if sample_count == 1 else max(2, len(votes) // 2 + 1)
+        ranking = counts.most_common()
+        if (
+            ranking
+            and ranking[0][1] >= required
+            and (len(ranking) == 1 or ranking[0][1] > ranking[1][1])
+        ):
+            winner, count = ranking[0]
+            self._diagnostics.visual = (
+                f"choice_consensus:{winner}:{count}/{len(votes)}:"
+                f"providers={provider_summary}:completed={len(done)}/{sample_count}"
+            )
+            return winner
+        vote_summary = ",".join(f"{label}:{count}" for label, count in sorted(counts.items()))
+        self._diagnostics.visual = (
+            f"choice_rejected:completed={len(done)}/{sample_count}:"
+            f"valid={len(raw_votes)}/{sample_count}:votes={vote_summary}:"
+            f"providers={provider_summary}:"
+            f"sources={'|'.join(sources)}"
+        )[:1000]
+        return None
+
+    @staticmethod
+    def _visual_provider_choice_votes(
+        raw_votes: list[tuple[str, str, int]],
+    ) -> tuple[list[str], str]:
+        buckets: dict[str, list[str]] = {}
+        display: dict[str, str] = {}
+        for candidate, diagnostic, index in raw_votes:
+            match = re.search(r"(?:^|:)provider=([^:|]+)", diagnostic)
+            provider = match.group(1).strip().lower() if match else ""
+            key = provider if provider and provider != "unknown" else f"sample-{index}"
+            buckets.setdefault(key, []).append(candidate)
+            display[key] = provider if provider and provider != "unknown" else "independent"
+        votes: list[str] = []
+        summary: list[str] = []
+        for key, candidates in buckets.items():
+            ranking = Counter(candidates).most_common()
+            if ranking and (len(ranking) == 1 or ranking[0][1] > ranking[1][1]):
+                votes.append(ranking[0][0])
+                summary.append(f"{display[key]}={ranking[0][0]}")
+            else:
+                summary.append(f"{display[key]}=conflict")
+        return votes, ",".join(summary)
+
+    @staticmethod
+    def _visual_choice_candidate(content: str, choices: tuple[str, ...]) -> str | None:
+        match = re.search(
+            r"\bCHOICE\s*[:=]\s*[`*'\"]*([A-Z][A-Z0-9_-]{0,15})",
+            str(content),
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        candidate = match.group(1).upper()
+        return candidate if candidate in choices else None
 
     def solve_visual_actions_sync(
         self,

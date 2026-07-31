@@ -18,7 +18,8 @@ class AutomationProviderCatalogTest {
     void replacesCatalogAtomicallyFromAutomationManifests() {
         catalog.replaceFrom(mapper.readTree("""
             {"providers":[
-              {"id":"alpha","operations":["keepalive","register"]},
+              {"id":"alpha","operations":["keepalive","register"],
+               "registration_attempt_mode":"single_identity"},
               {"id":"beta","operations":["reauthenticate"]}
             ]}
             """));
@@ -27,6 +28,10 @@ class AutomationProviderCatalogTest {
         assertThat(catalog.operationsFor("alpha"))
             .containsExactlyInAnyOrder(AutomationOperation.REGISTER, AutomationOperation.KEEPALIVE);
         assertThat(catalog.operationsFor("missing")).isEmpty();
+        assertThat(catalog.registrationAttemptMode("alpha"))
+            .isEqualTo(RegistrationAttemptMode.SINGLE_IDENTITY);
+        assertThat(catalog.registrationAttemptMode("beta"))
+            .isEqualTo(RegistrationAttemptMode.NEW_IDENTITY);
     }
 
     @Test

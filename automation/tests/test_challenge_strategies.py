@@ -357,6 +357,7 @@ def test_visual_solver_parses_normalized_points_without_exposing_response(
     assert request["url"] == "https://gateway.example/multimodal-random/v1/chat/completions"
     assert request["json"]["model"] == "random"
     assert request["json"]["reasoning_effort"] == "none"
+    assert "max_completion_tokens" not in request["json"]
     assert request["headers"] == {"Authorization": "Bearer fixture-secret"}
 
 
@@ -427,6 +428,72 @@ def test_visual_text_candidate_extracts_structured_or_emphasized_answers_only() 
     assert _captcha_text_candidate("The four characters are: **A01X**") == "A01X"
     assert _captcha_text_candidate("`aB7x`") == "aB7x"
     assert _captcha_text_candidate("I cannot determine the captcha") is None
+
+
+def test_visual_choice_solver_requires_a_unique_majority(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "5")
+    settings.cache_clear()
+    responses = iter(("CHOICE=B", "CHOICE=B", "CHOICE=B", "CHOICE=A", "CHOICE=C"))
+    prompts: list[str] = []
+
+    def complete(image, prompt, **kwargs):
+        del image, kwargs
+        prompts.append(prompt)
+        return next(responses)
+
+    monkeypatch.setattr(
+        registry,
+        "_visual_completion_sync",
+        complete,
+    )
+
+    choice = registry.solve_visual_choice_sync(
+        b"fixture-image",
+        "Choose a panel.",
+        ("A", "B", "C"),
+    )
+
+    settings.cache_clear()
+    assert choice == "B"
+    assert all(prompt.startswith("The first characters") for prompt in prompts)
+    assert "choice_consensus:B:3/5" in registry.visual_diagnostic()
+
+
+def test_visual_choice_solver_rejects_ties_and_unknown_labels(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "5")
+    settings.cache_clear()
+    responses = iter(("CHOICE=A", "CHOICE=A", "CHOICE=B", "CHOICE=B", "CHOICE=Z"))
+    monkeypatch.setattr(
+        registry,
+        "_visual_completion_sync",
+        lambda *args, **kwargs: next(responses),
+    )
+
+    choice = registry.solve_visual_choice_sync(
+        b"fixture-image",
+        "Choose a panel.",
+        ("A", "B", "C"),
+    )
+
+    settings.cache_clear()
+    assert choice is None
+    assert "votes=A:2,B:2" in registry.visual_diagnostic()
+
+
+def test_visual_choice_votes_count_each_provider_once() -> None:
+    votes, summary = registry._visual_provider_choice_votes(
+        [
+            ("A", "response_received:provider=qwen:model=one", 0),
+            ("A", "response_received:provider=qwen:model=one", 1),
+            ("B", "response_received:provider=mimo:model=two", 2),
+            ("B", "response_received:provider=minmax:model=three", 3),
+        ]
+    )
+
+    assert votes == ["A", "B", "B"]
+    assert "qwen=A" in summary
+    assert "mimo=B" in summary
+    assert "minmax=B" in summary
 
 
 def test_visual_action_solver_normalizes_percentage_coordinates(monkeypatch) -> None:
@@ -581,6 +648,26 @@ class _GlmSuccessPage:
         return b"should-not-be-used"
 
 
+def test_glm_waits_for_delayed_official_callback() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def evaluate(self, script: str) -> dict[str, str]:
+            del script
+            self.reads += 1
+            if self.reads < 4:
+                return {"status": "running", "ticket": ""}
+            return {"status": "success", "ticket": "t" * 64}
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            del milliseconds
+
+    state = GlmAliyunChallenge()._wait_for_challenge_result(Page(), 2)
+
+    assert state["status"] == "success"
+
+
 class _GlmMouse:
     def __init__(self) -> None:
         self.events: list[tuple[object, ...]] = []
@@ -683,6 +770,69 @@ def test_glm_slider_falls_back_to_surface_width_without_scene_geometry() -> None
 
     assert start == (140, 320)
     assert end == (240, 320)
+
+
+def test_glm_slider_calibrates_sdk_non_linear_piece_motion() -> None:
+    class Mouse:
+        def __init__(self, page) -> None:
+            self.page = page
+            self.down_state = False
+
+        def move(self, x: float, y: float, steps: int | None = None) -> None:
+            del y, steps
+            if self.down_state:
+                handle_delta = max(0.0, min(260.0, x - 590.0))
+                self.page.piece_x = 570.0 + 281.0 * (handle_delta / 260.0) ** 2
+
+        def down(self) -> None:
+            self.down_state = True
+
+        def up(self) -> None:
+            self.down_state = False
+
+    class Locator:
+        def __init__(self, page, selector: str) -> None:
+            self.page = page
+            self.selector = selector
+
+        @property
+        def first(self):
+            return self
+
+        def bounding_box(self) -> dict[str, float]:
+            if self.selector == "#aliyunCaptcha-img":
+                return {"x": 570, "y": 291.5, "width": 300, "height": 300}
+            if self.selector == "#aliyunCaptcha-puzzle":
+                return {"x": self.page.piece_x, "y": 291.5, "width": 19, "height": 300}
+            assert self.selector == "#aliyunCaptcha-sliding-body"
+            return {"x": 570, "y": 599.5, "width": 300, "height": 40}
+
+    class Page:
+        def __init__(self) -> None:
+            self.piece_x = 570.0
+            self.mouse = Mouse(self)
+
+        def locator(self, selector: str) -> Locator:
+            return Locator(self, selector)
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            del milliseconds
+
+    page = Page()
+    diagnostic = GlmAliyunChallenge()._drag_slider_to_scene_target(
+        page,
+        VisualAction(type="drag", start=(0.032, 0.5), end=(0.515, 0.5)),
+        GlmCaptchaSurface(b"", x=570, y=291.5, width=300, height=300, slider=True),
+        {"x": 570, "y": 599.5, "width": 40, "height": 40},
+        300,
+    )
+
+    desired_piece_center = 570 + 0.515 * 300
+    actual_piece_center = page.piece_x + 19 / 2
+    assert diagnostic is not None
+    assert "adaptive_curve=2.000" in diagnostic
+    assert abs(actual_piece_center - desired_piece_center) <= 1.5
+    assert page.mouse.down_state is False
 
 
 def test_glm_slider_uses_local_estimates_only_when_they_reach_consensus() -> None:
@@ -852,6 +1002,183 @@ def test_glm_semantic_slider_always_provides_left_edge_fallback_panel() -> None:
         assert composed.size == (640, 340)
         panel = composed.convert("RGB").crop((20, 40, 300, 320))
         assert ImageChops.difference(panel, Image.new("RGB", panel.size, "white")).getbbox()
+
+
+def test_glm_semantic_candidate_sheet_places_real_foreground_at_each_center() -> None:
+    background = Image.new("RGB", (300, 300), "white")
+    piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(piece).rectangle((20, 120, 40, 150), fill="black")
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    result = GlmAliyunChallenge()._candidate_contact_sheet(
+        png(background),
+        png(piece),
+        (0.25, 0.75),
+        ("A", "B"),
+    )
+
+    with Image.open(io.BytesIO(result)) as sheet:
+        first = sheet.convert("RGB").crop((12, 40, 232, 260))
+        second = sheet.convert("RGB").crop((244, 40, 464, 260))
+        first_box = ImageChops.difference(first, Image.new("RGB", first.size, "white")).getbbox()
+        second_box = ImageChops.difference(second, Image.new("RGB", second.size, "white")).getbbox()
+        assert first_box is not None
+        assert second_box is not None
+        assert abs((first_box[0] + first_box[2]) / 2 / 220 - 0.25) < 0.03
+        assert abs((second_box[0] + second_box[2]) / 2 / 220 - 0.75) < 0.03
+
+
+def test_glm_semantic_candidate_sheet_stays_within_gateway_image_budget() -> None:
+    background = Image.effect_noise((300, 300), 80).convert("RGB")
+    piece = Image.new("RGBA", (30, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(piece).ellipse((0, 120, 29, 150), fill="black")
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    result = GlmAliyunChallenge()._candidate_contact_sheet(
+        png(background),
+        png(piece),
+        tuple(index / 10 for index in range(1, 10)),
+        tuple("ABCDEFGHI"),
+    )
+
+    assert result.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(result) <= 120_000
+
+
+def test_glm_semantic_candidate_sheet_keeps_detached_object_reference() -> None:
+    reference = Image.new("RGB", (640, 340), "white")
+    ImageDraw.Draw(reference).rectangle((60, 100, 180, 260), fill="red")
+    candidates = Image.new("RGB", (708, 260), "white")
+    ImageDraw.Draw(candidates).rectangle((500, 80, 620, 220), fill="blue")
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    result = GlmAliyunChallenge()._candidate_sheet_with_reference(
+        png(reference),
+        png(candidates),
+    )
+
+    assert len(result) <= 120_000
+    with Image.open(io.BytesIO(result)) as sheet:
+        rgb = sheet.convert("RGB")
+        assert rgb.getpixel((130, 190))[0] > 180
+        assert rgb.getpixel((560, rgb.height - 80))[2] > 180
+
+
+def test_glm_semantic_candidate_sheet_preserves_narrow_sdk_piece_geometry() -> None:
+    background = Image.new("RGB", (300, 300), "white")
+    piece = Image.new("RGBA", (32, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(piece).rectangle((0, 120, 31, 150), fill="black")
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    challenge = GlmAliyunChallenge()
+    feasible = challenge._slider_feasible_centers(png(background), png(piece))
+    result = challenge._candidate_contact_sheet(
+        png(background),
+        png(piece),
+        (0.25, 0.75),
+        ("A", "B"),
+    )
+
+    assert feasible is not None
+    assert tuple(round(value, 3) for value in feasible) == (0.053, 0.947)
+    with Image.open(io.BytesIO(result)) as sheet:
+        first = sheet.convert("RGB").crop((12, 40, 232, 260))
+        first_box = ImageChops.difference(first, Image.new("RGB", first.size, "white")).getbbox()
+        assert first_box is not None
+        assert first_box[2] - first_box[0] < 30
+        assert abs((first_box[0] + first_box[2]) / 2 / 220 - 0.25) < 0.03
+
+
+def test_glm_capture_recognizes_narrow_portrait_slider_scene() -> None:
+    class Locator:
+        def __init__(self, box: dict[str, float]) -> None:
+            self.box = box
+
+        @property
+        def first(self):
+            return self
+
+        def count(self) -> int:
+            return 1
+
+        def is_visible(self) -> bool:
+            return True
+
+        def bounding_box(self) -> dict[str, float]:
+            return self.box
+
+    class Page:
+        def evaluate(self, script: str) -> dict[str, int]:
+            assert "innerWidth" in script
+            return {"width": 1440, "height": 900}
+
+        def locator(self, selector: str) -> Locator:
+            if selector == "#aliyunCaptcha-img":
+                return Locator({"x": 620, "y": 300, "width": 186, "height": 265})
+            assert selector == "#aliyunCaptcha-sliding-slider"
+            return Locator({"x": 570, "y": 600, "width": 40, "height": 40})
+
+        def screenshot(self, **kwargs) -> bytes:
+            assert kwargs["clip"]["width"] == 186
+            return b"portrait-scene"
+
+    result = GlmAliyunChallenge()._capture_surface(Page())
+
+    assert result.slider is True
+    assert result.width == 186
+    assert result.height == 265
+    assert result.image == b"portrait-scene"
+
+
+def test_glm_semantic_slider_uses_coarse_then_fine_choice_consensus(monkeypatch) -> None:
+    background = Image.new("RGB", (300, 300), "white")
+    piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(piece).rectangle((10, 120, 30, 150), fill="black")
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    calls: list[tuple[str, ...]] = []
+
+    def choose(image, prompt, choices, **kwargs):
+        del image, prompt, kwargs
+        calls.append(choices)
+        return "B" if len(calls) == 1 else "C"
+
+    monkeypatch.setattr(registry, "solve_visual_choice_sync", choose)
+    semantic = GlmSemanticSliderInput(
+        png(Image.new("RGB", (640, 340), "white")),
+        0.05,
+        png(background),
+        png(piece),
+    )
+
+    target, diagnostic = GlmAliyunChallenge()._semantic_slider_target(semantic, 120)
+
+    assert target is not None
+    assert abs(target - 0.5) < 0.01
+    assert calls == [tuple("ABC"), tuple("ABCDE"), tuple("ABCDE")]
+    assert "coarse=B:" in diagnostic
+    assert "fine=C:" in diagnostic
+    assert "precision=C:" in diagnostic
 
 
 def test_glm_slider_images_accept_browser_canvas_data_urls() -> None:

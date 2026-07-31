@@ -41,6 +41,7 @@ class GlmAutomationProvider(AutomationProvider):
         challenge_types=("aliyun_traceless", "semantic_slider", "semantic_drag", "semantic_click"),
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
+        registration_attempt_mode="single_identity",
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:

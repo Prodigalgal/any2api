@@ -51,6 +51,10 @@ cannot be reused. The generic browser form remains only a final compatibility fa
 
 LongCat waits for H5Guard readiness, observes the risk and email-apply API transitions, and handles slider, ordered-tap, and connect-dots Yoda layouts before accepting the OTP state. Qwen uses its current form names, page-world Baxia headers, and the measured Aliyun slider movement curve. These behaviors live entirely inside their provider modules.
 
+Providers may declare `registration_attempt_mode=single_identity` when a failed scheduler retry
+would consume another mailbox. GLM uses this mode: Python owns multiple browser/captcha attempts
+inside one registration call, while Java permits only one top-level attempt per requested identity.
+
 GLM uses separate Alibaba Cloud Captcha profiles for authentication and chat. Authentication uses
 the embedded `36qgs6xb` scene; chat uses the popup `didk33e0` scene. A ticket from one scene is never
 reused for the other. The provider first executes the SDK's fixed start action, then treats each

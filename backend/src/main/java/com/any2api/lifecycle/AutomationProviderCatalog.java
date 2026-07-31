@@ -61,6 +61,11 @@ public class AutomationProviderCatalog {
         return operationsFor(providerId).contains(operation);
     }
 
+    public RegistrationAttemptMode registrationAttemptMode(String providerId) {
+        return current.get().registrationAttemptModes()
+            .getOrDefault(providerId, RegistrationAttemptMode.NEW_IDENTITY);
+    }
+
     public boolean ready() {
         return current.get().refreshedAt() != null;
     }
@@ -70,6 +75,7 @@ public class AutomationProviderCatalog {
             throw new IllegalArgumentException("automation provider catalog is missing providers");
         }
         var parsed = new LinkedHashMap<String, Set<AutomationOperation>>();
+        var attemptModes = new LinkedHashMap<String, RegistrationAttemptMode>();
         for (var provider : response.path("providers")) {
             var providerId = provider.path("id").asText("");
             if (!PROVIDER_ID.matcher(providerId).matches()) {
@@ -87,16 +93,21 @@ public class AutomationProviderCatalog {
                 throw new IllegalArgumentException(
                     "duplicate automation provider id: " + providerId);
             }
+            var attemptMode = RegistrationAttemptMode.fromExternalName(
+                provider.path("registration_attempt_mode").asText("new_identity"));
+            attemptModes.put(providerId, attemptMode);
         }
-        current.set(new Snapshot(Map.copyOf(parsed), Instant.now()));
+        current.set(new Snapshot(
+            Map.copyOf(parsed), Map.copyOf(attemptModes), Instant.now()));
     }
 
     private record Snapshot(
         Map<String, Set<AutomationOperation>> operations,
+        Map<String, RegistrationAttemptMode> registrationAttemptModes,
         Instant refreshedAt
     ) {
         static Snapshot empty() {
-            return new Snapshot(Map.of(), null);
+            return new Snapshot(Map.of(), Map.of(), null);
         }
     }
 }

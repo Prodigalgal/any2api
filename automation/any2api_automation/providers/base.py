@@ -20,6 +20,7 @@ class AutomationProviderManifest:
     operations: tuple[str, ...] = ()
     realtime: bool = False
     inference_transport: bool = False
+    registration_attempt_mode: str = "new_identity"
 
 
 class AutomationProvider(ABC):

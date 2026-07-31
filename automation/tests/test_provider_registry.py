@@ -46,6 +46,17 @@ class UnknownOperationProvider(AutomationProvider):
     )
 
 
+class UnknownAttemptModeProvider(AutomationProvider):
+    manifest = AutomationProviderManifest(
+        id="unknown-mode",
+        browser_backend="patchright",
+        fallback_backend=None,
+        isolation="context",
+        challenge_types=(),
+        registration_attempt_mode="replace_everything",
+    )
+
+
 def test_provider_registry_rejects_duplicate_ids() -> None:
     with pytest.raises(ValueError, match="duplicate automation provider id"):
         AutomationProviderRegistry([ExampleProvider(), ExampleProvider()])
@@ -57,6 +68,9 @@ def test_provider_registry_rejects_invalid_ids_and_operations() -> None:
 
     with pytest.raises(ValueError, match="unsupported automation operations"):
         AutomationProviderRegistry([UnknownOperationProvider()])
+
+    with pytest.raises(ValueError, match="unsupported registration attempt mode"):
+        AutomationProviderRegistry([UnknownAttemptModeProvider()])
 
 
 def test_provider_registry_is_deterministic() -> None:

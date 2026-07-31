@@ -137,9 +137,11 @@ class GlmAliyunChallenge:
                     )
                     break
                 self._execute(page, actions, surface)
+                execution_diagnostic = f":{self.last_diagnostic}" if surface.slider else ""
                 self.last_diagnostic = (
                     f"mode=visual, attempt={attempt}, round={round_number}, actions="
                     + ",".join(action.type for action in actions)
+                    + execution_diagnostic
                 )
                 for _ in range(12):
                     page.wait_for_timeout(200)
@@ -313,6 +315,7 @@ class GlmAliyunChallenge:
             prompt,
             timeout_seconds=timeout_seconds,
         )
+        solver_diagnostic = registry.visual_diagnostic()
         if surface.slider and (
             len(actions) != 1
             or actions[0].type != "drag"
@@ -324,6 +327,10 @@ class GlmAliyunChallenge:
             target_x = actions[0].end[0]
             if target_x <= semantic.object_center_x + 0.025:
                 return []
+            self.last_diagnostic = (
+                f"ai={solver_diagnostic}:object_x={semantic.object_center_x:.3f}:"
+                f"target_x={target_x:.3f}"
+            )
             return [
                 VisualAction(
                     type="drag",
@@ -523,6 +530,7 @@ class GlmAliyunChallenge:
         if surface.width < 200 or surface.height < 200:
             raise RuntimeError("GLM captcha surface geometry is unavailable")
         slider_box = self._slider_box(page)
+        scene_width = self._slider_scene_width(page)
         for action in actions:
             if action.type == "click" and action.at is not None:
                 x, y = self._screen_point(action.at, surface)
@@ -531,7 +539,15 @@ class GlmAliyunChallenge:
                 page.mouse.click(x, y, delay=random.randint(45, 120))
             elif action.type == "drag" and action.start is not None and action.end is not None:
                 if slider_box is not None:
-                    start, end = self._slider_drag_points(action, surface, slider_box)
+                    start, end = self._slider_drag_points(
+                        action,
+                        surface,
+                        slider_box,
+                        scene_width,
+                    )
+                    self.last_diagnostic += (
+                        f":scene_width={scene_width:.1f}:surface_width={surface.width:.1f}"
+                    )
                 else:
                     start = self._screen_point(action.start, surface)
                     end = self._screen_point(action.end, surface)
@@ -556,6 +572,7 @@ class GlmAliyunChallenge:
         action: VisualAction,
         surface: GlmCaptchaSurface,
         slider_box: dict[str, float],
+        scene_width: float,
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         if action.start is None or action.end is None:
             raise RuntimeError("GLM slider action is incomplete")
@@ -563,12 +580,25 @@ class GlmAliyunChallenge:
             slider_box["x"] + slider_box["width"] / 2,
             slider_box["y"] + slider_box["height"] / 2,
         )
-        delta_x = (action.end[0] - action.start[0]) * surface.width
+        effective_width = scene_width if scene_width >= 100 else surface.width
+        delta_x = (action.end[0] - action.start[0]) * effective_width
         end = (
             max(start[0] + 4, min(surface.x + surface.width - 4, start[0] + delta_x)),
             start[1],
         )
         return start, end
+
+    def _slider_scene_width(self, page: Any) -> float:
+        try:
+            background = page.locator("#aliyunCaptcha-img").first
+            if background.count() and background.is_visible():
+                box = background.bounding_box()
+                width = float((box or {}).get("width") or 0)
+                if width >= 100:
+                    return width
+        except Exception:  # noqa: BLE001,S110 - fallback uses captured surface width
+            pass
+        return 0.0
 
     def _screen_point(
         self,

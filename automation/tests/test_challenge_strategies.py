@@ -662,6 +662,23 @@ def test_glm_slider_anchors_model_displacement_to_real_handle() -> None:
         action,
         surface,
         {"x": 120, "y": 300, "width": 40, "height": 40},
+        300,
+    )
+
+    assert start == (140, 320)
+    assert end == (215, 320)
+
+
+def test_glm_slider_falls_back_to_surface_width_without_scene_geometry() -> None:
+    challenge = GlmAliyunChallenge()
+    surface = GlmCaptchaSurface(b"", x=100, y=200, width=400, height=500)
+    action = VisualAction(type="drag", start=(0.2, 0.7), end=(0.45, 0.7))
+
+    start, end = challenge._slider_drag_points(
+        action,
+        surface,
+        {"x": 120, "y": 300, "width": 40, "height": 40},
+        0,
     )
 
     assert start == (140, 320)

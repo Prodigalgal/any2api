@@ -560,6 +560,14 @@ def test_glm_challenge_uses_separate_authentication_profile() -> None:
     assert challenge.profile.semantic_slider is True
 
 
+def test_glm_captcha_loader_bounds_existing_script_race() -> None:
+    from any2api_automation.providers.glm_challenge import _INSTALL_CAPTCHA
+
+    assert "waitForInitializer(5000)" in _INSTALL_CAPTCHA
+    assert "captcha script load failed" in _INSTALL_CAPTCHA
+    assert "_any2api=${Date.now()}" in _INSTALL_CAPTCHA
+
+
 def test_glm_challenge_maps_normalized_click_and_drag_to_viewport() -> None:
     page = _GlmActionPage()
     challenge = GlmAliyunChallenge()

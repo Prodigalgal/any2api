@@ -265,6 +265,7 @@ class GlmAliyunChallenge:
                 image = page.screenshot(
                     type="png",
                     clip={"x": x, "y": y, "width": width, "height": height},
+                    timeout=15_000,
                 )
                 return GlmCaptchaSurface(
                     image=image,
@@ -286,6 +287,7 @@ class GlmAliyunChallenge:
         image = page.screenshot(
             type="png",
             clip={"x": x, "y": y, "width": width, "height": height},
+            timeout=15_000,
         )
         return GlmCaptchaSurface(image=image, x=x, y=y, width=width, height=height)
 
@@ -631,20 +633,46 @@ async config => {
     document.body.appendChild(button);
   }
   window.AliyunCaptchaConfig = {region: config.region, prefix: config.prefix};
+  const waitForInitializer = timeout => new Promise(resolve => {
+    const started = Date.now();
+    const check = () => {
+      if (window.initAliyunCaptcha) return resolve(true);
+      if (Date.now() - started >= timeout) return resolve(false);
+      setTimeout(check, 50);
+    };
+    check();
+  });
+  const loadScript = src => new Promise(resolve => {
+    const script = document.createElement('script');
+    const finish = loaded => {
+      clearTimeout(timer);
+      script.onload = null;
+      script.onerror = null;
+      if (!loaded) script.remove();
+      resolve(loaded);
+    };
+    const timer = setTimeout(() => finish(false), 10000);
+    script.src = src;
+    script.onload = () => finish(true);
+    script.onerror = () => finish(false);
+    document.head.appendChild(script);
+  });
   if (!window.initAliyunCaptcha) {
-    await new Promise((resolve, reject) => {
-      const existing = document.querySelector(`script[src="${config.scriptUrl}"]`);
-      if (existing) {
-        existing.addEventListener('load', resolve, {once: true});
-        existing.addEventListener('error', reject, {once: true});
+    const existing = document.querySelector(`script[src="${config.scriptUrl}"]`);
+    if (existing) await waitForInitializer(5000);
+    if (!window.initAliyunCaptcha) {
+      existing?.remove();
+      const separator = config.scriptUrl.includes('?') ? '&' : '?';
+      const loaded = await loadScript(
+        `${config.scriptUrl}${separator}_any2api=${Date.now()}`
+      );
+      if (!loaded) {
+        state.status = 'error';
+        state.error = 'captcha script load failed';
         return;
       }
-      const script = document.createElement('script');
-      script.src = config.scriptUrl;
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
+      await waitForInitializer(2000);
+    }
   }
   if (!window.initAliyunCaptcha) {
     state.status = 'error';

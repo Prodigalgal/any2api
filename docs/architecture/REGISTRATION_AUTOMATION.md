@@ -58,6 +58,9 @@ flows for that identity. Java counts the completed registration call as one iden
 each browser flow. If all provider-local flows fail, a batch may create a replacement identity only
 when its configured `maxAttempts` budget still has room. This lets a success target tolerate bounded
 failed identities without sharing one mailbox across concurrent calls.
+Registration-job backoff follows consecutive fully failed batches, not lifetime attempt totals. A
+batch with at least one successful identity resets the failure streak and resumes the short jittered
+delay; an entirely failed batch increments the streak and backs off exponentially up to 15 minutes.
 Browser retries for the same identity derive a stable proxy affinity and rotate the ordered node
 list by attempt number. A provider-specific browser failure therefore advances to another node
 without hard-coding node names or consuming another mailbox.

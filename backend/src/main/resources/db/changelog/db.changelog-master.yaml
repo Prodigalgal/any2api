@@ -19,3 +19,5 @@ databaseChangeLog:
       file: db/changelog/releases/009-random-model-roles.sql
   - include:
       file: db/changelog/releases/010-proxy-traffic-scopes.sql
+  - include:
+      file: db/changelog/releases/011-registration-backoff-streak.sql

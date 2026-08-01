@@ -15,6 +15,7 @@ from ..captcha.artifacts import record_captcha_artifact
 from ..captcha.models import SolverEstimate, VisualAction
 from ..captcha.object_placement import estimate_blurred_object_placement
 from ..captcha.registry import registry
+from ..lifecycle.browser import browser_operation_deadline
 from .glm_settings import settings
 
 
@@ -81,6 +82,26 @@ class GlmAliyunChallenge:
         page.add_init_script(_OBSERVE_OFFICIAL_CAPTCHA)
 
     def solve(self, page: Any, *, timeout_seconds: int | None = None) -> str:
+        config = settings()
+        operation_timeout = (
+            (timeout_seconds or config.glm_captcha_timeout_seconds)
+            + config.glm_official_captcha_wait_seconds
+            + 30
+        )
+        expired = None
+        try:
+            with browser_operation_deadline(
+                page,
+                operation_timeout,
+                label="GLM Aliyun captcha",
+            ) as expired:
+                return self._solve(page, timeout_seconds=timeout_seconds)
+        except Exception as error:
+            if expired is not None and expired.is_set():
+                raise RuntimeError("GLM Aliyun captcha operation timed out") from error
+            raise
+
+    def _solve(self, page: Any, *, timeout_seconds: int | None = None) -> str:
         config = settings()
         if not self._use_official_initialization(page):
             self._install(page)

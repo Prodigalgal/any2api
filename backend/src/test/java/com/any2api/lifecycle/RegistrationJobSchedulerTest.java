@@ -19,16 +19,19 @@ class RegistrationJobSchedulerTest {
     }
 
     @Test
-    void successfulRegistrationUsesShortJitterWhileFailuresBackOff() {
+    void onlyConsecutiveFullyFailedBatchesBackOff() {
         var jobId = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
         var successDelay = RegistrationJobScheduler.nextRegistrationDelay(
-            jobId, 12, false);
-        var failureDelay = RegistrationJobScheduler.nextRegistrationDelay(
-            jobId, 12, true);
+            jobId, 0, false);
+        var firstFailureDelay = RegistrationJobScheduler.nextRegistrationDelay(
+            jobId, 1, true);
+        var sustainedFailureDelay = RegistrationJobScheduler.nextRegistrationDelay(
+            jobId, 6, true);
 
         assertThat(successDelay).isBetween(Duration.ofSeconds(5), Duration.ofSeconds(15));
-        assertThat(failureDelay).isGreaterThanOrEqualTo(Duration.ofMinutes(15));
+        assertThat(firstFailureDelay).isBetween(Duration.ofSeconds(30), Duration.ofMinutes(1));
+        assertThat(sustainedFailureDelay).isGreaterThanOrEqualTo(Duration.ofMinutes(15));
     }
 
     @Test

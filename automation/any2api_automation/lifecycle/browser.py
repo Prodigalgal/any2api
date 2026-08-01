@@ -3,15 +3,85 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import signal
+import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
 from ..config import settings
 from .proxy import proxy_lease, proxy_parameters
 
 logger = logging.getLogger("any2api_automation.browser")
+
+
+def _driver_pid(value: Any) -> int | None:
+    impl = getattr(value, "_impl_obj", value)
+    connection = getattr(impl, "_connection", None)
+    transport = getattr(connection, "_transport", None)
+    process = getattr(transport, "_proc", None)
+    pid = getattr(process, "pid", None)
+    return pid if isinstance(pid, int) and pid > 1 else None
+
+
+def _process_tree(root_pid: int) -> list[int]:
+    result: list[int] = []
+    pending = [root_pid]
+    seen: set[int] = set()
+    while pending:
+        pid = pending.pop()
+        if pid in seen or pid <= 1:
+            continue
+        seen.add(pid)
+        result.append(pid)
+        try:
+            children = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="ascii")
+        except OSError:
+            continue
+        pending.extend(int(value) for value in children.split() if value.isdigit())
+    return result
+
+
+def _terminate_process_tree(root_pid: int, label: str) -> None:
+    pids = _process_tree(root_pid)
+    if not pids:
+        pids = [root_pid]
+    logger.warning("browser operation deadline exceeded label=%s driver_pid=%s", label, root_pid)
+    for process_signal in (signal.SIGTERM, signal.SIGKILL):
+        for pid in reversed(pids):
+            with suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, process_signal)
+        if process_signal == signal.SIGTERM:
+            time.sleep(0.25)
+
+
+@contextmanager
+def browser_operation_deadline(
+    value: Any,
+    timeout_seconds: float,
+    *,
+    label: str,
+) -> Iterator[threading.Event]:
+    expired = threading.Event()
+    pid = _driver_pid(value)
+    timer: threading.Timer | None = None
+    if pid is not None:
+
+        def expire() -> None:
+            expired.set()
+            _terminate_process_tree(pid, label)
+
+        timer = threading.Timer(max(0.1, timeout_seconds), expire)
+        timer.daemon = True
+        timer.start()
+    try:
+        yield expired
+    finally:
+        if timer is not None:
+            timer.cancel()
 
 
 @dataclass(frozen=True)
@@ -196,7 +266,12 @@ def run_browser_flow(
         finally:
             context.set_default_timeout(max(1, config.browser_cleanup_timeout_seconds) * 1000)
             try:
-                context.close()
+                with browser_operation_deadline(
+                    page,
+                    config.browser_cleanup_timeout_seconds,
+                    label=f"{backend} context cleanup",
+                ):
+                    context.close()
             except Exception as error:  # noqa: BLE001 - browser process cleanup follows
                 logger.warning(
                     "browser context cleanup failed backend=%s error_type=%s",
@@ -258,7 +333,12 @@ def launch_browser(
             try:
                 yield backend, browser
             finally:
-                manager.__exit__(None, None, None)
+                with browser_operation_deadline(
+                    browser,
+                    settings().browser_cleanup_timeout_seconds,
+                    label="camoufox runtime cleanup",
+                ):
+                    manager.__exit__(None, None, None)
             return
         if backend == "patchright":
             runtime = None
@@ -291,8 +371,15 @@ def launch_browser(
             try:
                 yield backend, browser
             finally:
-                browser.close()
-                runtime.stop()
+                with browser_operation_deadline(
+                    browser,
+                    settings().browser_cleanup_timeout_seconds,
+                    label="patchright runtime cleanup",
+                ):
+                    try:
+                        browser.close()
+                    finally:
+                        runtime.stop()
             return
     raise RuntimeError("no browser backend available: " + "; ".join(errors))
 

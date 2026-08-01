@@ -80,7 +80,7 @@ The automation browser stack is published separately from application code. The 
 `browser-runtime-sha-*` image contains the ARM64 operating-system libraries, Python lockfile
 dependencies, Patchright Chromium, Camoufox, Firefox, sing-box, and native solver libraries. Run
 the `Build browser runtime` workflow only when `Dockerfile.browser-runtime`, `pyproject.toml`,
-`uv.lock`, a browser version, or sing-box changes. Pin the resulting immutable tag in
+`uv.lock`, a browser version, or sing-box changes. Pin the resulting immutable tag and digest in
 `automation/Dockerfile`; ordinary automation releases then copy only provider source code and do
 not rebuild browser binaries.
 

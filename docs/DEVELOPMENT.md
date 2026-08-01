@@ -74,6 +74,20 @@ Changesets live under `backend/src/main/resources/db/changelog`.
 
 Spring Data JPA and JdbcClient are blocking. They must never execute on Reactor Netty event-loop threads. Application services use the configured virtual-thread executor for database transactions. Streaming provider calls remain reactive through WebClient and must propagate downstream cancellation upstream.
 
+## Browser runtime image
+
+The automation browser stack is published separately from application code. The immutable
+`browser-runtime-sha-*` image contains the ARM64 operating-system libraries, Python lockfile
+dependencies, Patchright Chromium, Camoufox, Firefox, sing-box, and native solver libraries. Run
+the `Build browser runtime` workflow only when `Dockerfile.browser-runtime`, `pyproject.toml`,
+`uv.lock`, a browser version, or sing-box changes. Pin the resulting immutable tag in
+`automation/Dockerfile`; ordinary automation releases then copy only provider source code and do
+not rebuild browser binaries.
+
+The runtime remains a build-time base image, not a network service. Browser processes, provider
+flows, per-flow proxy processes, and browser-bound captcha tickets therefore stay in the same
+automation Pod lifecycle.
+
 ## Definition of done
 
 A feature is complete only when its affected surface has evidence:

@@ -63,13 +63,13 @@ the embedded `36qgs6xb` scene; chat uses the popup `didk33e0` scene. A ticket fr
 reused for the other. The provider first executes the SDK's fixed start action, then treats each
 challenge as a multi-round interaction until the official success callback returns a one-time
 ticket. Slider layouts expose a 300x300 background and an independent alpha foreground strip. Local
-ddddocr/OpenCV estimates are accepted only when they agree within 12 pixels; otherwise an optional
-vision solver chooses among the measured candidates. The shared solver calls Any2API's own
-`/multimodal-random/v1/chat/completions` endpoint with `model=random`; it never names or depends on a
-provider. The gateway may select only an enabled top-multimodal model backed by an inference-ready
-account, which prevents a registration attempt from recursively depending on its own pending
-account. Direct semantic click/drag layouts use the same restricted `ACTIONS=` schema. Model output
-is never treated as acceptance.
+OpenCV locates the inpainted slot from the alpha-masked foreground at its fixed vertical band. Three
+Gaussian scales must agree, the blurred-template gain must clear the threshold, the candidate must
+have low Laplacian boundary energy, and a sharp-template match must be absent. A low-confidence or
+unsupported visual layout is never guessed: the worker records a bounded diagnostic and refreshes
+the challenge or rotates a fresh browser while preserving the same mailbox. GLM captcha handling
+does not call the multimodal random inference routes. Only the official SDK success callback can
+accept a ticket.
 
 Grok registration uses one Camoufox context and one provider proxy lease. It loads the live signup page, waits for the current React Castle provider, discovers the current server action, router state, and Turnstile sitekey, and mints a full Castle request token from that page. Email-code requests, OTP verification, and signup are page-context fetches, so cookies, browser fingerprint, TLS, proxy egress, `conversionId`, Castle token, Turnstile token, `Next-Action`, and router state remain in one flow. Castle is minted again immediately before signup. A request with an empty or short Castle token is rejected locally and is never submitted. The Turnstile solver uses the same flow proxy by default.
 

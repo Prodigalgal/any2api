@@ -14,6 +14,7 @@ from any2api_automation.lifecycle.browser import BrowserResult
 from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationStage, RegistrationTrace
 from any2api_automation.providers.glm import (
+    GlmAutomationProvider,
     _activate_from_link,
     _activation_parameters,
     _retryable_registration_challenge,
@@ -113,6 +114,13 @@ def test_glm_registration_uses_fresh_browser_challenges_instead_of_sdk_refreshes
     glm_settings.cache_clear()
     assert glm_settings().glm_captcha_attempts == 1
     assert glm_settings().glm_registration_browser_attempts == 8
+
+
+def test_glm_manifest_advertises_only_deterministic_captcha_types() -> None:
+    assert GlmAutomationProvider.manifest.challenge_types == (
+        "aliyun_traceless",
+        "semantic_slider",
+    )
 
 
 def test_glm_activation_executes_verify_finish_and_profile_probe() -> None:

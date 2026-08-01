@@ -1036,27 +1036,44 @@ def test_glm_semantic_slider_never_executes_false_local_consensus(monkeypatch) -
     assert challenge._solve_actions(object(), surface, 42) == []
 
 
-def test_glm_semantic_slider_rejects_click_action(monkeypatch) -> None:
+def test_glm_semantic_slider_never_calls_ai_action_solver(monkeypatch) -> None:
     challenge = GlmAliyunChallenge()
     surface = GlmCaptchaSurface(b"rendered", x=10, y=20, width=300, height=300, slider=True)
-
-    monkeypatch.setattr(
-        challenge,
-        "_local_slider_action",
-        lambda page, captured: (None, []),
-    )
     monkeypatch.setattr(
         challenge,
         "_semantic_slider_input",
-        lambda page, image: GlmSemanticSliderInput(b"semantic-input", 0.05),
+        lambda page, image: GlmSemanticSliderInput(
+            b"semantic-input",
+            0.05,
+            b"background",
+            b"piece",
+        ),
     )
     monkeypatch.setattr(
         registry,
         "solve_visual_actions_sync",
-        lambda *args, **kwargs: [VisualAction(type="click", at=(0.5, 0.5))],
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("GLM semantic captcha must not invoke the AI action solver")
+        ),
     )
 
     assert challenge._solve_actions(object(), surface, 42) == []
+    assert "decision=refresh" in challenge.last_diagnostic
+
+
+def test_glm_non_slider_visual_challenge_never_calls_ai(monkeypatch) -> None:
+    challenge = GlmAliyunChallenge()
+    surface = GlmCaptchaSurface(b"rendered", x=10, y=20, width=300, height=300)
+    monkeypatch.setattr(
+        registry,
+        "solve_visual_actions_sync",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unsupported GLM visual challenges must refresh without AI")
+        ),
+    )
+
+    assert challenge._solve_actions(object(), surface, 42) == []
+    assert "deterministic_only" in challenge.last_diagnostic
 
 
 def test_glm_semantic_slider_input_magnifies_detached_object() -> None:
@@ -1194,24 +1211,6 @@ def test_glm_semantic_candidate_sheet_keeps_detached_object_reference() -> None:
         assert rgb.getpixel((560, rgb.height - 80))[2] > 180
 
 
-def test_glm_semantic_region_sheet_labels_regions_without_inserting_candidates() -> None:
-    reference = Image.new("RGB", (640, 340), "white")
-    ImageDraw.Draw(reference).rectangle((326, 32, 625, 331), fill="blue")
-
-    def png(image: Image.Image) -> bytes:
-        output = io.BytesIO()
-        image.save(output, format="PNG")
-        return output.getvalue()
-
-    result = GlmAliyunChallenge()._semantic_region_sheet(png(reference), tuple("ABC"))
-
-    with Image.open(io.BytesIO(result)) as sheet:
-        rgb = sheet.convert("RGB")
-        assert rgb.height > reference.height
-        assert rgb.getpixel((476, 180))[2] > 180
-        assert rgb.getpixel((376, rgb.height - 10)) == (0, 0, 0)
-
-
 def test_glm_semantic_candidate_sheet_preserves_narrow_sdk_piece_geometry() -> None:
     background = Image.new("RGB", (300, 300), "white")
     piece = Image.new("RGBA", (32, 300), (0, 0, 0, 0))
@@ -1223,7 +1222,6 @@ def test_glm_semantic_candidate_sheet_preserves_narrow_sdk_piece_geometry() -> N
         return output.getvalue()
 
     challenge = GlmAliyunChallenge()
-    feasible = challenge._slider_feasible_centers(png(background), png(piece))
     result = challenge._candidate_contact_sheet(
         png(background),
         png(piece),
@@ -1231,8 +1229,6 @@ def test_glm_semantic_candidate_sheet_preserves_narrow_sdk_piece_geometry() -> N
         ("A", "B"),
     )
 
-    assert feasible is not None
-    assert tuple(round(value, 3) for value in feasible) == (0.053, 0.947)
     with Image.open(io.BytesIO(result)) as sheet:
         first = sheet.convert("RGB").crop((12, 40, 232, 260))
         first_box = first.convert("L").point(lambda value: 255 if value < 64 else 0).getbbox()
@@ -1313,55 +1309,30 @@ def test_glm_capture_preserves_slider_mode_during_transient_locator_failure() ->
     assert result.image == b"fallback-slider-scene"
 
 
-def test_glm_semantic_slider_uses_coarse_then_fine_choice_consensus(monkeypatch) -> None:
-    background = Image.new("RGB", (300, 300), "white")
-    piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
-    ImageDraw.Draw(piece).rectangle((10, 120, 30, 150), fill="black")
-
-    def png(image: Image.Image) -> bytes:
-        output = io.BytesIO()
-        image.save(output, format="PNG")
-        return output.getvalue()
-
-    calls: list[tuple[tuple[str, ...], tuple[int, int]]] = []
-
-    def choose(image, prompt, choices, **kwargs):
-        del prompt, kwargs
-        with Image.open(io.BytesIO(image)) as source:
-            calls.append((choices, source.size))
-        return "B" if len(calls) == 1 else "C"
-
-    monkeypatch.setattr(registry, "solve_visual_choice_sync", choose)
+def test_glm_semantic_slider_rejects_ambiguous_cv_without_ai(monkeypatch) -> None:
+    challenge = GlmAliyunChallenge()
+    semantic = GlmSemanticSliderInput(
+        b"reference",
+        0.05,
+        b"background",
+        b"piece",
+    )
     monkeypatch.setattr(
         "any2api_automation.providers.glm_challenge.estimate_blurred_object_placement",
         lambda background, piece: None,
     )
-    challenge = GlmAliyunChallenge()
     monkeypatch.setattr(
-        "any2api_automation.providers.glm_challenge.settings",
-        lambda: type("Config", (), {"glm_semantic_ai_fallback_enabled": True})(),
-    )
-    semantic = GlmSemanticSliderInput(
-        png(Image.new("RGB", (640, 340), "white")),
-        0.05,
-        png(background),
-        png(piece),
+        registry,
+        "solve_visual_choice_sync",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ambiguous OpenCV results must not fall back to AI")
+        ),
     )
 
-    target, diagnostic = challenge._semantic_slider_target(semantic, 120)
+    target, diagnostic = challenge._semantic_slider_target(semantic)
 
-    assert target is not None
-    assert abs(target - 0.151) < 0.01
-    assert [choices for choices, _ in calls] == [
-        tuple("ABCDEFGHI"),
-        tuple("ABCDE"),
-        tuple("ABCDE"),
-    ]
-    assert calls[0][1][1] > 340
-    assert calls[1][1] != calls[0][1]
-    assert "coarse=B:" in diagnostic
-    assert "fine=C:" in diagnostic
-    assert "precision=C:" in diagnostic
+    assert target is None
+    assert diagnostic == "opencv_blur=unavailable:decision=refresh"
 
 
 def test_glm_slider_images_accept_browser_canvas_data_urls() -> None:

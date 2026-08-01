@@ -55,31 +55,23 @@ authentication: SceneId=36qgs6xb, mode=embed
 chat:           SceneId=didk33e0, mode=popup
 ```
 
-The shared vision client is configured only by environment variables. The API key and the optional
-shared prompt prefix are never stored in source, examples, diagnostics, or challenge artifacts.
-Every semantic image is submitted to the internal `multimodal-random` endpoint several times. The
-provider and model returned by the gateway are retained only as non-secret diagnostics.
-
 For inpainting slider challenges, the SDK exposes a background and a separate transparent
 foreground strip. Rendered scenes are not assumed to be square: current live challenges include
 portrait images narrower than 240 pixels. The foreground strip keeps its native width and vertical
 coordinate; stretching it to the background width destroys both the candidate geometry and the
 reachable range.
 
-The solver constructs completed scenes from the exact SDK background and foreground. Coarse
-selection uses a fixed reference area with the magnified detached object and pure target scene to
-choose the left, middle, or right semantic region. Local and precision stages then use finite
-labeled candidates whose moved foreground is marked by a magenta outline. Candidate sheets are
-palette-compressed to a bounded 120 KiB before base64 encoding. Open-ended coordinate regression is
-only a compatibility fallback when the SDK does not expose the two source images.
+The deterministic solver crops the alpha-masked foreground and compares sharp and Gaussian-blurred
+templates against the source background at the foreground's fixed vertical band. It requires a
+three-scale position consensus, sufficient blur-match gain, bounded candidate spread, low
+Laplacian boundary-energy percentile, and a weak sharp-template match. These guards distinguish the
+inpainted low-frequency residue from a visually similar object that is already present. Candidate
+sheets are generated only as bounded diagnostics; they are not sent to a model.
 
-Five `multimodal-random` calls run concurrently at each stage. The request uses only the standard
-parameter intersection supported by every top-multimodal provider. Answers must begin with
-`CHOICE=<label>`. Votes are deduplicated by provider; duplicate requests to one provider count once,
-and internally conflicting provider votes are discarded. A unique cross-provider majority is
-preferred at every stage. A 70 percent raw-sample supermajority is accepted only when the winning
-choice came from at least two provider sources, preventing one randomly over-selected provider from
-controlling the result. No-consensus refreshes the current challenge and never creates a new mailbox.
+An ambiguous OpenCV result, missing SDK source image, or unsupported non-slider visual layout is a
+refresh decision, never an inferred coordinate. Browser attempts reuse the same mailbox and rotate
+according to provider policy. The GLM captcha path does not call `/multimodal-random`; this prevents
+low-quality AI guesses and removes recursive dependence on inference-ready provider accounts.
 
 FeiLin does not map handle pixels linearly to foreground pixels. In a current live sample a 145 px
 handle move produced only 85.8 px of foreground motion, matching an approximately quadratic curve.
@@ -118,13 +110,13 @@ Verified on 2026-08-01:
   values are only a bounded fallback when the official component does not initialize;
 - authentication-scene escalation to real semantic challenges;
 - a live authentication semantic-slider challenge accepted by the official SDK success callback;
-- five-sample multimodal random aggregation against fixed known-target challenge images;
+- deterministic OpenCV placement using blur gain, three-scale consensus, Laplacian boundary energy,
+  and sharp-template rejection;
 - DOM foreground geometry, transparent-strip extraction, pure-background composition, and strict
   drag-only execution guards;
 - live non-linear handle/foreground measurements and adaptive execution with final placement errors
   below one pixel on two rejected semantic labels;
-- request-size rejection reproduction, bounded candidate compression, answer-first machine output,
-  and cross-provider routing across Qwen, MiMo, and MinMax;
+- bounded diagnostic artifacts and strict refresh behavior for ambiguous or unsupported layouts;
 - HAR-derived `verify_email` and `finish_signup` request/response mapping;
 - request-signature equality against the supplied HAR;
 - Java Chat/Responses mapping, chunked SSE decoding, model parsing, provider isolation, and random

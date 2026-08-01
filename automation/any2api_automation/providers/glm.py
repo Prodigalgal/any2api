@@ -41,7 +41,7 @@ class GlmAutomationProvider(AutomationProvider):
         browser_backend="camoufox",
         fallback_backend="patchright",
         isolation="process",
-        challenge_types=("aliyun_traceless", "semantic_slider", "semantic_drag", "semantic_click"),
+        challenge_types=("aliyun_traceless", "semantic_slider"),
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
         registration_attempt_mode="single_identity",

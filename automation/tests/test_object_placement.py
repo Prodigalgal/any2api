@@ -35,8 +35,8 @@ def test_blur_placement_locates_inpainted_residual() -> None:
     object_pixels[35:68, 7:17] = (20, 80, 190)
     piece[55:127, :, :3] = object_pixels
     piece[55:127, :, 3] = object_alpha
-    blurred = cv2.GaussianBlur(object_pixels, (0, 0), 7)
-    blurred_alpha = (cv2.GaussianBlur(object_alpha, (0, 0), 7) / 255.0)[:, :, None]
+    blurred = cv2.GaussianBlur(object_pixels, (0, 0), 4)
+    blurred_alpha = (cv2.GaussianBlur(object_alpha, (0, 0), 4) / 255.0)[:, :, None]
     sharp_alpha = (object_alpha / 255.0)[:, :, None]
     sharp_roi = background[55:127, 72:96].astype(np.float32)
     background[55:127, 72:96] = (

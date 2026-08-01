@@ -65,9 +65,10 @@ def estimate_blurred_object_placement(
         y_radius = max(3, round(height * 0.5))
         y_start = max(0, top - y_radius)
         y_stop = min(result_height, top + y_radius + 1)
-        x_margin = max(width, round(scene.shape[1] * 0.04))
-        x_start = max(0, x_margin - width // 2)
-        x_stop = min(result_width, scene.shape[1] - x_margin - width // 2)
+        minimum_center = round(scene.shape[1] * 0.15)
+        maximum_center = round(scene.shape[1] * 0.90)
+        x_start = max(0, round(minimum_center - width / 2))
+        x_stop = min(result_width, round(maximum_center - width / 2) + 1)
         if y_start >= y_stop or x_start >= x_stop:
             return None
         centered = _estimate_centered_placement(
@@ -262,7 +263,7 @@ def _estimate_centered_placement(
     energy_scale = max(0.001, float(high_energy - low_energy))
     normalized_energy = np.clip((energy - low_energy) / energy_scale, 0.0, 1.0)
     energy_weight = 0.0 if small_glyph else 0.32
-    vertical_weight = 0.04 if small_glyph else 0.24
+    vertical_weight = 0.04 if small_glyph else 0.08
     vertical_penalty = np.abs(np.arange(sharp.shape[0], dtype=np.float32)[:, None] - top) / max(
         1, y_radius
     )
@@ -352,7 +353,20 @@ def _estimate_centered_placement(
     vertical_offset = statistics.median(item[6] for item in winner)
     spread = max(item[0] for item in winner) - min(item[0] for item in winner)
     votes = len(winner)
-    accepted = votes >= 2 and spread <= tolerance and score >= -0.35 and sharp_similarity <= 0.92
+    minimum_center = (x_start + width / 2) / scene.shape[1]
+    maximum_center = (x_stop - 1 + width / 2) / scene.shape[1]
+    touches_search_boundary = (
+        center_x <= minimum_center + 0.005 or center_x >= maximum_center - 0.005
+    )
+    accepted = (
+        votes >= 2
+        and spread <= tolerance
+        and score >= -0.35
+        and (small_glyph or (gain >= 0.12 and separation >= 0.02))
+        and (small_glyph or votes == 3 or separation >= 0.03)
+        and -0.95 < sharp_similarity <= 0.92
+        and not touches_search_boundary
+    )
     confidence = max(
         0.0,
         min(

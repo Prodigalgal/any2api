@@ -20,6 +20,7 @@ final class GlmEventDecoder {
     private final Map<String, Integer> eventTypes = new LinkedHashMap<>();
     private final Map<String, Integer> phases = new LinkedHashMap<>();
     private final Map<String, Integer> payloadShapes = new LinkedHashMap<>();
+    private final Map<String, Integer> errorCodes = new LinkedHashMap<>();
     private long sequence;
     private long receivedBytes;
     private int frames;
@@ -60,9 +61,9 @@ final class GlmEventDecoder {
             LOGGER.warn(
                 "GLM stream completed without answer deltas requestId={} bytes={} frames={} "
                     + "sseFrames={} nonSseFrames={} eventTypes={} phases={} "
-                    + "payloadShapes={} reasoningDeltas={} failures={}",
+                    + "payloadShapes={} errorCodes={} reasoningDeltas={} failures={}",
                 requestId, receivedBytes, frames, sseFrames, nonSseFrames, eventTypes, phases,
-                payloadShapes, reasoningDeltas, failures);
+                payloadShapes, errorCodes, reasoningDeltas, failures);
         }
         return output;
     }
@@ -105,7 +106,7 @@ final class GlmEventDecoder {
         var type = root.path("type").asText("").trim();
         count(eventTypes, type.isEmpty() ? "<missing>" : type);
         var payload = payload(root.path("data"));
-        count(payloadShapes, shape(payload));
+        count(payloadShapes, payloadShape(payload));
         var phase = payload.path("phase").asText("").trim().toLowerCase();
         if (!phase.isEmpty()) count(phases, phase);
         var completion = "chat:completion".equals(type)
@@ -121,10 +122,13 @@ final class GlmEventDecoder {
             return;
         }
         if (payload.hasNonNull("error")) {
+            var errorType = errorType(payload);
+            var errorCode = errorCode(payload);
+            if (!errorCode.isEmpty()) count(errorCodes, errorCode);
             failures++;
             output.add(new CanonicalEvent.Failed(
-                1, requestId, next(), "provider_upstream_error",
-                "GLM completion payload contained an upstream error", Map.of()));
+                1, requestId, next(), errorType,
+                "GLM completion error class=" + errorType, Map.of()));
             return;
         }
         var delta = firstContent(payload, "delta_content", "content", "delta", "output_text");
@@ -190,6 +194,77 @@ final class GlmEventDecoder {
             entry.getKey() + ":" + entry.getValue().getNodeType().name().toLowerCase()));
         fields.sort(String::compareTo);
         return "{" + String.join(",", fields) + "}";
+    }
+
+    private String payloadShape(JsonNode payload) {
+        var output = "payload=" + shape(payload);
+        if (payload.path("error").isObject() || payload.path("error").isArray()) {
+            output += ";error=" + shape(payload.path("error"));
+        }
+        if (payload.path("data").isObject() || payload.path("data").isArray()) {
+            output += ";data=" + shape(payload.path("data"));
+        }
+        return output;
+    }
+
+    private String errorType(JsonNode payload) {
+        var text = errorText(payload).toLowerCase(java.util.Locale.ROOT);
+        if (text.contains("permission") || text.contains("forbidden")) {
+            return "permission_denied";
+        }
+        if (text.contains("account") && (text.contains("unavailable")
+            || text.contains("disabled") || text.contains("blocked"))) {
+            return "account_unavailable";
+        }
+        if (text.contains("model") && (text.contains("unavailable")
+            || text.contains("not found") || text.contains("invalid"))) {
+            return "model_unavailable";
+        }
+        if (text.contains("quota") || text.contains("credit") || text.contains("balance")) {
+            return "quota_exhausted";
+        }
+        if (text.contains("captcha") || text.contains("verify")) return "captcha_rejected";
+        if (text.contains("rate") || text.contains("too many")) return "rate_limited";
+        if (text.contains("token") || text.contains("auth") || text.contains("login")) {
+            return "credential_rejected";
+        }
+        return "provider_upstream_error";
+    }
+
+    private String errorCode(JsonNode payload) {
+        for (var source : errorSources(payload)) {
+            for (var field : List.of("code", "type", "name", "status")) {
+                var value = scalar(source.path(field));
+                if (!value.isEmpty()) {
+                    return value.replaceAll("[^A-Za-z0-9_.:-]", "_").substring(
+                        0, Math.min(80, value.length()));
+                }
+            }
+        }
+        return "<missing>";
+    }
+
+    private String errorText(JsonNode payload) {
+        var output = new StringBuilder();
+        for (var source : errorSources(payload)) {
+            for (var field : List.of("code", "type", "name", "status", "message", "detail")) {
+                var value = scalar(source.path(field));
+                if (!value.isEmpty()) output.append(' ').append(value);
+            }
+        }
+        return output.toString();
+    }
+
+    private List<JsonNode> errorSources(JsonNode payload) {
+        return List.of(
+            payload.path("error"),
+            payload.path("error").path("data"),
+            payload.path("data"),
+            payload.path("data").path("error"));
+    }
+
+    private String scalar(JsonNode value) {
+        return value.isValueNode() && !value.isNull() ? value.asText("").trim() : "";
     }
 
     private void count(Map<String, Integer> values, String key) {

@@ -119,6 +119,21 @@ class GlmProtocolTest {
     }
 
     @Test
+    void classifiesCompletionErrorWithoutExposingItsMessage() {
+        var decoder = new GlmEventDecoder("r6", mapper);
+        var events = new ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode(("data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"done\":true,\"error\":{\"code\":\"account_disabled\","
+            + "\"message\":\"account is unavailable\"},\"data\":{}}}\n\n"
+            + "data: [DONE]\n\n").getBytes(StandardCharsets.UTF_8)));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("account_unavailable")
+            && !failed.message().contains("account is unavailable"));
+    }
+
+    @Test
     void discoversNestedModelsAndSkipsInactiveEntries() {
         var root = mapper.readTree("""
             {"data":{"models":[

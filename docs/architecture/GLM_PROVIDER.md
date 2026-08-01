@@ -72,11 +72,13 @@ coordinate; stretching it to the background width destroys both the candidate ge
 reachable range.
 
 The deterministic solver crops the alpha-masked foreground and compares sharp and Gaussian-blurred
-templates against the source background at the foreground's fixed vertical band. It requires a
-three-scale position consensus, sufficient blur-match gain, bounded candidate spread, low
-Laplacian boundary-energy percentile, and a weak sharp-template match. These guards distinguish the
-inpainted low-frequency residue from a visually similar object that is already present. Candidate
-sheets are generated only as bounded diagnostics; they are not sent to a model.
+templates against the source background at the foreground's fixed vertical band. The primary path
+uses alpha-premultiplied, zero-mean low-frequency correlation across three scales, a bounded vertical
+offset, interior Laplacian energy, candidate-cluster consensus, and near-exact sharp-copy rejection.
+A legacy color-correlation candidate is eligible only with three votes, high blur gain, and low
+sharp similarity; this preserves strong small-glyph evidence without reviving the previous
+same-object false positives. Candidate sheets are generated only as bounded diagnostics; they are
+not sent to a model.
 
 An ambiguous OpenCV result, missing SDK source image, or unsupported non-slider visual layout is a
 refresh decision, never an inferred coordinate. Browser attempts reuse the same mailbox and rotate
@@ -89,8 +91,9 @@ captured or submitted as a captcha image.
 FeiLin does not map handle pixels linearly to foreground pixels. In a current live sample a 145 px
 handle move produced only 85.8 px of foreground motion, matching an approximately quadratic curve.
 The executor therefore calibrates the mapping during the same held drag, estimates the live curve,
-inverts it for the selected scene coordinate, and corrects against the actual foreground DOM box
-before releasing. No curve exponent is fixed in configuration. Other visual layouts use a bounded
+inverts it for the selected scene coordinate, and then applies bounded secant corrections from the
+observed handle and foreground deltas until the final DOM error is within one pixel. No curve
+exponent is fixed in configuration. Other visual layouts use a bounded
 click/drag action schema. Only the SDK success callback can accept a ticket, and a pending callback
 is polled for up to 30 seconds rather than treated as an immediate failure.
 

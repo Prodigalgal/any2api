@@ -14,7 +14,17 @@ def png(image: np.ndarray) -> bytes:
 
 def test_blur_placement_locates_inpainted_residual() -> None:
     rng = np.random.default_rng(42)
-    background = rng.integers(20, 60, size=(180, 300, 3), dtype=np.uint8)
+    grid_y, grid_x = np.mgrid[0:180, 0:300]
+    background = np.stack(
+        (
+            30 + grid_x * 0.18,
+            45 + grid_y * 0.22,
+            35 + (grid_x + grid_y) * 0.12,
+        ),
+        axis=2,
+    )
+    background += rng.normal(0, 1.5, background.shape)
+    background = np.clip(background, 0, 255).astype(np.uint8)
     piece = np.zeros((180, 24, 4), dtype=np.uint8)
     object_pixels = np.zeros((72, 24, 3), dtype=np.uint8)
     object_alpha = np.zeros((72, 24), dtype=np.uint8)
@@ -27,8 +37,13 @@ def test_blur_placement_locates_inpainted_residual() -> None:
     piece[55:127, :, 3] = object_alpha
     blurred = cv2.GaussianBlur(object_pixels, (0, 0), 7)
     blurred_alpha = (cv2.GaussianBlur(object_alpha, (0, 0), 7) / 255.0)[:, :, None]
-    blurred_roi = background[35:107, 208:232].astype(np.float32)
-    background[35:107, 208:232] = (
+    sharp_alpha = (object_alpha / 255.0)[:, :, None]
+    sharp_roi = background[55:127, 72:96].astype(np.float32)
+    background[55:127, 72:96] = (
+        sharp_roi * (1 - sharp_alpha) + object_pixels * sharp_alpha
+    ).astype(np.uint8)
+    blurred_roi = background[55:127, 208:232].astype(np.float32)
+    background[55:127, 208:232] = (
         blurred_roi * (1 - blurred_alpha) + blurred * blurred_alpha
     ).astype(np.uint8)
 
@@ -37,7 +52,8 @@ def test_blur_placement_locates_inpainted_residual() -> None:
     assert estimate is not None
     assert estimate.accepted is True
     assert abs(estimate.center_x - 220 / 300) < 0.06
-    assert estimate.votes == 3
+    assert estimate.votes >= 2
+    assert estimate.method == "centered_low_frequency"
 
 
 def test_blur_placement_rejects_scene_without_consistent_blur_residual() -> None:

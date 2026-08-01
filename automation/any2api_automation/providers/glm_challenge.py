@@ -880,9 +880,28 @@ class GlmAliyunChallenge:
                 if 0.4 <= measured <= 4.0:
                     exponent = measured
             final_error = target_piece_delta - observed_delta
-            for _ in range(3):
+            current_handle_delta = calibration_delta
+            current_piece_delta = observed_delta
+            previous_handle_delta: float | None = None
+            previous_piece_delta: float | None = None
+            for _ in range(6):
+                if abs(final_error) <= 1.0:
+                    break
                 desired_handle_delta = max_handle_delta * target_fraction ** (1.0 / exponent)
+                if previous_handle_delta is not None and previous_piece_delta is not None:
+                    handle_step = current_handle_delta - previous_handle_delta
+                    piece_step = current_piece_delta - previous_piece_delta
+                    slope = piece_step / handle_step if abs(handle_step) >= 0.5 else 0.0
+                    if slope > 0.02:
+                        correction_limit = max(8.0, max_handle_delta * 0.2)
+                        correction = max(
+                            -correction_limit,
+                            min(correction_limit, final_error / slope),
+                        )
+                        desired_handle_delta = current_handle_delta + correction
                 desired_handle_delta = max(4.0, min(max_handle_delta, desired_handle_delta))
+                previous_handle_delta = current_handle_delta
+                previous_piece_delta = current_piece_delta
                 pointer = self._move_held_slider(
                     page,
                     pointer,
@@ -892,8 +911,8 @@ class GlmAliyunChallenge:
                 current_piece = page.locator("#aliyunCaptcha-puzzle").first.bounding_box()
                 current_delta = float((current_piece or {}).get("x") or piece["x"]) - piece["x"]
                 final_error = target_piece_delta - current_delta
-                if abs(final_error) <= 1.5:
-                    break
+                current_handle_delta = desired_handle_delta
+                current_piece_delta = current_delta
                 current_handle_fraction = desired_handle_delta / max_handle_delta
                 current_piece_fraction = current_delta / max_piece_delta
                 if (

@@ -19,6 +19,7 @@ final class GlmEventDecoder {
     private final StringBuilder buffer = new StringBuilder();
     private final Map<String, Integer> eventTypes = new LinkedHashMap<>();
     private final Map<String, Integer> phases = new LinkedHashMap<>();
+    private final Map<String, Integer> payloadShapes = new LinkedHashMap<>();
     private long sequence;
     private long receivedBytes;
     private int frames;
@@ -59,9 +60,9 @@ final class GlmEventDecoder {
             LOGGER.warn(
                 "GLM stream completed without answer deltas requestId={} bytes={} frames={} "
                     + "sseFrames={} nonSseFrames={} eventTypes={} phases={} "
-                    + "reasoningDeltas={} failures={}",
+                    + "payloadShapes={} reasoningDeltas={} failures={}",
                 requestId, receivedBytes, frames, sseFrames, nonSseFrames, eventTypes, phases,
-                reasoningDeltas, failures);
+                payloadShapes, reasoningDeltas, failures);
         }
         return output;
     }
@@ -104,6 +105,7 @@ final class GlmEventDecoder {
         var type = root.path("type").asText("").trim();
         count(eventTypes, type.isEmpty() ? "<missing>" : type);
         var payload = payload(root.path("data"));
+        count(payloadShapes, shape(payload));
         var phase = payload.path("phase").asText("").trim().toLowerCase();
         if (!phase.isEmpty()) count(phases, phase);
         var completion = "chat:completion".equals(type)
@@ -118,9 +120,21 @@ final class GlmEventDecoder {
             }
             return;
         }
-        var delta = firstText(payload, "delta_content", "content", "delta");
-        if (delta.isEmpty() && payload.path("message").isObject()) {
-            delta = firstText(payload.path("message"), "content", "delta_content");
+        if (payload.hasNonNull("error")) {
+            failures++;
+            output.add(new CanonicalEvent.Failed(
+                1, requestId, next(), "provider_upstream_error",
+                "GLM completion payload contained an upstream error", Map.of()));
+            return;
+        }
+        var delta = firstContent(payload, "delta_content", "content", "delta", "output_text");
+        if (delta.isEmpty()) delta = content(payload.path("message"));
+        var choices = payload.path("choices");
+        if (delta.isEmpty() && choices.isArray() && !choices.isEmpty()) {
+            var choice = choices.get(0);
+            delta = content(choice.path("delta"));
+            if (delta.isEmpty()) delta = content(choice.path("message"));
+            if (delta.isEmpty()) delta = firstContent(choice, "text", "content");
         }
         if (!delta.isEmpty()) {
             if (List.of("thinking", "reasoning").contains(phase)) {
@@ -150,14 +164,32 @@ final class GlmEventDecoder {
         }
     }
 
-    private String firstText(JsonNode source, String... fields) {
+    private String firstContent(JsonNode source, String... fields) {
         for (var field : fields) {
-            if (source.path(field).isTextual()) {
-                var value = source.path(field).asText("");
-                if (!value.isEmpty()) return value;
-            }
+            var value = content(source.path(field));
+            if (!value.isEmpty()) return value;
         }
         return "";
+    }
+
+    private String content(JsonNode value) {
+        if (value.isTextual()) return value.asText("");
+        if (value.isArray()) {
+            var output = new StringBuilder();
+            for (var item : value) output.append(content(item));
+            return output.toString();
+        }
+        if (!value.isObject()) return "";
+        return firstContent(value, "text", "content", "value", "delta_content");
+    }
+
+    private String shape(JsonNode value) {
+        if (!value.isObject()) return value.getNodeType().name().toLowerCase();
+        var fields = new ArrayList<String>();
+        value.properties().forEach(entry -> fields.add(
+            entry.getKey() + ":" + entry.getValue().getNodeType().name().toLowerCase()));
+        fields.sort(String::compareTo);
+        return "{" + String.join(",", fields) + "}";
     }
 
     private void count(Map<String, Integer> values, String key) {

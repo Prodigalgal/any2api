@@ -105,6 +105,20 @@ class GlmProtocolTest {
     }
 
     @Test
+    void decodesOpenAiStyleAggregatedChoicesWithStructuredContent() {
+        var decoder = new GlmEventDecoder("r5", mapper);
+        var events = new ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode(("data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":["
+            + "{\"type\":\"text\",\"text\":\"ready\"}]}}]}}\n\n"
+            + "data: [DONE]\n\n").getBytes(StandardCharsets.UTF_8)));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta delta
+            && delta.delta().equals("ready"));
+    }
+
+    @Test
     void discoversNestedModelsAndSkipsInactiveEntries() {
         var root = mapper.readTree("""
             {"data":{"models":[

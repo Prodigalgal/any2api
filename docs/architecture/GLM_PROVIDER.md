@@ -72,6 +72,9 @@ An ambiguous OpenCV result, missing SDK source image, or unsupported non-slider 
 refresh decision, never an inferred coordinate. Browser attempts reuse the same mailbox and rotate
 according to provider policy. The GLM captcha path does not call `/multimodal-random`; this prevents
 low-quality AI guesses and removes recursive dependence on inference-ready provider accounts.
+The SDK replaces slider DOM nodes in place, so capture retries the official image and handle as one
+stable geometry pair. A vanished node is a transient round retry; the browser viewport is never
+captured or submitted as a captcha image.
 
 FeiLin does not map handle pixels linearly to foreground pixels. In a current live sample a 145 px
 handle move produced only 85.8 px of foreground motion, matching an approximately quadratic curve.

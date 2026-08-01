@@ -1280,33 +1280,47 @@ def test_glm_capture_recognizes_narrow_portrait_slider_scene() -> None:
 
 def test_glm_capture_preserves_slider_mode_during_transient_locator_failure() -> None:
     class Locator:
+        def __init__(self, page, selector: str) -> None:
+            self.page = page
+            self.selector = selector
+
         @property
         def first(self):
             return self
 
-        def is_visible(self) -> bool:
-            raise RuntimeError("transient DOM replacement")
+        def count(self) -> int:
+            return 1
 
-    class Page:
-        def evaluate(self, script: str) -> object:
-            if script.startswith("() => ({width"):
-                return {"width": 1440, "height": 900}
-            if "please complete" in script:
-                return {"x": 500, "y": 200, "width": 332, "height": 429}
+        def is_visible(self) -> bool:
+            if self.selector == "#aliyunCaptcha-img" and self.page.failures == 0:
+                self.page.failures += 1
+                raise RuntimeError("transient DOM replacement")
             return True
 
+        def bounding_box(self) -> dict[str, float]:
+            return {"x": 500, "y": 200, "width": 300, "height": 300}
+
+    class Page:
+        def __init__(self) -> None:
+            self.failures = 0
+            self.waits: list[int] = []
+
         def locator(self, selector: str) -> Locator:
-            del selector
-            return Locator()
+            return Locator(self, selector)
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            self.waits.append(milliseconds)
 
         def screenshot(self, **kwargs: object) -> bytes:
-            del kwargs
-            return b"fallback-slider-scene"
+            assert kwargs["clip"] == {"x": 500.0, "y": 200.0, "width": 300.0, "height": 300.0}
+            return b"stable-slider-scene"
 
-    result = GlmAliyunChallenge()._capture_surface(Page())
+    page = Page()
+    result = GlmAliyunChallenge()._capture_surface(page)
 
     assert result.slider is True
-    assert result.image == b"fallback-slider-scene"
+    assert result.image == b"stable-slider-scene"
+    assert page.waits == [100]
 
 
 def test_glm_semantic_slider_rejects_ambiguous_cv_without_ai(monkeypatch) -> None:

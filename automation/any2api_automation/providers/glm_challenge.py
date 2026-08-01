@@ -110,7 +110,16 @@ class GlmAliyunChallenge:
                     )
                     round_diagnostics.append(self.last_diagnostic)
                     continue
-                surface = self._capture_surface(page)
+                try:
+                    surface = self._capture_surface(page)
+                except RuntimeError as error:
+                    self.last_diagnostic = (
+                        f"mode=visual, attempt={attempt}, round={round_number}, "
+                        f"surface=transient:{error}"
+                    )
+                    round_diagnostics.append(self.last_diagnostic)
+                    page.wait_for_timeout(300)
+                    continue
                 actions = self._solve_actions(page, surface, remaining)
                 if not actions:
                     solver_diagnostic = self.last_diagnostic
@@ -283,61 +292,41 @@ class GlmAliyunChallenge:
             return False
 
     def _capture_surface(self, page: Any) -> GlmCaptchaSurface:
-        viewport = page.evaluate("() => ({width: innerWidth, height: innerHeight})")
-        viewport_width = float(viewport.get("width") or 0)
-        viewport_height = float(viewport.get("height") or 0)
-        if viewport_width < 200 or viewport_height < 200:
-            raise RuntimeError("GLM captcha viewport geometry is unavailable")
-        try:
-            captcha_image = page.locator("#aliyunCaptcha-img").first
-            slider = page.locator("#aliyunCaptcha-sliding-slider").first
-            image_box = captcha_image.bounding_box() if captcha_image.is_visible() else None
-            slider_visible = bool(slider.count() and slider.is_visible())
-            if (
-                image_box
-                and slider_visible
-                and float(image_box.get("width") or 0) >= 160
-                and float(image_box.get("height") or 0) >= 160
-            ):
-                x = float(image_box["x"])
-                y = float(image_box["y"])
-                width = float(image_box["width"])
-                height = float(image_box["height"])
-                image = page.screenshot(
-                    type="png",
-                    clip={"x": x, "y": y, "width": width, "height": height},
-                    timeout=15_000,
-                )
-                return GlmCaptchaSurface(
-                    image=image,
-                    x=x,
-                    y=y,
-                    width=width,
-                    height=height,
-                    slider=True,
-                )
-        except Exception:  # noqa: BLE001,S110 - semantic direct-drag fallback follows
-            pass
-        rect = page.evaluate(_CAPTCHA_SURFACE_RECT)
-        x = max(0.0, float((rect or {}).get("x") or 0))
-        y = max(0.0, float((rect or {}).get("y") or 0))
-        width = min(viewport_width - x, float((rect or {}).get("width") or viewport_width))
-        height = min(viewport_height - y, float((rect or {}).get("height") or viewport_height))
-        if width < 240 or height < 200:
-            x, y, width, height = 0.0, 0.0, viewport_width, viewport_height
-        image = page.screenshot(
-            type="png",
-            clip={"x": x, "y": y, "width": width, "height": height},
-            timeout=15_000,
-        )
-        return GlmCaptchaSurface(
-            image=image,
-            x=x,
-            y=y,
-            width=width,
-            height=height,
-            slider=self._visual_surface_ready(page),
-        )
+        deadline = time.monotonic() + 2.5
+        last_error = "not_visible"
+        while time.monotonic() < deadline:
+            try:
+                captcha_image = page.locator("#aliyunCaptcha-img").first
+                slider = page.locator("#aliyunCaptcha-sliding-slider").first
+                image_box = captcha_image.bounding_box() if captcha_image.is_visible() else None
+                slider_visible = bool(slider.count() and slider.is_visible())
+                if (
+                    image_box
+                    and slider_visible
+                    and float(image_box.get("width") or 0) >= 160
+                    and float(image_box.get("height") or 0) >= 160
+                ):
+                    x = float(image_box["x"])
+                    y = float(image_box["y"])
+                    width = float(image_box["width"])
+                    height = float(image_box["height"])
+                    image = page.screenshot(
+                        type="png",
+                        clip={"x": x, "y": y, "width": width, "height": height},
+                        timeout=15_000,
+                    )
+                    return GlmCaptchaSurface(
+                        image=image,
+                        x=x,
+                        y=y,
+                        width=width,
+                        height=height,
+                        slider=True,
+                    )
+            except Exception as error:  # noqa: BLE001 - the SDK replaces captcha nodes in place
+                last_error = type(error).__name__
+            page.wait_for_timeout(100)
+        raise RuntimeError(f"official slider surface changed before capture ({last_error})")
 
     def _solve_actions(
         self,
@@ -1172,36 +1161,6 @@ _REFRESH_CAPTCHA = """
   state.error = '';
   try { window.__any2apiGlmCaptchaInstance?.refresh?.(); } catch (_) {}
   document.getElementById('any2api-glm-captcha-trigger')?.click();
-}
-"""
-
-_CAPTCHA_SURFACE_RECT = """
-() => {
-  const labels = [...document.querySelectorAll('body *')].filter(element => {
-    const ownText = [...element.childNodes]
-      .filter(node => node.nodeType === Node.TEXT_NODE)
-      .map(node => node.textContent || '')
-      .join(' ')
-      .trim();
-    return /please complete (the )?captcha/i.test(ownText);
-  });
-  let element = labels[0] || null;
-  while (element && element !== document.body) {
-    const box = element.getBoundingClientRect();
-    if (box.width >= 280 && box.height >= 320 && box.width <= 700 && box.height <= 800) {
-      const margin = 16;
-      const x = Math.max(0, box.x - margin);
-      const y = Math.max(0, box.y - margin);
-      return {
-        x,
-        y,
-        width: Math.min(innerWidth - x, box.width + margin * 2),
-        height: Math.min(innerHeight - y, box.height + margin * 2)
-      };
-    }
-    element = element.parentElement;
-  }
-  return {x: 0, y: 0, width: innerWidth, height: innerHeight};
 }
 """
 

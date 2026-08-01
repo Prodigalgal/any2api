@@ -45,6 +45,10 @@ not appear in shared transport code.
 The upstream stream uses `type=chat:completion`. `data.phase=thinking` maps to reasoning deltas,
 `answer` maps to output text, `other` carries usage, and `done` completes the canonical response.
 Both public Chat Completions and Responses consume this same canonical event stream.
+The decoder also accepts equivalent non-SSE completion JSON and alternate textual delta fields.
+Non-completion JSON is an explicit provider error instead of an empty successful response. When a
+stream contains no answer deltas, diagnostics retain only byte/frame counts, event types, and phase
+counts; response text and credentials are never logged.
 
 ## Captcha solver
 

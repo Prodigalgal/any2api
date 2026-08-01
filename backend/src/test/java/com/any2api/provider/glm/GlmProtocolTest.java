@@ -79,6 +79,32 @@ class GlmProtocolTest {
     }
 
     @Test
+    void decodesNonSseAndAlternateAnswerPayloadsWithoutSilentlyDroppingThem() {
+        var decoder = new GlmEventDecoder("r3", mapper);
+        var events = new ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode(("{\"type\":\"chat:completion\",\"data\":"
+            + "{\"phase\":\"answer\",\"content\":\"ready\"}}\n\n")
+            .getBytes(StandardCharsets.UTF_8)));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta delta
+            && delta.delta().equals("ready"));
+        assertThat(events).anyMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
+    void classifiesNonSseJsonErrorsInsteadOfCompletingAnEmptyResponse() {
+        var decoder = new GlmEventDecoder("r4", mapper);
+        var events = new ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode("{\"error\":\"account unavailable\"}"
+            .getBytes(StandardCharsets.UTF_8)));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("provider_upstream_error"));
+    }
+
+    @Test
     void discoversNestedModelsAndSkipsInactiveEntries() {
         var root = mapper.readTree("""
             {"data":{"models":[

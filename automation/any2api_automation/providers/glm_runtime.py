@@ -305,10 +305,48 @@ def _completion_request(request: BrowserRequest, ticket: str) -> dict[str, objec
     }
 
 
-_START_COMPLETION_STREAM = """
+_START_COMPLETION_STREAM = r"""
 async input => {
   history.replaceState(null, '', input.referer_path);
-  const response = await fetch(input.path, {
+  const target = new URL(input.path, location.origin);
+  const ua = navigator.userAgent;
+  const language = navigator.language || 'en-US';
+  const browserName = /Firefox\//.test(ua) ? 'firefox' :
+    /Edg\//.test(ua) ? 'edge' : /Chrome\//.test(ua) ? 'chrome' : 'unknown';
+  const osName = navigator.userAgentData?.platform || navigator.platform || 'Unknown';
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const values = {
+    user_agent: ua,
+    language,
+    languages: [...(navigator.languages || [language])].join(','),
+    timezone,
+    cookie_enabled: String(navigator.cookieEnabled),
+    screen_width: String(screen.width),
+    screen_height: String(screen.height),
+    screen_resolution: `${screen.width}x${screen.height}`,
+    viewport_width: String(innerWidth),
+    viewport_height: String(innerHeight),
+    viewport_size: `${innerWidth}x${innerHeight}`,
+    color_depth: String(screen.colorDepth),
+    pixel_ratio: String(devicePixelRatio),
+    current_url: location.href,
+    pathname: location.pathname,
+    search: location.search,
+    hash: location.hash,
+    host: location.host,
+    hostname: location.hostname,
+    protocol: location.protocol,
+    title: document.title,
+    timezone_offset: String(new Date().getTimezoneOffset()),
+    is_mobile: String(/Mobi|Android/i.test(ua)),
+    is_touch: String(navigator.maxTouchPoints > 0),
+    max_touch_points: String(navigator.maxTouchPoints || 0),
+    browser_name: browserName,
+    os_name: osName
+  };
+  for (const [name, value] of Object.entries(values)) target.searchParams.set(name, value);
+  const path = `${target.pathname}?${target.searchParams.toString()}`;
+  const response = await fetch(path, {
     method: input.method,
     headers: input.headers,
     body: JSON.stringify(input.body),
@@ -317,7 +355,8 @@ async input => {
   window.__any2apiGlmCompletionReader = response.body?.getReader() || null;
   return {
     status: response.status,
-    content_type: response.headers.get('content-type') || 'application/octet-stream'
+    content_type: response.headers.get('content-type') || 'application/octet-stream',
+    fingerprint_aligned: true
   };
 }
 """

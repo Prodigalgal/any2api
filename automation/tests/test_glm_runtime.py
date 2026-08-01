@@ -78,6 +78,8 @@ def test_bound_completion_starts_fetch_with_validated_payload() -> None:
     assert result.status == 200
     assert result.content_type == "text/event-stream"
     assert captured["payload"]["body"]["captcha_verify_param"] == "official-ticket"
+    assert "target.searchParams.set" in captured["script"]
+    assert "navigator.userAgent" in captured["script"]
 
 
 def test_bound_flow_is_single_use_and_session_scoped() -> None:
@@ -109,7 +111,7 @@ def test_bound_flow_solves_and_streams_on_the_same_worker_page(monkeypatch) -> N
             captured["wait"] = milliseconds
 
         def evaluate(self, script: str, payload: object | None = None) -> dict[str, object]:
-            if "fetch(input.path" in script:
+            if "fetch(path" in script:
                 captured["fetch"] = payload
                 return {"status": 200, "content_type": "text/event-stream"}
             self.reads += 1

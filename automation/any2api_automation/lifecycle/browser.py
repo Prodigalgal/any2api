@@ -45,11 +45,23 @@ def _process_tree(root_pid: int) -> list[int]:
     return result
 
 
-def _terminate_process_tree(root_pid: int, label: str) -> None:
+def _process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _terminate_process_tree(root_pid: int, label: str, *, reason: str) -> None:
     pids = _process_tree(root_pid)
     if not pids:
         pids = [root_pid]
-    logger.warning("browser operation deadline exceeded label=%s driver_pid=%s", label, root_pid)
+    logger.warning(
+        "browser process tree terminated reason=%s label=%s driver_pid=%s", reason, label, root_pid
+    )
     for process_signal in (signal.SIGTERM, signal.SIGKILL):
         for pid in reversed(pids):
             with suppress(ProcessLookupError, PermissionError):
@@ -72,7 +84,7 @@ def browser_operation_deadline(
 
         def expire() -> None:
             expired.set()
-            _terminate_process_tree(pid, label)
+            _terminate_process_tree(pid, label, reason="deadline_exceeded")
 
         timer = threading.Timer(max(0.1, timeout_seconds), expire)
         timer.daemon = True
@@ -82,6 +94,15 @@ def browser_operation_deadline(
     finally:
         if timer is not None:
             timer.cancel()
+
+
+def terminate_residual_browser_process(value: Any, *, label: str) -> None:
+    pid = value if isinstance(value, int) else _driver_pid(value)
+    if pid is None:
+        return
+    time.sleep(0.1)
+    if _process_alive(pid):
+        _terminate_process_tree(pid, label, reason="cleanup_returned_with_live_process")
 
 
 @dataclass(frozen=True)
@@ -331,6 +352,7 @@ def launch_browser(
                 errors.append(f"camoufox: {type(exc).__name__}")
                 continue
             try:
+                driver_pid = _driver_pid(browser)
                 yield backend, browser
             finally:
                 with browser_operation_deadline(
@@ -339,6 +361,7 @@ def launch_browser(
                     label="camoufox runtime cleanup",
                 ):
                     manager.__exit__(None, None, None)
+                terminate_residual_browser_process(driver_pid, label="camoufox runtime cleanup")
             return
         if backend == "patchright":
             runtime = None
@@ -369,6 +392,7 @@ def launch_browser(
                 errors.append(f"patchright: {type(exc).__name__}")
                 continue
             try:
+                driver_pid = _driver_pid(browser)
                 yield backend, browser
             finally:
                 with browser_operation_deadline(
@@ -380,6 +404,7 @@ def launch_browser(
                         browser.close()
                     finally:
                         runtime.stop()
+                terminate_residual_browser_process(driver_pid, label="patchright runtime cleanup")
             return
     raise RuntimeError("no browser backend available: " + "; ".join(errors))
 

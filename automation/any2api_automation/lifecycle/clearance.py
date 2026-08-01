@@ -7,7 +7,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..config import settings
-from .browser import BrowserContextProfile, BrowserLaunchProfile, launch_browser
+from .browser import (
+    BrowserContextProfile,
+    BrowserLaunchProfile,
+    browser_operation_deadline,
+    launch_browser,
+)
 from .browser_session import BrowserSession
 
 _clearance_slots = threading.BoundedSemaphore(max(1, settings().browser_realtime_capacity))
@@ -93,7 +98,12 @@ def _refresh_once(
                 page.wait_for_timeout(750)
             raise RuntimeError("Cloudflare challenge did not reach a usable browser context")
         finally:
-            context.close()
+            with browser_operation_deadline(
+                page,
+                settings().browser_cleanup_timeout_seconds,
+                label="clearance context cleanup",
+            ):
+                context.close()
 
 
 def _clearance_patch(context: Any, browser: BrowserSession) -> dict[str, Any] | None:

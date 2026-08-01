@@ -22,6 +22,8 @@ from .glm_settings import settings
 class GlmCaptchaProfile:
     scene_id: str
     mode: str
+    region: str
+    prefix: str
     semantic_slider: bool = True
 
 
@@ -49,9 +51,13 @@ class GlmAliyunChallenge:
         self.profile = profile or GlmCaptchaProfile(
             scene_id=config.glm_chat_captcha_scene_id,
             mode="popup",
+            region=config.glm_chat_captcha_region,
+            prefix=config.glm_captcha_prefix,
         )
         if self.profile.mode not in {"embed", "popup"}:
             raise ValueError("GLM captcha mode must be embed or popup")
+        if self.profile.region not in {"cn", "sgp"}:
+            raise ValueError("GLM captcha region must be cn or sgp")
         self.last_diagnostic = "unavailable"
 
     @classmethod
@@ -61,6 +67,8 @@ class GlmAliyunChallenge:
             GlmCaptchaProfile(
                 scene_id=config.glm_auth_captcha_scene_id,
                 mode="embed",
+                region=config.glm_auth_captcha_region,
+                prefix=config.glm_captcha_prefix,
             )
         )
 
@@ -193,8 +201,8 @@ class GlmAliyunChallenge:
             _INSTALL_CAPTCHA,
             {
                 "scriptUrl": config.glm_captcha_script_url,
-                "region": config.glm_captcha_region,
-                "prefix": config.glm_captcha_prefix,
+                "region": self.profile.region,
+                "prefix": self.profile.prefix,
                 "sceneId": self.profile.scene_id,
                 "mode": self.profile.mode,
             },

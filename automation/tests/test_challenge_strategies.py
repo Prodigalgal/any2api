@@ -755,10 +755,15 @@ def test_glm_challenge_accepts_only_official_success_ticket_without_ai() -> None
 
 def test_glm_challenge_uses_separate_authentication_profile() -> None:
     challenge = GlmAliyunChallenge.for_authentication()
+    chat = GlmAliyunChallenge.for_chat()
 
     assert challenge.profile.scene_id == "36qgs6xb"
     assert challenge.profile.mode == "embed"
+    assert challenge.profile.region == "cn"
     assert challenge.profile.semantic_slider is True
+    assert chat.profile.scene_id == "didk33e0"
+    assert chat.profile.mode == "popup"
+    assert chat.profile.region == "sgp"
 
 
 def test_glm_challenge_observes_provider_owned_captcha_before_navigation() -> None:

@@ -105,7 +105,8 @@ def test_glm_fallback_region_tracks_current_official_configuration() -> None:
     from any2api_automation.providers.glm_settings import settings as glm_settings
 
     glm_settings.cache_clear()
-    assert glm_settings().glm_captcha_region == "cn"
+    assert glm_settings().glm_auth_captcha_region == "cn"
+    assert glm_settings().glm_chat_captcha_region == "sgp"
 
 
 def test_glm_registration_uses_fresh_browser_challenges_instead_of_sdk_refreshes() -> None:

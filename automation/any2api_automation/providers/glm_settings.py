@@ -8,8 +8,9 @@ class GlmSettings(AutomationProviderSettings):
     glm_captcha_script_url: str = (
         "https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"
     )
-    glm_captcha_region: str = "cn"
     glm_captcha_prefix: str = "no8xfe"
+    glm_auth_captcha_region: str = "cn"
+    glm_chat_captcha_region: str = "sgp"
     glm_auth_captcha_scene_id: str = "36qgs6xb"
     glm_chat_captcha_scene_id: str = "didk33e0"
     glm_captcha_attempts: int = 1

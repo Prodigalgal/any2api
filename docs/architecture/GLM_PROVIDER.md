@@ -61,8 +61,8 @@ counts; response text and credentials are never logged.
 Two provider-local profiles are required:
 
 ```text
-authentication: SceneId=36qgs6xb, mode=embed
-chat:           SceneId=didk33e0, mode=popup
+authentication: region=cn,  SceneId=36qgs6xb, mode=embed
+chat:           region=sgp, SceneId=didk33e0, mode=popup
 ```
 
 For inpainting slider challenges, the SDK exposes a background and a separate transparent

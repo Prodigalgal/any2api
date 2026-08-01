@@ -59,8 +59,8 @@ list by attempt number. A provider-specific browser failure therefore advances t
 without hard-coding node names or consuming another mailbox.
 
 GLM uses separate Alibaba Cloud Captcha profiles for authentication and chat. Authentication uses
-the embedded `36qgs6xb` scene; chat uses the popup `didk33e0` scene. A ticket from one scene is never
-reused for the other. The provider first executes the SDK's fixed start action, then treats each
+the embedded `36qgs6xb` scene in region `cn`; chat uses the popup `didk33e0` scene in region `sgp`.
+A ticket from one region/scene is never reused for the other. The provider first executes the SDK's fixed start action, then treats each
 challenge as a multi-round interaction until the official success callback returns a one-time
 ticket. Slider layouts expose a 300x300 background and an independent alpha foreground strip. Local
 OpenCV locates the inpainted slot from the alpha-masked foreground at its fixed vertical band. Three

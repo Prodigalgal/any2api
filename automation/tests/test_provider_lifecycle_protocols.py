@@ -107,6 +107,14 @@ def test_glm_fallback_region_tracks_current_official_configuration() -> None:
     assert glm_settings().glm_captcha_region == "cn"
 
 
+def test_glm_registration_uses_fresh_browser_challenges_instead_of_sdk_refreshes() -> None:
+    from any2api_automation.providers.glm_settings import settings as glm_settings
+
+    glm_settings.cache_clear()
+    assert glm_settings().glm_captcha_attempts == 1
+    assert glm_settings().glm_registration_browser_attempts == 8
+
+
 def test_glm_activation_executes_verify_finish_and_profile_probe() -> None:
     calls: list[dict[str, object]] = []
     scripts: list[str] = []

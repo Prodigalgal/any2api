@@ -27,8 +27,10 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class RegistrationJobScheduler {
     private static final int CLAIM_LIMIT = 2;
-    private static final Duration LEASE_TTL = Duration.ofMinutes(12);
-    private static final Duration LEASE_RENEW_INTERVAL = Duration.ofMinutes(4);
+    static final Duration LEASE_TTL = Duration.ofMinutes(12);
+    static final Duration LEASE_RENEW_INTERVAL = Duration.ofMinutes(4);
+    static final Duration AUTOMATION_ATTEMPT_TIMEOUT = Duration.ofMinutes(35);
+    static final Duration POLL_EXECUTION_TIMEOUT = Duration.ofMinutes(40);
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transactions;
@@ -61,7 +63,7 @@ public class RegistrationJobScheduler {
         Flux.fromIterable(claimed)
             .flatMap(job -> execute(job, owner).onErrorResume(error ->
                 Mono.fromRunnable(() -> failLease(job, owner, error))), CLAIM_LIMIT)
-            .then().block(Duration.ofMinutes(15));
+            .then().block(POLL_EXECUTION_TIMEOUT);
     }
 
     private List<Job> claim(String owner) {
@@ -109,6 +111,7 @@ public class RegistrationJobScheduler {
             .<Map<String, ?>>map(pool -> Map.of("proxy_pool", pool)).orElseGet(Map::of);
         var operation = Flux.range(0, batch)
             .flatMap(ignored -> automation.execute(job.providerId(), "register", payload)
+                .timeout(AUTOMATION_ATTEMPT_TIMEOUT)
                 .map(result -> importResult(job, result))
                 .onErrorResume(error -> Mono.just(Attempt.failed(error))), job.concurrency())
             .collectList()

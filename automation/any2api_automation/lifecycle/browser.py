@@ -4,7 +4,7 @@ import logging
 import os
 import secrets
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -219,6 +219,7 @@ def launch_browser(
     errors: list[str] = []
     for backend in order:
         if backend == "camoufox":
+            manager = None
             try:
                 from camoufox.sync_api import Camoufox
 
@@ -249,6 +250,9 @@ def launch_browser(
                 manager = Camoufox(**manager_options)
                 browser = manager.__enter__()
             except Exception as exc:  # noqa: BLE001 - optional third-party backend
+                if manager is not None:
+                    with suppress(Exception):
+                        manager.__exit__(None, None, None)
                 errors.append(f"camoufox: {type(exc).__name__}")
                 continue
             try:
@@ -257,6 +261,8 @@ def launch_browser(
                 manager.__exit__(None, None, None)
             return
         if backend == "patchright":
+            runtime = None
+            browser = None
             try:
                 from patchright.sync_api import sync_playwright
 
@@ -274,6 +280,12 @@ def launch_browser(
                     options["timeout"] = effective_profile.launch_timeout_ms
                 browser = runtime.chromium.launch(**options)
             except Exception as exc:  # noqa: BLE001 - optional third-party backend
+                if browser is not None:
+                    with suppress(Exception):
+                        browser.close()
+                if runtime is not None:
+                    with suppress(Exception):
+                        runtime.stop()
                 errors.append(f"patchright: {type(exc).__name__}")
                 continue
             try:

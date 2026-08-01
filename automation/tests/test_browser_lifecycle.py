@@ -1,7 +1,9 @@
 from contextlib import contextmanager
 
+import pytest
+
 from any2api_automation.lifecycle import browser as browser_lifecycle
-from any2api_automation.lifecycle.browser import BrowserResult, run_browser_flow
+from any2api_automation.lifecycle.browser import BrowserResult, launch_browser, run_browser_flow
 
 
 def test_browser_flow_bounds_context_cleanup_timeout(monkeypatch) -> None:
@@ -53,3 +55,29 @@ def test_browser_flow_bounds_context_cleanup_timeout(monkeypatch) -> None:
     assert result.external_id == "account-id"
     assert context.timeouts[-1] == 5_000
     assert context.closed is True
+
+
+def test_browser_launcher_cleans_partially_started_camoufox(monkeypatch) -> None:
+    import camoufox.sync_api
+
+    class Manager:
+        def __init__(self) -> None:
+            self.exited = False
+
+        def __enter__(self):
+            raise RuntimeError("browser launch failed after runtime start")
+
+        def __exit__(self, *args: object) -> None:
+            del args
+            self.exited = True
+
+    manager = Manager()
+    monkeypatch.setattr(camoufox.sync_api, "Camoufox", lambda **options: manager)
+
+    with (
+        pytest.raises(RuntimeError, match="no browser backend available"),
+        launch_browser("camoufox", None, headless=True, proxy_url=""),
+    ):
+        raise AssertionError("failed launcher must not yield")
+
+    assert manager.exited is True

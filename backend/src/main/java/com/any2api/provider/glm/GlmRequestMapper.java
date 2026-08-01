@@ -61,7 +61,6 @@ final class GlmRequestMapper {
         CanonicalRequest request,
         ChatSeed seed,
         String chatId,
-        String ticket,
         String email,
         long timestamp
     ) {
@@ -81,8 +80,7 @@ final class GlmRequestMapper {
             .putNull("current_user_message_parent_id")
             .set("background_tasks", mapper.createObjectNode()
                 .put("title_generation", true)
-                .put("tags_generation", true))
-            .put("captcha_verify_param", ticket);
+                .put("tags_generation", true));
         return body;
     }
 

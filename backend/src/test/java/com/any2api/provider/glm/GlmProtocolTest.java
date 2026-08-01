@@ -45,13 +45,13 @@ class GlmProtocolTest {
         var requestMapper = new GlmRequestMapper(mapper);
         var seed = requestMapper.prepareChat(request, 1785337442000L);
         var completion = requestMapper.prepareCompletion(
-            request, seed, "chat-1", "ticket-value", "user@example.test", 1785337442000L);
+            request, seed, "chat-1", "user@example.test", 1785337442000L);
 
         assertThat(seed.body().path("chat").path("models").get(0).asText())
             .isEqualTo("glm-5.2");
         assertThat(completion.path("model").asText()).isEqualTo("glm-5.2");
         assertThat(completion.path("signature_prompt").asText()).isEqualTo("hello");
-        assertThat(completion.path("captcha_verify_param").asText()).isEqualTo("ticket-value");
+        assertThat(completion.has("captcha_verify_param")).isFalse();
         assertThat(completion.path("features").path("auto_web_search").asBoolean()).isTrue();
         assertThat(completion.path("features").path("preview_mode").asBoolean()).isFalse();
         assertThat(completion.path("features").path("reasoning_effort").asText())

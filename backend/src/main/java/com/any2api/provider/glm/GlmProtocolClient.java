@@ -57,10 +57,10 @@ final class GlmProtocolClient {
         return Flux.usingWhen(
             transport.open(sessionCommand(credential, proxyPool, affinityKey)),
             session -> createChat(session, seed.body())
-                .flatMapMany(chatId -> captcha.solve(
+                .flatMapMany(chatId -> captcha.prepare(
                         session.id(), Math.min(240, properties.getTimeoutSeconds()))
-                    .flatMapMany(ticket -> streamCompletion(
-                        session, credential, email, request, seed, chatId, ticket))),
+                    .flatMapMany(flow -> streamCompletion(
+                        session, flow, credential, email, request, seed, chatId))),
             session -> close(session, credentialPatchSink),
             (session, ignored) -> close(session, credentialPatchSink),
             session -> close(session, credentialPatchSink));
@@ -99,17 +99,17 @@ final class GlmProtocolClient {
 
     private Flux<byte[]> streamCompletion(
         BrowserTransportClient.Session session,
+        GlmCaptchaClient.Flow flow,
         GlmCredential credential,
         String email,
         CanonicalRequest request,
         GlmRequestMapper.ChatSeed seed,
-        String chatId,
-        String ticket
+        String chatId
     ) {
         var timestamp = System.currentTimeMillis();
         var requestId = UUID.randomUUID().toString();
         var body = requestMapper.prepareCompletion(
-            request, seed, chatId, ticket, email, timestamp);
+            request, seed, chatId, email, timestamp);
         var signed = signer.sign(requestId, credential.userId(), seed.prompt(), timestamp);
         var path = completionPath(
             credential, chatId, requestId, seed.prompt(), signed.timestamp());
@@ -118,13 +118,10 @@ final class GlmProtocolClient {
             "x-fe-version", "prod-fe-" + properties.getFrontendVersion(),
             "x-region", properties.getRegion(),
             "x-signature", signed.signature());
-        return transport.stream(session.id(), new BrowserTransportClient.Request(
-            "POST",
-            path,
-            headers,
+        return captcha.stream(session.id(), flow, new BrowserTransportClient.Request(
+            "POST", path, headers,
             BrowserTransportClient.FingerprintProfile.SAME_ORIGIN_FETCH,
-            body,
-            properties.getTimeoutSeconds()));
+            body, properties.getTimeoutSeconds(), null, null, "/c/" + chatId));
     }
 
     private String completionPath(

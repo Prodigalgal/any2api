@@ -7,9 +7,11 @@ The GLM provider is split by capability, not by deployment:
 - Java owns model discovery, Chat/Responses mapping, request fingerprints, double-HMAC signing,
   upstream SSE decoding, account selection, leases, retries, and state transitions.
 - Python owns registration, reauthentication, Alibaba Cloud Captcha browser execution, temporary
-  mail, and the provider proxy lease.
-- The provider-local captcha runtime may return a one-time chat ticket for an existing opaque
-  browser-transport session. It never builds or sends the inference request.
+  mail, provider proxy leases, and browser-bound completion transport.
+- The provider-local runtime returns an opaque one-shot flow ID after the official captcha callback.
+  Java then maps and signs a fresh completion request. Python injects the retained ticket and sends
+  that request from the same Playwright page that solved the challenge; it does not map or sign the
+  provider protocol.
 
 No GLM identifier, URL, selector, header, or protocol branch exists in shared routing code.
 
@@ -27,6 +29,10 @@ POST /api/v2/chat/completions?...&signature_timestamp={timestamp}
 `chats/new` receives the chat seed and returns the upstream chat ID. The completion request carries
 the account token and browser fingerprint in its query, a one-time `captcha_verify_param` in the
 JSON body, and `x-fe-version`, `x-region`, and `x-signature` headers.
+The captcha page remains owned by one dedicated worker thread until the signed completion arrives.
+Flows are session-scoped, single-use, bounded by a consumption timeout, and cleaned on cancellation.
+This prevents `FRONTEND_CAPTCHA_REQUIRED`, which occurs when a ticket is solved in one browser and
+submitted through a different TLS/browser fingerprint.
 
 The signature contract is:
 

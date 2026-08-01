@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import threading
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ class _StreamMetadata:
 
 @dataclass(frozen=True)
 class _Failure:
+    stage: str
     error_type: str
 
 
@@ -59,6 +61,7 @@ class _Flow:
 
 
 _END = object()
+logger = logging.getLogger("any2api_automation.providers.glm_runtime")
 
 
 class _FlowManager:
@@ -87,7 +90,9 @@ class _FlowManager:
             self.discard(flow.id)
             if result.error_type == "KeyError":
                 raise KeyError(session_id)
-            raise _BoundFlowError(f"GLM bound captcha flow failed ({result.error_type})")
+            raise _BoundFlowError(
+                f"GLM bound captcha flow failed ({result.stage}:{result.error_type})"
+            )
         return flow
 
     def claim(self, session_id: str, flow_id: str) -> _Flow:
@@ -106,12 +111,13 @@ class _FlowManager:
     def _run(self, flow: _Flow) -> None:
         ready = False
         metadata = False
+        stage = "browser_setup"
         try:
             with (
                 browser_session_manager.lease(flow.session_id) as entry,
                 launch_browser(
-                    "patchright",
                     "camoufox",
+                    "patchright",
                     headless=True,
                     proxy_url=entry.proxy_url,
                     profile=BrowserLaunchProfile(humanize=True, camoufox_os="windows"),
@@ -133,25 +139,30 @@ class _FlowManager:
                     context.add_cookies(cookies)
                 page = context.new_page()
                 try:
+                    stage = "navigation"
                     page.goto(
                         settings().glm_base_url,
                         wait_until="domcontentloaded",
                         timeout=90_000,
                     )
                     page.wait_for_timeout(2_000)
+                    stage = "captcha"
                     challenge = GlmAliyunChallenge.for_chat()
                     ticket = challenge.solve(page, timeout_seconds=flow.timeout_seconds)
                     flow.ready.put(_Ready(challenge.last_diagnostic))
                     ready = True
                     if flow.cancel.is_set():
                         return
+                    stage = "await_completion"
                     try:
                         request = flow.command.get(timeout=60)
                     except Empty as error:
                         raise TimeoutError("GLM bound captcha flow was not consumed") from error
+                    stage = "completion_start"
                     stream = _start_completion(page, request, ticket)
                     flow.metadata.put(stream)
                     metadata = True
+                    stage = "completion_stream"
                     while not flow.cancel.is_set():
                         chunk = page.evaluate(_READ_COMPLETION_CHUNK)
                         if not isinstance(chunk, dict) or bool(chunk.get("done")):
@@ -162,7 +173,12 @@ class _FlowManager:
                 finally:
                     context.close()
         except Exception as error:  # noqa: BLE001 - failure crosses the worker-thread boundary
-            failure = _Failure(type(error).__name__)
+            failure = _Failure(stage, type(error).__name__)
+            logger.warning(
+                "GLM bound browser flow failed stage=%s error_type=%s",
+                stage,
+                failure.error_type,
+            )
             if not ready:
                 flow.ready.put(failure)
             elif not metadata:
@@ -210,7 +226,9 @@ def stream_chat_completion(
         flow.command.put(request)
         result = flow.metadata.get(timeout=request.timeout_seconds + 30)
         if isinstance(result, _Failure):
-            raise _BoundFlowError(f"GLM bound completion failed ({result.error_type})")
+            raise _BoundFlowError(
+                f"GLM bound completion failed ({result.stage}:{result.error_type})"
+            )
         if not isinstance(result, _StreamMetadata):
             raise TypeError("GLM bound completion returned invalid metadata")
     except Empty as error:
@@ -237,7 +255,9 @@ def stream_chat_completion(
                 if item is _END:
                     break
                 if isinstance(item, _Failure):
-                    raise _BoundFlowError(f"GLM bound completion failed ({item.error_type})")
+                    raise _BoundFlowError(
+                        f"GLM bound completion failed ({item.stage}:{item.error_type})"
+                    )
                 if isinstance(item, bytes):
                     yield item
         finally:

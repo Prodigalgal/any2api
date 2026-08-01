@@ -110,9 +110,12 @@ succeeds.
 
 ## Current verification status
 
-Verified on 2026-07-31:
+Verified on 2026-08-01:
 
 - official chat-scene SDK initialization and a live 280-byte traceless ticket;
+- registration navigation-time observation reuses the provider-owned captcha instance, so region,
+  scene, prefix, and dynamic SDK behavior come from the current official frontend; configured
+  values are only a bounded fallback when the official component does not initialize;
 - authentication-scene escalation to real semantic challenges;
 - a live authentication semantic-slider challenge accepted by the official SDK success callback;
 - five-sample multimodal random aggregation against fixed known-target challenge images;

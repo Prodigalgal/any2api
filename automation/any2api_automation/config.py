@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     captcha_diagnostics_max_files: int = 200
     registration_headless: bool = True
     registration_timeout_seconds: int = 360
+    browser_cleanup_timeout_seconds: int = 5
     registration_proxy_url: str = ""
     registration_use_dynamic_proxy: bool = False
     dynamic_proxy_subscription_url: str = ""

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import string
 from typing import Any
@@ -30,6 +31,8 @@ from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
 from .glm_challenge import GlmAliyunChallenge
 from .glm_settings import settings
+
+logger = logging.getLogger("any2api_automation.providers.glm")
 
 
 class GlmAutomationProvider(AutomationProvider):
@@ -143,6 +146,7 @@ async def _run_registration_browser(
 ) -> BrowserResult:
     attempts = max(1, min(8, settings().glm_registration_browser_attempts))
     for attempt in range(1, attempts + 1):
+        logger.info("GLM registration browser attempt attempt=%s/%s", attempt, attempts)
         try:
             return await asyncio.to_thread(
                 run_browser_flow,
@@ -167,7 +171,17 @@ async def _run_registration_browser(
                 fingerprint_policy=provider.browser_fingerprint_policy(),
             )
         except RuntimeError as error:
-            if attempt >= attempts or not _retryable_registration_challenge(trace, error):
+            retryable = _retryable_registration_challenge(trace, error)
+            if retryable:
+                detail = " ".join(str(error).split())[:240]
+                logger.warning(
+                    "GLM registration browser attempt failed attempt=%s/%s error_type=%s detail=%s",
+                    attempt,
+                    attempts,
+                    type(error).__name__,
+                    detail,
+                )
+            if attempt >= attempts or not retryable:
                 raise
     raise RuntimeError("GLM registration browser attempts were exhausted")
 
@@ -192,6 +206,8 @@ def _register_browser(
 ) -> BrowserResult:
     config = settings()
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
+    challenge = GlmAliyunChallenge.for_authentication()
+    challenge.arm_official(page)
     page.goto(
         f"{config.glm_base_url.rstrip('/')}/auth?action=signup",
         wait_until="domcontentloaded",
@@ -199,7 +215,6 @@ def _register_browser(
     )
     page.wait_for_timeout(2_000 + random.randint(0, 1_500))
     trace.mark(RegistrationStage.FORM_READY)
-    challenge = GlmAliyunChallenge.for_authentication()
     ticket = challenge.solve(page)
     trace.mark(RegistrationStage.CHALLENGE_CLEARED)
     display_name = "glm" + "".join(random.choice(string.ascii_lowercase) for _ in range(10))

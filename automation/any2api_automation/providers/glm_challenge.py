@@ -118,9 +118,14 @@ class GlmAliyunChallenge:
     def for_chat(cls) -> GlmAliyunChallenge:
         return cls()
 
+    def arm_official(self, page: Any) -> None:
+        """Observe the provider-owned captcha before its application scripts execute."""
+        page.add_init_script(_OBSERVE_OFFICIAL_CAPTCHA)
+
     def solve(self, page: Any, *, timeout_seconds: int | None = None) -> str:
         config = settings()
-        self._install(page)
+        if not self._use_official_initialization(page):
+            self._install(page)
         deadline = time.monotonic() + (timeout_seconds or config.glm_captcha_timeout_seconds)
         page.wait_for_timeout(1_500)
         if self._start_if_required(page):
@@ -192,6 +197,22 @@ class GlmAliyunChallenge:
             "GLM Aliyun captcha did not reach the official success callback "
             f"({self.last_diagnostic})"
         )
+
+    def _use_official_initialization(self, page: Any) -> bool:
+        state = self._state(page)
+        if state.get("status") in {"ready", "running", "success"}:
+            return True
+        if state.get("status") not in {"armed", "loading"}:
+            return False
+        deadline = time.monotonic() + max(1, settings().glm_official_captcha_wait_seconds)
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(200)
+            state = self._state(page)
+            if state.get("status") in {"ready", "running", "success"}:
+                return True
+            if state.get("status") in {"failed", "error", "closed", "missing"}:
+                return False
+        return False
 
     def _accepted_ticket(self, state: dict[str, Any]) -> str:
         if state.get("status") != "success":
@@ -1143,6 +1164,65 @@ class GlmAliyunChallenge:
         page.mouse.up()
 
 
+_OBSERVE_OFFICIAL_CAPTCHA = """
+(() => {
+  const state = window.__any2apiGlmCaptchaState = {
+    status: 'armed', ticket: '', error: '', source: 'official'
+  };
+  let initializer;
+  const wrap = value => {
+    if (typeof value !== 'function') return value;
+    return config => {
+      state.status = 'loading';
+      const originalSuccess = config?.success;
+      const originalFail = config?.fail;
+      const originalError = config?.onError;
+      const originalClose = config?.onClose;
+      const originalInstance = config?.getInstance;
+      return value({
+        ...config,
+        success: (...args) => {
+          const result = args[0];
+          state.ticket = typeof result === 'string' ? result : JSON.stringify(result);
+          state.status = 'success';
+          return originalSuccess?.(...args);
+        },
+        fail: (...args) => {
+          state.status = 'failed';
+          state.error = typeof args[0] === 'string' ? args[0] : 'challenge failed';
+          return originalFail?.(...args);
+        },
+        onError: (...args) => {
+          state.status = 'error';
+          state.error = typeof args[0] === 'string' ? args[0] : 'captcha service error';
+          return originalError?.(...args);
+        },
+        onClose: (...args) => {
+          state.status = 'closed';
+          return originalClose?.(...args);
+        },
+        getInstance: instance => {
+          window.__any2apiGlmCaptchaInstance = instance;
+          state.status = 'ready';
+          const result = originalInstance?.(instance);
+          if (state.status === 'ready') state.status = 'running';
+          return result;
+        }
+      });
+    };
+  };
+  Object.defineProperty(window, 'initAliyunCaptcha', {
+    configurable: true,
+    enumerable: true,
+    get: () => wrap(initializer),
+    set: value => {
+      initializer = value;
+      window.__any2apiGlmCaptchaRawInit = value;
+    }
+  });
+})();
+"""
+
 _INSTALL_CAPTCHA = """
 async config => {
   const state = window.__any2apiGlmCaptchaState = {
@@ -1172,10 +1252,11 @@ async config => {
     document.body.appendChild(button);
   }
   window.AliyunCaptchaConfig = {region: config.region, prefix: config.prefix};
+  const initializer = () => window.__any2apiGlmCaptchaRawInit || window.initAliyunCaptcha;
   const waitForInitializer = timeout => new Promise(resolve => {
     const started = Date.now();
     const check = () => {
-      if (window.initAliyunCaptcha) return resolve(true);
+      if (initializer()) return resolve(true);
       if (Date.now() - started >= timeout) return resolve(false);
       setTimeout(check, 50);
     };
@@ -1196,10 +1277,10 @@ async config => {
     script.onerror = () => finish(false);
     document.head.appendChild(script);
   });
-  if (!window.initAliyunCaptcha) {
+  if (!initializer()) {
     const existing = document.querySelector(`script[src="${config.scriptUrl}"]`);
     if (existing) await waitForInitializer(5000);
-    if (!window.initAliyunCaptcha) {
+    if (!initializer()) {
       existing?.remove();
       const separator = config.scriptUrl.includes('?') ? '&' : '?';
       const loaded = await loadScript(
@@ -1213,12 +1294,12 @@ async config => {
       await waitForInitializer(2000);
     }
   }
-  if (!window.initAliyunCaptcha) {
+  if (!initializer()) {
     state.status = 'error';
     state.error = 'initAliyunCaptcha missing';
     return;
   }
-  window.initAliyunCaptcha({
+  initializer()({
     SceneId: config.sceneId,
     mode: config.mode,
     element: `#${hostId}`,

@@ -761,12 +761,62 @@ def test_glm_challenge_uses_separate_authentication_profile() -> None:
     assert challenge.profile.semantic_slider is True
 
 
+def test_glm_challenge_observes_provider_owned_captcha_before_navigation() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.scripts: list[str] = []
+
+        def add_init_script(self, script: str) -> None:
+            self.scripts.append(script)
+
+    page = Page()
+
+    GlmAliyunChallenge.for_authentication().arm_official(page)
+
+    assert len(page.scripts) == 1
+    assert "Object.defineProperty(window, 'initAliyunCaptcha'" in page.scripts[0]
+    assert "__any2apiGlmCaptchaRawInit" in page.scripts[0]
+    assert "originalSuccess" in page.scripts[0]
+
+
+def test_glm_challenge_prefers_captured_official_initialization(monkeypatch) -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.states = iter(
+                (
+                    {"status": "loading", "ticket": ""},
+                    {"status": "running", "ticket": ""},
+                )
+            )
+
+        def evaluate(self, script: str) -> dict[str, str]:
+            del script
+            return next(self.states)
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            del milliseconds
+
+    challenge = GlmAliyunChallenge.for_authentication()
+
+    def unexpected_fallback(_page: object) -> None:
+        raise AssertionError("captured official captcha must not use fallback installation")
+
+    monkeypatch.setattr(
+        challenge,
+        "_install",
+        unexpected_fallback,
+    )
+
+    assert challenge._use_official_initialization(Page()) is True
+
+
 def test_glm_captcha_loader_bounds_existing_script_race() -> None:
     from any2api_automation.providers.glm_challenge import _INSTALL_CAPTCHA
 
     assert "waitForInitializer(5000)" in _INSTALL_CAPTCHA
     assert "captcha script load failed" in _INSTALL_CAPTCHA
     assert "_any2api=${Date.now()}" in _INSTALL_CAPTCHA
+    assert "__any2apiGlmCaptchaRawInit" in _INSTALL_CAPTCHA
 
 
 def test_glm_challenge_maps_normalized_click_and_drag_to_viewport() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from collections.abc import Callable, Iterator
@@ -9,6 +10,8 @@ from typing import Any
 
 from ..config import settings
 from .proxy import proxy_lease, proxy_parameters
+
+logger = logging.getLogger("any2api_automation.browser")
 
 
 @dataclass(frozen=True)
@@ -191,7 +194,15 @@ def run_browser_flow(
                 },
             )
         finally:
-            context.close()
+            context.set_default_timeout(max(1, config.browser_cleanup_timeout_seconds) * 1000)
+            try:
+                context.close()
+            except Exception as error:  # noqa: BLE001 - browser process cleanup follows
+                logger.warning(
+                    "browser context cleanup failed backend=%s error_type=%s",
+                    backend,
+                    type(error).__name__,
+                )
 
 
 @contextmanager

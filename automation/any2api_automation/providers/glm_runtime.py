@@ -87,9 +87,7 @@ class _FlowManager:
             self.discard(flow.id)
             if result.error_type == "KeyError":
                 raise KeyError(session_id)
-            raise _BoundFlowError(
-                f"GLM bound captcha flow failed ({result.error_type})"
-            )
+            raise _BoundFlowError(f"GLM bound captcha flow failed ({result.error_type})")
         return flow
 
     def claim(self, session_id: str, flow_id: str) -> _Flow:
@@ -212,9 +210,7 @@ def stream_chat_completion(
         flow.command.put(request)
         result = flow.metadata.get(timeout=request.timeout_seconds + 30)
         if isinstance(result, _Failure):
-            raise _BoundFlowError(
-                f"GLM bound completion failed ({result.error_type})"
-            )
+            raise _BoundFlowError(f"GLM bound completion failed ({result.error_type})")
         if not isinstance(result, _StreamMetadata):
             raise TypeError("GLM bound completion returned invalid metadata")
     except Empty as error:
@@ -241,9 +237,7 @@ def stream_chat_completion(
                 if item is _END:
                     break
                 if isinstance(item, _Failure):
-                    raise _BoundFlowError(
-                        f"GLM bound completion failed ({item.error_type})"
-                    )
+                    raise _BoundFlowError(f"GLM bound completion failed ({item.error_type})")
                 if isinstance(item, bytes):
                     yield item
         finally:

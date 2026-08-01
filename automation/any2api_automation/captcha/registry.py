@@ -236,6 +236,15 @@ class SolverRegistry:
                 f"providers={provider_summary}:completed={len(done)}/{sample_count}"
             )
             return winner
+        strong_sample_winner = self._strong_cross_provider_sample_choice(raw_votes)
+        if strong_sample_winner is not None:
+            winner, count, source_count = strong_sample_winner
+            self._diagnostics.visual = (
+                f"choice_strong_samples:{winner}:{count}/{len(raw_votes)}:"
+                f"sources={source_count}:providers={provider_summary}:"
+                f"completed={len(done)}/{sample_count}"
+            )
+            return winner
         vote_summary = ",".join(f"{label}:{count}" for label, count in sorted(counts.items()))
         self._diagnostics.visual = (
             f"choice_rejected:completed={len(done)}/{sample_count}:"
@@ -267,6 +276,28 @@ class SolverRegistry:
             else:
                 summary.append(f"{display[key]}=conflict")
         return votes, ",".join(summary)
+
+    @staticmethod
+    def _strong_cross_provider_sample_choice(
+        raw_votes: list[tuple[str, str, int]],
+    ) -> tuple[str, int, int] | None:
+        if len(raw_votes) < 3:
+            return None
+        ranking = Counter(candidate for candidate, _, _ in raw_votes).most_common()
+        if not ranking or (len(ranking) > 1 and ranking[0][1] == ranking[1][1]):
+            return None
+        winner, count = ranking[0]
+        required = max(3, math.ceil(len(raw_votes) * 0.7))
+        if count < required:
+            return None
+        sources: set[str] = set()
+        for candidate, diagnostic, index in raw_votes:
+            if candidate != winner:
+                continue
+            match = re.search(r"(?:^|:)provider=([^:|]+)", diagnostic)
+            provider = match.group(1).strip().lower() if match else ""
+            sources.add(provider if provider and provider != "unknown" else f"sample-{index}")
+        return (winner, count, len(sources)) if len(sources) >= 2 else None
 
     @staticmethod
     def _visual_choice_candidate(content: str, choices: tuple[str, ...]) -> str | None:

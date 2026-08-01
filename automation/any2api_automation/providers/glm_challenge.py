@@ -46,23 +46,25 @@ ACTIONS=[{"type":"drag","from":[0,50],"to":[target_center_x,50]}]
 """.strip()
 
 GLM_SLIDER_COARSE_CHOICE_PROMPT = """
-Every labeled panel shows the exact same target scene. The same detached foreground object has
-been moved horizontally to a different candidate position while preserving its original size and
-vertical coordinate. Choose the ONE panel where the object has the correct semantic relationship
-to the scene, such as a backpack on the child, a lid on its container, or a missing clock part in
-its proper location. Judge position and relationship, not drawing style.
+The image has a magnified DETACHED OBJECT on the left and the unchanged TARGET SCENE on the right.
+Determine the semantic destination where the detached object naturally belongs in the target scene.
+Choose A when the destination center is in the LEFT third of the target scene, B for the MIDDLE
+third, or C for the RIGHT third. Find the incomplete semantic structure, missing attachment, empty
+holder, or natural matching destination instead of choosing a similar object that is already whole.
 """.strip()
 
 GLM_SLIDER_FINE_CHOICE_PROMPT = """
 Every labeled panel shows the same scene and the same foreground object near one coarse target.
-Choose the ONE panel that is in the correct local region. Reject panels that cover an already
-complete object or break a symmetric sequence. Compare semantic relationship before precision.
+The moved foreground object is enclosed by a MAGENTA rectangle. Choose the ONE panel where that
+marked object is in the correct local region. Reject panels that cover an already complete object
+or break a symmetric sequence. Compare semantic relationship before precision.
 """.strip()
 
 GLM_SLIDER_PRECISION_CHOICE_PROMPT = """
 Every labeled panel shows the same already-identified object in the same local target region.
-Choose the ONE panel with the most precise natural horizontal placement. Compare attachment-point
-alignment, symmetry, contact, and overlap. Judge position only.
+The moved foreground object is enclosed by a MAGENTA rectangle. Choose the ONE panel with the most
+precise natural horizontal placement. Compare attachment-point alignment, symmetry, contact, and
+overlap. Judge the placement of the marked object only.
 """.strip()
 
 
@@ -427,7 +429,7 @@ class GlmAliyunChallenge:
         deadline = time.monotonic() + max(1.0, timeout_seconds)
         span = maximum - minimum
         coarse = tuple(minimum + span * fraction for fraction in (0.2, 0.5, 0.8))
-        coarse_target, coarse_diagnostic, coarse_artifact = self._choose_semantic_candidate(
+        coarse_target, coarse_diagnostic, coarse_artifact = self._choose_semantic_region(
             semantic,
             coarse,
             tuple("ABC"),
@@ -507,6 +509,29 @@ class GlmAliyunChallenge:
             f"fine_artifact={fine_artifact or 'disabled'}:"
             f"precision_artifact={precision_artifact or 'disabled'}"
         )
+
+    def _choose_semantic_region(
+        self,
+        semantic: GlmSemanticSliderInput,
+        candidates: tuple[float, ...],
+        labels: tuple[str, ...],
+        prompt: str,
+        artifact_label: str,
+        timeout_seconds: float,
+    ) -> tuple[float | None, str, str]:
+        if len(candidates) != len(labels) or not candidates:
+            raise ValueError("GLM semantic region labels do not match candidate positions")
+        artifact = record_captcha_artifact(artifact_label, semantic.image)
+        choice = registry.solve_visual_choice_sync(
+            semantic.image,
+            prompt,
+            labels,
+            timeout_seconds=timeout_seconds,
+        )
+        diagnostic = registry.visual_diagnostic()
+        if choice is None:
+            return None, diagnostic, artifact
+        return candidates[labels.index(choice)], f"{choice}:{diagnostic}", artifact
 
     def _choose_semantic_candidate(
         self,
@@ -621,13 +646,21 @@ class GlmAliyunChallenge:
                 shift = round(candidate * scene.width - object_center)
                 layer = Image.new("RGBA", scene.size, (0, 0, 0, 0))
                 layer.paste(foreground, (shift, 0), foreground)
-                completed = (
-                    Image.alpha_composite(scene, layer)
-                    .convert("RGB")
-                    .resize(
-                        (tile_size, tile_size),
-                        Image.Resampling.LANCZOS,
-                    )
+                completed_source = Image.alpha_composite(scene, layer).convert("RGB")
+                marker_box = (
+                    max(0, box[0] + shift - 3),
+                    max(0, box[1] - 3),
+                    min(scene.width - 1, box[2] + shift + 3),
+                    min(scene.height - 1, box[3] + 3),
+                )
+                ImageDraw.Draw(completed_source).rectangle(
+                    marker_box,
+                    outline=(255, 0, 220),
+                    width=3,
+                )
+                completed = completed_source.resize(
+                    (tile_size, tile_size),
+                    Image.Resampling.LANCZOS,
                 )
                 column = index % columns
                 row = index // columns
@@ -650,7 +683,7 @@ class GlmAliyunChallenge:
                     ),
                     Image.Resampling.LANCZOS,
                 )
-            for colors in (128, 96, 64):
+            for colors in (128, 96, 64, 48):
                 output = BytesIO()
                 candidate.quantize(colors=colors).save(
                     output,

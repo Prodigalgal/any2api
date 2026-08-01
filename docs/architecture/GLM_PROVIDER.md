@@ -66,19 +66,20 @@ portrait images narrower than 240 pixels. The foreground strip keeps its native 
 coordinate; stretching it to the background width destroys both the candidate geometry and the
 reachable range.
 
-The solver constructs completed scenes from the exact SDK background and foreground. Each request
-contains a fixed reference area with the magnified detached object and pure target scene, followed
-by finite labeled candidates. Selection is hierarchical: three broad regions, five local positions,
-then five precision positions. Candidate sheets are palette-compressed to a bounded 120 KiB before
-base64 encoding. Open-ended coordinate regression is only a compatibility fallback when the SDK
-does not expose the two source images.
+The solver constructs completed scenes from the exact SDK background and foreground. Coarse
+selection uses a fixed reference area with the magnified detached object and pure target scene to
+choose the left, middle, or right semantic region. Local and precision stages then use finite
+labeled candidates whose moved foreground is marked by a magenta outline. Candidate sheets are
+palette-compressed to a bounded 120 KiB before base64 encoding. Open-ended coordinate regression is
+only a compatibility fallback when the SDK does not expose the two source images.
 
 Five `multimodal-random` calls run concurrently at each stage. The request uses only the standard
 parameter intersection supported by every top-multimodal provider. Answers must begin with
 `CHOICE=<label>`. Votes are deduplicated by provider; duplicate requests to one provider count once,
 and internally conflicting provider votes are discarded. A unique cross-provider majority is
-required at every stage. No-consensus refreshes the current challenge and never creates a new
-mailbox.
+preferred at every stage. A 70 percent raw-sample supermajority is accepted only when the winning
+choice came from at least two provider sources, preventing one randomly over-selected provider from
+controlling the result. No-consensus refreshes the current challenge and never creates a new mailbox.
 
 FeiLin does not map handle pixels linearly to foreground pixels. In a current live sample a 145 px
 handle move produced only 85.8 px of foreground motion, matching an approximately quadratic curve.

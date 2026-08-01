@@ -496,6 +496,52 @@ def test_visual_choice_votes_count_each_provider_once() -> None:
     assert "minmax=B" in summary
 
 
+def test_visual_choice_accepts_strong_samples_from_multiple_provider_sources(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "5")
+    settings.cache_clear()
+    responses = iter(
+        (
+            ("CHOICE=C", "response_received:provider=qwen:model=one"),
+            ("CHOICE=C", "response_received:provider=qwen:model=one"),
+            ("CHOICE=C", "response_received:provider=qwen:model=one"),
+            ("CHOICE=C", "response_received:provider=mimo:model=two"),
+            ("CHOICE=B", "response_received:provider=mimo:model=two"),
+        )
+    )
+
+    def complete(*args, **kwargs):
+        del args, kwargs
+        content, diagnostic = next(responses)
+        registry._diagnostics.visual = diagnostic
+        return content
+
+    monkeypatch.setattr(registry, "_visual_completion_sync", complete)
+
+    choice = registry.solve_visual_choice_sync(b"fixture-image", "Choose.", ("A", "B", "C"))
+
+    settings.cache_clear()
+    assert choice == "C"
+    assert "choice_strong_samples:C:4/5:sources=2" in registry.visual_diagnostic()
+
+
+def test_visual_choice_rejects_strong_samples_from_one_provider(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "5")
+    settings.cache_clear()
+    responses = iter(("CHOICE=C", "CHOICE=C", "CHOICE=C", "CHOICE=C", "CHOICE=B"))
+
+    def complete(*args, **kwargs):
+        del args, kwargs
+        registry._diagnostics.visual = "response_received:provider=qwen:model=one"
+        return next(responses)
+
+    monkeypatch.setattr(registry, "_visual_completion_sync", complete)
+
+    choice = registry.solve_visual_choice_sync(b"fixture-image", "Choose.", ("A", "B", "C"))
+
+    settings.cache_clear()
+    assert choice is None
+
+
 def test_visual_action_solver_normalizes_percentage_coordinates(monkeypatch) -> None:
     monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
     monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
@@ -1099,7 +1145,7 @@ def test_glm_semantic_candidate_sheet_preserves_narrow_sdk_piece_geometry() -> N
     assert tuple(round(value, 3) for value in feasible) == (0.053, 0.947)
     with Image.open(io.BytesIO(result)) as sheet:
         first = sheet.convert("RGB").crop((12, 40, 232, 260))
-        first_box = ImageChops.difference(first, Image.new("RGB", first.size, "white")).getbbox()
+        first_box = first.convert("L").point(lambda value: 255 if value < 64 else 0).getbbox()
         assert first_box is not None
         assert first_box[2] - first_box[0] < 30
         assert abs((first_box[0] + first_box[2]) / 2 / 220 - 0.25) < 0.03
@@ -1156,11 +1202,12 @@ def test_glm_semantic_slider_uses_coarse_then_fine_choice_consensus(monkeypatch)
         image.save(output, format="PNG")
         return output.getvalue()
 
-    calls: list[tuple[str, ...]] = []
+    calls: list[tuple[tuple[str, ...], tuple[int, int]]] = []
 
     def choose(image, prompt, choices, **kwargs):
-        del image, prompt, kwargs
-        calls.append(choices)
+        del prompt, kwargs
+        with Image.open(io.BytesIO(image)) as source:
+            calls.append((choices, source.size))
         return "B" if len(calls) == 1 else "C"
 
     monkeypatch.setattr(registry, "solve_visual_choice_sync", choose)
@@ -1175,7 +1222,9 @@ def test_glm_semantic_slider_uses_coarse_then_fine_choice_consensus(monkeypatch)
 
     assert target is not None
     assert abs(target - 0.5) < 0.01
-    assert calls == [tuple("ABC"), tuple("ABCDE"), tuple("ABCDE")]
+    assert [choices for choices, _ in calls] == [tuple("ABC"), tuple("ABCDE"), tuple("ABCDE")]
+    assert calls[0][1] == (640, 340)
+    assert calls[1][1] != calls[0][1]
     assert "coarse=B:" in diagnostic
     assert "fine=C:" in diagnostic
     assert "precision=C:" in diagnostic

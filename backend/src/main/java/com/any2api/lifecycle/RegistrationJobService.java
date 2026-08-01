@@ -50,7 +50,7 @@ public class RegistrationJobService {
         var target = bounded(command.target(), 1, MAX_TARGET, 1);
         var attempts = bounded(command.maxAttempts(), target, target * 10, target * 3);
         attempts = effectiveMaxAttempts(
-            attempts, target, automationProviders.registrationAttemptMode(command.providerId()));
+            attempts, automationProviders.registrationAttemptMode(command.providerId()));
         var concurrency = bounded(command.concurrency(), 1, MAX_CONCURRENCY, 1);
         var key = command.idempotencyKey() == null || command.idempotencyKey().isBlank()
             ? "registration:" + command.providerId() + ":" + UUID.randomUUID()
@@ -77,10 +77,13 @@ public class RegistrationJobService {
 
     static int effectiveMaxAttempts(
         int configuredAttempts,
-        int target,
         RegistrationAttemptMode mode
     ) {
-        return mode == RegistrationAttemptMode.SINGLE_IDENTITY ? target : configuredAttempts;
+        // One scheduler attempt owns one mailbox identity. Provider-internal browser retries
+        // reuse that identity and are not counted here.
+        return switch (mode) {
+            case NEW_IDENTITY, SINGLE_IDENTITY -> configuredAttempts;
+        };
     }
 
     @Transactional(readOnly = true)

@@ -95,8 +95,10 @@ click/drag action schema. Only the SDK success callback can accept a ticket, and
 is polled for up to 30 seconds rather than treated as an immediate failure.
 
 GLM declares `registration_attempt_mode=single_identity`. Browser and captcha retries reuse the
-same mailbox; Java caps the scheduler attempt budget to the requested identity count so an internal
-captcha failure cannot silently allocate a replacement mailbox.
+same mailbox and run sequentially within one Python registration call. Java records that completed
+call as one identity attempt. Only after all provider-local browser flows for the identity are
+exhausted may the batch allocate a replacement mailbox, and only within the operator-configured
+`maxAttempts` identity budget.
 
 The observed email activation state machine is explicit and does not depend on the frontend page
 eventually writing local storage:

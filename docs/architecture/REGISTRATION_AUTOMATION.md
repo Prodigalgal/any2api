@@ -52,8 +52,12 @@ cannot be reused. The generic browser form remains only a final compatibility fa
 LongCat waits for H5Guard readiness, observes the risk and email-apply API transitions, and handles slider, ordered-tap, and connect-dots Yoda layouts before accepting the OTP state. Qwen uses its current form names, page-world Baxia headers, and the measured Aliyun slider movement curve. These behaviors live entirely inside their provider modules.
 
 Providers may declare `registration_attempt_mode=single_identity` when a failed scheduler retry
-would consume another mailbox. GLM uses this mode: Python owns multiple browser/captcha attempts
-inside one registration call, while Java permits only one top-level attempt per requested identity.
+must not consume another mailbox until its provider-local retry budget is exhausted. GLM uses this
+mode: one Python registration call creates one mailbox and owns multiple sequential browser/captcha
+flows for that identity. Java counts the completed registration call as one identity attempt, not
+each browser flow. If all provider-local flows fail, a batch may create a replacement identity only
+when its configured `maxAttempts` budget still has room. This lets a success target tolerate bounded
+failed identities without sharing one mailbox across concurrent calls.
 Browser retries for the same identity derive a stable proxy affinity and rotate the ordered node
 list by attempt number. A provider-specific browser failure therefore advances to another node
 without hard-coding node names or consuming another mailbox.

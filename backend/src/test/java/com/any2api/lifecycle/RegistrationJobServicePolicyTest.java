@@ -6,14 +6,14 @@ import org.junit.jupiter.api.Test;
 
 class RegistrationJobServicePolicyTest {
     @Test
-    void singleIdentityProvidersCannotCreateReplacementMailboxes() {
+    void singleIdentityProvidersKeepReplacementIdentityBudgetAfterWorkerExhaustion() {
         assertThat(RegistrationJobService.effectiveMaxAttempts(
-            9, 3, RegistrationAttemptMode.SINGLE_IDENTITY)).isEqualTo(3);
+            9, RegistrationAttemptMode.SINGLE_IDENTITY)).isEqualTo(9);
     }
 
     @Test
     void newIdentityProvidersKeepConfiguredAttemptBudget() {
         assertThat(RegistrationJobService.effectiveMaxAttempts(
-            9, 3, RegistrationAttemptMode.NEW_IDENTITY)).isEqualTo(9);
+            9, RegistrationAttemptMode.NEW_IDENTITY)).isEqualTo(9);
     }
 }

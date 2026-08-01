@@ -146,7 +146,7 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
         {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
       </TextField>
       <TextField label="成功目标" type="number" value={target} onChange={(event) => setTarget(Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 1000 } }} />
-      <TextField label="最大尝试次数" type="number" value={maxAttempts} onChange={(event) => setMaxAttempts(Number(event.target.value))} slotProps={{ htmlInput: { min: target, max: target * 10 } }} />
+      <TextField label="邮箱任务上限" type="number" value={maxAttempts} onChange={(event) => setMaxAttempts(Number(event.target.value))} slotProps={{ htmlInput: { min: target, max: target * 10 } }} />
       <TextField select label="任务并发" value={concurrency} onChange={(event) => setConcurrency(Number(event.target.value))}>
         {[1, 2, 3, 4, 6, 8].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
       </TextField>

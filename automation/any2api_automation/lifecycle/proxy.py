@@ -107,9 +107,7 @@ def proxy_attempt_payload(
         digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
         affinity = f"flow-{digest}"
     result["proxy_affinity_key"] = affinity
-    result["proxy_node_offset"] = (
-        _proxy_node_offset(result.get("proxy_node_offset")) + attempt - 1
-    )
+    result["proxy_node_offset"] = _proxy_node_offset(result.get("proxy_node_offset")) + attempt - 1
     return result
 
 

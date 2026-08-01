@@ -55,10 +55,13 @@ def _process_alive(pid: int) -> bool:
         return True
 
 
-def _terminate_process_tree(root_pid: int, label: str, *, reason: str) -> None:
-    pids = _process_tree(root_pid)
-    if not pids:
-        pids = [root_pid]
+def _terminate_process_ids(
+    pids: list[int],
+    root_pid: int,
+    label: str,
+    *,
+    reason: str,
+) -> None:
     logger.warning(
         "browser process tree terminated reason=%s label=%s driver_pid=%s", reason, label, root_pid
     )
@@ -68,6 +71,11 @@ def _terminate_process_tree(root_pid: int, label: str, *, reason: str) -> None:
                 os.kill(pid, process_signal)
         if process_signal == signal.SIGTERM:
             time.sleep(0.25)
+
+
+def _terminate_process_tree(root_pid: int, label: str, *, reason: str) -> None:
+    pids = _process_tree(root_pid)
+    _terminate_process_ids(pids or [root_pid], root_pid, label, reason=reason)
 
 
 @contextmanager
@@ -97,12 +105,23 @@ def browser_operation_deadline(
 
 
 def terminate_residual_browser_process(value: Any, *, label: str) -> None:
-    pid = value if isinstance(value, int) else _driver_pid(value)
-    if pid is None:
+    if isinstance(value, tuple):
+        pids = list(value)
+        pid = pids[0] if pids else None
+    else:
+        pid = value if isinstance(value, int) else _driver_pid(value)
+        pids = _process_tree(pid) if pid is not None else []
+    if pid is None or not pids:
         return
     time.sleep(0.1)
-    if _process_alive(pid):
-        _terminate_process_tree(pid, label, reason="cleanup_returned_with_live_process")
+    alive = [process_pid for process_pid in pids if _process_alive(process_pid)]
+    if alive:
+        _terminate_process_ids(
+            alive,
+            pid,
+            label,
+            reason="cleanup_returned_with_live_process",
+        )
 
 
 @dataclass(frozen=True)
@@ -353,6 +372,7 @@ def launch_browser(
                 continue
             try:
                 driver_pid = _driver_pid(browser)
+                driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
                 yield backend, browser
             finally:
                 with browser_operation_deadline(
@@ -361,7 +381,10 @@ def launch_browser(
                     label="camoufox runtime cleanup",
                 ):
                     manager.__exit__(None, None, None)
-                terminate_residual_browser_process(driver_pid, label="camoufox runtime cleanup")
+                terminate_residual_browser_process(
+                    driver_processes,
+                    label="camoufox runtime cleanup",
+                )
             return
         if backend == "patchright":
             runtime = None
@@ -393,6 +416,7 @@ def launch_browser(
                 continue
             try:
                 driver_pid = _driver_pid(browser)
+                driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
                 yield backend, browser
             finally:
                 with browser_operation_deadline(
@@ -404,7 +428,10 @@ def launch_browser(
                         browser.close()
                     finally:
                         runtime.stop()
-                terminate_residual_browser_process(driver_pid, label="patchright runtime cleanup")
+                terminate_residual_browser_process(
+                    driver_processes,
+                    label="patchright runtime cleanup",
+                )
             return
     raise RuntimeError("no browser backend available: " + "; ".join(errors))
 

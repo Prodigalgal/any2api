@@ -150,8 +150,10 @@ class GlmAliyunChallenge:
                 )
                 ticket = self._accepted_ticket(state)
                 if ticket:
+                    solver_evidence = self.last_diagnostic.split(":artifact=", 1)[0]
                     self.last_diagnostic = (
-                        f"mode=visual, attempt={attempt}, round={round_number}, ticket=accepted"
+                        f"mode=visual, attempt={attempt}, round={round_number}, "
+                        f"ticket=accepted, {solver_evidence}"
                     )
                     return ticket
                 if state.get("status") == "running":
@@ -404,6 +406,8 @@ class GlmAliyunChallenge:
     ) -> tuple[float | None, str]:
         if not semantic.background or not semantic.piece:
             return None, "semantic_sources_unavailable"
+        record_captcha_artifact("glm-background", semantic.background)
+        record_captcha_artifact("glm-piece", semantic.piece)
         blur_estimate = estimate_blurred_object_placement(
             semantic.background,
             semantic.piece,

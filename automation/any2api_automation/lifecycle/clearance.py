@@ -10,7 +10,7 @@ from ..config import settings
 from .browser import (
     BrowserContextProfile,
     BrowserLaunchProfile,
-    browser_operation_deadline,
+    close_browser_context,
     launch_browser,
 )
 from .browser_session import BrowserSession
@@ -78,6 +78,7 @@ def _refresh_once(
     ) as (backend, runtime):
         context = runtime.new_context(**context_profile.options(backend))
         context.set_default_timeout(timeout_seconds * 1000)
+        page = None
         try:
             cookies = browser.browser_cookies()
             if cookies:
@@ -98,12 +99,11 @@ def _refresh_once(
                 page.wait_for_timeout(750)
             raise RuntimeError("Cloudflare challenge did not reach a usable browser context")
         finally:
-            with browser_operation_deadline(
-                page,
-                settings().browser_cleanup_timeout_seconds,
+            close_browser_context(
+                context,
+                page if page is not None else context,
                 label="clearance context cleanup",
-            ):
-                context.close()
+            )
 
 
 def _clearance_patch(context: Any, browser: BrowserSession) -> dict[str, Any] | None:

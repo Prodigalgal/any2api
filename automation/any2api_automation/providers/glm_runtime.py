@@ -16,7 +16,12 @@ from pydantic import BaseModel, Field
 
 from ..browser_transport import BrowserRequest, _relative_path
 from ..browser_transport import manager as browser_session_manager
-from ..lifecycle.browser import BrowserContextProfile, BrowserLaunchProfile, launch_browser
+from ..lifecycle.browser import (
+    BrowserContextProfile,
+    BrowserLaunchProfile,
+    close_browser_context,
+    launch_browser,
+)
 from ..security import require_internal_token
 from .glm_challenge import GlmAliyunChallenge
 from .glm_settings import settings
@@ -133,12 +138,13 @@ class _FlowManager:
                     patchright_user_agent=entry.browser.user_agent,
                 )
                 context = browser.new_context(**profile.options(backend))
-                context.set_default_timeout(flow.timeout_seconds * 1000)
-                cookies = entry.browser.browser_cookies()
-                if cookies:
-                    context.add_cookies(cookies)
-                page = context.new_page()
+                page = None
                 try:
+                    context.set_default_timeout(flow.timeout_seconds * 1000)
+                    cookies = entry.browser.browser_cookies()
+                    if cookies:
+                        context.add_cookies(cookies)
+                    page = context.new_page()
                     stage = "navigation"
                     page.goto(
                         settings().glm_base_url,
@@ -171,7 +177,11 @@ class _FlowManager:
                         if encoded:
                             flow.chunks.put(base64.b64decode(encoded, validate=True))
                 finally:
-                    context.close()
+                    close_browser_context(
+                        context,
+                        page if page is not None else context,
+                        label="GLM runtime context cleanup",
+                    )
         except Exception as error:  # noqa: BLE001 - failure crosses the worker-thread boundary
             failure = _Failure(stage, type(error).__name__)
             logger.warning(

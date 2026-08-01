@@ -7,7 +7,7 @@ import time
 from types import TracebackType
 from typing import Any, Self
 
-from ..lifecycle.browser import BrowserLaunchProfile, launch_browser
+from ..lifecycle.browser import BrowserLaunchProfile, close_browser_context, launch_browser
 
 _turnstile_slots = threading.BoundedSemaphore(1)
 
@@ -84,6 +84,7 @@ class LocalTurnstileSolver:
         last_error = "token timeout"
         for round_index in range(1, self.rounds + 1):
             context = None
+            page = None
             try:
                 context = self._browser.new_context(no_viewport=True)
                 context.set_default_timeout(self.timeout_seconds * 1000)
@@ -122,7 +123,11 @@ class LocalTurnstileSolver:
                 last_error = f"{type(error).__name__}: {str(error)[:180]}"
             finally:
                 if context is not None:
-                    context.close()
+                    close_browser_context(
+                        context,
+                        page if page is not None else context,
+                        label="Turnstile context cleanup",
+                    )
             if round_index < self.rounds:
                 time.sleep(0.8)
         raise RuntimeError(f"Turnstile solve failed: {last_error}")

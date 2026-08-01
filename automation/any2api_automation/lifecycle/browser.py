@@ -124,6 +124,14 @@ def terminate_residual_browser_process(value: Any, *, label: str) -> None:
         )
 
 
+def close_browser_context(context: Any, value: Any, *, label: str) -> None:
+    cleanup_seconds = max(1, settings().browser_cleanup_timeout_seconds)
+    tracked_value = value if value is not None else context
+    context.set_default_timeout(cleanup_seconds * 1000)
+    with browser_operation_deadline(tracked_value, cleanup_seconds, label=label):
+        context.close()
+
+
 @dataclass(frozen=True)
 class BrowserResult:
     external_id: str
@@ -304,14 +312,8 @@ def run_browser_flow(
                 },
             )
         finally:
-            context.set_default_timeout(max(1, config.browser_cleanup_timeout_seconds) * 1000)
             try:
-                with browser_operation_deadline(
-                    page,
-                    config.browser_cleanup_timeout_seconds,
-                    label=f"{backend} context cleanup",
-                ):
-                    context.close()
+                close_browser_context(context, page, label=f"{backend} context cleanup")
             except Exception as error:  # noqa: BLE001 - browser process cleanup follows
                 logger.warning(
                     "browser context cleanup failed backend=%s error_type=%s",
@@ -375,16 +377,18 @@ def launch_browser(
                 driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
                 yield backend, browser
             finally:
-                with browser_operation_deadline(
-                    browser,
-                    settings().browser_cleanup_timeout_seconds,
-                    label="camoufox runtime cleanup",
-                ):
-                    manager.__exit__(None, None, None)
-                terminate_residual_browser_process(
-                    driver_processes,
-                    label="camoufox runtime cleanup",
-                )
+                try:
+                    with browser_operation_deadline(
+                        browser,
+                        settings().browser_cleanup_timeout_seconds,
+                        label="camoufox runtime cleanup",
+                    ):
+                        manager.__exit__(None, None, None)
+                finally:
+                    terminate_residual_browser_process(
+                        driver_processes,
+                        label="camoufox runtime cleanup",
+                    )
             return
         if backend == "patchright":
             runtime = None
@@ -419,19 +423,21 @@ def launch_browser(
                 driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
                 yield backend, browser
             finally:
-                with browser_operation_deadline(
-                    browser,
-                    settings().browser_cleanup_timeout_seconds,
-                    label="patchright runtime cleanup",
-                ):
-                    try:
-                        browser.close()
-                    finally:
-                        runtime.stop()
-                terminate_residual_browser_process(
-                    driver_processes,
-                    label="patchright runtime cleanup",
-                )
+                try:
+                    with browser_operation_deadline(
+                        browser,
+                        settings().browser_cleanup_timeout_seconds,
+                        label="patchright runtime cleanup",
+                    ):
+                        try:
+                            browser.close()
+                        finally:
+                            runtime.stop()
+                finally:
+                    terminate_residual_browser_process(
+                        driver_processes,
+                        label="patchright runtime cleanup",
+                    )
             return
     raise RuntimeError("no browser backend available: " + "; ".join(errors))
 

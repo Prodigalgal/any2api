@@ -81,3 +81,33 @@ def test_browser_launcher_cleans_partially_started_camoufox(monkeypatch) -> None
         raise AssertionError("failed launcher must not yield")
 
     assert manager.exited is True
+
+
+def test_browser_launcher_reaps_processes_when_runtime_close_fails(monkeypatch) -> None:
+    import camoufox.sync_api
+
+    class Manager:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(self, *args: object) -> None:
+            del args
+            raise RuntimeError("runtime close failed")
+
+    reaped: list[tuple[tuple[int, ...], str]] = []
+    monkeypatch.setattr(camoufox.sync_api, "Camoufox", lambda **options: Manager())
+    monkeypatch.setattr(browser_lifecycle, "_driver_pid", lambda value: 700)
+    monkeypatch.setattr(browser_lifecycle, "_process_tree", lambda pid: [pid, 701])
+    monkeypatch.setattr(
+        browser_lifecycle,
+        "terminate_residual_browser_process",
+        lambda value, *, label: reaped.append((value, label)),
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="runtime close failed"),
+        launch_browser("camoufox", None, headless=True, proxy_url="") as launched,
+    ):
+        assert launched[0] == "camoufox"
+
+    assert reaped == [((700, 701), "camoufox runtime cleanup")]

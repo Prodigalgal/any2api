@@ -8,7 +8,12 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
-from .browser import BrowserContextProfile, BrowserLaunchProfile, launch_browser
+from .browser import (
+    BrowserContextProfile,
+    BrowserLaunchProfile,
+    close_browser_context,
+    launch_browser,
+)
 from .browser_session import BrowserSession
 
 
@@ -103,6 +108,7 @@ class BrowserWebSocket:
         ) as (backend, runtime):
             context = runtime.new_context(**context_profile.options(backend))
             context.set_default_timeout(self._timeout_seconds * 1000)
+            page = None
             try:
                 cookies = self._browser.browser_cookies()
                 if cookies:
@@ -125,7 +131,11 @@ class BrowserWebSocket:
                 self._ready.set_result(None)
                 self._command_loop(page)
             finally:
-                context.close()
+                close_browser_context(
+                    context,
+                    page if page is not None else context,
+                    label="WebSocket context cleanup",
+                )
 
     def _command_loop(self, page: Any) -> None:
         while True:

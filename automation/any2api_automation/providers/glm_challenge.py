@@ -13,6 +13,7 @@ from PIL import Image, ImageChops, ImageDraw
 
 from ..captcha.artifacts import record_captcha_artifact
 from ..captcha.models import SolverEstimate, VisualAction
+from ..captcha.object_placement import estimate_blurred_object_placement
 from ..captcha.registry import registry
 from .glm_settings import settings
 
@@ -46,25 +47,44 @@ ACTIONS=[{"type":"drag","from":[0,50],"to":[target_center_x,50]}]
 """.strip()
 
 GLM_SLIDER_COARSE_CHOICE_PROMPT = """
-The image has a magnified DETACHED OBJECT on the left and the unchanged TARGET SCENE on the right.
-Determine the semantic destination where the detached object naturally belongs in the target scene.
-Choose A when the destination center is in the LEFT third of the target scene, B for the MIDDLE
-third, or C for the RIGHT third. Find the incomplete semantic structure, missing attachment, empty
-holder, or natural matching destination instead of choosing a similar object that is already whole.
+The image has a magnified DETACHED OBJECT on the left and one unchanged TARGET SCENE on the right.
+The strip under the target maps A, B, and C to its LEFT, MIDDLE, and RIGHT horizontal thirds. Choose
+the region containing the semantic destination where the detached object naturally belongs. A/B/C
+are broad regions only; no candidate object has been inserted yet.
+Find the incomplete semantic structure, missing attachment, empty holder, or natural matching
+destination instead of choosing a similar object that is already whole. The destination should fill
+visible empty background, a gap, or a broken outline; it must not stack another candle, lid, limb,
+digit, or accessory over an existing one.
+First identify the detached object's functional role. For a lid, cap, or cover, select a visibly OPEN
+container whose rim width, color, and outline match; a container that already has any lid is complete
+and MUST be rejected. For clock hands, select the clock's central axle rather than a numeral. Apply
+the same missing-part rule to other objects before choosing A, B, or C.
+""".strip()
+
+GLM_SLIDER_GLOBAL_CHOICE_PROMPT = """
+Every labeled panel shows the unchanged scene with the detached foreground object inserted at one
+horizontal position. The moved object is enclosed by a MAGENTA rectangle. Choose the ONE panel that
+fills the blurred missing region, empty holder, broken outline, or natural attachment point. Reject
+panels that cover or duplicate an object already present. Compare all panels; these are exact
+candidate placements, not broad regions.
 """.strip()
 
 GLM_SLIDER_FINE_CHOICE_PROMPT = """
 Every labeled panel shows the same scene and the same foreground object near one coarse target.
 The moved foreground object is enclosed by a MAGENTA rectangle. Choose the ONE panel where that
 marked object is in the correct local region. Reject panels that cover an already complete object
-or break a symmetric sequence. Compare semantic relationship before precision.
+or break a symmetric sequence. The detached object's apparent size and outline MUST match the
+destination: never place a large lid on a much smaller cup or bowl. Reject incompatible contact
+widths and objects floating beside the actual opening. Compare semantic relationship before
+precision.
 """.strip()
 
 GLM_SLIDER_PRECISION_CHOICE_PROMPT = """
 Every labeled panel shows the same already-identified object in the same local target region.
 The moved foreground object is enclosed by a MAGENTA rectangle. Choose the ONE panel with the most
 precise natural horizontal placement. Compare attachment-point alignment, symmetry, contact, and
-overlap. Judge the placement of the marked object only.
+overlap. The object and destination must have compatible widths and outlines. Judge the placement
+of the marked object only.
 """.strip()
 
 
@@ -127,6 +147,7 @@ class GlmAliyunChallenge:
         if not self._use_official_initialization(page):
             self._install(page)
         deadline = time.monotonic() + (timeout_seconds or config.glm_captcha_timeout_seconds)
+        round_diagnostics: list[str] = []
         page.wait_for_timeout(1_500)
         if self._start_if_required(page):
             page.wait_for_timeout(1_800)
@@ -157,14 +178,20 @@ class GlmAliyunChallenge:
                     self.last_diagnostic = (
                         f"mode=visual, attempt={attempt}, round={round_number}, surface=not_ready"
                     )
+                    round_diagnostics.append(self.last_diagnostic)
                     continue
                 surface = self._capture_surface(page)
                 actions = self._solve_actions(page, surface, remaining)
                 if not actions:
-                    self.last_diagnostic = (
-                        f"mode=visual, attempt={attempt}, round={round_number}, "
-                        f"ai={registry.visual_diagnostic()}"
+                    solver_diagnostic = (
+                        self.last_diagnostic
+                        if surface.slider and self.last_diagnostic.startswith("ai=")
+                        else f"ai={registry.visual_diagnostic()}"
                     )
+                    self.last_diagnostic = (
+                        f"mode=visual, attempt={attempt}, round={round_number}, {solver_diagnostic}"
+                    )
+                    round_diagnostics.append(self.last_diagnostic)
                     break
                 self._execute(page, actions, surface)
                 execution_diagnostic = f":{self.last_diagnostic}" if surface.slider else ""
@@ -173,6 +200,7 @@ class GlmAliyunChallenge:
                     + ",".join(action.type for action in actions)
                     + execution_diagnostic
                 )
+                round_diagnostics.append(self.last_diagnostic)
                 state = self._wait_for_challenge_result(
                     page,
                     min(30.0, max(1.0, deadline - time.monotonic())),
@@ -193,6 +221,8 @@ class GlmAliyunChallenge:
                     break
             if time.monotonic() < deadline and attempt < config.glm_captcha_attempts:
                 self._refresh(page)
+        if round_diagnostics:
+            self.last_diagnostic = " || ".join(round_diagnostics[-6:])[:3000]
         raise RuntimeError(
             "GLM Aliyun captcha did not reach the official success callback "
             f"({self.last_diagnostic})"
@@ -280,14 +310,26 @@ class GlmAliyunChallenge:
         if self._visual_surface_ready(page):
             return False
         try:
+            start_icon = page.locator("#aliyunCaptcha-start-icon").first
+            if start_icon.count() and start_icon.is_visible():
+                start_icon.click()
+                return True
+            body = page.locator("#aliyunCaptcha-captcha-body").first
+            if body.count() and body.is_visible():
+                text = " ".join(str(body.text_content() or "").split()).lower()
+                if ("start" in text and "verif" in text) or "点击开始验证" in text:
+                    body.click()
+                    return True
             for selector in (
                 "#aliyunCaptcha-float-wrapper",
                 "#any2api-glm-captcha-element",
             ):
-                starter = page.locator(selector).get_by_text("Click to verify", exact=False).first
-                if starter.count() and starter.is_visible():
-                    starter.click()
-                    return True
+                host = page.locator(selector)
+                for label in ("Click to start verification", "Click to verify", "点击开始验证"):
+                    starter = host.get_by_text(label, exact=False).first
+                    if starter.count() and starter.is_visible():
+                        starter.click()
+                        return True
         except Exception:  # noqa: BLE001,S110 - visual solving remains the fallback
             pass
         return False
@@ -362,7 +404,14 @@ class GlmAliyunChallenge:
             clip={"x": x, "y": y, "width": width, "height": height},
             timeout=15_000,
         )
-        return GlmCaptchaSurface(image=image, x=x, y=y, width=width, height=height)
+        return GlmCaptchaSurface(
+            image=image,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            slider=self._visual_surface_ready(page),
+        )
 
     def _solve_actions(
         self,
@@ -384,6 +433,10 @@ class GlmAliyunChallenge:
                 timeout_seconds,
             )
             if target_x is None:
+                self.last_diagnostic = (
+                    f"ai={solver_diagnostic}:object_x={semantic.object_center_x:.3f}:"
+                    f"artifact={artifact or 'disabled'}"
+                )
                 return []
             actions = [
                 VisualAction(
@@ -432,15 +485,27 @@ class GlmAliyunChallenge:
         timeout_seconds: float,
     ) -> tuple[float | None, str]:
         if not semantic.background or not semantic.piece:
-            actions = registry.solve_visual_actions_sync(
-                semantic.image,
-                GLM_SLIDER_OFFSET_PROMPT,
-                timeout_seconds=timeout_seconds,
+            return None, "semantic_sources_unavailable"
+        blur_estimate = estimate_blurred_object_placement(
+            semantic.background,
+            semantic.piece,
+        )
+        if blur_estimate is not None and blur_estimate.accepted:
+            candidate = self._candidate_contact_sheet(
+                semantic.background,
+                semantic.piece,
+                (blur_estimate.center_x,),
+                ("CV",),
             )
-            diagnostic = registry.visual_diagnostic()
-            if len(actions) == 1 and actions[0].type == "drag" and actions[0].end is not None:
-                return actions[0].end[0], f"legacy={diagnostic}"
-            return None, f"legacy={diagnostic}"
+            candidate = self._candidate_sheet_with_reference(semantic.image, candidate)
+            artifact = record_captcha_artifact("glm-semantic-opencv", candidate)
+            return (
+                blur_estimate.center_x,
+                f"opencv_blur={blur_estimate.detail}:artifact={artifact or 'disabled'}",
+            )
+        if not settings().glm_semantic_ai_fallback_enabled:
+            detail = blur_estimate.detail if blur_estimate is not None else "unavailable"
+            return None, f"opencv_blur={detail}:ai_fallback=disabled"
         feasible = self._slider_feasible_centers(semantic.background, semantic.piece)
         if feasible is None:
             return None, "candidate_piece_unavailable"
@@ -449,12 +514,13 @@ class GlmAliyunChallenge:
             return None, "candidate_range_too_small"
         deadline = time.monotonic() + max(1.0, timeout_seconds)
         span = maximum - minimum
-        coarse = tuple(minimum + span * fraction for fraction in (0.2, 0.5, 0.8))
-        coarse_target, coarse_diagnostic, coarse_artifact = self._choose_semantic_region(
+        coarse = tuple(minimum + span * index / 8 for index in range(9))
+        coarse_labels = tuple("ABCDEFGHI")
+        coarse_target, coarse_diagnostic, coarse_artifact = self._choose_semantic_candidate(
             semantic,
             coarse,
-            tuple("ABC"),
-            GLM_SLIDER_COARSE_CHOICE_PROMPT,
+            coarse_labels,
+            GLM_SLIDER_GLOBAL_CHOICE_PROMPT,
             "glm-semantic-coarse",
             min(35.0, max(10.0, deadline - time.monotonic() - 75.0)),
         )
@@ -542,9 +608,10 @@ class GlmAliyunChallenge:
     ) -> tuple[float | None, str, str]:
         if len(candidates) != len(labels) or not candidates:
             raise ValueError("GLM semantic region labels do not match candidate positions")
-        artifact = record_captcha_artifact(artifact_label, semantic.image)
+        image = self._semantic_region_sheet(semantic.image, labels)
+        artifact = record_captcha_artifact(artifact_label, image)
         choice = registry.solve_visual_choice_sync(
-            semantic.image,
+            image,
             prompt,
             labels,
             timeout_seconds=timeout_seconds,
@@ -553,6 +620,42 @@ class GlmAliyunChallenge:
         if choice is None:
             return None, diagnostic, artifact
         return candidates[labels.index(choice)], f"{choice}:{diagnostic}", artifact
+
+    def _semantic_region_sheet(
+        self,
+        reference: bytes,
+        labels: tuple[str, ...],
+    ) -> bytes:
+        if not labels:
+            raise ValueError("GLM semantic region labels are unavailable")
+        with Image.open(BytesIO(reference)) as source:
+            reference_image = source.convert("RGB")
+        target_left = round(reference_image.width * 326 / 640)
+        target_right = round(reference_image.width * 626 / 640)
+        strip_height = max(30, round(reference_image.height * 32 / 340))
+        canvas = Image.new(
+            "RGB",
+            (reference_image.width, reference_image.height + strip_height),
+            "white",
+        )
+        canvas.paste(reference_image, (0, 0))
+        draw = ImageDraw.Draw(canvas)
+        target_width = target_right - target_left
+        for index, label in enumerate(labels):
+            left = target_left + round(target_width * index / len(labels))
+            right = target_left + round(target_width * (index + 1) / len(labels))
+            draw.rectangle(
+                (left, reference_image.height, right, canvas.height - 1),
+                fill="black",
+                outline="white",
+                width=1,
+            )
+            draw.text(
+                (round((left + right) / 2) - 3, reference_image.height + 8),
+                label,
+                fill="white",
+            )
+        return self._encode_candidate_sheet(canvas)
 
     def _choose_semantic_candidate(
         self,
@@ -602,15 +705,20 @@ class GlmAliyunChallenge:
         rendered_scene: bytes,
     ) -> GlmSemanticSliderInput:
         object_center_x = self._slider_object_center_x(page)
-        try:
-            background, piece = self._slider_images(page)
-            image = self._compose_semantic_slider_input(rendered_scene, piece, background)
-            return GlmSemanticSliderInput(image, object_center_x, background, piece)
-        except (TypeError, ValueError):
-            buffer = BytesIO()
-            Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(buffer, format="PNG")
-            image = self._compose_semantic_slider_input(rendered_scene, buffer.getvalue())
-            return GlmSemanticSliderInput(image, object_center_x)
+        deadline = time.monotonic() + 2.5
+        while True:
+            try:
+                background, piece = self._slider_images(page)
+                image = self._compose_semantic_slider_input(rendered_scene, piece, background)
+                return GlmSemanticSliderInput(image, object_center_x, background, piece)
+            except (TypeError, ValueError):
+                if time.monotonic() >= deadline:
+                    break
+                page.wait_for_timeout(100)
+        buffer = BytesIO()
+        Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(buffer, format="PNG")
+        image = self._compose_semantic_slider_input(rendered_scene, buffer.getvalue())
+        return GlmSemanticSliderInput(image, object_center_x)
 
     def _slider_feasible_centers(
         self,

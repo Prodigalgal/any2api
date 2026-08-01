@@ -810,6 +810,45 @@ def test_glm_challenge_prefers_captured_official_initialization(monkeypatch) -> 
     assert challenge._use_official_initialization(Page()) is True
 
 
+def test_glm_challenge_starts_current_official_embed_control() -> None:
+    class Locator:
+        def __init__(self, *, visible: bool, text: str = "") -> None:
+            self.first = self
+            self.visible = visible
+            self.text = text
+            self.clicked = False
+
+        def count(self) -> int:
+            return int(self.visible)
+
+        def is_visible(self) -> bool:
+            return self.visible
+
+        def text_content(self) -> str:
+            return self.text
+
+        def click(self) -> None:
+            self.clicked = True
+
+    icon = Locator(visible=False)
+    body = Locator(visible=True, text="Click to start verification")
+
+    class Page:
+        def evaluate(self, script: str) -> bool:
+            del script
+            return False
+
+        def locator(self, selector: str) -> Locator:
+            if selector == "#aliyunCaptcha-start-icon":
+                return icon
+            if selector == "#aliyunCaptcha-captcha-body":
+                return body
+            raise AssertionError(f"unexpected selector: {selector}")
+
+    assert GlmAliyunChallenge.for_authentication()._start_if_required(Page()) is True
+    assert body.clicked is True
+
+
 def test_glm_captcha_loader_bounds_existing_script_race() -> None:
     from any2api_automation.providers.glm_challenge import _INSTALL_CAPTCHA
 
@@ -959,42 +998,31 @@ def test_glm_slider_uses_local_estimates_only_when_they_reach_consensus() -> Non
     assert candidates == [148, 194]
 
 
-def test_glm_semantic_slider_does_not_force_conflicting_local_candidates(monkeypatch) -> None:
+def test_glm_semantic_slider_refreshes_when_semantic_sources_are_unavailable(monkeypatch) -> None:
     challenge = GlmAliyunChallenge()
     surface = GlmCaptchaSurface(b"rendered", x=10, y=20, width=300, height=300, slider=True)
-    expected = VisualAction(type="drag", start=(0.05, 0.5), end=(0.85, 0.5))
-    request: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        challenge,
-        "_local_slider_action",
-        lambda page, captured: (None, [157.0, 164.0, 268.26]),
-    )
     monkeypatch.setattr(
         challenge,
         "_semantic_slider_input",
         lambda page, image: GlmSemanticSliderInput(b"semantic-input", 0.05),
     )
-
-    def solve(image, prompt, **kwargs):
-        request.update({"image": image, "prompt": prompt, **kwargs})
-        return [expected]
-
-    monkeypatch.setattr(registry, "solve_visual_actions_sync", solve)
+    monkeypatch.setattr(
+        registry,
+        "solve_visual_actions_sync",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("incomplete semantic input must never produce a blind drag")
+        ),
+    )
 
     actions = challenge._solve_actions(object(), surface, 42)
 
-    assert actions == [expected]
-    assert request["image"] == b"semantic-input"
-    assert "magnified view" in request["prompt"]
-    assert "measured candidates" not in request["prompt"]
-    assert request["timeout_seconds"] == 42
+    assert actions == []
+    assert "semantic_sources_unavailable" in challenge.last_diagnostic
 
 
 def test_glm_semantic_slider_never_executes_false_local_consensus(monkeypatch) -> None:
     challenge = GlmAliyunChallenge()
     surface = GlmCaptchaSurface(b"rendered", x=10, y=20, width=300, height=300, slider=True)
-    expected = VisualAction(type="drag", start=(0.02, 0.5), end=(0.82, 0.5))
 
     def unexpected_local_solver(page, captured):
         raise AssertionError("semantic slider must not use geometric local consensus")
@@ -1005,13 +1033,7 @@ def test_glm_semantic_slider_never_executes_false_local_consensus(monkeypatch) -
         "_semantic_slider_input",
         lambda page, image: GlmSemanticSliderInput(b"semantic-input", 0.02),
     )
-    monkeypatch.setattr(
-        registry,
-        "solve_visual_actions_sync",
-        lambda *args, **kwargs: [expected],
-    )
-
-    assert challenge._solve_actions(object(), surface, 42) == [expected]
+    assert challenge._solve_actions(object(), surface, 42) == []
 
 
 def test_glm_semantic_slider_rejects_click_action(monkeypatch) -> None:
@@ -1172,6 +1194,24 @@ def test_glm_semantic_candidate_sheet_keeps_detached_object_reference() -> None:
         assert rgb.getpixel((560, rgb.height - 80))[2] > 180
 
 
+def test_glm_semantic_region_sheet_labels_regions_without_inserting_candidates() -> None:
+    reference = Image.new("RGB", (640, 340), "white")
+    ImageDraw.Draw(reference).rectangle((326, 32, 625, 331), fill="blue")
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    result = GlmAliyunChallenge()._semantic_region_sheet(png(reference), tuple("ABC"))
+
+    with Image.open(io.BytesIO(result)) as sheet:
+        rgb = sheet.convert("RGB")
+        assert rgb.height > reference.height
+        assert rgb.getpixel((476, 180))[2] > 180
+        assert rgb.getpixel((376, rgb.height - 10)) == (0, 0, 0)
+
+
 def test_glm_semantic_candidate_sheet_preserves_narrow_sdk_piece_geometry() -> None:
     background = Image.new("RGB", (300, 300), "white")
     piece = Image.new("RGBA", (32, 300), (0, 0, 0, 0))
@@ -1242,6 +1282,37 @@ def test_glm_capture_recognizes_narrow_portrait_slider_scene() -> None:
     assert result.image == b"portrait-scene"
 
 
+def test_glm_capture_preserves_slider_mode_during_transient_locator_failure() -> None:
+    class Locator:
+        @property
+        def first(self):
+            return self
+
+        def is_visible(self) -> bool:
+            raise RuntimeError("transient DOM replacement")
+
+    class Page:
+        def evaluate(self, script: str) -> object:
+            if script.startswith("() => ({width"):
+                return {"width": 1440, "height": 900}
+            if "please complete" in script:
+                return {"x": 500, "y": 200, "width": 332, "height": 429}
+            return True
+
+        def locator(self, selector: str) -> Locator:
+            del selector
+            return Locator()
+
+        def screenshot(self, **kwargs: object) -> bytes:
+            del kwargs
+            return b"fallback-slider-scene"
+
+    result = GlmAliyunChallenge()._capture_surface(Page())
+
+    assert result.slider is True
+    assert result.image == b"fallback-slider-scene"
+
+
 def test_glm_semantic_slider_uses_coarse_then_fine_choice_consensus(monkeypatch) -> None:
     background = Image.new("RGB", (300, 300), "white")
     piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
@@ -1261,6 +1332,15 @@ def test_glm_semantic_slider_uses_coarse_then_fine_choice_consensus(monkeypatch)
         return "B" if len(calls) == 1 else "C"
 
     monkeypatch.setattr(registry, "solve_visual_choice_sync", choose)
+    monkeypatch.setattr(
+        "any2api_automation.providers.glm_challenge.estimate_blurred_object_placement",
+        lambda background, piece: None,
+    )
+    challenge = GlmAliyunChallenge()
+    monkeypatch.setattr(
+        "any2api_automation.providers.glm_challenge.settings",
+        lambda: type("Config", (), {"glm_semantic_ai_fallback_enabled": True})(),
+    )
     semantic = GlmSemanticSliderInput(
         png(Image.new("RGB", (640, 340), "white")),
         0.05,
@@ -1268,12 +1348,16 @@ def test_glm_semantic_slider_uses_coarse_then_fine_choice_consensus(monkeypatch)
         png(piece),
     )
 
-    target, diagnostic = GlmAliyunChallenge()._semantic_slider_target(semantic, 120)
+    target, diagnostic = challenge._semantic_slider_target(semantic, 120)
 
     assert target is not None
-    assert abs(target - 0.5) < 0.01
-    assert [choices for choices, _ in calls] == [tuple("ABC"), tuple("ABCDE"), tuple("ABCDE")]
-    assert calls[0][1] == (640, 340)
+    assert abs(target - 0.151) < 0.01
+    assert [choices for choices, _ in calls] == [
+        tuple("ABCDEFGHI"),
+        tuple("ABCDE"),
+        tuple("ABCDE"),
+    ]
+    assert calls[0][1][1] > 340
     assert calls[1][1] != calls[0][1]
     assert "coarse=B:" in diagnostic
     assert "fine=C:" in diagnostic
@@ -1303,6 +1387,44 @@ def test_glm_slider_images_accept_browser_canvas_data_urls() -> None:
         assert decoded_background.size == (300, 300)
     with Image.open(io.BytesIO(piece_bytes)) as decoded_piece:
         assert decoded_piece.size == (300, 300)
+
+
+def test_glm_semantic_input_waits_for_sources_after_sdk_dom_refresh(monkeypatch) -> None:
+    challenge = GlmAliyunChallenge()
+    background = Image.new("RGB", (300, 300), "white")
+    piece = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(piece).rectangle((10, 120, 30, 150), fill="black")
+
+    def png(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    attempts = 0
+
+    def slider_images(page):
+        nonlocal attempts
+        del page
+        attempts += 1
+        if attempts < 3:
+            raise ValueError("SDK image source is being replaced")
+        return png(background), png(piece)
+
+    class Page:
+        def evaluate(self, script: str) -> float:
+            del script
+            return 0.05
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            assert milliseconds == 100
+
+    monkeypatch.setattr(challenge, "_slider_images", slider_images)
+
+    result = challenge._semantic_slider_input(Page(), png(background))
+
+    assert attempts == 3
+    assert result.background
+    assert result.piece
 
 
 def test_registration_trace_reports_last_confirmed_stage() -> None:

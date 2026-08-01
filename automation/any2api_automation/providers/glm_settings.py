@@ -17,6 +17,7 @@ class GlmSettings(AutomationProviderSettings):
     glm_captcha_timeout_seconds: int = 120
     glm_official_captcha_wait_seconds: int = 20
     glm_registration_browser_attempts: int = 4
+    glm_semantic_ai_fallback_enabled: bool = False
 
 
 @lru_cache

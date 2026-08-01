@@ -53,6 +53,7 @@ ProxyNode = VlessNode | DirectNode
 
 def proxy_parameters(payload: dict[str, Any]) -> dict[str, Any]:
     config = settings()
+    node_offset = _proxy_node_offset(payload.get("proxy_node_offset"))
     pool = payload.get("proxy_pool")
     if isinstance(pool, dict):
         mode = str(pool.get("mode") or "").upper()
@@ -64,6 +65,7 @@ def proxy_parameters(payload: dict[str, Any]) -> dict[str, Any]:
                 "node_urls": None,
                 "affinity_key": str(payload.get("proxy_affinity_key") or "").strip(),
                 "strict_affinity": bool(payload.get("strict_proxy_affinity", False)),
+                "node_offset": node_offset,
             }
         if mode == "NODE_LIST":
             raw_nodes = pool.get("nodes")
@@ -77,6 +79,7 @@ def proxy_parameters(payload: dict[str, Any]) -> dict[str, Any]:
                 "node_urls": nodes,
                 "affinity_key": str(payload.get("proxy_affinity_key") or "").strip(),
                 "strict_affinity": bool(payload.get("strict_proxy_affinity", False)),
+                "node_offset": node_offset,
             }
         raise ValueError("unsupported proxy pool mode")
     return {
@@ -86,7 +89,28 @@ def proxy_parameters(payload: dict[str, Any]) -> dict[str, Any]:
         "node_urls": None,
         "affinity_key": str(payload.get("proxy_affinity_key") or "").strip(),
         "strict_affinity": bool(payload.get("strict_proxy_affinity", False)),
+        "node_offset": node_offset,
     }
+
+
+def proxy_attempt_payload(
+    payload: dict[str, Any],
+    *,
+    identity: str,
+    attempt: int,
+) -> dict[str, Any]:
+    if attempt < 1:
+        raise ValueError("proxy attempt must be positive")
+    result = {**payload}
+    affinity = str(result.get("proxy_affinity_key") or "").strip()
+    if not affinity:
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+        affinity = f"flow-{digest}"
+    result["proxy_affinity_key"] = affinity
+    result["proxy_node_offset"] = (
+        _proxy_node_offset(result.get("proxy_node_offset")) + attempt - 1
+    )
+    return result
 
 
 @contextmanager
@@ -99,6 +123,7 @@ def proxy_lease(
     node_urls: list[str] | None = None,
     affinity_key: str = "",
     strict_affinity: bool = False,
+    node_offset: int = 0,
     reject_redirect_hosts: tuple[str, ...] = (),
 ) -> Iterator[str]:
     if explicit_url:
@@ -113,7 +138,7 @@ def proxy_lease(
         if not subscription:
             raise RuntimeError("dynamic proxy subscription or node list is not configured")
         nodes = _fetch_nodes(subscription)
-    nodes = _ordered_nodes(nodes, affinity_key)
+    nodes = _ordered_nodes(nodes, affinity_key, node_offset)
     attempt_limit = 1 if affinity_key and strict_affinity else settings().dynamic_proxy_max_attempts
     errors: list[str] = []
     for node in nodes[:attempt_limit]:
@@ -267,20 +292,39 @@ def _parse_nodes(values: list[str] | tuple[str, ...] | Any) -> list[ProxyNode]:
     return nodes
 
 
-def _ordered_nodes(nodes: list[ProxyNode], affinity_key: str) -> list[ProxyNode]:
+def _ordered_nodes(
+    nodes: list[ProxyNode],
+    affinity_key: str,
+    node_offset: int = 0,
+) -> list[ProxyNode]:
+    offset = _proxy_node_offset(node_offset)
     if not affinity_key:
-        shuffled = list(nodes)
-        random.SystemRandom().shuffle(shuffled)
-        return shuffled
-    if len(affinity_key) > 256 or not re.fullmatch(r"[A-Za-z0-9._:-]+", affinity_key):
-        raise ValueError("proxy affinity key is invalid")
-    return sorted(
-        nodes,
-        key=lambda node: hashlib.sha256(
-            f"{affinity_key}\0{_node_identity(node)}".encode()
-        ).digest(),
-        reverse=True,
-    )
+        ordered = list(nodes)
+        random.SystemRandom().shuffle(ordered)
+    else:
+        if len(affinity_key) > 256 or not re.fullmatch(r"[A-Za-z0-9._:-]+", affinity_key):
+            raise ValueError("proxy affinity key is invalid")
+        ordered = sorted(
+            nodes,
+            key=lambda node: hashlib.sha256(
+                f"{affinity_key}\0{_node_identity(node)}".encode()
+            ).digest(),
+            reverse=True,
+        )
+    if not ordered:
+        return ordered
+    rotation = offset % len(ordered)
+    return ordered[rotation:] + ordered[:rotation]
+
+
+def _proxy_node_offset(value: Any) -> int:
+    try:
+        offset = int(value or 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("proxy node offset must be an integer") from error
+    if offset < 0 or offset > 100_000:
+        raise ValueError("proxy node offset is outside the allowed range")
+    return offset
 
 
 def _node_identity(node: ProxyNode) -> str:

@@ -25,7 +25,7 @@ from ..lifecycle.browser import (
     run_browser_flow,
 )
 from ..lifecycle.mail import Mailbox, TempMailClient
-from ..lifecycle.proxy import proxy_lease, proxy_parameters
+from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
 from .glm_challenge import GlmAliyunChallenge
@@ -141,7 +141,7 @@ async def _run_registration_browser(
     password: str,
     trace: RegistrationTrace,
 ) -> BrowserResult:
-    attempts = max(1, min(3, settings().glm_registration_browser_attempts))
+    attempts = max(1, min(8, settings().glm_registration_browser_attempts))
     for attempt in range(1, attempts + 1):
         try:
             return await asyncio.to_thread(
@@ -157,7 +157,11 @@ async def _run_registration_browser(
                 ),
                 preferred=provider.manifest.browser_backend,
                 fallback=provider.manifest.fallback_backend,
-                payload=payload,
+                payload=proxy_attempt_payload(
+                    payload,
+                    identity=mailbox.address,
+                    attempt=attempt,
+                ),
                 context_profile=provider.browser_context_profile(),
                 launch_profile=provider.browser_launch_profile(),
                 fingerprint_policy=provider.browser_fingerprint_policy(),

@@ -217,7 +217,10 @@ class GlmAliyunChallenge:
             if state.get("status") in {"ready", "running", "success"}:
                 return
             if state.get("status") == "error":
-                raise RuntimeError("GLM Aliyun captcha initialization failed")
+                detail = " ".join(str(state.get("error") or "none").split())[:160]
+                raise RuntimeError(
+                    f"GLM Aliyun captcha initialization failed detail={detail}"
+                )
             page.wait_for_timeout(200)
         state = self._state(page)
         status = str(state.get("status") or "unknown")[:40]

@@ -54,6 +54,9 @@ LongCat waits for H5Guard readiness, observes the risk and email-apply API trans
 Providers may declare `registration_attempt_mode=single_identity` when a failed scheduler retry
 would consume another mailbox. GLM uses this mode: Python owns multiple browser/captcha attempts
 inside one registration call, while Java permits only one top-level attempt per requested identity.
+Browser retries for the same identity derive a stable proxy affinity and rotate the ordered node
+list by attempt number. A provider-specific browser failure therefore advances to another node
+without hard-coding node names or consuming another mailbox.
 
 GLM uses separate Alibaba Cloud Captcha profiles for authentication and chat. Authentication uses
 the embedded `36qgs6xb` scene; chat uses the popup `didk33e0` scene. A ticket from one scene is never

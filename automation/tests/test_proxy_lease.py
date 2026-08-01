@@ -8,6 +8,7 @@ from any2api_automation.lifecycle.proxy import (
     _ordered_nodes,
     _parse_nodes,
     _singbox_config,
+    proxy_attempt_payload,
     proxy_lease,
     proxy_parameters,
 )
@@ -56,6 +57,7 @@ def test_admin_node_pool_overrides_environment_defaults() -> None:
         "node_urls": ["http://proxy.example:8080", "socks5://proxy.example:1080"],
         "affinity_key": "",
         "strict_affinity": False,
+        "node_offset": 0,
     }
 
 
@@ -94,6 +96,31 @@ def test_proxy_affinity_is_stable_and_identity_specific() -> None:
     assert first == repeated
     assert {node.url for node in first} == {node.url for node in nodes}
     assert _ordered_nodes(nodes, "identity-b") != first
+
+
+def test_proxy_attempts_rotate_stable_affinity_across_nodes() -> None:
+    nodes = _parse_nodes(
+        [
+            "http://proxy-a.example:8080",
+            "http://proxy-b.example:8080",
+            "http://proxy-c.example:8080",
+        ]
+    )
+    first = _ordered_nodes(nodes, "identity-a", 0)
+
+    assert _ordered_nodes(nodes, "identity-a", 1) == first[1:] + first[:1]
+    assert _ordered_nodes(nodes, "identity-a", 2) == first[2:] + first[:2]
+
+    initial = proxy_attempt_payload({}, identity="mail@example.test", attempt=1)
+    retry = proxy_attempt_payload({}, identity="mail@example.test", attempt=2)
+    assert initial["proxy_affinity_key"] == retry["proxy_affinity_key"]
+    assert initial["proxy_node_offset"] == 0
+    assert retry["proxy_node_offset"] == 1
+
+
+def test_proxy_node_offset_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="offset"):
+        proxy_parameters({"proxy_node_offset": -1})
 
 
 def test_proxy_affinity_rejects_unbounded_or_unsafe_keys() -> None:

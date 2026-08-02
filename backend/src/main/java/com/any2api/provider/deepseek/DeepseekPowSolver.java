@@ -1,8 +1,6 @@
 package com.any2api.provider.deepseek;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
 import tools.jackson.databind.JsonNode;
@@ -15,14 +13,9 @@ final class DeepseekPowSolver {
         validate(challenge);
         var prefix = (challenge.salt() + "_" + challenge.expireAt() + "_")
             .getBytes(StandardCharsets.UTF_8);
-        var digest = sha3();
         var target = HexFormat.of().parseHex(challenge.challenge());
         for (var answer = 0; answer < challenge.difficulty(); answer++) {
-            digest.update(prefix);
-            var hash = digest.digest(Integer.toString(answer).getBytes(StandardCharsets.UTF_8));
-            if (MessageDigest.isEqual(hash, target)) {
-                return answer;
-            }
+            if (DeepseekHashV1.matches(prefix, answer, target)) return answer;
         }
         throw new IllegalStateException("DeepSeek POW challenge has no solution in its search range");
     }
@@ -62,15 +55,6 @@ final class DeepseekPowSolver {
             throw new IllegalStateException("DeepSeek POW challenge has expired");
         }
     }
-
-    private MessageDigest sha3() {
-        try {
-            return MessageDigest.getInstance("SHA3-256");
-        } catch (NoSuchAlgorithmException error) {
-            throw new IllegalStateException("JVM does not provide SHA3-256", error);
-        }
-    }
-
     record Challenge(
         String algorithm,
         String challenge,

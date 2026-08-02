@@ -49,7 +49,7 @@ For each inference request the provider:
 
 1. creates a fresh official chat session;
 2. requests a proof-of-work challenge for `/api/v0/chat/completion`;
-3. solves `DeepSeekHashV1` with SHA3-256 on a bounded worker scheduler;
+3. solves `DeepSeekHashV1` with the official 23-round Keccak variant on a bounded worker scheduler;
 4. submits the mapped prompt and proof using the account's bearer token;
 5. converts reasoning, response, usage, close, and failure patches to canonical events.
 

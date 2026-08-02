@@ -17,6 +17,7 @@ final class LongcatEventDecoder {
     private long sequence;
     private boolean started;
     private boolean completed;
+    private boolean usageEmitted;
 
     LongcatEventDecoder(
         String requestId,
@@ -119,10 +120,12 @@ final class LongcatEventDecoder {
 
     private void usage(List<CanonicalEvent> output, tools.jackson.databind.JsonNode usage,
                        tools.jackson.databind.JsonNode tokenInfo) {
+        if (usageEmitted) return;
         var input = usage.path("inputTokens").asLong(tokenInfo.path("promptTokens").asLong());
         var generated = usage.path("outputTokens").asLong(tokenInfo.path("completionTokens").asLong());
         if (input > 0 || generated > 0) {
             output.add(new CanonicalEvent.Usage(1, requestId, next(), input, generated, 0));
+            usageEmitted = true;
         }
     }
 

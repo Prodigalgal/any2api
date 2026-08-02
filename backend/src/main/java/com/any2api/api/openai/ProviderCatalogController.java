@@ -4,6 +4,7 @@ import com.any2api.lifecycle.AutomationProviderCatalog;
 import com.any2api.lifecycle.ProviderLifecycleRegistry;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ProviderCapability;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.SupportLevel;
 import java.util.List;
 import java.util.HashSet;
@@ -30,11 +31,14 @@ public class ProviderCatalogController {
 
     @GetMapping("/api/catalog/v1/providers")
     public Map<String, Object> providers() {
-        var data = providers.list().stream().map(manifest -> new ProviderDescriptor(
-            manifest.id(), manifest.displayName(), manifest.adapterVersion(),
-            manifest.requestSchemaVersion(), manifest.defaultModels(), manifest.capabilities(),
-            lifecycleOperations(manifest.id()),
-            manifest.configured())).toList();
+        var data = providers.enabledPlugins().stream().map(provider -> {
+            var manifest = provider.manifest();
+            return new ProviderDescriptor(
+                manifest.id(), manifest.displayName(), manifest.adapterVersion(),
+                manifest.requestSchemaVersion(), manifest.defaultModels(), manifest.capabilities(),
+                provider.protocolContract(), lifecycleOperations(manifest.id()),
+                manifest.configured());
+        }).toList();
         return Map.of(
             "object", "list",
             "automationCatalogReady", automation.ready(),
@@ -54,6 +58,7 @@ public class ProviderCatalogController {
         String requestSchemaVersion,
         List<String> defaultModels,
         Map<ProviderCapability, SupportLevel> capabilities,
+        ProviderProtocolContract protocolContract,
         List<String> lifecycleOperations,
         boolean configured
     ) {}

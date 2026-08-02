@@ -4,9 +4,11 @@ import com.any2api.account.AccountEntity;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.coordination.AccountLease;
 import com.any2api.protocol.CanonicalEvent;
+import com.any2api.protocol.CanonicalEventStream;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import java.time.Duration;
 import java.time.Instant;
@@ -61,8 +63,11 @@ final class InferenceReadinessProbe {
             requestId, account.getId(), Long.toString(credentialVersion),
             lease.ownerToken(), lease.fencingToken(), lease.expiresAt());
         return Flux.defer(() -> {
+                ProviderRequestValidation.requireSupportedRequest(
+                    request, provider.manifest(), provider.protocolContract());
                 provider.validate(request);
-                return provider.generate(request, context, leased);
+                return CanonicalEventStream.enforce(
+                    request, provider.generate(request, context, leased));
             })
             .timeout(TIMEOUT)
             .collectList()

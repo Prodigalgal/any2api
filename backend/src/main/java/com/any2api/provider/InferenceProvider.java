@@ -11,6 +11,10 @@ public interface InferenceProvider {
 
     ProviderManifest manifest();
 
+    default ProviderProtocolContract protocolContract() {
+        return ProviderProtocolContract.strict();
+    }
+
     default void validate(CanonicalRequest request) {
     }
 

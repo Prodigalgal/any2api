@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -76,8 +77,7 @@ public class OpenAiResponseWriter {
             var payload = request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS
                 ? accumulator.chatResponse()
                 : accumulator.responsesResponse();
-            exchange.getResponse().setStatusCode(
-                accumulator.failed() ? HttpStatus.BAD_GATEWAY : HttpStatus.OK);
+            exchange.getResponse().setStatusCode(accumulator.status());
             exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
             exchange.getResponse().getHeaders().setCacheControl("no-store");
             var bytes = objectMapper.writeValueAsBytes(payload);
@@ -94,11 +94,15 @@ public class OpenAiResponseWriter {
         private final CanonicalRequest request;
         private final ObjectMapper mapper;
         private final Map<String, Integer> toolIndexes = new LinkedHashMap<>();
+        private final boolean includeUsage;
+        private CanonicalEvent.Usage pendingUsage;
         private String responseId;
 
         private ChatStreamRenderer(CanonicalRequest request, ObjectMapper mapper) {
             this.request = request;
             this.mapper = mapper;
+            this.includeUsage = request.rawRequest().path("stream_options")
+                .path("include_usage").asBoolean(false);
             this.responseId = "chatcmpl_" + request.requestId().replace("-", "");
         }
 
@@ -137,20 +141,26 @@ public class OpenAiResponseWriter {
                 return List.of(data(chunk(delta, null)));
             }
             if (event instanceof CanonicalEvent.Usage usage) {
-                var payload = chunk(mapper.createObjectNode(), null);
-                payload.set("choices", mapper.createArrayNode());
-                payload.set("usage", usage(mapper, usage));
-                return List.of(data(payload));
+                if (includeUsage) pendingUsage = usage;
+                return List.of();
             }
             if (event instanceof CanonicalEvent.Completed completed) {
-                return List.of(data(chunk(
-                    mapper.createObjectNode(),
-                    completed.finishReason())), "data: [DONE]\n\n");
+                var frames = new ArrayList<String>();
+                frames.add(data(chunk(mapper.createObjectNode(), completed.finishReason())));
+                if (pendingUsage != null) {
+                    var payload = chunk(mapper.createObjectNode(), null);
+                    payload.set("choices", mapper.createArrayNode());
+                    payload.set("usage", usage(mapper, pendingUsage));
+                    frames.add(data(payload));
+                }
+                frames.add("data: [DONE]\n\n");
+                return frames;
             }
             if (event instanceof CanonicalEvent.Failed failed) {
                 var error = mapper.createObjectNode()
                     .put("type", failed.errorType())
-                    .put("message", failed.message());
+                    .put("message", failed.message())
+                    .put("code", failed.errorType());
                 var payload = mapper.createObjectNode().set("error", error);
                 return List.of(data(payload), "data: [DONE]\n\n");
             }
@@ -169,6 +179,7 @@ public class OpenAiResponseWriter {
                 .put("object", "chat.completion.chunk")
                 .put("created", Instant.now().getEpochSecond())
                 .put("model", request.model());
+            if (includeUsage) payload.putNull("usage");
             payload.putArray("choices").add(choice);
             return payload;
         }
@@ -218,7 +229,8 @@ public class OpenAiResponseWriter {
                     var part = mapper.createObjectNode()
                         .put("type", "output_text")
                         .put("text", "")
-                        .set("annotations", mapper.createArrayNode());
+                        .set("annotations", mapper.createArrayNode())
+                        .set("logprobs", mapper.createArrayNode());
                     frames.add(event("response.content_part.added", textPart(part)));
                 }
                 frames.add(event("response.output_text.delta", textDelta(text.delta())));
@@ -294,9 +306,12 @@ public class OpenAiResponseWriter {
                         .put("item_id", "msg_" + responseId)
                         .put("output_index", textOutputIndex)
                         .put("content_index", 0)
-                        .put("text", text)));
+                        .put("text", text)
+                        .set("logprobs", mapper.createArrayNode())));
                     var part = mapper.createObjectNode().put("type", "output_text")
-                        .put("text", text).set("annotations", mapper.createArrayNode());
+                        .put("text", text)
+                        .set("annotations", mapper.createArrayNode())
+                        .set("logprobs", mapper.createArrayNode());
                     frames.add(event("response.content_part.done", textPart(part)));
                     var content = mapper.createArrayNode().add(part);
                     var item = mapper.createObjectNode()
@@ -320,13 +335,15 @@ public class OpenAiResponseWriter {
         }
 
         private ObjectNode baseResponse(String status) {
-            return mapper.createObjectNode()
+            var response = mapper.createObjectNode()
                 .put("id", responseId)
                 .put("object", "response")
                 .put("created_at", Instant.now().getEpochSecond())
                 .put("status", status)
                 .put("model", request.model())
                 .set("output", mapper.createArrayNode());
+            applyResponsesConfiguration(response, request, mapper);
+            return response;
         }
 
         private ObjectNode indexedItem(int index, ObjectNode item) {
@@ -346,7 +363,8 @@ public class OpenAiResponseWriter {
                 .put("item_id", "msg_" + responseId)
                 .put("output_index", textOutputIndex)
                 .put("content_index", 0)
-                .put("delta", delta);
+                .put("delta", delta)
+                .set("logprobs", mapper.createArrayNode());
         }
 
         private String event(String type, ObjectNode payload) {
@@ -407,6 +425,12 @@ public class OpenAiResponseWriter {
             return failure != null;
         }
 
+        private HttpStatus status() {
+            if (!failed()) return HttpStatus.OK;
+            return Set.of("rate_limited", "quota_exhausted").contains(failure.errorType())
+                ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.BAD_GATEWAY;
+        }
+
         private ObjectNode chatResponse() {
             if (failure != null) {
                 return error();
@@ -456,7 +480,8 @@ public class OpenAiResponseWriter {
                 var content = mapper.createArrayNode().add(mapper.createObjectNode()
                     .put("type", "output_text")
                     .put("text", text.toString())
-                    .set("annotations", mapper.createArrayNode()));
+                    .set("annotations", mapper.createArrayNode())
+                    .set("logprobs", mapper.createArrayNode()));
                 output.add(mapper.createObjectNode()
                     .put("id", "msg_" + responseId)
                     .put("type", "message")
@@ -479,31 +504,15 @@ public class OpenAiResponseWriter {
                 .put("model", request.model())
                 .set("output", output)
                 .set("usage", responsesUsage(mapper, usage));
-            response.putNull("error");
-            response.putNull("incomplete_details");
-            response.set("metadata", request.rawRequest().path("metadata").isObject()
-                ? request.rawRequest().path("metadata").deepCopy() : mapper.createObjectNode());
-            response.put("parallel_tool_calls",
-                request.rawRequest().path("parallel_tool_calls").asBoolean(true));
-            response.set("tools", request.rawRequest().path("tools").isArray()
-                ? request.rawRequest().path("tools").deepCopy() : mapper.createArrayNode());
-            response.set("tool_choice", request.rawRequest().has("tool_choice")
-                ? request.rawRequest().path("tool_choice").deepCopy()
-                : mapper.getNodeFactory().textNode("auto"));
-            if (request.rawRequest().has("instructions")) {
-                response.set("instructions", request.rawRequest().path("instructions").deepCopy());
-            } else response.putNull("instructions");
-            if (request.rawRequest().has("previous_response_id")) {
-                response.set("previous_response_id",
-                    request.rawRequest().path("previous_response_id").deepCopy());
-            } else response.putNull("previous_response_id");
+            applyResponsesConfiguration(response, request, mapper);
             return response;
         }
 
         private ObjectNode error() {
             return mapper.createObjectNode().set("error", mapper.createObjectNode()
                 .put("type", failure.errorType())
-                .put("message", failure.message()));
+                .put("message", failure.message())
+                .put("code", failure.errorType()));
         }
 
         private ObjectNode tool(ToolState tool) {
@@ -535,7 +544,8 @@ public class OpenAiResponseWriter {
             .put("prompt_tokens", input)
             .put("completion_tokens", output)
             .put("total_tokens", input + output)
-            .put("cached_tokens", cached);
+            .set("prompt_tokens_details",
+                mapper.createObjectNode().put("cached_tokens", cached));
     }
 
     private static ObjectNode responsesUsage(ObjectMapper mapper, CanonicalEvent.Usage usage) {
@@ -547,6 +557,43 @@ public class OpenAiResponseWriter {
             .put("output_tokens", output)
             .put("total_tokens", input + output)
             .set("input_tokens_details", mapper.createObjectNode().put("cached_tokens", cached));
+    }
+
+    private static void applyResponsesConfiguration(
+        ObjectNode response,
+        CanonicalRequest request,
+        ObjectMapper mapper
+    ) {
+        var raw = request.rawRequest();
+        response.putNull("error");
+        response.putNull("incomplete_details");
+        response.set("metadata", raw.path("metadata").isObject()
+            ? raw.path("metadata").deepCopy() : mapper.createObjectNode());
+        response.put("parallel_tool_calls", raw.path("parallel_tool_calls").asBoolean(true));
+        response.put("store", raw.path("store").asBoolean(false));
+        response.set("tools", raw.path("tools").isArray()
+            ? raw.path("tools").deepCopy() : mapper.createArrayNode());
+        response.set("tool_choice", raw.has("tool_choice")
+            ? raw.path("tool_choice").deepCopy()
+            : mapper.getNodeFactory().textNode("auto"));
+        copyOrNull(response, raw, "instructions");
+        copyOrNull(response, raw, "max_output_tokens");
+        copyOrNull(response, raw, "previous_response_id");
+        copyOrNull(response, raw, "reasoning");
+        copyOrNull(response, raw, "service_tier");
+        copyOrNull(response, raw, "temperature");
+        copyOrNull(response, raw, "text");
+        copyOrNull(response, raw, "top_p");
+        copyOrNull(response, raw, "truncation");
+    }
+
+    private static void copyOrNull(
+        ObjectNode target,
+        tools.jackson.databind.JsonNode source,
+        String field
+    ) {
+        if (source.has(field)) target.set(field, source.path(field).deepCopy());
+        else target.putNull(field);
     }
 
 }

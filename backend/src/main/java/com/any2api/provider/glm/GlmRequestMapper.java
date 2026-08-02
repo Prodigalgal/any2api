@@ -109,6 +109,8 @@ final class GlmRequestMapper {
         copyNumber(request, output, "top_p", "top_p");
         if (request.generation().get("max_completion_tokens") instanceof Number number) {
             output.put("max_tokens", number.longValue());
+        } else if (request.generation().get("max_output_tokens") instanceof Number number) {
+            output.put("max_tokens", number.longValue());
         } else copyNumber(request, output, "max_tokens", "max_tokens");
         return output;
     }
@@ -187,7 +189,9 @@ final class GlmRequestMapper {
     private String reasoningEffort(CanonicalRequest request) {
         var value = String.valueOf(request.providerOptions().getOrDefault(
             "reasoning_effort",
-            request.reasoning().getOrDefault("effort", "max"))).trim().toLowerCase();
+            request.reasoning().getOrDefault("effort",
+                request.rawRequest().path("reasoning_effort").asText("max"))))
+            .trim().toLowerCase();
         return value.isBlank() ? "max" : value;
     }
 

@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -29,11 +30,28 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public final class GrokProvider implements InferenceProvider {
 
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of("skip_x_search", ProviderProtocolContract.OptionType.BOOLEAN),
+        Set.of(
+            "temperature", "top_p", "max_tokens", "max_completion_tokens",
+            "max_output_tokens", "reasoning", "reasoning_effort", "tools", "tool_choice",
+            "parallel_tool_calls", "prompt_cache_key", "user", "instructions",
+            "stream_tool_calls", "conversation_id", "conversation", "thread_id", "session_id",
+            "metadata", "_skip_x_search"),
+        Set.of(
+            "background", "context_management", "conversation", "include", "max_output_tokens",
+            "max_tool_calls", "moderation", "parallel_tool_calls", "previous_response_id", "prompt",
+            "prompt_cache_key", "prompt_cache_options", "reasoning", "safety_identifier",
+            "service_tier", "store", "temperature", "tools", "tool_choice", "top_logprobs",
+            "top_p", "truncation", "user"),
+        Set.of("function", "x_search"),
+        Set.of("effort", "summary"));
+
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "grok",
         "Grok",
         "xai-cli-responses-v1",
-        "1",
+        "2",
         List.of("grok-4.5"),
         Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
@@ -76,8 +94,13 @@ public final class GrokProvider implements InferenceProvider {
     }
 
     @Override
+    public ProviderProtocolContract protocolContract() {
+        return PROTOCOL;
+    }
+
+    @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of("skip_x_search"));
+        ProviderRequestValidation.requireBooleanParameters(request, "_skip_x_search");
     }
 
     @Override
@@ -108,7 +131,8 @@ public final class GrokProvider implements InferenceProvider {
                     if (response.statusCode().is2xxSuccessful()) {
                         return response.bodyToFlux(SSE_TYPE)
                             .mapNotNull(ServerSentEvent::data)
-                            .concatMapIterable(decoder::decode);
+                            .concatMapIterable(decoder::decode)
+                            .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
                     }
                     return response.bodyToMono(String.class)
                         .defaultIfEmpty("")

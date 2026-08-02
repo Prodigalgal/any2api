@@ -8,6 +8,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -18,7 +19,6 @@ import com.any2api.transport.SseDataDecoder;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -27,6 +27,18 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class LongcatProvider implements InferenceProvider {
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of(
+            "agent_id", ProviderProtocolContract.OptionType.STRING,
+            "reason_enabled", ProviderProtocolContract.OptionType.BOOLEAN,
+            "search_enabled", ProviderProtocolContract.OptionType.BOOLEAN),
+        java.util.Set.of(
+            "reasoning", "reasoning_effort", "agent_id", "reason_enabled", "search_enabled",
+            "tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of(
+            "reasoning", "reasoning_effort", "agent_id", "reason_enabled", "search_enabled",
+            "tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of("function"));
     private final BrowserTransportClient transport;
     private final ProxyPoolService proxyPools;
     private final LongcatProperties properties;
@@ -52,7 +64,7 @@ public final class LongcatProvider implements InferenceProvider {
 
     @Override
     public ProviderManifest manifest() {
-        return new ProviderManifest("longcat", "LongCat", "native-longcat-web-v1", "1",
+        return new ProviderManifest("longcat", "LongCat", "native-longcat-web-v1", "2",
             List.of("longcat-flash", "longcat-thinking", "longcat-search",
                 "longcat-reason-search", "longcat-pro"),
             Map.of(
@@ -68,11 +80,17 @@ public final class LongcatProvider implements InferenceProvider {
     }
 
     @Override
+    public ProviderProtocolContract protocolContract() {
+        return PROTOCOL;
+    }
+
+    @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of(
-            "agent_id", "reason_enabled", "search_enabled"));
-        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of(
-            "tool_choice", "parallel_tool_calls"));
+        ProviderRequestValidation.requireStringParameters(request, "agent_id");
+        ProviderRequestValidation.requireBooleanParameters(
+            request, "reason_enabled", "search_enabled");
+        ProviderRequestValidation.requireReasoningBooleanConsistency(
+            request, "reason_enabled", java.util.Set.of("none", "minimal"), "reason_enabled");
         toolProtocol.plan(request);
     }
 

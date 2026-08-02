@@ -110,6 +110,12 @@ under `provider_options.<providerId>`. A provider may also recognize documented 
 aliases for compatibility, but its typed option is authoritative. Unknown provider options,
 conflicting standard fields, and unsupported capabilities fail before upstream I/O.
 
+Each `InferenceProvider` must return a `ProviderProtocolContract`. Parameter support belongs in this
+declaration, not in controller branches or ad hoc provider whitelist calls. The contract separately
+declares Chat parameters, Responses parameters, tool types, and typed provider options. Provider
+`validate` methods are limited to value ranges, mutually dependent options, model restrictions, and
+other semantics that cannot be represented by the structural contract.
+
 Every manifest must declare both `CHAT_COMPLETIONS` and `RESPONSES`; the registry refuses to boot
 otherwise. Both public protocol families use the same canonical event stream, including reasoning,
 tool calls, usage, completion, and failure. Provider-specific upstream event names never reach the

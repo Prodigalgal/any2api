@@ -9,12 +9,11 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
-import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -26,10 +25,22 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class GrokConsoleProvider implements InferenceProvider {
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of(),
+        java.util.Set.of(
+            "temperature", "top_p", "max_tokens", "max_completion_tokens",
+            "max_output_tokens", "reasoning", "reasoning_effort", "tools", "tool_choice",
+            "parallel_tool_calls"),
+        java.util.Set.of(
+            "include", "max_output_tokens", "max_tool_calls", "parallel_tool_calls",
+            "reasoning", "temperature", "tools", "tool_choice", "top_logprobs", "top_p",
+            "truncation"),
+        java.util.Set.of("function"),
+        java.util.Set.of("effort", "summary"));
     private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_TYPE =
         new ParameterizedTypeReference<>() {};
     private static final ProviderManifest MANIFEST = new ProviderManifest(
-        "grok_console", "Grok Console", "xai-console-sso-v1", "1",
+        "grok_console", "Grok Console", "xai-console-sso-v1", "2",
         GrokConsoleModelCatalog.modelIds(), Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
             ProviderCapability.RESPONSES, SupportLevel.NATIVE,
@@ -59,6 +70,8 @@ public final class GrokConsoleProvider implements InferenceProvider {
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
+    @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
+
     @Override
     public void validateCredential(tools.jackson.databind.JsonNode credential) {
         if (first(credential, "sso", "sso-rw", "sso_rw", "sso_token").isBlank()) {
@@ -68,7 +81,6 @@ public final class GrokConsoleProvider implements InferenceProvider {
 
     @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of());
         GrokConsoleModelCatalog.require(request.model());
     }
 
@@ -96,6 +108,7 @@ public final class GrokConsoleProvider implements InferenceProvider {
             .exchangeToFlux(response -> response.statusCode().is2xxSuccessful()
                 ? response.bodyToFlux(SSE_TYPE).mapNotNull(ServerSentEvent::data)
                     .concatMapIterable(decoder::decode)
+                    .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())))
                 : response.bodyToMono(String.class).defaultIfEmpty("")
                     .flatMapMany(body -> Flux.error(new GrokConsoleUpstreamException(
                         response.statusCode().value(), summarize(response.statusCode().value(), body)))));

@@ -25,7 +25,8 @@ class ProviderIsolationArchitectureTest {
 
     private void assertProviderIdDoesNotLeakIntoCore(Path providerDirectory) throws IOException {
         var providerId = providerDirectory.getFileName().toString();
-        var providerToken = Pattern.compile("\\b" + Pattern.quote(providerId) + "\\b");
+        var providerToken = Pattern.compile(
+            "\\b" + Pattern.quote(providerId) + "\\b", Pattern.CASE_INSENSITIVE);
         try (var sources = Files.walk(JAVA_ROOT)) {
             var leaks = sources
                 .filter(path -> path.toString().endsWith(".java"))
@@ -35,6 +36,27 @@ class ProviderIsolationArchitectureTest {
                 .toList();
             assertThat(leaks)
                 .as("provider id %s must stay inside %s", providerId, providerDirectory)
+                .isEmpty();
+        }
+    }
+
+    @Test
+    void providerParameterWhitelistsAreDeclaredAsContracts() throws IOException {
+        try (var sources = Files.walk(PROVIDER_ROOT)) {
+            var leaks = sources
+                .filter(path -> path.toString().endsWith("Provider.java"))
+                .filter(path -> {
+                    try {
+                        var content = Files.readString(path);
+                        return content.contains("requireKnownOptions")
+                            || content.contains("requireKnownGenerationParameters");
+                    } catch (IOException error) {
+                        throw new IllegalStateException(error);
+                    }
+                })
+                .toList();
+            assertThat(leaks)
+                .as("provider parameter support must live in ProviderProtocolContract")
                 .isEmpty();
         }
     }

@@ -3,12 +3,14 @@ package com.any2api.provider.qwen;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.provider.InferenceProvider;
 import com.any2api.provider.DiscoveredModel;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.RandomModelRole;
@@ -29,6 +31,22 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class QwenProvider implements InferenceProvider {
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of(
+            "thinking_mode", ProviderProtocolContract.OptionType.STRING,
+            "thinking_budget", ProviderProtocolContract.OptionType.INTEGER,
+            "web_search", ProviderProtocolContract.OptionType.BOOLEAN),
+        Set.of(
+            "temperature", "top_p", "max_tokens", "max_completion_tokens",
+            "max_output_tokens", "reasoning", "reasoning_effort", "thinking_mode",
+            "enable_thinking", "thinking_budget", "web_search", "enable_search", "search",
+            "tools", "tool_choice"),
+        Set.of(
+            "temperature", "top_p", "max_tokens", "max_completion_tokens",
+            "max_output_tokens", "reasoning", "reasoning_effort", "thinking_mode",
+            "enable_thinking", "thinking_budget", "web_search", "enable_search", "search",
+            "tools", "tool_choice"),
+        Set.of("web_search", "web_search_preview", "search"));
     private final BrowserTransportClient transport;
     private final ProxyPoolService proxyPools;
     private final QwenProperties properties;
@@ -57,7 +75,7 @@ public final class QwenProvider implements InferenceProvider {
 
     @Override
     public ProviderManifest manifest() {
-        return new ProviderManifest("qwen", "Qwen", "native-qwen-web-v2.1", "1",
+        return new ProviderManifest("qwen", "Qwen", "native-qwen-web-v2.1", "2",
             List.of("qwen3.7-plus"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
@@ -74,12 +92,25 @@ public final class QwenProvider implements InferenceProvider {
     }
 
     @Override
+    public ProviderProtocolContract protocolContract() {
+        return PROTOCOL;
+    }
+
+    @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of(
-            "thinking_mode", "thinking_budget", "web_search"));
-        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of(
-            "temperature", "top_p", "max_tokens", "max_completion_tokens",
-            "max_output_tokens", "tool_choice"));
+        ProviderRequestValidation.requireStringParameters(request, "thinking_mode");
+        ProviderRequestValidation.requireBooleanParameters(
+            request, "enable_thinking", "web_search", "enable_search", "search");
+        ProviderRequestValidation.requirePositiveIntegerParameters(request, "thinking_budget");
+        ProviderRequestValidation.requireEnumParameter(
+            request, "thinking_mode", Set.of("Auto", "Thinking", "Fast"));
+        ProviderRequestValidation.requireProviderOptionEnum(
+            request, "thinking_mode", Set.of("Auto", "Thinking", "Fast"));
+        ProviderRequestValidation.requirePositiveIntegerProviderOption(
+            request, "thinking_budget");
+        ProviderRequestValidation.requireConsistentBooleanAliases(
+            request, "web_search", "web_search", "enable_search", "search");
+        validateThinkingAliases(request);
         var toolChoice = request.rawRequest().path("tool_choice");
         if (!toolChoice.isMissingNode() && !toolChoice.isNull()
             && (!toolChoice.isTextual()
@@ -95,6 +126,34 @@ public final class QwenProvider implements InferenceProvider {
         if (!unsupportedTools.isEmpty()) {
             throw new IllegalArgumentException(
                 "Qwen does not support tool types: " + String.join(", ", unsupportedTools));
+        }
+    }
+
+    private void validateThinkingAliases(CanonicalRequest request) {
+        var explicitMode = String.valueOf(request.providerOptions().getOrDefault(
+            "thinking_mode", request.rawRequest().path("thinking_mode").asText(""))).trim();
+        var enable = request.rawRequest().path("enable_thinking");
+        if (explicitMode.isBlank() && enable.isBoolean()) {
+            explicitMode = enable.asBoolean() ? "Thinking" : "Fast";
+        } else if (!explicitMode.isBlank() && enable.isBoolean()) {
+            var enabledByMode = !"Fast".equalsIgnoreCase(explicitMode);
+            if (enabledByMode != enable.asBoolean()) {
+                throw OpenAiRequestException.conflict(
+                    "thinking_mode", "thinking_mode conflicts with enable_thinking");
+            }
+        }
+        var effort = String.valueOf(request.reasoning().getOrDefault(
+            "effort", request.rawRequest().path("reasoning_effort").asText("")))
+            .trim().toLowerCase();
+        if (explicitMode.isBlank() || effort.isBlank()) return;
+        var effortMode = switch (effort) {
+            case "none", "minimal" -> "Fast";
+            case "auto" -> "Auto";
+            default -> "Thinking";
+        };
+        if (!explicitMode.equalsIgnoreCase(effortMode)) {
+            throw OpenAiRequestException.conflict(
+                "thinking_mode", "thinking_mode conflicts with reasoning effort " + effort);
         }
     }
 

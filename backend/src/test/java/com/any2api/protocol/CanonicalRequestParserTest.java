@@ -79,4 +79,30 @@ class CanonicalRequestParserTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("unsupported Responses input item type");
     }
+
+    @Test
+    void rejectsProviderOptionsForAnotherExplicitRoute() {
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");
+        raw.putArray("messages").addObject().put("role", "user").put("content", "hello");
+        raw.putObject("provider_options").putObject("mimo").put("thinking", true);
+
+        assertThatThrownBy(() -> parser.parse(
+            CanonicalRequest.Protocol.CHAT_COMPLETIONS, route, raw))
+            .isInstanceOf(OpenAiRequestException.class)
+            .hasMessageContaining("does not match the resolved provider");
+    }
+
+    @Test
+    void rejectsConflictingTokenLimitAliases() {
+        var raw = mapper.createObjectNode()
+            .put("model", "qwen/qwen3.7-plus")
+            .put("max_tokens", 100)
+            .put("max_completion_tokens", 200);
+        raw.putArray("messages").addObject().put("role", "user").put("content", "hello");
+
+        assertThatThrownBy(() -> parser.parse(
+            CanonicalRequest.Protocol.CHAT_COMPLETIONS, route, raw))
+            .isInstanceOf(OpenAiRequestException.class)
+            .hasMessageContaining("cannot be supplied together");
+    }
 }

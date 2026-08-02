@@ -10,7 +10,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
-import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -18,7 +18,6 @@ import com.any2api.proxy.ProxyTrafficScope;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -28,8 +27,14 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class GrokWebProvider implements InferenceProvider {
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of(),
+        java.util.Set.of("tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of(
+            "tools", "tool_choice", "parallel_tool_calls", "previous_response_id", "store"),
+        java.util.Set.of("function"));
     private static final ProviderManifest MANIFEST = new ProviderManifest(
-        "grok_web", "Grok Web", "grok-web-sso-v1", "1",
+        "grok_web", "Grok Web", "grok-web-sso-v1", "2",
         GrokWebModelCatalog.modelIds(), Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
             ProviderCapability.RESPONSES, SupportLevel.NATIVE,
@@ -72,6 +77,8 @@ public final class GrokWebProvider implements InferenceProvider {
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
+    @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
+
     @Override
     public void validateCredential(tools.jackson.databind.JsonNode credential) {
         if (first(credential, "sso", "sso-rw", "sso_rw", "sso_token").isBlank()) {
@@ -81,7 +88,6 @@ public final class GrokWebProvider implements InferenceProvider {
 
     @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of());
         var model = GrokWebModelCatalog.require(request.model());
         if (model.kind() != GrokWebModelCatalog.Kind.CHAT) {
             throw new IllegalArgumentException("media model requires a media endpoint");

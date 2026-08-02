@@ -31,6 +31,7 @@ final class GlmEventDecoder {
     private int failures;
     private boolean started;
     private boolean completed;
+    private boolean usageEmitted;
 
     GlmEventDecoder(String requestId, ObjectMapper mapper) {
         this.requestId = requestId;
@@ -272,12 +273,13 @@ final class GlmEventDecoder {
     }
 
     private void usage(JsonNode usage, List<CanonicalEvent> output) {
-        if (!usage.isObject()) return;
+        if (!usage.isObject() || usageEmitted) return;
         var input = usage.path("prompt_tokens").asLong();
         var generated = usage.path("completion_tokens").asLong();
         var cached = usage.path("prompt_tokens_details").path("cached_tokens").asLong();
         output.add(new CanonicalEvent.Usage(
             1, requestId, next(), input, generated, cached));
+        usageEmitted = true;
     }
 
     private void start(List<CanonicalEvent> output) {

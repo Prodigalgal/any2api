@@ -45,6 +45,7 @@ public class ProviderRegistry {
             }
             requireProtocolFamily(provider.manifest(), ProviderCapability.CHAT_COMPLETIONS);
             requireProtocolFamily(provider.manifest(), ProviderCapability.RESPONSES);
+            requireProtocolContract(provider);
         }
     }
 
@@ -83,6 +84,18 @@ public class ProviderRegistry {
         if (support == SupportLevel.UNSUPPORTED) {
             throw new IllegalArgumentException(
                 "provider " + manifest.id() + " must implement " + capability);
+        }
+    }
+
+    private void requireProtocolContract(InferenceProvider provider) {
+        var contract = provider.protocolContract();
+        if (contract.toolTypes().contains("function")
+            && provider.manifest().capabilities().getOrDefault(
+                ProviderCapability.FUNCTION_TOOLS, SupportLevel.UNSUPPORTED)
+                == SupportLevel.UNSUPPORTED) {
+            throw new IllegalArgumentException(
+                "provider " + provider.manifest().id()
+                    + " accepts function tools without declaring FUNCTION_TOOLS");
         }
     }
 }

@@ -77,6 +77,8 @@ class InferenceReadinessProbeTest {
                         1, request.requestId(), 1, "credential_rejected", "rejected", Map.of()));
                 }
                 return Flux.just(
+                    new CanonicalEvent.ResponseStarted(
+                        1, request.requestId(), 0, "resp-probe"),
                     new CanonicalEvent.OutputTextDelta(
                         1, request.requestId(), 1, "ANY2API_PROBE_OK"),
                     new CanonicalEvent.Completed(1, request.requestId(), 2, "stop"));

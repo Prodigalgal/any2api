@@ -14,6 +14,7 @@ final class QwenEventDecoder {
     private boolean started;
     private boolean completed;
     private boolean emittedOutput;
+    private boolean emittedUsage;
     private String responseId;
 
     QwenEventDecoder(String requestId) { this.requestId = requestId; }
@@ -112,11 +113,12 @@ final class QwenEventDecoder {
     }
 
     private void usage(JsonNode usage, List<CanonicalEvent> output) {
-        if (!usage.isObject() || !emittedOutput) return;
+        if (!usage.isObject() || !emittedOutput || emittedUsage) return;
         var input = usage.path("prompt_tokens").asLong(usage.path("input_tokens").asLong());
         var generated = usage.path("completion_tokens").asLong(usage.path("output_tokens").asLong());
         if (input > 0 || generated > 0) {
             output.add(new CanonicalEvent.Usage(1, requestId, next(), input, generated, 0));
+            emittedUsage = true;
         }
     }
 

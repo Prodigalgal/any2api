@@ -9,6 +9,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -18,7 +19,6 @@ import com.any2api.transport.BrowserTransportClient;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -29,13 +29,27 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class GlmProvider implements InferenceProvider {
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of(
+            "enable_thinking", ProviderProtocolContract.OptionType.BOOLEAN,
+            "reasoning_effort", ProviderProtocolContract.OptionType.STRING,
+            "web_search", ProviderProtocolContract.OptionType.BOOLEAN,
+            "preview_mode", ProviderProtocolContract.OptionType.BOOLEAN),
+        java.util.Set.of(
+            "temperature", "top_p", "max_tokens", "max_completion_tokens",
+            "max_output_tokens", "reasoning", "reasoning_effort", "web_search",
+            "preview_mode"),
+        java.util.Set.of(
+            "temperature", "top_p", "max_tokens", "max_completion_tokens",
+            "max_output_tokens", "reasoning", "reasoning_effort", "web_search",
+            "preview_mode"),
+        java.util.Set.of());
     private static final ProviderManifest MANIFEST = new ProviderManifest(
-        "glm", "GLM", "native-z-ai-web-v1", "1", List.of("glm-5.2"), Map.of(
+        "glm", "GLM", "native-z-ai-web-v1", "2", List.of("glm-5.2"), Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
             ProviderCapability.RESPONSES, SupportLevel.NATIVE,
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
             ProviderCapability.REASONING, SupportLevel.NATIVE,
-            ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
             ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
             ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
@@ -64,6 +78,8 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
+    @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
+
     @Override
     public void validateCredential(JsonNode credential) {
         if (first(credential, "token", "access_token", "jwt").isBlank()
@@ -74,8 +90,14 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of(
-            "enable_thinking", "reasoning_effort", "web_search", "preview_mode"));
+        ProviderRequestValidation.requireStringParameters(request, "reasoning_effort");
+        ProviderRequestValidation.requireBooleanParameters(
+            request, "web_search", "preview_mode");
+        ProviderRequestValidation.requireReasoningBooleanConsistency(
+            request, "enable_thinking", java.util.Set.of("none", "minimal", "low"));
+        if (!request.tools().isEmpty()) {
+            throw new IllegalArgumentException("GLM does not support function tools");
+        }
     }
 
     @Override

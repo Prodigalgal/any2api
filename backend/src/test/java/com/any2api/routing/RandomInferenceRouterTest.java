@@ -21,6 +21,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -159,6 +160,13 @@ class RandomInferenceRouterTest {
                     id, id, "test-v1", "1", List.of(), Map.of(
                         ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                         ProviderCapability.RESPONSES, SupportLevel.NATIVE), true);
+            }
+
+            @Override
+            public ProviderProtocolContract protocolContract() {
+                return new ProviderProtocolContract(
+                    java.util.Set.of("flag"), java.util.Set.of(), java.util.Set.of(),
+                    java.util.Set.of());
             }
 
             @Override

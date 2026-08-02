@@ -17,6 +17,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.SupportLevel;
 import java.util.List;
@@ -61,6 +62,11 @@ class ProviderCatalogControllerTest {
             .extracting(item -> ((ProviderCatalogController.ProviderDescriptor) item)
                 .lifecycleOperations())
             .isEqualTo(List.of("keepalive", "register"));
+        assertThat((List<?>) response.get("data"))
+            .first()
+            .extracting(item -> ((ProviderCatalogController.ProviderDescriptor) item)
+                .protocolContract().providerOptions())
+            .isEqualTo(Map.of("flag", ProviderProtocolContract.OptionType.BOOLEAN));
     }
 
     private InferenceProvider provider(String id) {
@@ -71,6 +77,13 @@ class ProviderCatalogControllerTest {
                     id, id.toUpperCase(), "test-v1", "1", List.of(), Map.of(
                         ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                         ProviderCapability.RESPONSES, SupportLevel.NATIVE), true);
+            }
+
+            @Override
+            public ProviderProtocolContract protocolContract() {
+                return new ProviderProtocolContract(
+                    Map.of("flag", ProviderProtocolContract.OptionType.BOOLEAN),
+                    Set.of(), Set.of(), Set.of());
             }
 
             @Override

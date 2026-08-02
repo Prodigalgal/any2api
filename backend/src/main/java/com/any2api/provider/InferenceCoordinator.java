@@ -2,6 +2,8 @@ package com.any2api.provider;
 
 import com.any2api.account.AccountSelectionService;
 import com.any2api.protocol.CanonicalEvent;
+import com.any2api.protocol.CanonicalEventStream;
+import com.any2api.protocol.CanonicalProtocolException;
 import com.any2api.protocol.CanonicalRequest;
 import java.time.Duration;
 import java.time.Instant;
@@ -33,7 +35,8 @@ public class InferenceCoordinator {
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request) {
         var provider = providers.require(request.providerId());
-        ProviderRequestValidation.requireSupportedRequest(request, provider.manifest());
+        ProviderRequestValidation.requireSupportedRequest(
+            request, provider.manifest(), provider.protocolContract());
         provider.validate(request);
         return executeWithRetries(request, provider,
             accountLease(request, provider), false, 1);
@@ -91,7 +94,7 @@ public class InferenceCoordinator {
             account -> {
                 if (validateInsideLease) {
                     ProviderRequestValidation.requireSupportedRequest(
-                        request, provider.manifest());
+                        request, provider.manifest(), provider.protocolContract());
                     provider.validate(request);
                 }
                 var failed = new AtomicBoolean();
@@ -104,7 +107,10 @@ public class InferenceCoordinator {
                     account.lease().fencingToken(),
                     Instant.now().plus(REQUEST_DEADLINE));
                 return withLeaseRenewal(
-                    Flux.defer(() -> provider.generate(request, context, account)), account)
+                    CanonicalEventStream.enforce(
+                        request,
+                        Flux.defer(() -> provider.generate(request, context, account))),
+                    account)
                     .concatMap(event -> {
                         lastSequence.accumulateAndGet(event.sequenceNumber(), Math::max);
                         if (event instanceof CanonicalEvent.Failed failure) {
@@ -121,7 +127,13 @@ public class InferenceCoordinator {
                     })
                     .onErrorResume(error -> {
                         failed.set(true);
-                        var failure = provider.classify(error);
+                        var failure = error instanceof CanonicalProtocolException protocolError
+                            ? new ProviderFailure(
+                                "provider_protocol_violation",
+                                "provider emitted an invalid canonical event stream",
+                                false,
+                                Map.of("violation", protocolError.violation()))
+                            : provider.classify(error);
                         var event = new CanonicalEvent.Failed(
                             1,
                             request.requestId(),

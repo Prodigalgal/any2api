@@ -1,5 +1,6 @@
 package com.any2api.routing;
 
+import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.provider.ProviderRegistry;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
@@ -17,7 +18,7 @@ public class ProviderRouteResolver {
 
     public ResolvedRoute resolve(String requestPath, String requestedModel) {
         if (requestedModel == null || requestedModel.isBlank()) {
-            throw new IllegalArgumentException("model is required");
+            throw OpenAiRequestException.invalid("model", "model is required");
         }
         var pathProvider = providerFromPath(requestPath);
         var separator = requestedModel.indexOf('/');
@@ -25,15 +26,17 @@ public class ProviderRouteResolver {
         var upstreamModel = separator > 0 ? requestedModel.substring(separator + 1) : requestedModel;
 
         if (pathProvider == null && modelProvider == null) {
-            throw new IllegalArgumentException("unified /v1 requests require a provider/model identifier");
+            throw OpenAiRequestException.invalid(
+                "model", "unified /v1 requests require a provider/model identifier");
         }
         if (pathProvider != null && modelProvider != null && !pathProvider.equals(modelProvider)) {
-            throw new IllegalArgumentException("provider path conflicts with model namespace");
+            throw OpenAiRequestException.conflict(
+                "model", "provider path conflicts with model namespace");
         }
         var provider = pathProvider != null ? pathProvider : modelProvider;
         registry.require(provider);
         if (upstreamModel.isBlank()) {
-            throw new IllegalArgumentException("upstream model is required");
+            throw OpenAiRequestException.invalid("model", "upstream model is required");
         }
         return new ResolvedRoute(provider, upstreamModel);
     }

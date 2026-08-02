@@ -59,6 +59,44 @@ MinMax request-only options are isolated in its namespace:
 
 Contradictory standard and provider-native parameters return `parameter_conflict`. Unknown provider options return `unknown_provider_option`. Explicit unsupported features return `unsupported_parameter`.
 
+Every inference plugin publishes a `protocolContract` in
+`GET /api/catalog/v1/providers`. The contract is the machine-readable source of truth for:
+
+- typed `provider_options.<provider>` fields;
+- translated Chat Completions parameters;
+- translated Responses parameters;
+- accepted tool types;
+- translated `reasoning` subfields.
+
+Fields absent from the resolved provider contract are rejected before account selection. Explicit
+provider routes accept only their own provider-options namespace. Random routes may carry one
+namespace per candidate provider; each candidate validates only its own namespace.
+
+## Provider protocol matrix
+
+All rows use the same canonical event stream and central Chat/Responses renderer. `Emulated` means
+the provider adapter injects a provider-local prompt contract and parses the model output; it does
+not mean the field is forwarded natively.
+
+| Provider | Chat | Responses | Reasoning | Function tools | Image input | Stored Responses |
+|---|---|---|---|---|---|---|
+| Qwen | Native | Native | Native | Unsupported; search tools only | Native | Unsupported |
+| LongCat | Native | Native | Native | Emulated | Unsupported | Unsupported |
+| MiMo | Native | Native | Native | Emulated | Native | Unsupported |
+| MinMax | Native | Native | Native | Unsupported | Native | Unsupported |
+| GLM | Native | Native | Native | Unsupported | Unsupported | Unsupported |
+| Grok Build | Native | Native | Native | Native | Unsupported | Unsupported |
+| Grok Web | Native | Native | Native output | Emulated | Separate media API | Native |
+| Grok Console | Native | Native | Native | Native | Unsupported | Stateless only |
+
+Grok channels remain code-installed but may be administratively hot-unplugged. Disabling them does
+not weaken protocol validation for the enabled providers.
+
+The shared event guard requires schema version 1, matching request IDs, monotonically increasing
+sequence numbers, one response start, paired tool-call events, at most one usage snapshot, and one
+terminal completed/failed event. A violation becomes `provider_protocol_violation` rather than a
+partially rendered success.
+
 ## Canonical event contract
 
 The event schema is versioned independently of provider adapters. Initial event families are:

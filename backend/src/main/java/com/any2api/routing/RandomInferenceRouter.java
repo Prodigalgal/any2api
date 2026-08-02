@@ -5,6 +5,7 @@ import com.any2api.account.AccountUnavailableException;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.CanonicalRequestParser;
+import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ProviderRequestValidation;
@@ -88,11 +89,11 @@ public class RandomInferenceRouter {
             }
             var raw = request.deepCopy();
             raw.put("model", route.modelId());
-            var canonical = parser.parse(
+            var canonical = parser.parseCandidate(
                 protocol, new ResolvedRoute(route.providerId(), route.modelId()), raw);
             try {
                 ProviderRequestValidation.requireSupportedRequest(
-                    canonical, provider.manifest());
+                    canonical, provider.manifest(), provider.protocolContract());
                 provider.validate(canonical);
             } catch (IllegalArgumentException ignored) {
                 continue;
@@ -138,8 +139,8 @@ public class RandomInferenceRouter {
     private void requireRandomModel(ObjectNode request) {
         var value = request.path("model").asText("").trim();
         if (!value.isBlank() && !"random".equalsIgnoreCase(value)) {
-            throw new IllegalArgumentException(
-                "random endpoints accept only model=random or an omitted model");
+            throw OpenAiRequestException.invalid(
+                "model", "random endpoints accept only model=random or an omitted model");
         }
     }
 

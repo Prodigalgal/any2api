@@ -13,6 +13,9 @@ final class GrokConsoleRequestMapper {
     private static final Set<String> STATEFUL_FIELDS = Set.of(
         "metadata", "previous_response_id", "service_tier", "prompt_cache_key",
         "background", "conversation", "provider_options");
+    private static final Set<String> CHAT_FIELDS = Set.of(
+        "temperature", "top_p", "max_tokens", "max_completion_tokens",
+        "max_output_tokens", "reasoning", "parallel_tool_calls", "tool_choice");
 
     private final ObjectMapper mapper;
 
@@ -39,11 +42,11 @@ final class GrokConsoleRequestMapper {
     private ObjectNode fromChat(CanonicalRequest request) {
         var payload = mapper.createObjectNode();
         payload.set("input", input(request.messages()));
-        if (request.rawRequest().has("temperature")) {
-            payload.set("temperature", request.rawRequest().path("temperature").deepCopy());
-        }
-        if (request.rawRequest().has("tool_choice")) {
-            payload.set("tool_choice", request.rawRequest().path("tool_choice").deepCopy());
+        CHAT_FIELDS.stream().filter(request.rawRequest()::has).forEach(field ->
+            payload.set(field, request.rawRequest().path(field).deepCopy()));
+        if (!payload.has("reasoning") && request.rawRequest().path("reasoning_effort").isTextual()) {
+            payload.set("reasoning", mapper.createObjectNode().put(
+                "effort", request.rawRequest().path("reasoning_effort").asText()));
         }
         return payload;
     }

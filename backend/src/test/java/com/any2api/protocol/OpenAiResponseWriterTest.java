@@ -18,6 +18,8 @@ class OpenAiResponseWriterTest {
     @Test
     void rendersCompleteChatStreamingContract() {
         var request = request(CanonicalRequest.Protocol.CHAT_COMPLETIONS, true);
+        ((tools.jackson.databind.node.ObjectNode) request.rawRequest())
+            .putObject("stream_options").put("include_usage", true);
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
             "/alpha/v1/chat/completions").build());
 
@@ -29,6 +31,22 @@ class OpenAiResponseWriterTest {
             .contains("tool_calls")
             .contains("prompt_tokens")
             .contains("data: [DONE]");
+        assertThat(body.indexOf("\"finish_reason\":\"tool_calls\""))
+            .isLessThan(body.indexOf("\"prompt_tokens\":4"));
+        assertThat(body.indexOf("\"prompt_tokens\":4"))
+            .isLessThan(body.indexOf("data: [DONE]"));
+    }
+
+    @Test
+    void omitsChatStreamUsageUnlessTheClientRequestsIt() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+            "/alpha/v1/chat/completions").build());
+
+        writer.write(request(CanonicalRequest.Protocol.CHAT_COMPLETIONS, true), events(), exchange)
+            .block();
+
+        assertThat(exchange.getResponse().getBodyAsString().block())
+            .doesNotContain("prompt_tokens");
     }
 
     @Test
@@ -92,6 +110,21 @@ class OpenAiResponseWriterTest {
         assertThat(responses.getResponse().getBodyAsString().block())
             .contains("account_unavailable")
             .contains("no eligible account for provider alpha");
+    }
+
+    @Test
+    void mapsProviderRateLimitsToOpenAiCompatibleHttpStatus() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+            "/alpha/v1/responses").build());
+        Flux<CanonicalEvent> failure = Flux.just(new CanonicalEvent.Failed(
+            1, "request-id", 0, "rate_limited", "retry later", Map.of()));
+
+        writer.write(request(CanonicalRequest.Protocol.RESPONSES, false), failure, exchange)
+            .block();
+
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(429);
+        assertThat(exchange.getResponse().getBodyAsString().block())
+            .contains("\"code\":\"rate_limited\"");
     }
 
     private CanonicalRequest request(CanonicalRequest.Protocol protocol, boolean stream) {

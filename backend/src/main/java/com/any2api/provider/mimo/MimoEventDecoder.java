@@ -42,6 +42,7 @@ final class MimoEventDecoder {
     private boolean completed;
     private boolean reasoning;
     private boolean emittedAnswer;
+    private boolean usageEmitted;
 
     MimoEventDecoder(
         String requestId,
@@ -66,9 +67,10 @@ final class MimoEventDecoder {
                     buffer.append(text.replace("\0", ""));
                     if (tools.isEmpty()) output.addAll(drain(false));
                 }
-            } else if (event.has("promptTokens")) {
+            } else if (event.has("promptTokens") && !usageEmitted) {
                 output.add(new CanonicalEvent.Usage(1, requestId, next(),
                     event.path("promptTokens").asLong(), event.path("completionTokens").asLong(), 0));
+                usageEmitted = true;
             }
             return output;
         } catch (Exception error) {

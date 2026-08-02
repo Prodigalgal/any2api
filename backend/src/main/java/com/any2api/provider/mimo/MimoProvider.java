@@ -9,6 +9,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -19,7 +20,6 @@ import com.any2api.transport.SseDataDecoder;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -28,6 +28,18 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class MimoProvider implements InferenceProvider {
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of(
+            "conversation_id", ProviderProtocolContract.OptionType.STRING,
+            "thinking", ProviderProtocolContract.OptionType.BOOLEAN,
+            "web_search_status", ProviderProtocolContract.OptionType.STRING),
+        java.util.Set.of(
+            "temperature", "top_p", "reasoning", "reasoning_effort", "thinking",
+            "web_search_status", "tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of(
+            "temperature", "top_p", "reasoning", "reasoning_effort", "thinking",
+            "web_search_status", "tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of("function"));
     private final BrowserTransportClient transport;
     private final ProxyPoolService proxyPools;
     private final MimoProperties properties;
@@ -53,12 +65,13 @@ public final class MimoProvider implements InferenceProvider {
 
     @Override
     public ProviderManifest manifest() {
-        return new ProviderManifest("mimo", "MiMo", "native-mimo-web-v1", "1",
+        return new ProviderManifest("mimo", "MiMo", "native-mimo-web-v1", "2",
             List.of("mimo-v2.5-pro", "mimo-v2.5"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.STREAMING, SupportLevel.NATIVE,
                 ProviderCapability.REASONING, SupportLevel.NATIVE,
+                ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
                 ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
                 ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
@@ -70,11 +83,16 @@ public final class MimoProvider implements InferenceProvider {
     }
 
     @Override
+    public ProviderProtocolContract protocolContract() {
+        return PROTOCOL;
+    }
+
+    @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of(
-            "conversation_id", "thinking", "web_search_status"));
-        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of(
-            "temperature", "top_p", "tool_choice", "parallel_tool_calls"));
+        ProviderRequestValidation.requireBooleanParameters(request, "thinking");
+        ProviderRequestValidation.requireStringParameters(request, "web_search_status");
+        ProviderRequestValidation.requireReasoningBooleanConsistency(
+            request, "thinking", java.util.Set.of("none", "minimal"), "thinking");
     }
 
     @Override

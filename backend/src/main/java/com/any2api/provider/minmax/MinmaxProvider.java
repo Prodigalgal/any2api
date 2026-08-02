@@ -9,14 +9,13 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
-import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -27,6 +26,15 @@ import tools.jackson.databind.node.ObjectNode;
 
 @Component
 public final class MinmaxProvider implements InferenceProvider {
+    private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
+        Map.of(
+            "variant", ProviderProtocolContract.OptionType.STRING,
+            "agent_role", ProviderProtocolContract.OptionType.STRING,
+            "enable_team", ProviderProtocolContract.OptionType.BOOLEAN,
+            "worktree_mode", ProviderProtocolContract.OptionType.BOOLEAN),
+        java.util.Set.of("reasoning", "reasoning_effort"),
+        java.util.Set.of("reasoning", "reasoning_effort"),
+        java.util.Set.of());
     private final MinmaxTransportClient transport;
     private final ProxyPoolService proxyPools;
     private final MinmaxRequestMapper requestMapper;
@@ -49,7 +57,7 @@ public final class MinmaxProvider implements InferenceProvider {
 
     @Override
     public ProviderManifest manifest() {
-        return new ProviderManifest("minmax", "MinMax", "native-minmax-agent-web-v1", "1",
+        return new ProviderManifest("minmax", "MinMax", "native-minmax-agent-web-v1", "2",
             List.of("MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
@@ -66,10 +74,12 @@ public final class MinmaxProvider implements InferenceProvider {
     }
 
     @Override
+    public ProviderProtocolContract protocolContract() {
+        return PROTOCOL;
+    }
+
+    @Override
     public void validate(CanonicalRequest request) {
-        ProviderRequestValidation.requireKnownOptions(request, Set.of(
-            "variant", "agent_role", "enable_team", "worktree_mode"));
-        ProviderRequestValidation.requireKnownGenerationParameters(request, Set.of());
         if (!request.tools().isEmpty()) {
             throw new IllegalArgumentException("MinMax does not support tools");
         }

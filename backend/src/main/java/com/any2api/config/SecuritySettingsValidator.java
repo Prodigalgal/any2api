@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public final class SecuritySettingsValidator {
+    private static final int MINIMUM_ADMIN_PASSWORD_LENGTH = 8;
+
     private final Any2ApiProperties properties;
 
     public SecuritySettingsValidator(Any2ApiProperties properties) {
@@ -15,7 +17,10 @@ public final class SecuritySettingsValidator {
     @PostConstruct
     void validate() {
         var security = properties.getSecurity();
-        requireLength("ANY2API_ADMIN_PASSWORD", security.getAdminPassword(), 12);
+        requireLength(
+            "ANY2API_ADMIN_PASSWORD",
+            security.getAdminPassword(),
+            MINIMUM_ADMIN_PASSWORD_LENGTH);
         requireLength("ANY2API_PUBLIC_API_KEY", security.getPublicApiKey(), 24);
         requireLength("ANY2API_INTERNAL_TOKEN", security.getInternalToken(), 24);
         if (decodeKey(security.getCredentialMasterKey()).length != 32) {

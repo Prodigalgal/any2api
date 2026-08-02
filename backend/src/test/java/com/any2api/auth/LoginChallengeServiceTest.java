@@ -10,6 +10,7 @@ import com.any2api.config.SecuritySettingsValidatorTest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,8 @@ class LoginChallengeServiceTest {
 
         var challenge = service.issue().block();
         assertThat(challenge).isNotNull();
+        assertThat(Duration.between(Instant.now(), challenge.expiresAt()))
+            .isBetween(Duration.ofMinutes(4), Duration.ofMinutes(5));
         var answer = answer(challenge.expression());
         var nonce = solve(challenge.challengeToken(), challenge.difficulty());
 

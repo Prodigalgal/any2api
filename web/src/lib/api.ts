@@ -158,6 +158,9 @@ async function adminJson<T>(
     ) {
       window.location.replace("/login");
     }
+    if (response.status === 401 && !redirectOnUnauthorized) {
+      throw new Error("登录验证失败，请检查管理员密码和当前数学验证码");
+    }
     const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
     throw new Error(payload?.error?.message ?? `${url} returned ${response.status}`);
   }

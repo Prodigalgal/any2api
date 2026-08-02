@@ -47,7 +47,9 @@ export function LoginScreen() {
       return { value, nonce };
     },
     retry: 1,
-    staleTime: 0,
+    staleTime: 5 * 60 * 1_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: session.isSuccess && session.data.authenticated === false,
   });
   const login = useMutation({

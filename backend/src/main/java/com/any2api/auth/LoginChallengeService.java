@@ -16,7 +16,7 @@ import reactor.core.publisher.Mono;
 
 @Service
 public class LoginChallengeService {
-    private static final Duration TTL = Duration.ofMinutes(2);
+    private static final Duration TTL = Duration.ofMinutes(5);
     private final ReactiveStringRedisTemplate redis;
     private final SecureRandom random = new SecureRandom();
     private final byte[] signingKey;

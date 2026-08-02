@@ -57,7 +57,9 @@ class DeepseekHcaptchaChallenge:
                 continue
             attempts += 1
             if attempts > config.deepseek_hcaptcha_attempts:
-                raise RuntimeError("DeepSeek hCaptcha attempts were exhausted")
+                raise RuntimeError(
+                    f"DeepSeek hCaptcha attempts were exhausted diagnostic={self.last_diagnostic}"
+                )
             prompt = _prompt(frame)
             task = _ready_surface_image(page, surface)
             actions = registry.solve_visual_actions_sync(
@@ -106,7 +108,10 @@ class DeepseekHcaptchaChallenge:
             self.last_diagnostic = (f"retry:attempt={attempts}:" + registry.visual_diagnostic())[
                 :600
             ]
-        raise TimeoutError("DeepSeek hCaptcha did not complete before the deadline")
+        raise TimeoutError(
+            "DeepSeek hCaptcha did not complete before the deadline "
+            f"diagnostic={self.last_diagnostic}"
+        )
 
 
 def _frames(page: Any) -> list[Any]:

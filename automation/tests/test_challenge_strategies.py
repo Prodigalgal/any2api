@@ -673,6 +673,34 @@ def test_visual_action_review_requires_two_independent_agreeing_votes(monkeypatc
     assert "review_consensus:2/3" in registry.visual_diagnostic()
 
 
+def test_visual_action_review_respects_total_deadline(monkeypatch) -> None:
+    fixture = io.BytesIO()
+    Image.new("RGB", (500, 400), "white").save(fixture, format="PNG")
+    clock = {"now": 0.0}
+    calls = {"count": 0}
+
+    def completion(*args, **kwargs):
+        calls["count"] += 1
+        clock["now"] = 5.0
+        return f'ACTIONS=[{{"type":"click","at":[{calls["count"] / 10:.1f},0.3]}}]'
+
+    monkeypatch.setattr(registry, "_visual_completion_sync", completion)
+    monkeypatch.setattr(
+        "any2api_automation.captcha.registry.time.monotonic",
+        lambda: clock["now"],
+    )
+
+    actions = registry.solve_visual_actions_sync(
+        fixture.getvalue(),
+        "fixture prompt",
+        timeout_seconds=1.0,
+    )
+
+    assert actions == []
+    assert calls["count"] == 5
+    assert "review=deadline_exhausted" in registry.visual_diagnostic()
+
+
 def test_visual_action_consensus_rejects_broad_single_center_neighborhood() -> None:
     samples = [
         [VisualAction(type="drag", start=(0, 0.5), end=(0.36, 0.5))],

@@ -321,21 +321,25 @@ class SolverRegistry:
         config = settings()
         sample_count = max(1, min(5, config.captcha_ai_action_samples))
         sample_timeout = float(max(1, config.captcha_ai_action_sample_timeout_seconds))
-        if timeout_seconds is not None:
-            sample_timeout = min(sample_timeout, timeout_seconds)
+        total_budget = sample_timeout * 2 if timeout_seconds is None else max(0, timeout_seconds)
+        deadline = time.monotonic() + total_budget
+        initial_timeout = min(sample_timeout, max(0, deadline - time.monotonic()))
+        if initial_timeout <= 0:
+            self._diagnostics.visual = "deadline_exhausted_before_sampling"
+            return []
 
         def sample() -> tuple[str, str]:
             content = self._visual_completion_sync(
                 image,
                 prompt,
                 max_tokens=256,
-                timeout_seconds=sample_timeout,
+                timeout_seconds=initial_timeout,
             )
             return content, self.visual_diagnostic()
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=sample_count)
         futures = [executor.submit(sample) for _ in range(sample_count)]
-        done, pending = concurrent.futures.wait(futures, timeout=sample_timeout)
+        done, pending = concurrent.futures.wait(futures, timeout=initial_timeout)
         for future in pending:
             future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
@@ -363,11 +367,16 @@ class SolverRegistry:
         if consensus:
             return consensus
         primary_diagnostic = self.visual_diagnostic()
-        reviewed = self._review_visual_actions(
-            image,
-            prompt,
-            samples,
-            timeout_seconds=sample_timeout,
+        review_timeout = min(sample_timeout, max(0, deadline - time.monotonic()))
+        reviewed = (
+            self._review_visual_actions(
+                image,
+                prompt,
+                samples,
+                timeout_seconds=review_timeout,
+            )
+            if review_timeout > 0
+            else []
         )
         if reviewed:
             return reviewed
@@ -378,7 +387,8 @@ class SolverRegistry:
             f"consensus_rejected:completed={len(done)}/{sample_count}:"
             f"valid={len(samples)}/{sample_count}:"
             f"votes={votes}:sources={source_summary}:last={failure}:"
-            f"primary={primary_diagnostic}:review={self.visual_diagnostic()}"
+            f"primary={primary_diagnostic}:review="
+            f"{self.visual_diagnostic() if review_timeout > 0 else 'deadline_exhausted'}"
         )[:1000]
         return []
 

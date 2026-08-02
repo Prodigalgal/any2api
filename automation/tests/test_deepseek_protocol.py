@@ -13,6 +13,8 @@ from any2api_automation.providers.deepseek import (
     _headers,
     _keepalive_sync,
     _reauthenticate_sync,
+    _recover_registered_user,
+    _registration_user,
     _request_profile,
     _require_success,
     _run_registration_browser,
@@ -129,6 +131,55 @@ def test_keepalive_requires_authenticated_model_catalog(monkeypatch) -> None:
 def test_rejected_envelopes_do_not_look_healthy() -> None:
     with pytest.raises(RuntimeError, match="biz_code=3"):
         _require_success({"code": 0, "data": {"biz_code": 3}}, "registration")
+
+
+def test_registration_nested_rejection_is_not_misclassified_as_missing_identity() -> None:
+    with pytest.raises(RuntimeError, match="nested_code=7"):
+        _registration_user(
+            {
+                "code": 0,
+                "data": {
+                    "biz_code": 0,
+                    "biz_data": {"code": 7, "msg": "rejected"},
+                },
+            }
+        )
+
+
+def test_registration_user_can_be_recovered_by_same_browser_login() -> None:
+    class Page:
+        def evaluate(self, script, args):
+            assert "/api/v0/users/login" in script
+            assert args["email"] == "same@example.test"
+            assert args["password"] == "Password1!"
+            assert args["device_id"] == "device"
+            return {
+                "status": 200,
+                "body": {
+                    "code": 0,
+                    "data": {
+                        "biz_code": 0,
+                        "biz_data": {
+                            "user": {
+                                "id": "user",
+                                "token": "token",
+                                "email": "s***@example.test",
+                            }
+                        },
+                    },
+                },
+            }
+
+    user = _recover_registered_user(
+        Page(),
+        "same@example.test",
+        "Password1!",
+        "device",
+        _request_profile({}),
+    )
+
+    assert user["id"] == "user"
+    assert user["token"] == "token"
 
 
 def test_birthday_activation_preserves_created_account_on_transient_failure() -> None:

@@ -152,11 +152,15 @@ async def _run_registration_browser(
             }
             if accepted or attempt >= attempts:
                 raise
+            diagnostic = str(error)
+            if not diagnostic.startswith("DeepSeek hCaptcha failed"):
+                diagnostic = "unavailable"
             logger.warning(
-                "DeepSeek registration browser retry attempt=%s/%s error_type=%s",
+                "DeepSeek registration browser retry attempt=%s/%s error_type=%s diagnostic=%s",
                 attempt,
                 attempts,
                 type(error).__name__,
+                diagnostic[:1000],
             )
     raise RuntimeError("DeepSeek registration browser attempts were exhausted")
 
@@ -202,7 +206,13 @@ def _register_browser(
     page.on("response", observe_code_response)
     try:
         send.click()
-        challenge.solve(page, completed=lambda: bool(code_responses))
+        try:
+            challenge.solve(page, completed=lambda: bool(code_responses))
+        except Exception as error:
+            raise RuntimeError(
+                "DeepSeek hCaptcha failed "
+                f"type={type(error).__name__} diagnostic={challenge.last_diagnostic}"
+            ) from error
         deadline = time.monotonic() + 15
         while not code_responses and time.monotonic() < deadline:
             page.wait_for_timeout(250)
@@ -247,14 +257,20 @@ def _register_browser(
     trace.mark(RegistrationStage.FORM_SUBMITTED)
     register_body = _json_response(register_info.value, "registration")
     _require_success(register_body, "registration")
-    user = ((register_body.get("data") or {}).get("biz_data") or {}).get("user") or {}
+    user = _registration_user(register_body)
+    profile = _request_profile(request_headers)
+    if not str(user.get("token") or "").strip() or not str(user.get("id") or "").strip():
+        user = _recover_registered_user(page, mailbox.address, password, device_id, profile)
     token = str(user.get("token") or "").strip()
     external_id = str(user.get("id") or "").strip()
-    email_value = str(user.get("email") or mailbox.address).strip().lower()
-    if not token or not external_id or email_value != mailbox.address.lower():
+    email_value = str(user.get("email") or "").strip().lower()
+    if (
+        not token
+        or not external_id
+        or (email_value and "*" not in email_value and email_value != mailbox.address.lower())
+    ):
         raise RuntimeError("DeepSeek registration returned an invalid account identity")
     trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
-    profile = _request_profile(request_headers)
     birthday = _set_birthday(page, token, profile)
     trace.mark(RegistrationStage.ACTIVATED)
     user_agent = str(page.evaluate("() => navigator.userAgent") or "")
@@ -446,6 +462,69 @@ def _request_profile(headers: dict[str, str]) -> dict[str, Any]:
             lowered.get("x-client-timezone-offset") or config.deepseek_timezone_offset_seconds
         ),
     }
+
+
+def _registration_user(body: dict[str, Any]) -> dict[str, Any]:
+    data = body.get("data") or {}
+    biz_data = data.get("biz_data") or {} if isinstance(data, dict) else {}
+    if not isinstance(biz_data, dict):
+        raise TypeError("DeepSeek registration returned invalid business data")
+    nested_code = int(biz_data.get("code") or 0)
+    if nested_code != 0:
+        raise RuntimeError(f"DeepSeek registration was rejected nested_code={nested_code}")
+    user = biz_data.get("user") or {}
+    return user if isinstance(user, dict) else {}
+
+
+def _recover_registered_user(
+    page: Any,
+    email: str,
+    password: str,
+    device_id: str,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    result = page.evaluate(
+        """async args => {
+          const response = await fetch('/api/v0/users/login', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Client-Bundle-Id': args.profile.bundle_id,
+              'X-Client-Platform': args.profile.platform,
+              'X-Client-Version': args.profile.client_version,
+              'X-Client-Locale': args.profile.locale,
+              'X-Client-Timezone-Offset': String(args.profile.timezone_offset)
+            },
+            body: JSON.stringify({
+              email: args.email,
+              mobile: '',
+              password: args.password,
+              area_code: '',
+              device_id: args.device_id,
+              os: 'web'
+            })
+          });
+          let body = {};
+          try { body = await response.json(); } catch (_) {}
+          return {status: response.status, body};
+        }""",
+        {
+            "email": email,
+            "password": password,
+            "device_id": device_id,
+            "profile": profile,
+        },
+    )
+    if not isinstance(result, dict) or int(result.get("status") or 0) >= 400:
+        status = int(result.get("status") or 0) if isinstance(result, dict) else 0
+        raise RuntimeError(f"DeepSeek post-registration login returned HTTP {status}")
+    body = result.get("body") or {}
+    if not isinstance(body, dict):
+        raise TypeError("DeepSeek post-registration login returned invalid JSON")
+    _require_success(body, "post-registration login")
+    user = ((body.get("data") or {}).get("biz_data") or {}).get("user") or {}
+    return user if isinstance(user, dict) else {}
 
 
 def _warm_up_hcaptcha(page: Any, base_url: str) -> None:

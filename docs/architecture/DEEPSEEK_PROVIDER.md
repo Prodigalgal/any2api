@@ -23,6 +23,10 @@ normalized click or drag actions back to the browser surface. The shared visual 
 multimodal-random route independently; when the first vote has no geometric consensus, a bounded
 second review inspects the image and candidate actions again. Completion is accepted only after the
 official email-verification response arrives, never from an iframe disappearing temporarily.
+Registration validates the outer envelope, business envelope, and nested registration result
+separately. If all result codes succeed but the response omits the user object, the provider uses
+the same browser, mailbox identity, generated password, device ID, and request profile for one
+official login recovery before declaring the account unusable.
 
 Registration traffic follows the provider's `REGISTRATION` proxy binding. Inference and keepalive
 are direct by default and use `INFERENCE` or `LIFECYCLE` proxy bindings only when an operator enables

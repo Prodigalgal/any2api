@@ -363,7 +363,17 @@ class SolverRegistry:
                 sources.append(diagnostic)
             else:
                 failures.append(self.visual_diagnostic())
-        consensus = self._visual_action_consensus(samples, sample_count)
+        primary_tolerance = (
+            0.1
+            if samples
+            and all(len(actions) == 1 and actions[0].type == "drag" for actions in samples)
+            else 0.06
+        )
+        consensus = self._visual_action_consensus(
+            samples,
+            sample_count,
+            tolerance=primary_tolerance,
+        )
         if consensus:
             return consensus
         primary_diagnostic = self.visual_diagnostic()
@@ -458,6 +468,7 @@ class SolverRegistry:
         required = 1 if sample_count == 1 else max(2, valid_count // 2 + 1)
         grouped: dict[tuple[str, ...], list[list[VisualAction]]] = {}
         for actions in samples:
+            actions = self._canonical_visual_actions(actions)
             signature = tuple(action.type for action in actions)
             grouped.setdefault(signature, []).append(actions)
         if not grouped:
@@ -500,6 +511,25 @@ class SolverRegistry:
             + ",".join(signature)
         )
         return result
+
+    def _canonical_visual_actions(
+        self,
+        actions: list[VisualAction],
+    ) -> list[VisualAction]:
+        if all(action.type == "click" and action.at is not None for action in actions):
+            return sorted(actions, key=lambda action: action.at or (0.0, 0.0))
+        if all(
+            action.type == "drag" and action.start is not None and action.end is not None
+            for action in actions
+        ):
+            return sorted(
+                actions,
+                key=lambda action: (
+                    action.start or (0.0, 0.0),
+                    action.end or (0.0, 0.0),
+                ),
+            )
+        return actions
 
     def _visual_vector_spread(self, vectors: list[list[float]]) -> float:
         return max(max(values) - min(values) for values in zip(*vectors, strict=True))

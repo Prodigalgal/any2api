@@ -23,6 +23,9 @@ normalized click or drag actions back to the browser surface. The shared visual 
 multimodal-random route independently; when the first vote has no geometric consensus, a bounded
 second review inspects the image and candidate actions again. Completion is accepted only after the
 official email-verification response arrives, never from an iframe disappearing temporarily.
+Single-drag tasks use a bounded target-region tolerance. Multiple click or drag actions are sorted
+by geometry before consensus so equivalent model answers do not disagree merely by action order;
+the number of drag actions follows the current task instruction instead of being fixed to one.
 Registration validates the outer envelope, business envelope, and nested registration result
 separately. If all result codes succeed but the response omits the user object, the provider uses
 the same browser, mailbox identity, generated password, device ID, and request profile for one

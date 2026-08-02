@@ -68,8 +68,10 @@ class DeepseekHcaptchaChallenge:
                 + prompt
                 + "\nFirst reason internally about every object, the row/column pattern, and the "
                 "empty target. Use click actions for selection tasks. For drag tasks, return one "
-                'ACTIONS=[{"type":"drag","from":[x1,y1],"to":[x2,y2]}] action '
-                "from the movable object's center to the target center. Coordinates must be "
+                "drag action per object required by the instruction; return multiple drag actions "
+                "when multiple objects must move. Each drag must use "
+                '{"type":"drag","from":[x1,y1],"to":[x2,y2]} '
+                "from the movable object's center to its target center. Coordinates must be "
                 "decimal fractions from 0.0 to 1.0 relative to the supplied task image; never "
                 "return pixel coordinates or values above 1. Do not click the submit button.",
                 timeout_seconds=max(10, deadline - time.monotonic()),

@@ -641,6 +641,33 @@ def test_visual_action_consensus_uses_majority_cluster_median() -> None:
     assert "consensus:2/3" in registry.visual_diagnostic()
 
 
+def test_visual_action_consensus_canonicalizes_multiple_drag_order() -> None:
+    left = VisualAction("drag", start=(0.1, 0.2), end=(0.3, 0.4))
+    right = VisualAction("drag", start=(0.7, 0.2), end=(0.8, 0.4))
+
+    actions = registry._visual_action_consensus(
+        [[left, right], [right, left], [left, right]],
+        3,
+    )
+
+    assert actions == [left, right]
+    assert "consensus:3/3" in registry.visual_diagnostic()
+
+
+def test_single_drag_consensus_accepts_same_target_region_variance() -> None:
+    samples = [
+        [VisualAction("drag", start=(0.10, 0.15), end=(0.31, 0.84))],
+        [VisualAction("drag", start=(0.10, 0.15), end=(0.36, 0.84))],
+        [VisualAction("drag", start=(0.10, 0.15), end=(0.40, 0.85))],
+    ]
+
+    actions = registry._visual_action_consensus(samples, 3, tolerance=0.1)
+
+    assert len(actions) == 1
+    assert actions[0].start == pytest.approx((0.1, 0.15))
+    assert actions[0].end == pytest.approx((0.36, 0.84))
+
+
 def test_visual_action_review_requires_two_independent_agreeing_votes(monkeypatch) -> None:
     fixture = io.BytesIO()
     Image.new("RGB", (500, 400), "white").save(fixture, format="PNG")

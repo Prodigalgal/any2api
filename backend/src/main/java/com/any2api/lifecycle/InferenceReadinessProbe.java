@@ -15,6 +15,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -25,6 +27,7 @@ import tools.jackson.databind.ObjectMapper;
 final class InferenceReadinessProbe {
     private static final Duration TIMEOUT = Duration.ofMinutes(2);
     private static final String MARKER = "ANY2API_PROBE_OK";
+    private static final Logger LOGGER = LoggerFactory.getLogger(InferenceReadinessProbe.class);
 
     private final ProviderRegistry providers;
     private final ObjectMapper mapper;
@@ -74,6 +77,10 @@ final class InferenceReadinessProbe {
             .map(events -> result(model, events))
             .onErrorResume(error -> {
                 var failure = provider.classify(error);
+                LOGGER.warn(
+                    "Inference readiness probe failed provider={} error_type={} failure={} detail={}",
+                    account.getProviderId(), error.getClass().getSimpleName(), failure.type(),
+                    safeDetail(error));
                 return Mono.just(Result.failed(model, failure.type()));
             });
     }
@@ -97,6 +104,17 @@ final class InferenceReadinessProbe {
         if (!preferred.isEmpty()) return preferred.getFirst();
         if (!manifest.defaultModels().isEmpty()) return manifest.defaultModels().getFirst();
         throw new IllegalStateException("provider has no model for inference readiness probe");
+    }
+
+    private static String safeDetail(Throwable error) {
+        var message = error.getMessage();
+        if (message == null || message.isBlank()) return "unavailable";
+        var redacted = message
+            .replaceAll("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", "[email]")
+            .replaceAll("[A-Za-z0-9_\\-=]{32,}", "[secret]")
+            .replaceAll("\\s+", " ")
+            .trim();
+        return redacted.substring(0, Math.min(500, redacted.length()));
     }
 
     record Result(boolean ready, String model, String errorClass) {

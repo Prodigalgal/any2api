@@ -50,6 +50,26 @@ class OpenAiResponseWriterTest {
     }
 
     @Test
+    void emitsZeroChatUsageWhenRequestedAndTheProviderHasNoCounters() {
+        var request = request(CanonicalRequest.Protocol.CHAT_COMPLETIONS, true);
+        ((tools.jackson.databind.node.ObjectNode) request.rawRequest())
+            .putObject("stream_options").put("include_usage", true);
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+            "/alpha/v1/chat/completions").build());
+        var eventsWithoutUsage = events().filter(
+            event -> !(event instanceof CanonicalEvent.Usage));
+
+        writer.write(request, eventsWithoutUsage, exchange).block();
+
+        var body = exchange.getResponse().getBodyAsString().block();
+        assertThat(body).contains("\"choices\":[]")
+            .contains("\"prompt_tokens\":0")
+            .contains("\"completion_tokens\":0");
+        assertThat(body.indexOf("\"finish_reason\":\"tool_calls\""))
+            .isLessThan(body.indexOf("\"prompt_tokens\":0"));
+    }
+
+    @Test
     void rendersCompleteResponsesStreamingContract() {
         var request = request(CanonicalRequest.Protocol.RESPONSES, true);
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(

@@ -147,7 +147,7 @@ public class OpenAiResponseWriter {
             if (event instanceof CanonicalEvent.Completed completed) {
                 var frames = new ArrayList<String>();
                 frames.add(data(chunk(mapper.createObjectNode(), completed.finishReason())));
-                if (pendingUsage != null) {
+                if (includeUsage) {
                     var payload = chunk(mapper.createObjectNode(), null);
                     payload.set("choices", mapper.createArrayNode());
                     payload.set("usage", usage(mapper, pendingUsage));

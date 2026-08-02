@@ -40,6 +40,10 @@ from .deepseek_settings import settings
 logger = logging.getLogger("any2api_automation.providers.deepseek")
 
 
+class _BrowserReauthenticationRequired(RuntimeError):
+    pass
+
+
 class DeepseekAutomationProvider(AutomationProvider):
     manifest = AutomationProviderManifest(
         id="deepseek",
@@ -81,7 +85,34 @@ class DeepseekAutomationProvider(AutomationProvider):
             raise trace.failure(error) from error
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(_reauthenticate_sync, payload, credential(payload))
+        current = credential(payload)
+        try:
+            return await asyncio.to_thread(_reauthenticate_sync, payload, current)
+        except _BrowserReauthenticationRequired:
+            logger.info("DeepSeek password login requires browser WAF clearance")
+        flow_payload = {**payload}
+        flow_payload.setdefault("proxy_check_url", settings().deepseek_base_url)
+        result = await asyncio.to_thread(
+            run_browser_flow,
+            lambda page, context, backend, proxy_url: _reauthenticate_browser(page, current),
+            preferred=self.manifest.browser_backend,
+            fallback=self.manifest.fallback_backend,
+            payload=flow_payload,
+            context_profile=self.browser_context_profile(),
+            launch_profile=self.browser_launch_profile(),
+            fingerprint_policy=self.browser_fingerprint_policy(),
+        )
+        return {
+            "healthy": True,
+            "ready_for_inference": False,
+            "credential_patch": result.credential,
+            "metadata_patch": {
+                **result.metadata,
+                "authentication": "password_browser",
+                "birthday": result.credential["birthday_status"],
+                "inference_probe_required": True,
+            },
+        }
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
@@ -320,6 +351,8 @@ def _reauthenticate_sync(payload: dict[str, Any], current: dict[str, Any]) -> di
             },
             timeout=90,
         )
+        if _is_waf_challenge(response):
+            raise _BrowserReauthenticationRequired
         if response.status_code in {401, 403}:
             return {
                 "healthy": False,
@@ -357,6 +390,32 @@ def _reauthenticate_sync(payload: dict[str, Any], current: dict[str, Any]) -> di
             "inference_probe_required": True,
         },
     }
+
+
+def _reauthenticate_browser(page: Any, current: dict[str, Any]) -> BrowserResult:
+    email = required(current, "email")
+    password = required(current, "password")
+    device_id = required(current, "device_id")
+    base_url = settings().deepseek_base_url.rstrip("/")
+    _open_sign_in(page, base_url)
+    profile = _request_profile(_headers(current, with_token=False))
+    user = _recover_registered_user(page, email, password, device_id, profile)
+    token = str(user.get("token") or "").strip()
+    external_id = str(user.get("id") or "").strip()
+    if not token or not external_id:
+        raise RuntimeError("DeepSeek browser login returned no account token")
+    birthday_status = str(current.get("birthday_status") or "pending").strip().lower()
+    if birthday_status != "set" or bool(user.get("need_birthday")):
+        birthday_status = _set_birthday(page, token, profile)
+    if birthday_status != "set":
+        raise RuntimeError("DeepSeek birthday activation remains pending")
+    return BrowserResult(
+        external_id=external_id,
+        email=email,
+        credential={"token": token, "birthday_status": birthday_status},
+        metadata={"reauthentication_transport": "browser"},
+        ready_for_inference=False,
+    )
 
 
 def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
@@ -425,6 +484,17 @@ class _SessionLease:
 
 def _session(payload: dict[str, Any], current: dict[str, Any]) -> _SessionLease:
     return _SessionLease(payload, current)
+
+
+def _is_waf_challenge(response: Any) -> bool:
+    headers = getattr(response, "headers", {})
+    waf_action = str(headers.get("x-amzn-waf-action") or "").strip().lower()
+    content_type = str(headers.get("content-type") or "").strip().lower()
+    return waf_action == "challenge" or (
+        response.status_code == 202
+        and not getattr(response, "content", b"")
+        and content_type.startswith("text/html")
+    )
 
 
 def _headers(current: dict[str, Any], *, with_token: bool, token: str = "") -> dict[str, str]:
@@ -507,7 +577,12 @@ def _recover_registered_user(
           });
           let body = {};
           try { body = await response.json(); } catch (_) {}
-          return {status: response.status, body};
+          return {
+            status: response.status,
+            body,
+            wafAction: response.headers.get('x-amzn-waf-action') || '',
+            contentType: response.headers.get('content-type') || ''
+          };
         }""",
         {
             "email": email,
@@ -520,6 +595,8 @@ def _recover_registered_user(
         status = int(result.get("status") or 0) if isinstance(result, dict) else 0
         raise RuntimeError(f"DeepSeek post-registration login returned HTTP {status}")
     body = result.get("body") or {}
+    if str(result.get("wafAction") or "").strip() or not body:
+        raise RuntimeError("DeepSeek browser login remained behind WAF")
     if not isinstance(body, dict):
         raise TypeError("DeepSeek post-registration login returned invalid JSON")
     _require_success(body, "post-registration login")
@@ -528,6 +605,17 @@ def _recover_registered_user(
 
 
 def _warm_up_hcaptcha(page: Any, base_url: str) -> None:
+    body = _open_sign_in(page, base_url)
+    feature = (
+        (((body.get("data") or {}).get("biz_data") or {}).get("settings") or {})
+        .get("chat_hcaptcha", {})
+        .get("value")
+    )
+    if feature is not True:
+        raise RuntimeError("DeepSeek official hCaptcha feature is unavailable")
+
+
+def _open_sign_in(page: Any, base_url: str) -> dict[str, Any]:
     def is_main_settings(response: Any) -> bool:
         parsed = urlparse(response.url)
         return parsed.path == "/api/v0/client/settings" and parse_qs(parsed.query).get("scope") == [
@@ -538,13 +626,7 @@ def _warm_up_hcaptcha(page: Any, base_url: str) -> None:
         page.goto(f"{base_url}/sign_in", wait_until="domcontentloaded", timeout=120_000)
     body = _json_response(response_info.value, "main client settings")
     _require_success(body, "main client settings")
-    feature = (
-        (((body.get("data") or {}).get("biz_data") or {}).get("settings") or {})
-        .get("chat_hcaptcha", {})
-        .get("value")
-    )
-    if feature is not True:
-        raise RuntimeError("DeepSeek official hCaptcha feature is unavailable")
+    return body
 
 
 def _set_birthday(page: Any, token: str, profile: dict[str, Any]) -> str:

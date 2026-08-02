@@ -10,7 +10,9 @@ from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers import provider_registry
 from any2api_automation.providers.deepseek import (
     DeepseekAutomationProvider,
+    _BrowserReauthenticationRequired,
     _headers,
+    _is_waf_challenge,
     _keepalive_sync,
     _reauthenticate_sync,
     _recover_registered_user,
@@ -243,6 +245,73 @@ def test_reauthentication_completes_pending_birthday(monkeypatch) -> None:
         "token": "replacement",
         "birthday_status": "set",
     }
+
+
+def test_reauthentication_detects_empty_aws_waf_challenge(monkeypatch) -> None:
+    class Response:
+        def __init__(self) -> None:
+            self.status_code = 202
+            self.content = b""
+            self.headers = {
+                "content-type": "text/html; charset=UTF-8",
+                "x-amzn-waf-action": "challenge",
+            }
+
+    class Client:
+        def post(self, *args, **kwargs):
+            return Response()
+
+    @contextmanager
+    def session(*args, **kwargs):
+        yield Client()
+
+    monkeypatch.setattr("any2api_automation.providers.deepseek._session", session)
+
+    assert _is_waf_challenge(Response()) is True
+    with pytest.raises(_BrowserReauthenticationRequired):
+        _reauthenticate_sync(
+            {},
+            {
+                "email": "same@example.test",
+                "password": "Password1!",
+                "device_id": "device",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_reauthentication_falls_back_to_isolated_browser(monkeypatch) -> None:
+    def http_login(*args, **kwargs):
+        raise _BrowserReauthenticationRequired
+
+    def browser_flow(flow, **kwargs):
+        assert kwargs["preferred"] == "patchright"
+        assert kwargs["payload"]["proxy_check_url"].startswith("https://")
+        return BrowserResult(
+            external_id="user",
+            email="same@example.test",
+            credential={"token": "replacement", "birthday_status": "set"},
+            metadata={"reauthentication_transport": "browser"},
+            ready_for_inference=False,
+        )
+
+    monkeypatch.setattr("any2api_automation.providers.deepseek._reauthenticate_sync", http_login)
+    monkeypatch.setattr("any2api_automation.providers.deepseek.run_browser_flow", browser_flow)
+
+    result = await DeepseekAutomationProvider().reauthenticate(
+        {
+            "credential": {
+                "email": "same@example.test",
+                "password": "Password1!",
+                "device_id": "device",
+            }
+        }
+    )
+
+    assert result["healthy"] is True
+    assert result["ready_for_inference"] is False
+    assert result["credential_patch"]["token"] == "replacement"
+    assert result["metadata_patch"]["authentication"] == "password_browser"
 
 
 def test_hcaptcha_warmup_requires_official_main_feature() -> None:

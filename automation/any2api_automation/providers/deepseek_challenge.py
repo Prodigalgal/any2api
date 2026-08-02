@@ -42,7 +42,7 @@ class DeepseekHcaptchaChallenge:
                 image,
                 "Solve this hCaptcha image challenge. Instruction: "
                 + prompt
-                + "\nReturn ACTIONS=[{\"type\":\"click\",\"at\":[x,y]}]. "
+                + '\nReturn ACTIONS=[{"type":"click","at":[x,y]}]. '
                 "Coordinates must be normalized to the supplied challenge image. "
                 "Return one click per matching target and no submit-button click.",
                 timeout_seconds=max(10, deadline - time.monotonic()),
@@ -71,9 +71,9 @@ class DeepseekHcaptchaChallenge:
                     f"solved:attempt={attempts}:" + registry.visual_diagnostic()
                 )[:600]
                 return
-            self.last_diagnostic = (
-                f"retry:attempt={attempts}:" + registry.visual_diagnostic()
-            )[:600]
+            self.last_diagnostic = (f"retry:attempt={attempts}:" + registry.visual_diagnostic())[
+                :600
+            ]
         raise TimeoutError("DeepSeek hCaptcha did not complete before the deadline")
 
 

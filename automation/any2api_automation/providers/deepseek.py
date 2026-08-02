@@ -169,9 +169,7 @@ def _register_browser(
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
     page.goto(f"{base_url}/sign_up", wait_until="domcontentloaded", timeout=90_000)
     page.wait_for_timeout(1500)
-    if page.get_by_text(
-        re.compile("only phone number registration", re.IGNORECASE)
-    ).count():
+    if page.get_by_text(re.compile("only phone number registration", re.IGNORECASE)).count():
         raise RuntimeError("DeepSeek email registration is unavailable for the current egress")
     email = _visible(page, ('input[type="email"]', 'input[placeholder*="email" i]'))
     if email is None:
@@ -191,8 +189,9 @@ def _register_browser(
     challenge = DeepseekHcaptchaChallenge()
     seen = mail.message_ids_sync(mailbox)
     with page.expect_response(
-        lambda response: urlparse(response.url).path
-        == "/api/v0/users/create_email_verification_code",
+        lambda response: (
+            urlparse(response.url).path == "/api/v0/users/create_email_verification_code"
+        ),
         timeout=240_000,
     ) as response_info:
         send.click()
@@ -398,18 +397,14 @@ def _session(payload: dict[str, Any], current: dict[str, Any]) -> _SessionLease:
     return _SessionLease(payload, current)
 
 
-def _headers(
-    current: dict[str, Any], *, with_token: bool, token: str = ""
-) -> dict[str, str]:
+def _headers(current: dict[str, Any], *, with_token: bool, token: str = "") -> dict[str, str]:
     config = settings()
     headers = {
         "Accept": "application/json, */*",
         "Content-Type": "application/json",
         "Origin": config.deepseek_base_url,
         "Referer": config.deepseek_base_url.rstrip("/") + "/",
-        "X-Client-Bundle-Id": str(
-            current.get("bundle_id") or config.deepseek_bundle_id
-        ),
+        "X-Client-Bundle-Id": str(current.get("bundle_id") or config.deepseek_bundle_id),
         "X-Client-Platform": str(current.get("platform") or config.deepseek_platform),
         "X-Client-Version": str(
             current.get("client_version") or config.deepseek_client_version_fallback
@@ -434,8 +429,7 @@ def _request_profile(headers: dict[str, str]) -> dict[str, Any]:
         or config.deepseek_client_version_fallback,
         "locale": lowered.get("x-client-locale") or config.deepseek_locale,
         "timezone_offset": int(
-            lowered.get("x-client-timezone-offset")
-            or config.deepseek_timezone_offset_seconds
+            lowered.get("x-client-timezone-offset") or config.deepseek_timezone_offset_seconds
         ),
     }
 
@@ -538,6 +532,4 @@ def _require_success(body: dict[str, Any], operation: str) -> None:
     data = body.get("data") or {}
     biz_code = int(data.get("biz_code") or 0) if isinstance(data, dict) else -1
     if code != 0 or biz_code != 0:
-        raise RuntimeError(
-            f"DeepSeek {operation} was rejected code={code} biz_code={biz_code}"
-        )
+        raise RuntimeError(f"DeepSeek {operation} was rejected code={code} biz_code={biz_code}")

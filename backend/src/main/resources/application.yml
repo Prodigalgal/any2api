@@ -69,6 +69,14 @@ any2api:
   automation:
     base-url: ${AUTOMATION_BASE_URL:http://localhost:8090}
   provider:
+    deepseek:
+      base-url: ${ANY2API_PROVIDER_DEEPSEEK_BASE_URL:https://chat.deepseek.com}
+      asset-host: ${ANY2API_PROVIDER_DEEPSEEK_ASSET_HOST:fe-static.deepseek.com}
+      client-version: ${ANY2API_PROVIDER_DEEPSEEK_CLIENT_VERSION:2.3.0}
+      bundle-id: ${ANY2API_PROVIDER_DEEPSEEK_BUNDLE_ID:com.deepseek.chat}
+      platform: ${ANY2API_PROVIDER_DEEPSEEK_PLATFORM:web}
+      locale: ${ANY2API_PROVIDER_DEEPSEEK_LOCALE:en_US}
+      timezone-offset-seconds: ${ANY2API_PROVIDER_DEEPSEEK_TIMEZONE_OFFSET_SECONDS:32400}
     grok:
       base-url: ${ANY2API_PROVIDER_GROK_BASE_URL:https://cli-chat-proxy.grok.com/v1}
       client-version: ${ANY2API_PROVIDER_GROK_CLIENT_VERSION:0.2.112}

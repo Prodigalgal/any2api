@@ -1,0 +1,182 @@
+from contextlib import contextmanager
+
+import pytest
+
+from any2api_automation.lifecycle.browser import BrowserResult
+from any2api_automation.lifecycle.mail import Mailbox
+from any2api_automation.lifecycle.registration import RegistrationTrace
+from any2api_automation.providers import provider_registry
+from any2api_automation.providers.deepseek import (
+    DeepseekAutomationProvider,
+    _headers,
+    _keepalive_sync,
+    _reauthenticate_sync,
+    _request_profile,
+    _require_success,
+    _run_registration_browser,
+    _set_birthday,
+)
+
+
+def test_manifest_is_discovered_with_full_lifecycle_operations() -> None:
+    provider = provider_registry.require("deepseek")
+
+    assert provider.manifest.operations == ("register", "reauthenticate", "keepalive")
+    assert provider.manifest.registration_attempt_mode == "single_identity"
+    assert provider.manifest.challenge_types == ("hcaptcha_area_select", "hcaptcha_grid")
+
+
+def test_request_profile_uses_observed_official_headers() -> None:
+    profile = _request_profile(
+        {
+            "X-Client-Bundle-Id": "official.bundle",
+            "X-Client-Platform": "web",
+            "X-Client-Version": "9.8.7",
+            "X-Client-Locale": "en_US",
+            "X-Client-Timezone-Offset": "32400",
+        }
+    )
+
+    assert profile == {
+        "bundle_id": "official.bundle",
+        "platform": "web",
+        "client_version": "9.8.7",
+        "locale": "en_US",
+        "timezone_offset": 32400,
+    }
+    headers = _headers({**profile, "token": "secret"}, with_token=True, token="secret")
+    assert headers["X-Client-Version"] == "9.8.7"
+    assert headers["Authorization"] == "Bearer secret"
+
+
+@pytest.mark.asyncio
+async def test_registration_browser_retries_reuse_one_identity(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def run(*args, **kwargs):
+        calls.append(kwargs["payload"])
+        if len(calls) < 3:
+            raise RuntimeError("challenge failed")
+        return BrowserResult("user", "same@example.test", {"token": "value"})
+
+    monkeypatch.setattr("any2api_automation.providers.deepseek.run_browser_flow", run)
+    provider = DeepseekAutomationProvider()
+    mailbox = Mailbox("same@example.test", "mail-jwt")
+
+    result = await _run_registration_browser(
+        provider,
+        {},
+        object(),  # type: ignore[arg-type]
+        mailbox,
+        "Password1!",
+        RegistrationTrace("deepseek"),
+    )
+
+    assert result.external_id == "user"
+    assert len(calls) == 3
+    affinity_keys = {str(call["proxy_affinity_key"]) for call in calls}
+    assert len(affinity_keys) == 1
+    assert next(iter(affinity_keys)).startswith("flow-")
+    assert mailbox.address not in next(iter(affinity_keys))
+    assert [call["proxy_node_offset"] for call in calls] == [0, 1, 2]
+
+
+def test_keepalive_requires_authenticated_model_catalog(monkeypatch) -> None:
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {
+                "code": 0,
+                "data": {
+                    "biz_code": 0,
+                    "biz_data": {"settings": {"model_configs": {"value": []}}},
+                },
+            }
+
+    class Client:
+        def get(self, *args, **kwargs):
+            assert kwargs["headers"]["Authorization"] == "Bearer token"
+            return Response()
+
+    @contextmanager
+    def session(*args, **kwargs):
+        yield Client()
+
+    monkeypatch.setattr("any2api_automation.providers.deepseek._session", session)
+
+    result = _keepalive_sync({}, {"token": "token", "device_id": "device"})
+
+    assert result["healthy"] is True
+    assert result["auth_expired"] is False
+
+
+def test_rejected_envelopes_do_not_look_healthy() -> None:
+    with pytest.raises(RuntimeError, match="biz_code=3"):
+        _require_success({"code": 0, "data": {"biz_code": 3}}, "registration")
+
+
+def test_birthday_activation_preserves_created_account_on_transient_failure() -> None:
+    class Page:
+        attempts = 0
+
+        def evaluate(self, *args):
+            self.attempts += 1
+            if self.attempts < 3:
+                raise RuntimeError("temporary network failure")
+            return {"status": 200, "code": 0, "bizCode": 0}
+
+        def wait_for_timeout(self, timeout):
+            assert timeout in {750, 1500}
+
+    assert _set_birthday(Page(), "token", _request_profile({})) == "set"
+
+
+def test_reauthentication_completes_pending_birthday(monkeypatch) -> None:
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {
+                "code": 0,
+                "data": {
+                    "biz_code": 0,
+                    "biz_data": {"user": {"id": "user", "token": "replacement"}},
+                },
+            }
+
+    class Client:
+        def post(self, url, **kwargs):
+            if url.endswith("/login"):
+                assert kwargs["json"]["email"] == "same@example.test"
+            else:
+                assert url.endswith("/set_birthday")
+                assert kwargs["headers"]["Authorization"] == "Bearer replacement"
+            return Response()
+
+    @contextmanager
+    def session(*args, **kwargs):
+        yield Client()
+
+    monkeypatch.setattr("any2api_automation.providers.deepseek._session", session)
+    result = _reauthenticate_sync(
+        {},
+        {
+            "email": "same@example.test",
+            "password": "Password1!",
+            "device_id": "device",
+            "birthday_status": "pending",
+        },
+    )
+
+    assert result["healthy"] is True
+    assert result["credential_patch"] == {
+        "token": "replacement",
+        "birthday_status": "set",
+    }

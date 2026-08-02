@@ -44,7 +44,8 @@ final class MimoRequestMapper {
         var body = mapper.createObjectNode()
             .put("msgId", compactUuid())
             .put("conversationId", text(options.get("conversation_id"), compactUuid()))
-            .put("query", messages(request.messages(), tools, media, parallel))
+            .put("query", messages(
+                request.messages(), tools, media, parallel, choice.required()))
             .set("modelConfig", modelConfig);
         body.set("multiMedias", mapper.createArrayNode());
         body.set("attachments", mapper.createArrayNode());
@@ -56,7 +57,8 @@ final class MimoRequestMapper {
         List<JsonNode> messages,
         List<MimoTool> tools,
         List<MimoMediaSource> media,
-        boolean parallel
+        boolean parallel,
+        boolean toolRequired
     ) {
         var system = new ArrayList<String>();
         var conversation = new ArrayList<String>();
@@ -81,12 +83,12 @@ final class MimoRequestMapper {
         }
         var blocks = new ArrayList<String>();
         if (!system.isEmpty()) blocks.add(String.join("\n\n", system));
-        if (!tools.isEmpty()) blocks.add(toolPrompt(tools, parallel));
+        if (!tools.isEmpty()) blocks.add(toolPrompt(tools, parallel, toolRequired));
         if (!conversation.isEmpty()) blocks.add(String.join("\n\n", conversation));
         return String.join("\n\n", blocks);
     }
 
-    private String toolPrompt(List<MimoTool> tools, boolean parallel) {
+    private String toolPrompt(List<MimoTool> tools, boolean parallel, boolean required) {
         var definitions = mapper.createArrayNode();
         for (var tool : tools) {
             definitions.add(mapper.createObjectNode()
@@ -97,8 +99,14 @@ final class MimoRequestMapper {
         return "You can call the functions below. Their JSON Schemas are authoritative.\n<tools>"
             + mapper.writeValueAsString(definitions) + "</tools>\n"
             + "Parallel calls allowed: " + parallel + ".\n"
-            + "When calling functions, output only <|MiMoML|tool_calls> blocks with "
-            + "<|MiMoML|invoke name=\"FUNCTION_NAME\"> and named parameter elements.";
+            + (required ? "You must call at least one declared function.\n" : "")
+            + "When calling functions, output only this exact structure and no prose:\n"
+            + "<|MiMoML|tool_calls>\n"
+            + "<|MiMoML|invoke name=\"FUNCTION_NAME\">\n"
+            + "<|MiMoML|parameter name=\"PARAMETER_NAME\">JSON_VALUE"
+            + "</|MiMoML|parameter>\n"
+            + "</|MiMoML|invoke>\n"
+            + "</|MiMoML|tool_calls>";
     }
 
     private List<MimoTool> tools(List<JsonNode> rawTools) {

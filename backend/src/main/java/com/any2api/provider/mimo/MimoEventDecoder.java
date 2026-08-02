@@ -3,6 +3,7 @@ package com.any2api.provider.mimo;
 import com.any2api.protocol.CanonicalEvent;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -198,26 +199,9 @@ final class MimoEventDecoder {
         }
         var tagged = TAGGED_FUNCTION.matcher(source);
         while (tagged.find()) {
-            try {
-                var value = mapper.readTree(tagged.group(1).trim());
-                var values = value.isArray() ? value
-                    : value.path("tool_calls").isArray() ? value.path("tool_calls")
-                    : mapper.createArrayNode().add(value);
-                for (var item : values) {
-                    var function = item.path("function").isObject()
-                        ? item.path("function") : item;
-                    var name = resolveName(function.path("name").asText(""));
-                    if (name == null) continue;
-                    var arguments = function.path("arguments");
-                    if (arguments.isTextual()) arguments = mapper.readTree(arguments.asText());
-                    calls.add(new ParsedCall(name, arguments.isObject()
-                        ? (tools.jackson.databind.node.ObjectNode) arguments
-                        : mapper.createObjectNode()));
-                }
-            } catch (RuntimeException ignored) {
-                // Other supported tool syntaxes may still match this response.
-            }
+            addJsonCalls(tagged.group(1), calls);
         }
+        jsonCandidates(source).forEach(candidate -> addJsonCalls(candidate, calls));
         var plain = PLAIN_CALL.matcher(source);
         while (plain.find()) {
             var name = resolveName(plain.group(1));
@@ -277,6 +261,44 @@ final class MimoEventDecoder {
                 .equals(compact)) return tool.name();
         }
         return null;
+    }
+
+    private void addJsonCalls(String source, List<ParsedCall> calls) {
+        try {
+            var value = mapper.readTree(source.trim());
+            var values = value.isArray() ? value
+                : value.path("tool_calls").isArray() ? value.path("tool_calls")
+                : mapper.createArrayNode().add(value);
+            for (var item : values) {
+                var function = item.path("function").isObject()
+                    ? item.path("function") : item;
+                var name = resolveName(function.path("name").asText(""));
+                if (name == null) continue;
+                var arguments = function.path("arguments");
+                if (arguments.isTextual()) arguments = mapper.readTree(arguments.asText());
+                calls.add(new ParsedCall(name, arguments.isObject()
+                    ? (tools.jackson.databind.node.ObjectNode) arguments
+                    : mapper.createObjectNode()));
+            }
+        } catch (RuntimeException ignored) {
+            // Other supported tool syntaxes may still match this response.
+        }
+    }
+
+    private Set<String> jsonCandidates(String source) {
+        var candidates = new LinkedHashSet<String>();
+        var raw = source == null ? "" : source.trim();
+        if ((raw.startsWith("{") && raw.endsWith("}"))
+            || (raw.startsWith("[") && raw.endsWith("]"))) {
+            candidates.add(raw);
+        }
+        var fenced = Pattern.compile(
+            "```(?:json)?\\s*([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE).matcher(raw);
+        while (fenced.find()) candidates.add(fenced.group(1).trim());
+        var start = raw.indexOf('{');
+        var end = raw.lastIndexOf('}');
+        if (start >= 0 && end > start) candidates.add(raw.substring(start, end + 1));
+        return candidates;
     }
 
     private void putAuto(

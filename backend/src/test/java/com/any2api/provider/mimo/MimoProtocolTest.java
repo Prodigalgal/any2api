@@ -71,6 +71,10 @@ class MimoProtocolTest {
         var decoder = new MimoEventDecoder("tools", prepared.tools(), prepared.toolRequired(),
             prepared.parallelToolCalls());
 
+        assertThat(prepared.body().path("query").asText())
+            .contains("You must call at least one declared function")
+            .contains("<|MiMoML|parameter name=\"PARAMETER_NAME\">");
+
         decoder.decode("{\"type\":\"text\",\"content\":\"<|MiMoML|tool_calls>"
             + "<|MiMoML|invoke name='get_weather'><|MiMoML|parameter name='city'>"
             + "\\\"Xiamen\\\"</|MiMoML|parameter></|MiMoML|invoke>"
@@ -86,6 +90,22 @@ class MimoProtocolTest {
         assertThat(missing.finish()).anyMatch(event ->
             event instanceof CanonicalEvent.Failed failed
                 && failed.errorType().equals("tool_call_generation_failed"));
+    }
+
+    @Test
+    void decodesBareOpenAiJsonToolCallsFromLiveModelVariants() {
+        var tool = new MimoTool("get_weather", "", mapper.createObjectNode());
+        var decoder = new MimoEventDecoder("json-tools", List.of(tool), true, true);
+
+        decoder.decode("{\"type\":\"text\",\"content\":\"{\\\"tool_calls\\\":[{"
+            + "\\\"function\\\":{\\\"name\\\":\\\"get_weather\\\","
+            + "\\\"arguments\\\":\\\"{\\\\\\\"city\\\\\\\":\\\\\\\"Tokyo\\\\\\\"}\\\"}}]}\"}");
+        var events = decoder.finish();
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.ToolCallCompleted call
+            && call.arguments().equals("{\"city\":\"Tokyo\"}"))
+            .anyMatch(event -> event instanceof CanonicalEvent.Completed completed
+                && completed.finishReason().equals("tool_calls"));
     }
 
     @Test

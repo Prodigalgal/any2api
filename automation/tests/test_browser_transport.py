@@ -100,6 +100,24 @@ def test_clearance_is_scoped_to_primary_origin_not_every_sso_domain() -> None:
     assert {cookie.domain for cookie in cookies if cookie.name == "cf_clearance"} == {"grok.com"}
 
 
+def test_browser_session_transfers_aws_waf_clearance_without_cloudflare_alias() -> None:
+    with BrowserSession(origin="https://chat.deepseek.com", credential={}) as browser:
+        patch = browser.apply_clearance_context(
+            {
+                "clearance_cookies": "aws-waf-token=clear",
+                "user_agent": browser.user_agent,
+                "browser_profile": browser.profile.impersonate,
+            }
+        )
+        cookies = list(browser.client.cookies.jar)
+
+    assert patch["clearance_cookies"] == "aws-waf-token=clear"
+    assert "cloudflare_cookies" not in patch
+    assert {cookie.domain for cookie in cookies if cookie.name == "aws-waf-token"} == {
+        "chat.deepseek.com"
+    }
+
+
 def test_browser_session_initializes_bearer_without_allowing_request_override() -> None:
     with BrowserSession(
         origin="https://grok.com",

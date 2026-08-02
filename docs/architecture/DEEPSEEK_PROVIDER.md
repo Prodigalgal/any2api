@@ -23,10 +23,13 @@ those scopes. Mail, Redis, Java callbacks, and captcha inference never inherit t
 
 ## Protocol profile
 
-The provider obtains the official web client version from allowlisted DeepSeek frontend assets and
-retains the last verified value when refresh fails. The configured version is a cold-start fallback,
-not a request-method constant. Account credentials retain their own device ID, User-Agent, browser
-profile, and the request profile observed during registration.
+The registration browser captures the official `X-Client-*` request profile that actually passed the
+current upstream edge and stores it with that account. Inference prefers this observed account
+profile. A fingerprinted, allowlisted official-asset refresher updates the process fallback when the
+deployment egress can reach those assets; it retains the last verified value on WAF rejection,
+timeout, or parse failure. The configured version is therefore only a cold-start fallback, not a
+request-method constant. Account credentials also retain their own device ID, User-Agent, and
+browser profile.
 
 For each inference request the provider:
 

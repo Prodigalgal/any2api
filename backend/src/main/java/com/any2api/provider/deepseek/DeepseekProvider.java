@@ -137,12 +137,12 @@ public final class DeepseekProvider implements InferenceProvider {
         var credential = DeepseekCredential.from(account);
         return Flux.usingWhen(
             transport.open(sessionCommand(credential, account.accountId() + ":" + request.requestId())),
-            session -> createSession(session)
-                .flatMapMany(sessionId -> createPow(session)
+            session -> createSession(session, credential)
+                .flatMapMany(sessionId -> createPow(session, credential)
                     .flatMapMany(challenge -> Mono.fromCallable(() -> pow.solve(challenge))
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(answer -> completion(
-                            session, request, sessionId, challenge, answer)))),
+                            session, credential, request, sessionId, challenge, answer)))),
             this::close,
             (session, ignored) -> close(session),
             this::close);
@@ -158,7 +158,8 @@ public final class DeepseekProvider implements InferenceProvider {
                     "/api/v0/client/settings?did=" + url(credential.deviceId()) + "&scope=model",
                     null,
                     Map.of(),
-                    120))
+                    120,
+                    credential))
                 .flatMap(response -> response.successful()
                     ? Mono.just(parseModels(json(response)))
                     : Mono.error(upstream(response))),
@@ -190,9 +191,13 @@ public final class DeepseekProvider implements InferenceProvider {
         return List.copyOf(result.values());
     }
 
-    private Mono<String> createSession(BrowserTransportClient.Session session) {
+    private Mono<String> createSession(
+        BrowserTransportClient.Session session,
+        DeepseekCredential credential
+    ) {
         return transport.request(session.id(), request(
-                "POST", "/api/v0/chat_session/create", mapper.createObjectNode(), Map.of(), 120))
+                "POST", "/api/v0/chat_session/create", mapper.createObjectNode(), Map.of(), 120,
+                credential))
             .flatMap(response -> {
                 if (!response.successful()) return Mono.error(upstream(response));
                 var root = json(response);
@@ -207,11 +212,12 @@ public final class DeepseekProvider implements InferenceProvider {
     }
 
     private Mono<DeepseekPowSolver.Challenge> createPow(
-        BrowserTransportClient.Session session
+        BrowserTransportClient.Session session,
+        DeepseekCredential credential
     ) {
         var body = mapper.createObjectNode().put("target_path", COMPLETION_PATH);
         return transport.request(session.id(), request(
-                "POST", "/api/v0/chat/create_pow_challenge", body, Map.of(), 120))
+                "POST", "/api/v0/chat/create_pow_challenge", body, Map.of(), 120, credential))
             .flatMap(response -> {
                 if (!response.successful()) return Mono.error(upstream(response));
                 var root = json(response);
@@ -222,6 +228,7 @@ public final class DeepseekProvider implements InferenceProvider {
 
     private Flux<CanonicalEvent> completion(
         BrowserTransportClient.Session session,
+        DeepseekCredential credential,
         CanonicalRequest request,
         String sessionId,
         DeepseekPowSolver.Challenge challenge,
@@ -240,7 +247,7 @@ public final class DeepseekProvider implements InferenceProvider {
         var sse = new SseDataDecoder();
         return transport.stream(session.id(), request(
                 "POST", COMPLETION_PATH, requestMapper.prepare(request, sessionId),
-                Map.of("X-DS-PoW-Response", encoded), 300))
+                Map.of("X-DS-PoW-Response", encoded), 300, credential))
             .concatMapIterable(sse::decode)
             .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
             .concatMapIterable(decoder::decode)
@@ -252,16 +259,23 @@ public final class DeepseekProvider implements InferenceProvider {
         String path,
         JsonNode body,
         Map<String, String> extraHeaders,
-        int timeout
+        int timeout,
+        DeepseekCredential credential
     ) {
         var headers = new LinkedHashMap<String, String>();
         if (body != null) headers.put("Content-Type", "application/json");
-        headers.put("X-Client-Bundle-Id", properties.getBundleId());
-        headers.put("X-Client-Platform", properties.getPlatform());
-        headers.put("X-Client-Version", properties.getClientVersion());
-        headers.put("X-Client-Locale", properties.getLocale());
+        headers.put("X-Client-Bundle-Id", first(
+            credential.bundleId(), properties.getBundleId()));
+        headers.put("X-Client-Platform", first(
+            credential.platform(), properties.getPlatform()));
+        headers.put("X-Client-Version", first(
+            credential.clientVersion(), properties.getClientVersion()));
+        headers.put("X-Client-Locale", first(
+            credential.locale(), properties.getLocale()));
         headers.put("X-Client-Timezone-Offset",
-            Integer.toString(properties.getTimezoneOffsetSeconds()));
+            Integer.toString(credential.timezoneOffsetSeconds() == 0
+                ? properties.getTimezoneOffsetSeconds()
+                : credential.timezoneOffsetSeconds()));
         headers.putAll(extraHeaders);
         return new BrowserTransportClient.Request(
             method, path, Map.copyOf(headers),
@@ -317,6 +331,10 @@ public final class DeepseekProvider implements InferenceProvider {
 
     private String url(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static String first(String preferred, String fallback) {
+        return preferred == null || preferred.isBlank() ? fallback : preferred;
     }
 
     @Override

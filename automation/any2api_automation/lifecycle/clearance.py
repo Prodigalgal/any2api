@@ -13,7 +13,7 @@ from .browser import (
     close_browser_context,
     launch_browser,
 )
-from .browser_session import BrowserSession
+from .browser_session import CLEARANCE_COOKIE_NAMES, BrowserSession
 
 _clearance_slots = threading.BoundedSemaphore(max(1, settings().browser_realtime_capacity))
 _CHALLENGE_MARKERS = (
@@ -23,6 +23,8 @@ _CHALLENGE_MARKERS = (
     "verify you are human",
     "challenge-platform",
     "cf-chl-",
+    "awswaf",
+    "aws waf",
 )
 
 
@@ -111,7 +113,7 @@ def _clearance_patch(context: Any, browser: BrowserSession) -> dict[str, Any] | 
     expiries: list[int] = []
     for cookie in context.cookies():
         name = str(cookie.get("name") or "")
-        if name not in {"cf_clearance", "__cf_bm", "_cfuvid", "cf_chl_2", "cf_chl_rc_i"}:
+        if name not in CLEARANCE_COOKIE_NAMES:
             continue
         value = str(cookie.get("value") or "").strip()
         if not value:
@@ -123,11 +125,16 @@ def _clearance_patch(context: Any, browser: BrowserSession) -> dict[str, Any] | 
     if not values:
         return None
     patch: dict[str, Any] = {
-        "cloudflare_cookies": "; ".join(f"{name}={values[name]}" for name in sorted(values)),
+        "clearance_cookies": "; ".join(f"{name}={values[name]}" for name in sorted(values)),
         "user_agent": browser.user_agent,
         "browser_profile": browser.profile.impersonate,
         "clearance_refreshed_at": datetime.now(UTC).isoformat(),
     }
+    cloudflare = {name: value for name, value in values.items() if name != "aws-waf-token"}
+    if cloudflare:
+        patch["cloudflare_cookies"] = "; ".join(
+            f"{name}={cloudflare[name]}" for name in sorted(cloudflare)
+        )
     if expiries:
         patch["clearance_expires_at"] = datetime.fromtimestamp(min(expiries), tz=UTC).isoformat()
     return patch

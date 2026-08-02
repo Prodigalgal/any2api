@@ -14,7 +14,7 @@ from uuid import uuid4
 from curl_cffi.requests.exceptions import RequestException
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .config import settings
 from .lifecycle.browser_session import BrowserSession, BrowserSessionProfile
@@ -132,11 +132,18 @@ class BrowserClearanceRefreshRequest(BaseModel):
 
 
 class BrowserClearanceApplyRequest(BaseModel):
-    cloudflare_cookies: str = Field(min_length=1, max_length=32768)
+    clearance_cookies: str = Field(default="", max_length=32768)
+    cloudflare_cookies: str = Field(default="", max_length=32768)
     user_agent: str = Field(default="", max_length=512)
     browser_profile: str = Field(default="", max_length=64)
     clearance_refreshed_at: str = Field(default="", max_length=64)
     clearance_expires_at: str = Field(default="", max_length=64)
+
+    @model_validator(mode="after")
+    def require_cookies(self) -> BrowserClearanceApplyRequest:
+        if not self.clearance_cookies.strip() and not self.cloudflare_cookies.strip():
+            raise ValueError("clearance cookies are required")
+        return self
 
 
 @dataclass

@@ -9,15 +9,17 @@ from urllib.parse import urlparse
 
 from curl_cffi import requests
 
-_CF_COOKIE_NAMES = frozenset(
+CLEARANCE_COOKIE_NAMES = frozenset(
     {
         "cf_clearance",
         "__cf_bm",
         "_cfuvid",
         "cf_chl_2",
         "cf_chl_rc_i",
+        "aws-waf-token",
     }
 )
+_CF_COOKIE_NAMES = frozenset(name for name in CLEARANCE_COOKIE_NAMES if name != "aws-waf-token")
 _DEFAULT_USER_AGENTS = {
     "chrome136": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -100,19 +102,27 @@ class BrowserSession:
 
     def credential_patch(self) -> dict[str, Any] | None:
         cookies = _cookie_items(self.client.cookies)
-        cloudflare = {name: value for name, value in cookies.items() if name in _CF_COOKIE_NAMES}
-        if not cloudflare:
+        clearance = {
+            name: value for name, value in cookies.items() if name in CLEARANCE_COOKIE_NAMES
+        }
+        if not clearance:
             return None
-        header = "; ".join(f"{name}={cloudflare[name]}" for name in sorted(cloudflare))
+        header = "; ".join(f"{name}={clearance[name]}" for name in sorted(clearance))
         result: dict[str, Any] = {
-            "cloudflare_cookies": header,
             "user_agent": self.user_agent,
             "browser_profile": self.profile.impersonate,
         }
+        if any(name not in _CF_COOKIE_NAMES for name in clearance):
+            result["clearance_cookies"] = header
+        cloudflare = {name: value for name, value in clearance.items() if name in _CF_COOKIE_NAMES}
+        if cloudflare:
+            result["cloudflare_cookies"] = "; ".join(
+                f"{name}={cloudflare[name]}" for name in sorted(cloudflare)
+            )
         expiries = [
             int(cookie.expires)
             for cookie in _cookie_objects(self.client.cookies)
-            if cookie.name in _CF_COOKIE_NAMES and cookie.expires
+            if cookie.name in CLEARANCE_COOKIE_NAMES and cookie.expires
         ]
         if expiries:
             result["clearance_expires_at"] = datetime.fromtimestamp(
@@ -144,10 +154,11 @@ class BrowserSession:
             raise ValueError("clearance User-Agent does not match the browser session")
         if browser_profile and browser_profile != self.profile.impersonate:
             raise ValueError("clearance browser profile does not match the browser session")
-        values = _parse_cookie_header(str(context.get("cloudflare_cookies") or ""))
-        values = {name: value for name, value in values.items() if name in _CF_COOKIE_NAMES}
+        values = _parse_cookie_header(str(context.get("clearance_cookies") or ""))
+        values.update(_parse_cookie_header(str(context.get("cloudflare_cookies") or "")))
+        values = {name: value for name, value in values.items() if name in CLEARANCE_COOKIE_NAMES}
         if not values:
-            raise ValueError("clearance context contains no supported Cloudflare cookies")
+            raise ValueError("clearance context contains no supported anti-bot cookies")
         for name, value in values.items():
             self.client.cookies.set(name, value, domain=self._clearance_domain, path="/")
         patch = self.credential_patch()
@@ -161,14 +172,14 @@ class BrowserSession:
 
     def _load_credential_cookies(self, credential: dict[str, Any]) -> None:
         values: dict[str, str] = {}
-        for field in ("cloudflare_cookies", "cf_cookies"):
+        for field in ("clearance_cookies", "cloudflare_cookies", "cf_cookies"):
             values.update(_parse_cookie_header(str(credential.get(field) or "")))
-        for name in _CF_COOKIE_NAMES:
+        for name in CLEARANCE_COOKIE_NAMES:
             value = str(credential.get(name) or "").strip()
             if value:
                 values[name] = value
         for name, value in values.items():
-            if name not in _CF_COOKIE_NAMES:
+            if name not in CLEARANCE_COOKIE_NAMES:
                 continue
             self.client.cookies.set(name, value, domain=self._clearance_domain, path="/")
 

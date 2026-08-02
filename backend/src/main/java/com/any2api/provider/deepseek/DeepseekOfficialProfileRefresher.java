@@ -1,17 +1,17 @@
 package com.any2api.provider.deepseek;
 
+import com.any2api.transport.BrowserTransportClient;
 import java.net.URI;
 import java.time.Duration;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -24,20 +24,20 @@ final class DeepseekOfficialProfileRefresher {
     private static final Pattern APP_VERSION = Pattern.compile(
         "appVersion\\s*:\\s*[\\\"']([0-9]+(?:\\.[0-9]+){1,3})[\\\"']");
 
-    private final WebClient client;
+    private final BrowserTransportClient transport;
     private final DeepseekProperties properties;
     private final URI baseUri;
+    private final URI assetOrigin;
     private final AtomicBoolean refreshing = new AtomicBoolean();
 
     DeepseekOfficialProfileRefresher(
-        WebClient.Builder builder,
+        BrowserTransportClient transport,
         DeepseekProperties properties
     ) {
-        client = builder.clone()
-            .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(20 * 1024 * 1024))
-            .build();
+        this.transport = transport;
         this.properties = properties;
         baseUri = URI.create(properties.getBaseUrl() + "/");
+        assetOrigin = URI.create("https://" + properties.getAssetHost());
     }
 
     @Scheduled(
@@ -61,22 +61,51 @@ final class DeepseekOfficialProfileRefresher {
     }
 
     Mono<String> discover() {
-        return client.get().uri(baseUri.resolve("sign_in"))
-            .header(HttpHeaders.USER_AGENT, properties.getUserAgent())
-            .accept(MediaType.TEXT_HTML)
-            .retrieve().bodyToMono(String.class)
-            .flatMapMany(this::scripts)
-            .flatMap(this::fetchScript, 4)
-            .map(DeepseekOfficialProfileRefresher::parseVersion)
-            .filter(value -> !value.isBlank())
-            .next()
-            .switchIfEmpty(Mono.error(new IllegalStateException(
-                "official frontend exposed no DeepSeek client version")));
+        return Mono.usingWhen(
+            transport.open(openCommand()),
+            session -> fetchIndex(session)
+                .flatMapMany(this::scripts)
+                .flatMap(uri -> fetchScript(session, uri), 4)
+                .map(DeepseekOfficialProfileRefresher::parseVersion)
+                .filter(value -> !value.isBlank())
+                .next()
+                .switchIfEmpty(Mono.error(new IllegalStateException(
+                    "official frontend exposed no DeepSeek client version"))),
+            this::close,
+            (session, ignored) -> close(session),
+            this::close);
     }
 
     static String parseVersion(String script) {
         var matcher = APP_VERSION.matcher(script == null ? "" : script);
         return matcher.find() ? matcher.group(1) : "";
+    }
+
+    private Mono<String> fetchIndex(BrowserTransportClient.Session session) {
+        return fetchIndexResponse(session).flatMap(response -> {
+            if (response.successful()) return Mono.just(response.text());
+            if (response.status() != 202 && response.status() != 403) {
+                return Mono.error(new IllegalStateException(
+                    "official frontend returned HTTP " + response.status()));
+            }
+            return transport.refreshClearance(session.id(), "/sign_in")
+                .then(fetchIndexResponse(session))
+                .flatMap(retried -> retried.successful()
+                    ? Mono.just(retried.text())
+                    : Mono.error(new IllegalStateException(
+                        "official frontend returned HTTP " + retried.status()
+                            + " after browser clearance")));
+        });
+    }
+
+    private Mono<BrowserTransportClient.BufferedResponse> fetchIndexResponse(
+        BrowserTransportClient.Session session
+    ) {
+        var request = new BrowserTransportClient.Request(
+            "GET", "/sign_in", Map.of(),
+            BrowserTransportClient.FingerprintProfile.NAVIGATION,
+            null, 90);
+        return transport.request(session.id(), request);
     }
 
     private Flux<URI> scripts(String html) {
@@ -96,11 +125,36 @@ final class DeepseekOfficialProfileRefresher {
             || host.equalsIgnoreCase(properties.getAssetHost()));
     }
 
-    private Mono<String> fetchScript(URI uri) {
-        return client.get().uri(uri)
-            .header(HttpHeaders.USER_AGENT, properties.getUserAgent())
-            .accept(MediaType.valueOf("application/javascript"), MediaType.TEXT_PLAIN)
-            .retrieve().bodyToMono(String.class)
+    private Mono<String> fetchScript(
+        BrowserTransportClient.Session session,
+        URI uri
+    ) {
+        var origin = origin(uri);
+        var path = uri.getRawPath()
+            + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());
+        var request = new BrowserTransportClient.Request(
+            "GET", path, Map.of("Accept", "application/javascript, text/javascript, */*"),
+            BrowserTransportClient.FingerprintProfile.NONE,
+            null, 90, origin.equals(baseUri.resolve("/")) ? null : origin);
+        return transport.request(session.id(), request)
+            .filter(BrowserTransportClient.BufferedResponse::successful)
+            .map(BrowserTransportClient.BufferedResponse::text)
             .onErrorResume(ignored -> Mono.empty());
+    }
+
+    private BrowserTransportClient.OpenCommand openCommand() {
+        return new BrowserTransportClient.OpenCommand(
+            baseUri.resolve("/"), Map.of(), List.of("." + baseUri.getHost()),
+            properties.getUserAgent(), properties.getBrowserProfile(), "v2",
+            Map.of(), 180, List.of(assetOrigin), "deepseek-official-profile",
+            false, "", "");
+    }
+
+    private Mono<Void> close(BrowserTransportClient.Session session) {
+        return transport.close(session.id()).then();
+    }
+
+    private static URI origin(URI uri) {
+        return URI.create(uri.getScheme() + "://" + uri.getRawAuthority());
     }
 }

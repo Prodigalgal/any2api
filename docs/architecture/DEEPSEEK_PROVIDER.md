@@ -17,6 +17,13 @@ fingerprints, and registration-proxy affinity. A registration task creates one m
 the browser flow with that same identity. Only exhaustion of the task's bounded browser budget lets
 the Java registration scheduler create another task identity.
 
+Before opening sign-up, the provider loads the official sign-in settings and confirms that hCaptcha
+is enabled. Challenge handling waits for the real task image, removes prompt chrome, and maps
+normalized click or drag actions back to the browser surface. The shared visual solver samples the
+multimodal-random route independently; when the first vote has no geometric consensus, a bounded
+second review inspects the image and candidate actions again. Completion is accepted only after the
+official email-verification response arrives, never from an iframe disappearing temporarily.
+
 Registration traffic follows the provider's `REGISTRATION` proxy binding. Inference and keepalive
 are direct by default and use `INFERENCE` or `LIFECYCLE` proxy bindings only when an operator enables
 those scopes. Mail, Redis, Java callbacks, and captcha inference never inherit the provider proxy.

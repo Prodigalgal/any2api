@@ -1,6 +1,8 @@
+import io
 from contextlib import contextmanager
 
 import pytest
+from PIL import Image, ImageDraw
 
 from any2api_automation.lifecycle.browser import BrowserResult
 from any2api_automation.lifecycle.mail import Mailbox
@@ -15,6 +17,12 @@ from any2api_automation.providers.deepseek import (
     _require_success,
     _run_registration_browser,
     _set_birthday,
+    _warm_up_hcaptcha,
+)
+from any2api_automation.providers.deepseek_challenge import (
+    DeepseekHcaptchaChallenge,
+    _extract_task_image,
+    _wait_for_completion,
 )
 
 
@@ -23,7 +31,11 @@ def test_manifest_is_discovered_with_full_lifecycle_operations() -> None:
 
     assert provider.manifest.operations == ("register", "reauthenticate", "keepalive")
     assert provider.manifest.registration_attempt_mode == "single_identity"
-    assert provider.manifest.challenge_types == ("hcaptcha_area_select", "hcaptcha_grid")
+    assert provider.manifest.challenge_types == (
+        "hcaptcha_area_select",
+        "hcaptcha_grid",
+        "hcaptcha_semantic_drag",
+    )
 
 
 def test_request_profile_uses_observed_official_headers() -> None:
@@ -180,3 +192,89 @@ def test_reauthentication_completes_pending_birthday(monkeypatch) -> None:
         "token": "replacement",
         "birthday_status": "set",
     }
+
+
+def test_hcaptcha_warmup_requires_official_main_feature() -> None:
+    class Response:
+        status = 200
+        url = "https://chat.deepseek.com/api/v0/client/settings?did=device&scope=main"
+
+        def json(self):
+            return {
+                "code": 0,
+                "data": {
+                    "biz_code": 0,
+                    "biz_data": {"settings": {"chat_hcaptcha": {"value": True}}},
+                },
+            }
+
+    class ResponseInfo:
+        value = Response()
+
+    class Expected:
+        def __enter__(self):
+            return ResponseInfo()
+
+        def __exit__(self, *args):
+            return None
+
+    class Page:
+        def expect_response(self, predicate, timeout):
+            assert predicate(Response()) is True
+            assert timeout == 120_000
+            return Expected()
+
+        def goto(self, url, **kwargs):
+            assert url.endswith("/sign_in")
+
+    _warm_up_hcaptcha(Page(), "https://chat.deepseek.com")
+
+
+def test_hcaptcha_completion_is_bound_to_provider_response() -> None:
+    challenge = DeepseekHcaptchaChallenge()
+
+    challenge.solve(object(), completed=lambda: True)
+
+    assert challenge.last_diagnostic == "provider_response"
+
+
+def test_hcaptcha_waits_for_delayed_provider_response(monkeypatch) -> None:
+    clock = {"now": 0.0}
+
+    class Page:
+        def wait_for_timeout(self, milliseconds):
+            clock["now"] += milliseconds / 1000
+
+    monkeypatch.setattr(
+        "any2api_automation.providers.deepseek_challenge.time.monotonic",
+        lambda: clock["now"],
+    )
+
+    completed = _wait_for_completion(
+        Page(),
+        lambda: clock["now"] >= 1.0,
+        timeout_seconds=5.0,
+    )
+
+    assert completed is True
+    assert clock["now"] == pytest.approx(1.0)
+
+
+def test_hcaptcha_task_crop_excludes_prompt_header_and_maps_back_to_surface() -> None:
+    image = Image.new("RGB", (500, 470), "white")
+    draw = ImageDraw.Draw(image)
+    for y in range(135, 455, 20):
+        for x in range(10, 490, 20):
+            color = (30, 120, 210) if (x + y) // 20 % 2 else (230, 90, 50)
+            draw.rectangle((x, y, x + 19, y + 19), fill=color)
+    encoded = io.BytesIO()
+    image.save(encoded, format="PNG")
+
+    task = _extract_task_image(encoded.getvalue())
+
+    assert task is not None
+    assert task.top > 0.2
+    assert task.height > 0.5
+    with Image.open(io.BytesIO(task.image)) as cropped:
+        assert cropped.width > 450
+        assert cropped.height > 280

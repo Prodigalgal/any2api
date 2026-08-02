@@ -65,11 +65,15 @@ def _terminate_process_ids(
     logger.warning(
         "browser process tree terminated reason=%s label=%s driver_pid=%s", reason, label, root_pid
     )
-    for process_signal in (signal.SIGTERM, signal.SIGKILL):
+    kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+    process_signals = (
+        (signal.SIGTERM, kill_signal) if kill_signal != signal.SIGTERM else (signal.SIGTERM,)
+    )
+    for process_signal in process_signals:
         for pid in reversed(pids):
             with suppress(ProcessLookupError, PermissionError):
                 os.kill(pid, process_signal)
-        if process_signal == signal.SIGTERM:
+        if process_signal == signal.SIGTERM and len(process_signals) > 1:
             time.sleep(0.25)
 
 

@@ -362,20 +362,87 @@ class SolverRegistry:
         consensus = self._visual_action_consensus(samples, sample_count)
         if consensus:
             return consensus
+        primary_diagnostic = self.visual_diagnostic()
+        reviewed = self._review_visual_actions(
+            image,
+            prompt,
+            samples,
+            timeout_seconds=sample_timeout,
+        )
+        if reviewed:
+            return reviewed
         failure = failures[-1] if failures else "coordinate_disagreement"
         votes = "|".join(self._visual_action_summary(actions) for actions in samples)
         source_summary = "|".join(sources)
         self._diagnostics.visual = (
             f"consensus_rejected:completed={len(done)}/{sample_count}:"
             f"valid={len(samples)}/{sample_count}:"
-            f"votes={votes}:sources={source_summary}:last={failure}"
+            f"votes={votes}:sources={source_summary}:last={failure}:"
+            f"primary={primary_diagnostic}:review={self.visual_diagnostic()}"
         )[:1000]
         return []
+
+    def _review_visual_actions(
+        self,
+        image: bytes,
+        prompt: str,
+        candidates: list[list[VisualAction]],
+        *,
+        timeout_seconds: float,
+    ) -> list[VisualAction]:
+        if len(candidates) < 2:
+            return []
+        proposals = "\n".join(
+            f"Candidate {index + 1}: {self._visual_action_summary(actions)}"
+            for index, actions in enumerate(candidates)
+        )
+        review_prompt = (
+            prompt
+            + "\n\nSeveral independent solvers proposed these normalized actions:\n"
+            + proposals
+            + "\nIndependently inspect the image and instruction. Identify the correct movable "
+            "object or selectable targets and the exact destination implied by the pattern. "
+            "Candidates may be wrong; do not vote by popularity. Return only one corrected "
+            "ACTIONS=[...] JSON list using decimal coordinates from 0.0 to 1.0."
+        )
+
+        def review() -> list[VisualAction]:
+            content = self._visual_completion_sync(
+                image,
+                review_prompt,
+                max_tokens=256,
+                timeout_seconds=timeout_seconds,
+            )
+            return self._parse_visual_actions(image, content) if content else []
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        futures = [executor.submit(review) for _ in range(3)]
+        done, pending = concurrent.futures.wait(futures, timeout=timeout_seconds)
+        for future in pending:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        samples: list[list[VisualAction]] = []
+        for future in done:
+            try:
+                actions = future.result()
+                if actions:
+                    samples.append(actions)
+            except Exception:  # noqa: BLE001,S112 - one reviewer must not fail the vote
+                continue
+        return self._visual_action_consensus(
+            samples,
+            3,
+            tolerance=0.1,
+            diagnostic_prefix="review_consensus",
+        )
 
     def _visual_action_consensus(
         self,
         samples: list[list[VisualAction]],
         sample_count: int,
+        *,
+        tolerance: float = 0.06,
+        diagnostic_prefix: str = "consensus",
     ) -> list[VisualAction]:
         valid_count = len(samples)
         required = 1 if sample_count == 1 else max(2, valid_count // 2 + 1)
@@ -397,7 +464,7 @@ class SolverRegistry:
             qualifying = [
                 candidate
                 for candidate in itertools.combinations(action_vectors, size)
-                if self._visual_vector_spread([vector for _, vector in candidate]) <= 0.06
+                if self._visual_vector_spread([vector for _, vector in candidate]) <= tolerance
             ]
             if qualifying:
                 cluster = min(
@@ -419,7 +486,8 @@ class SolverRegistry:
             for vector in clustered_vectors
         )
         self._diagnostics.visual = (
-            f"consensus:{len(cluster)}/{sample_count}:spread={spread:.3f}:" + ",".join(signature)
+            f"{diagnostic_prefix}:{len(cluster)}/{sample_count}:spread={spread:.3f}:"
+            + ",".join(signature)
         )
         return result
 
@@ -478,7 +546,13 @@ class SolverRegistry:
             points = self._visual_action_points(decoded)
             largest = max((max(abs(x), abs(y)) for x, y in points), default=0.0)
             coordinate_mode = (
-                "normalized" if largest <= 1 else "percent" if largest <= 100 else "pixel"
+                "normalized"
+                if largest <= 1
+                else "percent"
+                if largest <= 100
+                else "permille"
+                if largest <= 1000
+                else "pixel"
             )
             actions: list[VisualAction] = []
             for raw in decoded:
@@ -552,6 +626,8 @@ class SolverRegistry:
         x, y = float(value[0]), float(value[1])
         if mode == "percent":
             x, y = x / 100, y / 100
+        elif mode == "permille":
+            x, y = x / 1000, y / 1000
         elif mode == "pixel":
             x, y = x / width, y / height
         if not (0 <= x <= 1 and 0 <= y <= 1):
@@ -572,7 +648,8 @@ class SolverRegistry:
             self._diagnostics.visual = "disabled_or_unconfigured"
             return ""
         endpoint = f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions"
-        data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
+        mime_type, normalized_image = self._visual_ai_payload(image)
+        data_url = f"data:{mime_type};base64," + base64.b64encode(normalized_image).decode("ascii")
         prompt_prefix = config.captcha_ai_prompt_prefix.strip()
         effective_prompt = f"{prompt_prefix}\n\n{prompt}" if prompt_prefix else prompt
         request_body = {
@@ -658,6 +735,30 @@ class SolverRegistry:
                 self._diagnostics.visual = f"request_error:{type(error).__name__}"
                 return ""
         return ""
+
+    def _visual_ai_payload(self, image: bytes) -> tuple[str, bytes]:
+        from PIL import Image, UnidentifiedImageError
+
+        try:
+            with Image.open(io.BytesIO(image)) as source:
+                detected = str(source.format or "").upper()
+                if len(image) <= 120 * 1024 and detected in {"PNG", "JPEG", "WEBP"}:
+                    mime = "image/jpeg" if detected == "JPEG" else f"image/{detected.lower()}"
+                    return mime, image
+                normalized = source.convert("RGB")
+                candidate = image
+                for maximum in (1024, 896, 768, 640, 512):
+                    working = normalized.copy()
+                    working.thumbnail((maximum, maximum), Image.Resampling.LANCZOS)
+                    for quality in (84, 76, 68, 60, 52):
+                        output = io.BytesIO()
+                        working.save(output, format="JPEG", quality=quality, optimize=True)
+                        candidate = output.getvalue()
+                        if len(candidate) <= 120 * 1024:
+                            return "image/jpeg", candidate
+                return "image/jpeg", candidate
+        except (OSError, UnidentifiedImageError):
+            return "image/png", image
 
     def _response_error_type(self, response: object) -> str:
         if int(getattr(response, "status_code", 200)) < 400:

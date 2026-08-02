@@ -7,7 +7,7 @@ import re
 import time
 from types import TracebackType
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from curl_cffi.requests import Session as CurlSession
 
@@ -46,7 +46,11 @@ class DeepseekAutomationProvider(AutomationProvider):
         browser_backend="patchright",
         fallback_backend="camoufox",
         isolation="process",
-        challenge_types=("hcaptcha_area_select", "hcaptcha_grid"),
+        challenge_types=(
+            "hcaptcha_area_select",
+            "hcaptcha_grid",
+            "hcaptcha_semantic_drag",
+        ),
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
         registration_attempt_mode="single_identity",
@@ -167,6 +171,7 @@ def _register_browser(
 ) -> BrowserResult:
     base_url = settings().deepseek_base_url.rstrip("/")
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
+    _warm_up_hcaptcha(page, base_url)
     page.goto(f"{base_url}/sign_up", wait_until="domcontentloaded", timeout=90_000)
     page.wait_for_timeout(1500)
     if page.get_by_text(re.compile("only phone number registration", re.IGNORECASE)).count():
@@ -188,15 +193,24 @@ def _register_browser(
         raise RuntimeError("DeepSeek send-code control is unavailable")
     challenge = DeepseekHcaptchaChallenge()
     seen = mail.message_ids_sync(mailbox)
-    with page.expect_response(
-        lambda response: (
-            urlparse(response.url).path == "/api/v0/users/create_email_verification_code"
-        ),
-        timeout=240_000,
-    ) as response_info:
+    code_responses: list[Any] = []
+
+    def observe_code_response(response: Any) -> None:
+        if urlparse(response.url).path == "/api/v0/users/create_email_verification_code":
+            code_responses.append(response)
+
+    page.on("response", observe_code_response)
+    try:
         send.click()
-        challenge.solve(page)
-    code_response = response_info.value
+        challenge.solve(page, completed=lambda: bool(code_responses))
+        deadline = time.monotonic() + 15
+        while not code_responses and time.monotonic() < deadline:
+            page.wait_for_timeout(250)
+    finally:
+        page.remove_listener("response", observe_code_response)
+    if not code_responses:
+        raise RuntimeError("DeepSeek hCaptcha completed without an email verification response")
+    code_response = code_responses[-1]
     code_body = _json_response(code_response, "email verification")
     _require_success(code_body, "email verification")
     trace.mark(RegistrationStage.CHALLENGE_CLEARED)
@@ -432,6 +446,26 @@ def _request_profile(headers: dict[str, str]) -> dict[str, Any]:
             lowered.get("x-client-timezone-offset") or config.deepseek_timezone_offset_seconds
         ),
     }
+
+
+def _warm_up_hcaptcha(page: Any, base_url: str) -> None:
+    def is_main_settings(response: Any) -> bool:
+        parsed = urlparse(response.url)
+        return parsed.path == "/api/v0/client/settings" and parse_qs(parsed.query).get("scope") == [
+            "main"
+        ]
+
+    with page.expect_response(is_main_settings, timeout=120_000) as response_info:
+        page.goto(f"{base_url}/sign_in", wait_until="domcontentloaded", timeout=120_000)
+    body = _json_response(response_info.value, "main client settings")
+    _require_success(body, "main client settings")
+    feature = (
+        (((body.get("data") or {}).get("biz_data") or {}).get("settings") or {})
+        .get("chat_hcaptcha", {})
+        .get("value")
+    )
+    if feature is not True:
+        raise RuntimeError("DeepSeek official hCaptcha feature is unavailable")
 
 
 def _set_birthday(page: Any, token: str, profile: dict[str, Any]) -> str:

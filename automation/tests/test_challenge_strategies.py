@@ -4,6 +4,7 @@ import time
 from typing import Any, ClassVar
 
 import httpx
+import pytest
 from PIL import Image, ImageChops, ImageDraw
 
 from any2api_automation.captcha.models import SolverEstimate, VisualAction
@@ -564,6 +565,34 @@ def test_visual_action_solver_normalizes_percentage_coordinates(monkeypatch) -> 
     assert "consensus:3/3" in registry.visual_diagnostic()
 
 
+def test_visual_action_parser_accepts_model_per_mille_coordinates() -> None:
+    fixture = io.BytesIO()
+    Image.new("RGB", (500, 470), "white").save(fixture, format="PNG")
+
+    actions = registry._parse_visual_actions(
+        fixture.getvalue(),
+        'ACTIONS=[{"type":"click","at":[395,620]}]',
+    )
+
+    assert len(actions) == 1
+    assert actions[0].at == (0.395, 0.62)
+    assert "mode:permille" in registry.visual_diagnostic()
+
+
+def test_visual_ai_payload_compresses_large_captcha_below_gateway_limit() -> None:
+    fixture = io.BytesIO()
+    Image.effect_noise((800, 800), 100).convert("RGB").save(fixture, format="PNG")
+    source = fixture.getvalue()
+
+    mime_type, payload = registry._visual_ai_payload(source)
+
+    assert len(source) > 120 * 1024
+    assert mime_type == "image/jpeg"
+    assert len(payload) <= 120 * 1024
+    with Image.open(io.BytesIO(payload)) as normalized:
+        assert max(normalized.size) <= 1024
+
+
 def test_visual_action_solver_aggregates_same_image_random_samples(
     monkeypatch,
 ) -> None:
@@ -610,6 +639,38 @@ def test_visual_action_consensus_uses_majority_cluster_median() -> None:
     assert tuple(round(value, 2) for value in actions[0].start) == (0.06, 0.5)
     assert tuple(round(value, 2) for value in actions[0].end) == (0.77, 0.5)
     assert "consensus:2/3" in registry.visual_diagnostic()
+
+
+def test_visual_action_review_requires_two_independent_agreeing_votes(monkeypatch) -> None:
+    fixture = io.BytesIO()
+    Image.new("RGB", (500, 400), "white").save(fixture, format="PNG")
+    responses = iter(
+        (
+            'ACTIONS=[{"type":"drag","from":[0.10,0.20],"to":[0.50,0.60]}]',
+            'ACTIONS=[{"type":"drag","from":[0.12,0.21],"to":[0.53,0.62]}]',
+            'ACTIONS=[{"type":"drag","from":[0.70,0.20],"to":[0.20,0.30]}]',
+        )
+    )
+    monkeypatch.setattr(
+        registry,
+        "_visual_completion_sync",
+        lambda *args, **kwargs: next(responses),
+    )
+
+    actions = registry._review_visual_actions(
+        fixture.getvalue(),
+        "fixture prompt",
+        [
+            [VisualAction("drag", start=(0.1, 0.2), end=(0.5, 0.6))],
+            [VisualAction("drag", start=(0.7, 0.2), end=(0.2, 0.3))],
+        ],
+        timeout_seconds=10,
+    )
+
+    assert len(actions) == 1
+    assert actions[0].start == pytest.approx((0.11, 0.205))
+    assert actions[0].end == pytest.approx((0.515, 0.61))
+    assert "review_consensus:2/3" in registry.visual_diagnostic()
 
 
 def test_visual_action_consensus_rejects_broad_single_center_neighborhood() -> None:

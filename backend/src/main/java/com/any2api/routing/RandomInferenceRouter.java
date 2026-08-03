@@ -1,5 +1,6 @@
 package com.any2api.routing;
 
+import com.any2api.auth.ApiKeyGrant;
 import com.any2api.account.AccountSelectionService;
 import com.any2api.account.AccountUnavailableException;
 import com.any2api.account.LeasedProviderAccount;
@@ -54,7 +55,16 @@ public class RandomInferenceRouter {
         ObjectNode request,
         RandomModelRole role
     ) {
-        return Mono.fromCallable(() -> candidatesBlocking(protocol, request, role))
+        return select(protocol, request, role, ApiKeyGrant.unrestricted());
+    }
+
+    public Mono<RandomSelection> select(
+        CanonicalRequest.Protocol protocol,
+        ObjectNode request,
+        RandomModelRole role,
+        ApiKeyGrant grant
+    ) {
+        return Mono.fromCallable(() -> candidatesBlocking(protocol, request, role, grant))
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
             .flatMapMany(Flux::fromIterable)
             .concatMap(candidate -> {
@@ -73,7 +83,8 @@ public class RandomInferenceRouter {
     private List<CanonicalRequest> candidatesBlocking(
         CanonicalRequest.Protocol protocol,
         ObjectNode request,
-        RandomModelRole role
+        RandomModelRole role,
+        ApiKeyGrant grant
     ) {
         requireRandomModel(request);
         var capability = protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
@@ -81,6 +92,7 @@ public class RandomInferenceRouter {
             : ProviderCapability.RESPONSES;
         var byProvider = new LinkedHashMap<String, List<CanonicalRequest>>();
         for (var route : catalog.installedModels(role)) {
+            if (!grant.allowsModel(route.providerId(), route.modelId())) continue;
             var provider = providers.require(route.providerId());
             if (provider.manifest().capabilities()
                 .getOrDefault(capability, SupportLevel.UNSUPPORTED)

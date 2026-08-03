@@ -1,5 +1,6 @@
 package com.any2api.api.openai;
 
+import com.any2api.auth.ApiKeyAuthorization;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.CanonicalRequestParser;
 import com.any2api.protocol.OpenAiResponseWriter;
@@ -22,19 +23,22 @@ public class OpenAiGatewayController {
     private final InferenceCoordinator coordinator;
     private final OpenAiResponseWriter responseWriter;
     private final RandomInferenceRouter randomRouter;
+    private final ApiKeyAuthorization authorization;
 
     public OpenAiGatewayController(
         ProviderRouteResolver routeResolver,
         CanonicalRequestParser requestParser,
         InferenceCoordinator coordinator,
         OpenAiResponseWriter responseWriter,
-        RandomInferenceRouter randomRouter
+        RandomInferenceRouter randomRouter,
+        ApiKeyAuthorization authorization
     ) {
         this.routeResolver = routeResolver;
         this.requestParser = requestParser;
         this.coordinator = coordinator;
         this.responseWriter = responseWriter;
         this.randomRouter = randomRouter;
+        this.authorization = authorization;
     }
 
     @PostMapping({
@@ -96,6 +100,8 @@ public class OpenAiGatewayController {
     ) {
         var model = request.path("model").asText("");
         var route = routeResolver.resolve(exchange.getRequest().getPath().value(), model);
+        authorization.require(
+            exchange, authorization.protocol(protocol), route.providerId(), route.upstreamModel());
         var canonical = requestParser.parse(protocol, route, request);
         return responseWriter.write(canonical, coordinator.execute(canonical), exchange);
     }
@@ -106,7 +112,12 @@ public class OpenAiGatewayController {
         CanonicalRequest.Protocol protocol,
         RandomModelRole role
     ) {
-        return randomRouter.select(protocol, request, role).flatMap(selection -> {
+        var grant = authorization.grant(exchange);
+        if (!grant.allowsProtocol(authorization.protocol(protocol))) {
+            throw new com.any2api.auth.ApiKeyScopeException(
+                "API key does not allow this protocol");
+        }
+        return randomRouter.select(protocol, request, role, grant).flatMap(selection -> {
             var canonical = selection.request();
             exchange.getResponse().getHeaders().set(
                 "X-Any2API-Provider", canonical.providerId());

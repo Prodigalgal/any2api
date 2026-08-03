@@ -8,7 +8,7 @@ import {
   AutorenewOutlined,
   LogoutOutlined,
   LanOutlined,
-  MenuOutlined
+  KeyOutlined,
 } from "@mui/icons-material";
 import {
   AppBar,
@@ -24,31 +24,27 @@ import {
   Toolbar,
   Tooltip,
   Typography,
-  useMediaQuery,
-  useTheme
 } from "@mui/material";
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api } from "@/lib/api";
 
-const drawerWidth = 232;
+const drawerWidth = 240;
 const navigation = [
   ["运行概览", DashboardOutlined, "/"],
   ["账号池", AccountTreeOutlined, "/accounts"],
   ["生命周期", AutorenewOutlined, "/lifecycle"],
-  ["代理池", LanOutlined, "/proxy-pools"]
+  ["代理池", LanOutlined, "/proxy-pools"],
+  ["分发密钥", KeyOutlined, "/api-keys"],
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const theme = useTheme();
   const pathname = usePathname();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const desktop = useMediaQuery(theme.breakpoints.up("md"));
-  const [mobileOpen, setMobileOpen] = useState(false);
   const session = useQuery({ queryKey: ["admin-session"], queryFn: api.session, retry: false });
   const logout = useMutation({
     mutationFn: api.logout,
@@ -65,8 +61,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (session.isLoading || session.isError || !session.data?.authenticated) return <SessionGate />;
 
   const drawer = (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#172126", color: "#dbe4e7" }}>
-      <Box sx={{ px: 2.25, height: 64, display: "flex", alignItems: "center", borderBottom: "1px solid #314047" }}>
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#121c20", color: "#dbe4e7" }}>
+      <Box sx={{ px: 2.5, height: 64, display: "flex", alignItems: "center", borderBottom: "1px solid #2c3a40" }}>
         <Box sx={{ width: 30, height: 30, borderRadius: 1, bgcolor: "primary.main", display: "grid", placeItems: "center", mr: 1.25 }}>
           <ApiOutlined sx={{ fontSize: 19, color: "white" }} />
         </Box>
@@ -83,12 +79,21 @@ export function AppShell({ children }: { children: ReactNode }) {
             href={href}
             selected={pathname === href}
             sx={{
-              minHeight: 40,
-              mb: 0.35,
+              minHeight: 42,
+              mb: 0.5,
               borderRadius: 1,
               color: "#bdc9cd",
+              position: "relative",
               "& .MuiListItemIcon-root": { color: "inherit" },
-              "&.Mui-selected": { bgcolor: "#223b40", color: "#8ee4df", "&:hover": { bgcolor: "#27464b" } }
+              "&.Mui-selected": {
+                bgcolor: "#20363a",
+                color: "#8ee4df",
+                "&:before": {
+                  content: '""', position: "absolute", left: 0, top: 9, bottom: 9,
+                  width: 3, borderRadius: "0 2px 2px 0", bgcolor: "#62d8d0",
+                },
+                "&:hover": { bgcolor: "#254147" },
+              },
             }}
           >
             <ListItemIcon sx={{ minWidth: 34 }}><Icon sx={{ fontSize: 19 }} /></ListItemIcon>
@@ -101,7 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </ListItemButton>
         ))}
       </List>
-      <Box sx={{ mt: "auto", px: 2.25, py: 2, borderTop: "1px solid #314047" }}>
+      <Box sx={{ mt: "auto", px: 2.5, py: 2, borderTop: "1px solid #2c3a40" }}>
         <Typography sx={{ color: "#91a2a9", fontSize: 11 }}>Java · Python · PostgreSQL · Redis</Typography>
       </Box>
     </Box>
@@ -109,21 +114,18 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <Box sx={{ minHeight: "100vh", display: "flex" }}>
-      <AppBar position="fixed" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: "divider", ml: { md: `${drawerWidth}px` }, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
-        <Toolbar sx={{ minHeight: "64px !important", px: { xs: 1.5, sm: 2.5 } }}>
-          {!desktop && (
-            <Tooltip title="打开导航"><IconButton edge="start" onClick={() => setMobileOpen(true)} sx={{ mr: 1 }}><MenuOutlined /></IconButton></Tooltip>
-          )}
+      <AppBar position="fixed" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: "divider", ml: `${drawerWidth}px`, width: `calc(100% - ${drawerWidth}px)` }}>
+        <Toolbar sx={{ minHeight: "64px !important", px: 3 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 14 }}>
             {navigation.find(([, , href]) => href === pathname)?.[0] ?? "Any2API"}
           </Typography>
           <Box sx={{ flex: 1 }} />
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
             <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "success.main" }} />
-            <Typography color="text.secondary" sx={{ fontSize: 12 }}>控制面在线</Typography>
-            <Box sx={{ width: 1, height: 18, bgcolor: "divider", mx: 0.5 }} />
+            <Typography color="text.secondary" sx={{ fontSize: 12, whiteSpace: "nowrap" }}>控制面在线</Typography>
+            <Box sx={{ width: "1px", height: 18, flexShrink: 0, bgcolor: "divider", mx: 0.5 }} />
             <AccountCircleOutlined sx={{ fontSize: 18, color: "text.secondary" }} />
-            <Typography sx={{ fontSize: 12, fontWeight: 650 }}>{session.data?.username ?? "admin"}</Typography>
+            <Typography sx={{ fontSize: 12, fontWeight: 650, whiteSpace: "nowrap" }}>{session.data?.username ?? "admin"}</Typography>
             <Tooltip title="退出登录">
               <IconButton size="small" onClick={() => logout.mutate()} disabled={logout.isPending}>
                 <LogoutOutlined sx={{ fontSize: 18 }} />
@@ -132,11 +134,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Box>
         </Toolbar>
       </AppBar>
-      <Box component="nav" sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}>
-        <Drawer variant="temporary" open={mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { width: drawerWidth } }}>{drawer}</Drawer>
-        <Drawer variant="permanent" open sx={{ display: { xs: "none", md: "block" }, "& .MuiDrawer-paper": { width: drawerWidth, border: 0 } }}>{drawer}</Drawer>
+      <Box component="nav" sx={{ width: drawerWidth, flexShrink: 0 }}>
+        <Drawer variant="permanent" open sx={{ "& .MuiDrawer-paper": { width: drawerWidth, border: 0 } }}>{drawer}</Drawer>
       </Box>
-      <Box component="main" sx={{ flex: 1, minWidth: 0, pt: 8, bgcolor: "background.default" }}>{children}</Box>
+      <Box component="main" sx={{ flex: 1, minWidth: 1040, pt: 8, bgcolor: "background.default" }}>{children}</Box>
     </Box>
   );
 }

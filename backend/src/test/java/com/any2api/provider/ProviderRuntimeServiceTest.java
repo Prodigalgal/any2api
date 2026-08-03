@@ -45,7 +45,8 @@ class ProviderRuntimeServiceTest {
         when(statement.update()).thenReturn(1);
         when(statement.query(any(RowMapper.class))).thenReturn((JdbcClient.MappedQuerySpec) query);
         when(query.optional()).thenReturn(Optional.of(expected));
-        var service = new ProviderRuntimeService(registry, installations, locks, jdbc);
+        var service = new ProviderRuntimeService(
+            registry, installations, locks, jdbc, mock(ModelCatalogCache.class));
 
         TransactionSynchronizationManager.initSynchronization();
         try {

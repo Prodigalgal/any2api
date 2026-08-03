@@ -5,6 +5,8 @@ import com.any2api.account.AccountCommandService;
 import com.any2api.provider.ProviderAccountCommandHandler;
 import com.any2api.account.AccountStatus;
 import com.any2api.account.AccountView;
+import com.any2api.account.AccountPageView;
+import com.any2api.account.AccountSearchQuery;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -37,9 +39,18 @@ public class AdminAccountController {
         this.commands = commands;
     }
 
-    @GetMapping
-    public List<AccountView> list(@RequestParam(name = "provider", required = false) String provider) {
-        return accounts.list(provider);
+    @GetMapping("/page")
+    public AccountPageView page(
+        @RequestParam(name = "provider", required = false) String provider,
+        @RequestParam(name = "status", required = false) AccountStatus status,
+        @RequestParam(name = "enabled", required = false) Boolean enabled,
+        @RequestParam(name = "query", required = false) String query,
+        @RequestParam(name = "expiry", defaultValue = "ANY") AccountSearchQuery.Expiry expiry,
+        @RequestParam(name = "page", defaultValue = "0") int page,
+        @RequestParam(name = "size", defaultValue = "25") int size
+    ) {
+        return accounts.search(new AccountSearchQuery(
+            provider, status, enabled, query, expiry, page, size));
     }
 
     @PostMapping("/import")

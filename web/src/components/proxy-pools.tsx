@@ -20,7 +20,6 @@ import {
   IconButton,
   LinearProgress,
   MenuItem,
-  Paper,
   Stack,
   Switch,
   Table,
@@ -42,6 +41,7 @@ import {
   type ProxyPool,
   type ProxyTrafficScope,
 } from "@/lib/api";
+import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout";
 
 const trafficScopes: Array<[ProxyTrafficScope, string]> = [
   ["REGISTRATION", "注册"],
@@ -60,23 +60,31 @@ export function ProxyPools() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["proxy-pools"] }),
   });
 
-  return <Box sx={{ px: 3.5, py: 3, width: "100%", minWidth: 1080 }}>
-    <Stack direction="row" sx={{ mb: 2.5, alignItems: "flex-start", justifyContent: "space-between" }}>
-      <Box>
-        <Typography variant="h4">代理池</Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.5, fontSize: 13 }}>
-          管理自动化出口并绑定厂商
-        </Typography>
-      </Box>
-      <Stack direction="row" spacing={1}>
-        <Button variant="outlined" startIcon={<RefreshOutlined />} onClick={() => pools.refetch()}>刷新</Button>
-        <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setEditing(null)}>新建代理池</Button>
-      </Stack>
-    </Stack>
+  return <PageContainer>
+    <PageHeader
+      title="代理池"
+      description="管理自动化出口、流量边界与厂商绑定"
+      actions={
+        <>
+          <Tooltip title="刷新代理池">
+            <IconButton
+              aria-label="刷新代理池"
+              onClick={() => pools.refetch()}
+              sx={{ border: 1, borderColor: "divider", bgcolor: "background.paper" }}
+            >
+              <RefreshOutlined sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+          <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setEditing(null)}>
+            新建代理池
+          </Button>
+        </>
+      }
+    />
 
     {pools.error && <Alert severity="error" sx={{ mb: 2 }}>{pools.error.message}</Alert>}
     {remove.error && <Alert severity="error" sx={{ mb: 2 }}>{remove.error.message}</Alert>}
-    <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+    <DataSurface>
       {pools.isFetching && <LinearProgress />}
       <TableContainer>
         <Table size="small">
@@ -114,7 +122,7 @@ export function ProxyPools() {
           </TableBody>
         </Table>
       </TableContainer>
-    </Paper>
+    </DataSurface>
     {editing !== undefined && <PoolDialog
       pool={editing}
       providers={providers}
@@ -124,7 +132,7 @@ export function ProxyPools() {
         void queryClient.invalidateQueries({ queryKey: ["proxy-pools"] });
       }}
     />}
-  </Box>;
+  </PageContainer>;
 }
 
 function PoolDialog({ pool, providers, onClose, onSaved }: {

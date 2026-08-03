@@ -18,9 +18,14 @@ import reactor.core.publisher.Mono;
 public class PublicApiKeyWebFilter implements WebFilter {
 
     private final Any2ApiProperties properties;
+    private final ApiKeyAuthenticator authenticator;
 
-    public PublicApiKeyWebFilter(Any2ApiProperties properties) {
+    public PublicApiKeyWebFilter(
+        Any2ApiProperties properties,
+        ApiKeyAuthenticator authenticator
+    ) {
         this.properties = properties;
+        this.authenticator = authenticator;
     }
 
     @Override
@@ -29,16 +34,22 @@ public class PublicApiKeyWebFilter implements WebFilter {
             return chain.filter(exchange);
         }
         var expected = properties.getSecurity().getPublicApiKey();
-        if (expected == null || expected.isBlank()) {
-            return chain.filter(exchange);
-        }
         var header = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         var actual = header != null && header.startsWith("Bearer ") ? header.substring(7) : "";
-        if (constantTimeEquals(expected, actual)) {
+        if (expected != null && !expected.isBlank() && constantTimeEquals(expected, actual)) {
+            exchange.getAttributes().put(
+                ApiKeyAuthorization.GRANT_ATTRIBUTE, ApiKeyGrant.unrestricted());
             return chain.filter(exchange);
         }
-        exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-        return exchange.getResponse().setComplete();
+        return authenticator.authenticate(actual)
+            .flatMap(grant -> {
+                if (grant.isEmpty()) {
+                    exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                    return exchange.getResponse().setComplete();
+                }
+                exchange.getAttributes().put(ApiKeyAuthorization.GRANT_ATTRIBUTE, grant.get());
+                return chain.filter(exchange);
+            });
     }
 
     private boolean isInferencePath(String path) {

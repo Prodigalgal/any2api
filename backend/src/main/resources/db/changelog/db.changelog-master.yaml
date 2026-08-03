@@ -21,3 +21,7 @@ databaseChangeLog:
       file: db/changelog/releases/010-proxy-traffic-scopes.sql
   - include:
       file: db/changelog/releases/011-registration-backoff-streak.sql
+  - include:
+      file: db/changelog/releases/012-account-admin-search.sql
+  - include:
+      file: db/changelog/releases/013-distribution-api-keys.sql

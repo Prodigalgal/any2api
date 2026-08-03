@@ -7,6 +7,32 @@
 - Registration aggregate: campaign, job, attempt, step events, and final account reference.
 - Scheduled action aggregate: handler, entity, due time, generation, attempts, lease, and terminal result.
 - Session aggregate: tenant, provider, model, account binding, upstream state, context, and expiry.
+- Distribution-key aggregate: hashed identity, lifecycle state, provider/model grants, protocol grants, and usage timestamp.
+
+## Provider, account, model, and key relationships
+
+```mermaid
+erDiagram
+    PROVIDER ||--o{ MODEL : publishes
+    PROVIDER ||--o{ ACCOUNT : owns
+    API_KEY ||--|{ API_KEY_PROVIDER_GRANT : authorizes
+    PROVIDER ||--o{ API_KEY_PROVIDER_GRANT : targets
+    API_KEY_PROVIDER_GRANT ||--o{ API_KEY_MODEL_GRANT : narrows
+    MODEL ||--o{ API_KEY_MODEL_GRANT : permits
+    API_KEY ||--|{ API_KEY_PROTOCOL_GRANT : permits
+```
+
+An account belongs to exactly one provider. Matching email addresses across providers are attributes,
+not identity or sharing relationships. A distribution key never binds directly to an account: it
+authorizes a provider/model/protocol tuple, then the account selector leases an eligible account of
+that provider at request time. This keeps account rotation, cooldown, expiry, and replacement out of
+the customer-facing authorization model.
+
+`api_key_provider_grants.all_models = true` grants current and future enabled models for that
+provider. Otherwise at least one constrained `api_key_model_grants` row is required. Provider and
+model foreign keys prevent dangling grants; application value objects reject ambiguous empty
+selected-model scopes. Provider disablement and model disablement remain runtime availability gates,
+so a durable grant never overrides a hot-unplug decision.
 
 ## Core tables
 
@@ -16,7 +42,10 @@
 | `models` | Namespaced model catalog and capabilities JSONB |
 | `accounts` | Common indexed account state and non-sensitive metadata |
 | `account_credentials` | Versioned encrypted secret payloads |
-| `api_keys` | Hash, prefix, scopes, quotas, state, and usage counters |
+| `api_keys` | Hash, display prefix, lifecycle state, expiry, quota envelope, and usage timestamp |
+| `api_key_provider_grants` | Key-to-provider authorization and current/future model policy |
+| `api_key_model_grants` | Explicit model restrictions under a provider grant |
+| `api_key_protocol_grants` | Allowed public OpenAI protocol families |
 | `sessions` | Sticky account and provider conversation state |
 | `responses` | Durable Responses objects and input context |
 | `registration_jobs` | Java-owned automation state |
@@ -48,6 +77,18 @@ its account and proxy lease are still active, validates the media type and size,
 short-lived private copy. Expired rows are not readable even before physical cleanup. Multi-replica
 cleanup uses a PostgreSQL transaction advisory lock and bounded batches for both media and model
 cooldowns, so deployment scale-up cannot create a synchronized expiry scan storm.
+
+## Read cache hierarchy
+
+PostgreSQL is L3 and remains authoritative. Redis is the rebuildable L2 shared cache. A bounded
+Caffeine cache is L1 inside each Java process. API-key authorization snapshots and the public model
+catalog use this hierarchy; encrypted credentials and mutable account lifecycle state do not.
+
+Concurrent misses for the same cache key are coalesced into one L3 load per Java process. L1 and L2
+have independently configurable TTLs and capacities. Key disable/delete evicts both cache layers only
+after the database transaction commits. Redis failure degrades cache reads to PostgreSQL without
+changing authorization semantics; it is never treated as a durable permission store or a substitute
+for fenced coordination.
 
 ## Secret storage
 

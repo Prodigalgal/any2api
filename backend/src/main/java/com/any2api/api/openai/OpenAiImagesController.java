@@ -1,5 +1,7 @@
 package com.any2api.api.openai;
 
+import com.any2api.auth.ApiKeyAuthorization;
+import com.any2api.auth.ApiKeyProtocol;
 import com.any2api.media.MediaAssetService;
 import com.any2api.media.MediaCoordinator;
 import com.any2api.media.MediaOperation;
@@ -42,19 +44,22 @@ public final class OpenAiImagesController {
     private final MediaAssetService assets;
     private final ObjectMapper mapper;
     private final Any2ApiProperties properties;
+    private final ApiKeyAuthorization authorization;
 
     public OpenAiImagesController(
         ProviderRouteResolver routes,
         MediaCoordinator coordinator,
         MediaAssetService assets,
         ObjectMapper mapper,
-        Any2ApiProperties properties
+        Any2ApiProperties properties,
+        ApiKeyAuthorization authorization
     ) {
         this.routes = routes;
         this.coordinator = coordinator;
         this.assets = assets;
         this.mapper = mapper;
         this.properties = properties;
+        this.authorization = authorization;
     }
 
     @PostMapping(
@@ -68,6 +73,8 @@ public final class OpenAiImagesController {
         return exchange.getMultipartData().flatMap(parts -> {
             var model = form(parts.getFirst("model"), "");
             var route = routes.resolve(exchange.getRequest().getPath().value(), model);
+            authorization.require(
+                exchange, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
             return readInputs(parts.get("image")).flatMap(inputs -> {
                 var request = parseEdit(route.providerId(), route.upstreamModel(), parts, inputs);
                 return coordinator.execute(request)
@@ -86,6 +93,8 @@ public final class OpenAiImagesController {
     ) {
         var route = routes.resolve(
             exchange.getRequest().getPath().value(), body.path("model").asText(""));
+        authorization.require(
+            exchange, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
         var request = parse(route.providerId(), route.upstreamModel(), body);
         return coordinator.execute(request)
             .flatMap(result -> encode(request, result, exchange));

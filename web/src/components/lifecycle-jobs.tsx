@@ -7,7 +7,6 @@ import {
 } from "@mui/icons-material";
 import {
   Alert,
-  Box,
   Button,
   Chip,
   Dialog,
@@ -16,7 +15,6 @@ import {
   DialogTitle,
   LinearProgress,
   MenuItem,
-  Paper,
   Stack,
   Table,
   TableBody,
@@ -32,6 +30,12 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, providerOptions, type ProviderOption, type RegistrationJob } from "@/lib/api";
+import {
+  DataSurface,
+  PageContainer,
+  PageHeader,
+  ToolbarSurface,
+} from "@/components/page-layout";
 
 const activeStatuses = new Set(["PENDING", "RUNNING"]);
 
@@ -59,32 +63,40 @@ export function LifecycleJobs() {
   });
 
   return (
-    <Box sx={{ px: 3.5, py: 3, width: "100%", minWidth: 1080 }}>
-      <Stack direction="row" sx={{ mb: 2.5, alignItems: "flex-start", justifyContent: "space-between" }}>
-        <Box>
-          <Typography variant="h4">生命周期</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5, fontSize: 13 }}>
-            批量注册、重新认证与分散保活任务
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1}>
-          <Button variant="outlined" startIcon={<RefreshOutlined />} onClick={() => jobs.refetch()}>刷新</Button>
-          <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setCreateOpen(true)}>新建注册任务</Button>
-        </Stack>
-      </Stack>
+    <PageContainer>
+      <PageHeader
+        title="生命周期"
+        description="批量注册、重新认证与分散保活任务"
+        actions={
+          <>
+            <Tooltip title="刷新任务">
+              <IconButton
+                aria-label="刷新任务"
+                onClick={() => jobs.refetch()}
+                sx={{ border: 1, borderColor: "divider", bgcolor: "background.paper" }}
+              >
+                <RefreshOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setCreateOpen(true)}>
+              新建注册任务
+            </Button>
+          </>
+        }
+      />
 
-      <Paper variant="outlined" sx={{ mb: 2, p: 1.5 }}>
+      <ToolbarSurface>
         <TextField select size="small" label="厂商" value={provider} onChange={(event) => setProvider(event.target.value)} sx={{ width: 260 }}>
           <MenuItem value="">全部厂商</MenuItem>
           {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
         </TextField>
-      </Paper>
+      </ToolbarSurface>
       {catalog.error && <Alert severity="error" sx={{ mb: 2 }}>自动化厂商目录加载失败：{catalog.error.message}</Alert>}
       {catalog.data && !catalog.data.automationCatalogReady && (
         <Alert severity="warning" sx={{ mb: 2 }}>自动化服务尚未就绪，注册入口将在连接后自动加载。</Alert>
       )}
       {jobs.error && <Alert severity="error" sx={{ mb: 2 }}>{jobs.error.message}</Alert>}
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <DataSurface>
         {jobs.isFetching && <LinearProgress />}
         <TableContainer>
           <Table size="small">
@@ -118,12 +130,12 @@ export function LifecycleJobs() {
             </TableBody>
           </Table>
         </TableContainer>
-      </Paper>
+      </DataSurface>
       <CreateJobDialog open={createOpen} providers={providers} onClose={() => setCreateOpen(false)} onCreated={() => {
         setCreateOpen(false);
         void queryClient.invalidateQueries({ queryKey: ["registration-jobs"] });
       }} />
-    </Box>
+    </PageContainer>
   );
 }
 

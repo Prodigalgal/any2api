@@ -3,9 +3,11 @@
 import {
   AddOutlined,
   DeleteOutlineOutlined,
-  RefreshOutlined,
+  FilterAltOffOutlined,
   LoginOutlined,
   MoreVertOutlined,
+  RefreshOutlined,
+  SearchOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -17,9 +19,11 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  MenuItem,
+  InputAdornment,
+  LinearProgress,
   Menu,
-  Paper,
+  MenuItem,
+  Skeleton,
   Stack,
   Switch,
   Table,
@@ -27,55 +31,113 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type MouseEvent } from "react";
-import { api, providerOptions, type Account, type ProviderOption } from "@/lib/api";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { memo, useEffect, useMemo, useState, type MouseEvent } from "react";
+import {
+  api,
+  providerOptions,
+  type Account,
+  type AccountExpiryFilter,
+  type ProviderOption,
+} from "@/lib/api";
+import {
+  DataSurface,
+  PageContainer,
+  PageHeader,
+  ToolbarSurface,
+} from "@/components/page-layout";
+
+const pageSizes = [25, 50, 100];
+const statusOptions = [
+  ["ACTIVE", "正常"],
+  ["PENDING", "待就绪"],
+  ["DEGRADED", "异常"],
+  ["BANNED", "封禁"],
+  ["DISABLED", "停用"],
+  ["EXPIRED", "过期"],
+] as const;
+const expiryOptions: Array<[AccountExpiryFilter, string]> = [
+  ["ANY", "全部到期状态"],
+  ["VALID", "有效或长期"],
+  ["EXPIRING_SOON", "7 天内到期"],
+  ["EXPIRED", "已经到期"],
+  ["NEVER", "未设置到期"],
+];
 
 export function Accounts() {
   const queryClient = useQueryClient();
   const [provider, setProvider] = useState("");
+  const [status, setStatus] = useState("");
+  const [enabled, setEnabled] = useState("");
+  const [expiry, setExpiry] = useState<AccountExpiryFilter>("ANY");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [importOpen, setImportOpen] = useState(false);
   const [commandAccount, setCommandAccount] = useState<Account | null>(null);
   const [commandAnchor, setCommandAnchor] = useState<HTMLElement | null>(null);
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
 
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
   const providers = providerOptions(catalog.data);
+  const providerNames = useMemo(() => new Map(providers), [providers]);
   const accounts = useQuery({
-    queryKey: ["accounts", provider],
-    queryFn: () => api.accounts(provider || undefined),
-    retry: false,
+    queryKey: ["accounts-page", provider, status, enabled, expiry, debouncedSearch, page, pageSize],
+    queryFn: () => api.accountPage({
+      provider: provider || undefined,
+      status: status || undefined,
+      enabled: enabled ? enabled === "true" : undefined,
+      query: debouncedSearch || undefined,
+      expiry,
+      page,
+      size: pageSize,
+    }),
+    placeholderData: keepPreviousData,
   });
+
+  const invalidateAccounts = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["accounts-page"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin-providers"] }),
+    ]);
+  };
   const update = useMutation({
-    mutationFn: ({ account, enabled }: { account: Account; enabled: boolean }) =>
-      api.updateAccount(account.id, { enabled, status: enabled ? "ACTIVE" : "DISABLED" }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+    mutationFn: ({ account, nextEnabled }: { account: Account; nextEnabled: boolean }) =>
+      api.updateAccount(account.id, {
+        enabled: nextEnabled,
+        status: nextEnabled ? "ACTIVE" : "DISABLED",
+      }),
+    onSuccess: invalidateAccounts,
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteAccount(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: async () => {
+      if ((accounts.data?.items.length ?? 0) === 1 && page > 0) setPage((current) => current - 1);
+      await invalidateAccounts();
+    },
   });
   const reauthenticate = useMutation({
     mutationFn: (id: string) => api.reauthenticateAccount(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: invalidateAccounts,
   });
   const commands = useQuery({
     queryKey: ["account-commands", commandAccount?.id],
     queryFn: () => api.accountCommands(commandAccount!.id),
     enabled: Boolean(commandAccount),
-    retry: false,
   });
   const executeCommand = useMutation({
     mutationFn: ({ accountId, command }: { accountId: string; command: string }) =>
       api.executeAccountCommand(accountId, command),
-    onSuccess: () => {
+    onSuccess: async () => {
       setCommandAnchor(null);
       setCommandAccount(null);
-      void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      await invalidateAccounts();
     },
   });
 
@@ -83,115 +145,210 @@ export function Accounts() {
     setCommandAnchor(event.currentTarget);
     setCommandAccount(account);
   };
+  const filtersActive = Boolean(provider || status || enabled || expiry !== "ANY" || search);
+  const error = accounts.error ?? commands.error ?? executeCommand.error
+    ?? update.error ?? remove.error ?? reauthenticate.error;
 
   return (
-    <Box sx={{ px: 3.5, py: 3, width: "100%", minWidth: 980 }}>
-      <Stack direction="row" sx={{ mb: 2.5, alignItems: "flex-start", justifyContent: "space-between" }}>
-        <Box>
-          <Typography variant="h4">账号池</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5, fontSize: 13 }}>
-            厂商隔离账号、凭据版本与运行健康状态
+    <PageContainer>
+      <PageHeader
+        title="账号池"
+        description="按厂商隔离管理账号、运行状态与生命周期凭据"
+        actions={
+          <>
+            <Tooltip title="刷新账号">
+              <span>
+                <IconButton
+                  aria-label="刷新账号"
+                  disabled={accounts.isFetching}
+                  onClick={() => accounts.refetch()}
+                  sx={{ border: 1, borderColor: "divider", bgcolor: "background.paper" }}
+                >
+                  <RefreshOutlined sx={{ fontSize: 18 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setImportOpen(true)}>
+              导入账号
+            </Button>
+          </>
+        }
+      />
+
+      <ToolbarSurface>
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: "minmax(240px, 1.6fr) repeat(4, minmax(150px, 0.8fr)) 40px",
+            gap: 1.25,
+            alignItems: "center",
+          }}
+        >
+          <TextField
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(0);
+            }}
+            placeholder="搜索上游账号、邮箱或最近错误"
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchOutlined sx={{ fontSize: 18, color: "text.secondary" }} />
+                  </InputAdornment>
+                ),
+                inputProps: { "aria-label": "搜索账号" },
+              },
+            }}
+          />
+          <TextField
+            select
+            label="厂商"
+            value={provider}
+            onChange={(event) => {
+              setProvider(event.target.value);
+              setPage(0);
+            }}
+          >
+            <MenuItem value="">全部厂商</MenuItem>
+            {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
+          </TextField>
+          <TextField
+            select
+            label="状态"
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(0);
+            }}
+          >
+            <MenuItem value="">全部状态</MenuItem>
+            {statusOptions.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+          </TextField>
+          <TextField
+            select
+            label="启用状态"
+            value={enabled}
+            onChange={(event) => {
+              setEnabled(event.target.value);
+              setPage(0);
+            }}
+          >
+            <MenuItem value="">全部账号</MenuItem>
+            <MenuItem value="true">仅启用</MenuItem>
+            <MenuItem value="false">仅停用</MenuItem>
+          </TextField>
+          <TextField
+            select
+            label="到期状态"
+            value={expiry}
+            onChange={(event) => {
+              setExpiry(event.target.value as AccountExpiryFilter);
+              setPage(0);
+            }}
+          >
+            {expiryOptions.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+          </TextField>
+          <Tooltip title="清空筛选">
+            <span>
+              <IconButton
+                aria-label="清空筛选"
+                disabled={!filtersActive}
+                onClick={() => {
+                  setProvider("");
+                  setStatus("");
+                  setEnabled("");
+                  setExpiry("ANY");
+                  setSearch("");
+                  setPage(0);
+                }}
+              >
+                <FilterAltOffOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Box>
+      </ToolbarSurface>
+
+      {error ? <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert> : null}
+
+      <DataSurface>
+        <LinearProgress
+          sx={{
+            position: "absolute",
+            inset: "0 0 auto",
+            zIndex: 3,
+            height: 2,
+            visibility: accounts.isFetching ? "visible" : "hidden",
+          }}
+        />
+        <Box sx={{ px: 1.75, height: 44, display: "flex", alignItems: "center", borderBottom: 1, borderColor: "divider" }}>
+          <Typography sx={{ fontSize: 12.5, fontWeight: 700 }}>账号列表</Typography>
+          <Typography color="text.secondary" sx={{ ml: 1, fontSize: 12 }}>
+            {accounts.data ? `${accounts.data.totalElements.toLocaleString("zh-CN")} 个结果` : "正在读取"}
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
-          <Button variant="outlined" startIcon={<RefreshOutlined />} onClick={() => accounts.refetch()}>
-            刷新
-          </Button>
-          <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setImportOpen(true)}>
-            导入账号
-          </Button>
-        </Stack>
-      </Stack>
-
-      <Paper variant="outlined" sx={{ mb: 2, p: 1.5 }}>
-        <TextField
-          select
-          size="small"
-          label="厂商"
-          value={provider}
-          onChange={(event) => setProvider(event.target.value)}
-          sx={{ width: 260 }}
-        >
-          <MenuItem value="">全部厂商</MenuItem>
-          {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
-        </TextField>
-      </Paper>
-
-      {(accounts.error || commands.error || executeCommand.error) && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {(accounts.error || commands.error || executeCommand.error)?.message}
-        </Alert>
-      )}
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
-        <TableContainer>
-          <Table size="small">
+        <TableContainer sx={{ height: "calc(100vh - 386px)", minHeight: 340, maxHeight: 690 }}>
+          <Table stickyHeader size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
             <TableHead>
               <TableRow>
-                <TableCell>厂商</TableCell>
-                <TableCell>上游账号</TableCell>
-                <TableCell>邮箱</TableCell>
-                <TableCell>状态</TableCell>
-                <TableCell align="right">请求 / 成功 / 失败</TableCell>
-                <TableCell>到期时间</TableCell>
-                <TableCell align="center">启用</TableCell>
-                <TableCell align="right">操作</TableCell>
+                <TableCell sx={{ width: 100 }}>厂商</TableCell>
+                <TableCell sx={{ width: 135 }}>上游账号</TableCell>
+                <TableCell sx={{ width: 170 }}>邮箱</TableCell>
+                <TableCell sx={{ width: 90 }}>状态</TableCell>
+                <TableCell align="right" sx={{ width: 155 }}>请求 / 成功 / 失败</TableCell>
+                <TableCell sx={{ width: 120 }}>到期时间</TableCell>
+                <TableCell align="center" sx={{ width: 65 }}>启用</TableCell>
+                <TableCell align="right" sx={{ width: 105 }}>操作</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {(accounts.data ?? []).map((account) => (
-                <TableRow key={account.id} hover>
-                  <TableCell><Chip size="small" variant="outlined" label={account.providerId} /></TableCell>
-                  <TableCell sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{account.externalId}</TableCell>
-                  <TableCell>{account.email || "-"}</TableCell>
-                  <TableCell><StatusChip status={account.status} /></TableCell>
-                  <TableCell align="right" sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
-                    {account.requestCount} / {account.successCount} / {account.failureCount}
-                  </TableCell>
-                  <TableCell>{formatTime(account.expiresAt)}</TableCell>
-                  <TableCell align="center">
-                    <Switch
-                      size="small"
-                      checked={account.enabled}
-                      disabled={update.isPending}
-                      onChange={(_, enabled) => update.mutate({ account, enabled })}
-                      slotProps={{ input: { "aria-label": `${account.externalId} 启用状态` } }}
-                    />
-                  </TableCell>
-                  <TableCell align="right">
-                    <Tooltip title="厂商账号操作">
-                      <IconButton
-                        size="small"
-                        disabled={!account.enabled}
-                        onClick={(event) => openCommands(event, account)}
-                      ><MoreVertOutlined fontSize="small" /></IconButton>
-                    </Tooltip>
-                    <Tooltip title="重新认证">
-                      <IconButton
-                        size="small"
-                        disabled={reauthenticate.isPending || !account.enabled}
-                        onClick={() => reauthenticate.mutate(account.id)}
-                      ><LoginOutlined fontSize="small" /></IconButton>
-                    </Tooltip>
-                    <Tooltip title="删除账号">
-                      <IconButton
-                        size="small"
-                        color="error"
-                        disabled={remove.isPending}
-                        onClick={() => {
-                          if (window.confirm(`删除 ${account.providerId}/${account.externalId}？`)) remove.mutate(account.id);
-                        }}
-                      ><DeleteOutlineOutlined fontSize="small" /></IconButton>
-                    </Tooltip>
+              {accounts.isLoading ? <LoadingRows /> : null}
+              {(accounts.data?.items ?? []).map((account) => (
+                <AccountRow
+                  key={account.id}
+                  account={account}
+                  providerName={providerNames.get(account.providerId) ?? account.providerId}
+                  updating={update.isPending && update.variables?.account.id === account.id}
+                  removing={remove.isPending && remove.variables === account.id}
+                  reauthenticating={reauthenticate.isPending && reauthenticate.variables === account.id}
+                  onToggle={(nextEnabled) => update.mutate({ account, nextEnabled })}
+                  onCommands={(event) => openCommands(event, account)}
+                  onReauthenticate={() => reauthenticate.mutate(account.id)}
+                  onDelete={() => {
+                    if (window.confirm(`删除 ${account.providerId}/${account.externalId}？`)) {
+                      remove.mutate(account.id);
+                    }
+                  }}
+                />
+              ))}
+              {!accounts.isLoading && (accounts.data?.items.length ?? 0) === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} align="center" sx={{ height: 240, color: "text.secondary" }}>
+                    <FilterAltOffOutlined sx={{ display: "block", mx: "auto", mb: 1, fontSize: 24, color: "#95a2a7" }} />
+                    没有符合当前条件的账号
                   </TableCell>
                 </TableRow>
-              ))}
-              {!accounts.isLoading && (accounts.data?.length ?? 0) === 0 && (
-                <TableRow><TableCell colSpan={8} align="center" sx={{ py: 6, color: "text.secondary" }}>暂无账号</TableCell></TableRow>
-              )}
+              ) : null}
             </TableBody>
           </Table>
         </TableContainer>
-      </Paper>
+        <TablePagination
+          component="div"
+          count={accounts.data?.totalElements ?? 0}
+          page={page}
+          rowsPerPage={pageSize}
+          rowsPerPageOptions={pageSizes}
+          labelRowsPerPage="每页"
+          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
+          onPageChange={(_, nextPage) => setPage(nextPage)}
+          onRowsPerPageChange={(event) => {
+            setPageSize(Number(event.target.value));
+            setPage(0);
+          }}
+        />
+      </DataSurface>
 
       <Menu
         anchorEl={commandAnchor}
@@ -201,10 +358,10 @@ export function Accounts() {
           setCommandAccount(null);
         }}
       >
-        {commands.isLoading && <MenuItem disabled>正在加载...</MenuItem>}
-        {!commands.isLoading && (commands.data?.length ?? 0) === 0 && (
+        {commands.isLoading ? <MenuItem disabled>正在加载...</MenuItem> : null}
+        {!commands.isLoading && (commands.data?.length ?? 0) === 0 ? (
           <MenuItem disabled>该厂商没有账号操作</MenuItem>
-        )}
+        ) : null}
         {(commands.data ?? []).map((command) => (
           <MenuItem
             key={command.name}
@@ -223,13 +380,132 @@ export function Accounts() {
         open={importOpen}
         providers={providers}
         onClose={() => setImportOpen(false)}
-        onImported={() => {
+        onImported={async () => {
           setImportOpen(false);
-          void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+          setPage(0);
+          await invalidateAccounts();
         }}
       />
+    </PageContainer>
+  );
+}
+
+const AccountRow = memo(function AccountRow({
+  account,
+  providerName,
+  updating,
+  removing,
+  reauthenticating,
+  onToggle,
+  onCommands,
+  onReauthenticate,
+  onDelete,
+}: {
+  account: Account;
+  providerName: string;
+  updating: boolean;
+  removing: boolean;
+  reauthenticating: boolean;
+  onToggle: (enabled: boolean) => void;
+  onCommands: (event: MouseEvent<HTMLElement>) => void;
+  onReauthenticate: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <TableRow hover>
+      <TableCell>
+        <Typography noWrap sx={{ fontSize: 12.5, fontWeight: 700 }}>{providerName}</Typography>
+        {providerName !== account.providerId ? (
+          <Typography noWrap color="text.secondary" sx={{ fontFamily: "ui-monospace, monospace", fontSize: 10.5 }}>
+            {account.providerId}
+          </Typography>
+        ) : null}
+      </TableCell>
+      <TableCell>
+        <Typography noWrap title={account.externalId} sx={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
+          {account.externalId}
+        </Typography>
+      </TableCell>
+      <TableCell>
+        <Typography noWrap title={account.email ?? ""} sx={{ fontSize: 12.5 }}>
+          {account.email || "-"}
+        </Typography>
+      </TableCell>
+      <TableCell><StatusChip status={account.status} error={account.lastError} /></TableCell>
+      <TableCell align="right"><CounterTriplet account={account} /></TableCell>
+      <TableCell>
+        <Typography noWrap sx={{ fontVariantNumeric: "tabular-nums", fontSize: 11.5 }}>
+          {formatTime(account.expiresAt)}
+        </Typography>
+      </TableCell>
+      <TableCell align="center">
+        <Switch
+          size="small"
+          checked={account.enabled}
+          disabled={updating}
+          onChange={(_, nextEnabled) => onToggle(nextEnabled)}
+          slotProps={{ input: { "aria-label": `${account.externalId} 启用状态` } }}
+        />
+      </TableCell>
+      <TableCell align="right">
+        <Stack direction="row" spacing={0.25} sx={{ justifyContent: "flex-end" }}>
+          <Tooltip title="厂商账号操作">
+            <span>
+              <IconButton size="small" disabled={!account.enabled} onClick={onCommands}>
+                <MoreVertOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title="重新认证">
+            <span>
+              <IconButton size="small" disabled={reauthenticating || !account.enabled} onClick={onReauthenticate}>
+                <LoginOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title="删除账号">
+            <span>
+              <IconButton size="small" color="error" disabled={removing} onClick={onDelete}>
+                <DeleteOutlineOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Stack>
+      </TableCell>
+    </TableRow>
+  );
+});
+
+function CounterTriplet({ account }: { account: Account }) {
+  return (
+    <Box
+      sx={{
+        ml: "auto",
+        width: 156,
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        fontFamily: "ui-monospace, monospace",
+        fontSize: 11.5,
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <span>{account.requestCount}</span>
+      <Box component="span" sx={{ color: "success.main" }}>{account.successCount}</Box>
+      <Box component="span" sx={{ color: account.failureCount ? "error.main" : "text.secondary" }}>
+        {account.failureCount}
+      </Box>
     </Box>
   );
+}
+
+function LoadingRows() {
+  return Array.from({ length: 8 }, (_, index) => (
+    <TableRow key={index}>
+      {Array.from({ length: 8 }, (__, cell) => (
+        <TableCell key={cell}><Skeleton animation="wave" height={18} /></TableCell>
+      ))}
+    </TableRow>
+  ));
 }
 
 function ImportDialog({
@@ -241,7 +517,7 @@ function ImportDialog({
   open: boolean;
   providers: ProviderOption[];
   onClose: () => void;
-  onImported: () => void;
+  onImported: () => void | Promise<void>;
 }) {
   const [providerId, setProviderId] = useState("");
   const [externalId, setExternalId] = useState("");
@@ -251,7 +527,11 @@ function ImportDialog({
   const mutation = useMutation({
     mutationFn: () => {
       let parsed: unknown;
-      try { parsed = JSON.parse(credential); } catch { throw new Error("凭据不是有效 JSON"); }
+      try {
+        parsed = JSON.parse(credential);
+      } catch {
+        throw new Error("凭据不是有效 JSON");
+      }
       return api.importAccount({
         providerId,
         externalId,
@@ -267,29 +547,69 @@ function ImportDialog({
       <DialogTitle>导入或轮换账号</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          {mutation.error && <Alert severity="error">{mutation.error.message}</Alert>}
+          {mutation.error ? <Alert severity="error">{mutation.error.message}</Alert> : null}
           <TextField select label="厂商" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
             {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
           </TextField>
           <TextField label="上游账号 ID" value={externalId} onChange={(event) => setExternalId(event.target.value)} />
           <TextField label="邮箱" value={email} onChange={(event) => setEmail(event.target.value)} />
-          <TextField label="账号到期时间" type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} />
-          <TextField label="凭据 JSON" value={credential} onChange={(event) => setCredential(event.target.value)} multiline minRows={8} slotProps={{ htmlInput: { spellCheck: false } }} sx={{ "& textarea": { fontFamily: "ui-monospace, monospace", fontSize: 12 } }} />
+          <TextField
+            label="账号到期时间"
+            type="datetime-local"
+            value={expiresAt}
+            onChange={(event) => setExpiresAt(event.target.value)}
+            slotProps={{ inputLabel: { shrink: true } }}
+          />
+          <TextField
+            label="凭据 JSON"
+            value={credential}
+            onChange={(event) => setCredential(event.target.value)}
+            multiline
+            minRows={8}
+            slotProps={{ htmlInput: { spellCheck: false } }}
+            sx={{ "& textarea": { fontFamily: "ui-monospace, monospace", fontSize: 12 } }}
+          />
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>取消</Button>
-        <Button variant="contained" onClick={() => mutation.mutate()} disabled={!providerId || !externalId || mutation.isPending}>保存</Button>
+        <Button
+          variant="contained"
+          onClick={() => mutation.mutate()}
+          disabled={!providerId || !externalId || mutation.isPending}
+        >
+          保存
+        </Button>
       </DialogActions>
     </Dialog>
   );
 }
 
-function StatusChip({ status }: { status: string }) {
-  const color = status === "ACTIVE" ? "success" : status === "DEGRADED" ? "warning" : "default";
-  return <Chip size="small" color={color} variant="outlined" label={status} />;
+function StatusChip({ status, error }: { status: string; error: string | null }) {
+  const details: Record<string, { label: string; color: "success" | "warning" | "error" | "default" }> = {
+    ACTIVE: { label: "正常", color: "success" },
+    PENDING: { label: "待就绪", color: "warning" },
+    DEGRADED: { label: "异常", color: "error" },
+    BANNED: { label: "封禁", color: "error" },
+    DISABLED: { label: "停用", color: "default" },
+    EXPIRED: { label: "过期", color: "default" },
+  };
+  const value = details[status] ?? { label: status, color: "default" as const };
+  const chip = <Chip size="small" color={value.color} variant="outlined" label={value.label} />;
+  return error ? <Tooltip title={error}>{chip}</Tooltip> : chip;
 }
 
 function formatTime(value: string | null) {
-  return value ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "-";
+  return value
+    ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+    : "长期";
+}
+
+function useDebouncedValue<T>(value: T, delay: number) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timeout);
+  }, [delay, value]);
+  return debounced;
 }

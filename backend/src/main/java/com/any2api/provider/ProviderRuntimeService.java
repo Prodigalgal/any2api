@@ -17,17 +17,20 @@ public class ProviderRuntimeService {
     private final ProviderInstallationCatalog installations;
     private final PostgresAdvisoryLocks locks;
     private final JdbcClient jdbc;
+    private final ModelCatalogCache modelCatalog;
 
     public ProviderRuntimeService(
         ProviderRegistry providers,
         ProviderInstallationCatalog installations,
         PostgresAdvisoryLocks locks,
-        JdbcClient jdbc
+        JdbcClient jdbc,
+        ModelCatalogCache modelCatalog
     ) {
         this.providers = providers;
         this.installations = installations;
         this.locks = locks;
         this.jdbc = jdbc;
+        this.modelCatalog = modelCatalog;
     }
 
     @Transactional(readOnly = true)
@@ -52,6 +55,7 @@ public class ProviderRuntimeService {
             throw new IllegalStateException("provider plugin is not installed: " + providerId);
         }
         if (!enabled) quarantine(providerId);
+        modelCatalog.invalidateAfterCommit();
         TransactionSynchronizationManager.registerSynchronization(
             new TransactionSynchronization() {
                 @Override

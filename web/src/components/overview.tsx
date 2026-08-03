@@ -9,10 +9,10 @@ import {
 import {
   Alert,
   Box,
-  Button,
   Chip,
   CircularProgress,
   Divider,
+  IconButton,
   Paper,
   Stack,
   Switch,
@@ -22,10 +22,12 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tooltip,
   Typography
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ProviderDescriptor, type ProviderModel, type ProviderRuntime } from "@/lib/api";
+import { PageContainer, PageHeader } from "@/components/page-layout";
 
 export function Overview() {
   const queryClient = useQueryClient();
@@ -48,18 +50,22 @@ export function Overview() {
   });
 
   return (
-    <Box sx={{ px: { xs: 1.5, sm: 2.5, lg: 3.5 }, py: { xs: 2, sm: 3 }, maxWidth: 1440, mx: "auto" }}>
-      <Stack
-        direction={{ xs: "column", sm: "row" }}
-        spacing={2}
-        sx={{ mb: 2.5, alignItems: { sm: "flex-start" }, justifyContent: "space-between" }}
-      >
-        <Box>
-          <Typography variant="h4">运行概览</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5, fontSize: 13 }}>厂商接入、账号生命周期与自动化资源的实时状态</Typography>
-        </Box>
-        <Button variant="outlined" startIcon={<RefreshOutlined />} onClick={() => void Promise.all([catalog.refetch(), runtime.refetch(), models.refetch(), health.refetch()])}>刷新状态</Button>
-      </Stack>
+    <PageContainer maxWidth={1480}>
+      <PageHeader
+        title="运行概览"
+        description="厂商接入、账号生命周期与自动化资源的实时状态"
+        actions={
+          <Tooltip title="刷新状态">
+            <IconButton
+              aria-label="刷新状态"
+              onClick={() => void Promise.all([catalog.refetch(), runtime.refetch(), models.refetch(), health.refetch()])}
+              sx={{ border: 1, borderColor: "divider", bgcolor: "background.paper" }}
+            >
+              <RefreshOutlined sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+        }
+      />
 
       {(catalog.error || runtime.error || models.error) && <Alert severity="warning" sx={{ mb: 2 }}>后端尚未连接，启动 Java 服务后将显示真实厂商目录。</Alert>}
       {toggle.error && <Alert severity="error" sx={{ mb: 2 }}>{toggle.error.message}</Alert>}
@@ -134,7 +140,7 @@ export function Overview() {
           </Paper>
         </Stack>
       </Box>
-    </Box>
+    </PageContainer>
   );
 }
 

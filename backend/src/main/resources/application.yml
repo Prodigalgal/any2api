@@ -52,6 +52,15 @@ management:
       show-details: when_authorized
 
 any2api:
+  cache:
+    api-key:
+      local-ttl: ${ANY2API_CACHE_API_KEY_L1_TTL:30s}
+      redis-ttl: ${ANY2API_CACHE_API_KEY_L2_TTL:5m}
+      maximum-entries: ${ANY2API_CACHE_API_KEY_MAX_ENTRIES:10000}
+    model-catalog:
+      local-ttl: ${ANY2API_CACHE_MODEL_CATALOG_L1_TTL:3s}
+      redis-ttl: ${ANY2API_CACHE_MODEL_CATALOG_L2_TTL:20s}
+      maximum-entries: ${ANY2API_CACHE_MODEL_CATALOG_MAX_ENTRIES:1000}
   media:
     public-base-url: ${ANY2API_MEDIA_PUBLIC_BASE_URL:}
   proxy-bootstrap:

@@ -27,6 +27,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webclient")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("com.aliyun.oss:aliyun-sdk-oss:3.18.5")
+    implementation("com.github.ben-manes.caffeine:caffeine")
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")

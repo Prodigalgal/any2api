@@ -1,6 +1,7 @@
 package com.any2api.config;
 
 import java.net.URI;
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "any2api")
@@ -10,6 +11,7 @@ public class Any2ApiProperties {
     private final Automation automation = new Automation();
     private final ProxyBootstrap proxyBootstrap = new ProxyBootstrap();
     private final Media media = new Media();
+    private final CacheSettings cache = new CacheSettings();
 
     public Security getSecurity() {
         return security;
@@ -21,6 +23,7 @@ public class Any2ApiProperties {
 
     public ProxyBootstrap getProxyBootstrap() { return proxyBootstrap; }
     public Media getMedia() { return media; }
+    public CacheSettings getCache() { return cache; }
 
 
     public static class Security {
@@ -114,6 +117,35 @@ public class Any2ApiProperties {
 
         public String getPublicBaseUrl() { return publicBaseUrl; }
         public void setPublicBaseUrl(String value) { publicBaseUrl = value; }
+    }
+
+    public static class CacheSettings {
+        private final Tier apiKey = new Tier(
+            Duration.ofSeconds(30), Duration.ofMinutes(5), 10_000);
+        private final Tier modelCatalog = new Tier(
+            Duration.ofSeconds(3), Duration.ofSeconds(20), 1_000);
+
+        public Tier getApiKey() { return apiKey; }
+        public Tier getModelCatalog() { return modelCatalog; }
+    }
+
+    public static class Tier {
+        private Duration localTtl;
+        private Duration redisTtl;
+        private long maximumEntries;
+
+        Tier(Duration localTtl, Duration redisTtl, long maximumEntries) {
+            this.localTtl = localTtl;
+            this.redisTtl = redisTtl;
+            this.maximumEntries = maximumEntries;
+        }
+
+        public Duration getLocalTtl() { return localTtl; }
+        public void setLocalTtl(Duration value) { localTtl = value; }
+        public Duration getRedisTtl() { return redisTtl; }
+        public void setRedisTtl(Duration value) { redisTtl = value; }
+        public long getMaximumEntries() { return maximumEntries; }
+        public void setMaximumEntries(long value) { maximumEntries = value; }
     }
 
 }

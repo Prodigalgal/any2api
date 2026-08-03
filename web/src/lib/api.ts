@@ -77,6 +77,27 @@ export type Account = {
   successCount: number;
   failureCount: number;
   lastError: string | null;
+  updatedAt?: string;
+};
+
+export type AccountExpiryFilter = "ANY" | "VALID" | "EXPIRING_SOON" | "EXPIRED" | "NEVER";
+
+export type AccountPageQuery = {
+  provider?: string;
+  status?: string;
+  enabled?: boolean;
+  query?: string;
+  expiry?: AccountExpiryFilter;
+  page: number;
+  size: number;
+};
+
+export type AccountPage = {
+  items: Account[];
+  totalElements: number;
+  page: number;
+  size: number;
+  totalPages: number;
 };
 
 export type AccountCommand = {
@@ -130,6 +151,26 @@ export type ProxyPool = {
 
 export type ProxyTrafficScope = "REGISTRATION" | "LIFECYCLE" | "INFERENCE";
 
+export type ApiKeyProtocol = "CHAT_COMPLETIONS" | "RESPONSES" | "IMAGES";
+
+export type DistributionApiKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  enabled: boolean;
+  providerModels: Record<string, string[]>;
+  protocols: ApiKeyProtocol[];
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreatedDistributionApiKey = {
+  key: DistributionApiKey;
+  secret: string;
+};
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(5_000) });
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
@@ -182,9 +223,18 @@ export const api = {
   logout: () => adminJson<{ authenticated: boolean }>(
     "/api/admin/v1/session", { method: "DELETE" },
   ),
-  accounts: (provider?: string) => adminJson<Account[]>(
-    `/api/admin/v1/accounts${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
-  ),
+  accountPage: (query: AccountPageQuery) => {
+    const params = new URLSearchParams({
+      page: String(query.page),
+      size: String(query.size),
+      expiry: query.expiry ?? "ANY",
+    });
+    if (query.provider) params.set("provider", query.provider);
+    if (query.status) params.set("status", query.status);
+    if (query.enabled !== undefined) params.set("enabled", String(query.enabled));
+    if (query.query) params.set("query", query.query);
+    return adminJson<AccountPage>(`/api/admin/v1/accounts/page?${params.toString()}`);
+  },
   adminProviders: () => adminJson<ProviderRuntime[]>("/api/admin/v1/providers"),
   updateProvider: (id: string, enabled: boolean) => adminJson<ProviderRuntime>(
     `/api/admin/v1/providers/${encodeURIComponent(id)}`,
@@ -226,5 +276,16 @@ export const api = {
   ),
   deleteProxyPool: (id: string) => adminJson<void>(
     `/api/admin/v1/proxy-pools/${id}`, { method: "DELETE" },
+  ),
+  apiKeys: () => adminJson<DistributionApiKey[]>("/api/admin/v1/api-keys"),
+  createApiKey: (body: Record<string, unknown>) => adminJson<CreatedDistributionApiKey>(
+    "/api/admin/v1/api-keys", { method: "POST", body: JSON.stringify(body) },
+  ),
+  updateApiKey: (id: string, enabled: boolean) => adminJson<DistributionApiKey>(
+    `/api/admin/v1/api-keys/${id}`,
+    { method: "PATCH", body: JSON.stringify({ enabled }) },
+  ),
+  deleteApiKey: (id: string) => adminJson<void>(
+    `/api/admin/v1/api-keys/${id}`, { method: "DELETE" },
   ),
 };

@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.any2api.media.GeneratedMedia;
+import com.any2api.auth.ApiKeyAuthorization;
 import com.any2api.media.MediaAssetService;
 import com.any2api.media.MediaCoordinator;
 import com.any2api.media.MediaResult;
@@ -37,7 +38,8 @@ class OpenAiImagesControllerTest {
                 new GeneratedMedia("image/webp", new byte[] {1, 2}, "prompt"))))));
         when(assets.save(any(), any(), any())).thenReturn(Mono.just(assetId));
         var controller = new OpenAiImagesController(
-            routes, coordinator, assets, mapper, new Any2ApiProperties());
+            routes, coordinator, assets, mapper, new Any2ApiProperties(),
+            mock(ApiKeyAuthorization.class));
         var request = mapper.createObjectNode()
             .put("model", "grok_web/grok-imagine-image")
             .put("prompt", "prompt");
@@ -65,7 +67,8 @@ class OpenAiImagesControllerTest {
             new MediaCoordinator.ExecutionResult(UUID.randomUUID(), new MediaResult(List.of(
                 new GeneratedMedia("image/png", new byte[] {1, 2, 3}, ""))))));
         var controller = new OpenAiImagesController(
-            routes, coordinator, assets, mapper, new Any2ApiProperties());
+            routes, coordinator, assets, mapper, new Any2ApiProperties(),
+            mock(ApiKeyAuthorization.class));
         var request = mapper.createObjectNode()
             .put("model", "grok_web/grok-imagine-image")
             .put("prompt", "prompt")

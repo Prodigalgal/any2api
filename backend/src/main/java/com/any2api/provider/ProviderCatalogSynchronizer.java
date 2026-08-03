@@ -29,6 +29,7 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
     private final ObjectMapper objectMapper;
     private final AccountSelectionService accounts;
     private final ExecutorService databaseExecutor;
+    private final ModelCatalogCache modelCatalog;
 
     public ProviderCatalogSynchronizer(
         ProviderRegistry registry,
@@ -36,7 +37,8 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
         TransactionTemplate transactions,
         ObjectMapper objectMapper,
         AccountSelectionService accounts,
-        ExecutorService databaseExecutor
+        ExecutorService databaseExecutor,
+        ModelCatalogCache modelCatalog
     ) {
         this.registry = registry;
         this.jdbc = jdbc;
@@ -44,6 +46,7 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
         this.objectMapper = objectMapper;
         this.accounts = accounts;
         this.databaseExecutor = databaseExecutor;
+        this.modelCatalog = modelCatalog;
     }
 
     @Override
@@ -59,6 +62,7 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
             """).update();
         registry.plugins().forEach(this::synchronizeManifest);
         retireRemovedProviderWork();
+        modelCatalog.invalidateAfterCommit();
     }
 
     @Scheduled(
@@ -81,7 +85,10 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
                 accounts.acquire(providerId),
                 account -> provider.discoverModels(account)
                     .flatMap(models -> Mono.fromRunnable(() -> transactions.executeWithoutResult(
-                        ignored -> synchronizeModels(provider.manifest(), models, "OFFICIAL")))
+                        ignored -> {
+                            synchronizeModels(provider.manifest(), models, "OFFICIAL");
+                            modelCatalog.invalidateAfterCommit();
+                        }))
                         .subscribeOn(Schedulers.fromExecutor(databaseExecutor))),
                 accounts::release,
                 (account, ignored) -> accounts.release(account),

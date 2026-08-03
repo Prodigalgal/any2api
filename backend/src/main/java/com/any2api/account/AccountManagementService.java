@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import tools.jackson.databind.JsonNode;
 
 @Service
@@ -38,13 +40,12 @@ public class AccountManagementService {
     }
 
     @Transactional(readOnly = true)
-    public List<AccountView> list(String providerId) {
-        if (providerId == null || providerId.isBlank()) {
-            return accounts.findAll().stream().map(AccountView::from).toList();
-        }
-        providers.requirePlugin(providerId);
-        return accounts.findAllByProviderIdOrderByCreatedAtDesc(providerId).stream()
-            .map(AccountView::from).toList();
+    public AccountPageView search(AccountSearchQuery query) {
+        if (query.providerId() != null) providers.requirePlugin(query.providerId());
+        var pageable = PageRequest.of(query.page(), query.size(),
+            Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by("id")));
+        return AccountPageView.from(accounts.findAll(
+            AccountSpecifications.matching(query, Instant.now()), pageable));
     }
 
     @Transactional

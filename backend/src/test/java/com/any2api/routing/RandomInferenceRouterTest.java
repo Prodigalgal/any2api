@@ -6,9 +6,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.any2api.account.AccountSelectionService;
+import com.any2api.auth.ApiKeyGrant;
+import com.any2api.auth.ApiKeyProviderScope;
+import com.any2api.auth.ApiKeyProtocol;
 import com.any2api.account.AccountUnavailableException;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.coordination.AccountLease;
@@ -131,6 +136,39 @@ class RandomInferenceRouterTest {
 
         assertThat(selected).doesNotHaveDuplicates();
         assertThat(selected).containsExactlyInAnyOrder("alpha", "beta", "gamma");
+    }
+
+    @Test
+    void restrictedKeyRemovesDisallowedRandomCandidatesBeforeAccountSelection() {
+        var catalog = mock(RandomRouteCatalog.class);
+        when(catalog.installedModels(RandomModelRole.TOP_TEXT)).thenReturn(List.of(
+            new RandomRouteCatalog.ModelRoute("alpha", "allowed-model"),
+            new RandomRouteCatalog.ModelRoute("beta", "blocked-model")));
+        var accounts = mock(AccountSelectionService.class);
+        when(accounts.acquire(eq("alpha"), eq("allowed-model"), any()))
+            .thenReturn(Mono.just(leased("alpha")));
+        var router = new RandomInferenceRouter(
+            catalog,
+            new ProviderRegistry(List.of(provider("alpha"), provider("beta"))),
+            accounts,
+            new CanonicalRequestParser(new ObjectMapper()),
+            executor);
+        var request = new ObjectMapper().createObjectNode();
+        request.putArray("messages").addObject().put("role", "user").put("content", "hello");
+        var grant = new ApiKeyGrant(
+            UUID.randomUUID(), "client", Map.of(
+                "alpha", ApiKeyProviderScope.selectedModels(
+                    "alpha", java.util.Set.of("allowed-model"))),
+            java.util.Set.of(ApiKeyProtocol.CHAT_COMPLETIONS), null, false);
+
+        var selected = router.select(
+            CanonicalRequest.Protocol.CHAT_COMPLETIONS, request,
+            RandomModelRole.TOP_TEXT, grant).block();
+
+        assertThat(selected).isNotNull();
+        assertThat(selected.request().providerId()).isEqualTo("alpha");
+        verify(accounts, never())
+            .acquire(eq("beta"), eq("blocked-model"), any());
     }
 
     private LeasedProviderAccount leased(String providerId) {

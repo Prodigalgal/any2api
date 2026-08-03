@@ -1,6 +1,7 @@
 package com.any2api.api;
 
 import com.any2api.media.MediaCoordinator;
+import com.any2api.auth.ApiKeyScopeException;
 import com.any2api.protocol.OpenAiRequestException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -12,6 +13,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    @ExceptionHandler(ApiKeyScopeException.class)
+    public ResponseEntity<Map<String, Object>> apiKeyScope(ApiKeyScopeException error) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", Map.of(
+            "type", "insufficient_scope",
+            "message", error.getMessage(),
+            "code", "insufficient_scope")));
+    }
 
     @ExceptionHandler(OpenAiRequestException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)

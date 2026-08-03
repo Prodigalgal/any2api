@@ -28,7 +28,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 
@@ -175,6 +179,49 @@ class AccountManagementServiceTest {
         assertThat(stored.get("grok_console:xai-user").isEnabled()).isFalse();
         verify(vault).store(any(), eq("grok_web"), any(), any());
         verify(vault).store(any(), eq("grok_console"), any(), any());
+    }
+
+    @Test
+    void accountSearchReturnsAStableLightweightPage() {
+        var repository = mock(AccountRepository.class);
+        var account = AccountEntity.create(
+            "alpha", "upstream-a", "same@example.com", null, Map.of("large", "metadata"));
+        when(repository.findAll(any(Specification.class), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(account),
+                org.springframework.data.domain.PageRequest.of(1, 50), 2646));
+        var service = new AccountManagementService(
+            repository,
+            mock(CredentialVault.class),
+            new ProviderRegistry(List.of(provider("alpha"))),
+            mock(LifecycleScheduleService.class),
+            List.of());
+
+        var result = service.search(new AccountSearchQuery(
+            " alpha ", AccountStatus.ACTIVE, true, " same ",
+            AccountSearchQuery.Expiry.VALID, 1, 50));
+
+        assertThat(result.totalElements()).isEqualTo(2646);
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.size()).isEqualTo(50);
+        assertThat(result.items()).singleElement().satisfies(item -> {
+            assertThat(item.providerId()).isEqualTo("alpha");
+            assertThat(item.externalId()).isEqualTo("upstream-a");
+        });
+        var pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(repository).findAll(any(Specification.class), pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(50);
+        assertThat(pageable.getValue().getSort().getOrderFor("createdAt")).isNotNull();
+    }
+
+    @Test
+    void accountSearchRejectsUnboundedPagesAndKeywords() {
+        assertThatThrownBy(() -> new AccountSearchQuery(
+            null, null, null, "x".repeat(121), AccountSearchQuery.Expiry.ANY, 0, 25))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AccountSearchQuery(
+            null, null, null, null, AccountSearchQuery.Expiry.ANY, 0, 101))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     private ImportCommand command(String providerId, String externalId,

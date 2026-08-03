@@ -29,6 +29,7 @@ from any2api_automation.providers.deepseek_challenge import (
     DeepseekHcaptchaChallenge,
     _challenge_evidence,
     _extract_task_image,
+    _surface_artifact,
     _wait_for_completion,
 )
 
@@ -441,3 +442,23 @@ def test_hcaptcha_evidence_contains_only_normalized_prompt_actions_and_artifact(
         "actions=click(0.250,0.500),drag(0.100,0.200;0.800,0.700):"
         "artifact=deepseek-hcaptcha-fixture.png"
     )
+
+
+def test_hcaptcha_post_action_artifact_is_best_effort(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "any2api_automation.providers.deepseek_challenge.record_captcha_artifact",
+        lambda label, image: f"{label}-{len(image)}.png",
+    )
+
+    class Surface:
+        def screenshot(self, *, type):
+            assert type == "png"
+            return b"after"
+
+    assert _surface_artifact(Surface(), "deepseek-after") == "deepseek-after-5.png"
+
+    class ReplacedSurface:
+        def screenshot(self, *, type):
+            raise RuntimeError("frame replaced")
+
+    assert _surface_artifact(ReplacedSurface(), "deepseek-after") == ""

@@ -114,15 +114,28 @@ class DeepseekHcaptchaChallenge:
                     _point(box, task, action.start),
                     _point(box, task, action.end),
                 )
-            _submit(frame, required=all(action.type == "click" for action in actions))
-            if _wait_for_completion(page, completed):
+            submitted = _submit(frame, required=all(action.type == "click" for action in actions))
+            if not submitted and any(action.type == "drag" for action in actions):
+                page.wait_for_timeout(750)
+                submitted = _submit(frame, required=False)
+            if _wait_for_completion(
+                page,
+                completed,
+                timeout_seconds=min(
+                    config.deepseek_hcaptcha_result_wait_seconds,
+                    max(1.0, deadline - time.monotonic()),
+                ),
+            ):
                 self.last_diagnostic = (
-                    f"solved:attempt={attempts}:{solver_diagnostic}:{evidence}"
+                    f"solved:attempt={attempts}:{solver_diagnostic}:"
+                    f"submitted={submitted}:{evidence}"
                 )[:600]
                 return
-            self.last_diagnostic = (f"retry:attempt={attempts}:{solver_diagnostic}:{evidence}")[
-                :600
-            ]
+            after_artifact = _surface_artifact(surface, "deepseek-hcaptcha-after")
+            self.last_diagnostic = (
+                f"retry:attempt={attempts}:{solver_diagnostic}:submitted={submitted}:"
+                f"after={after_artifact or 'unavailable'}:{evidence}"
+            )[:600]
         raise TimeoutError(
             "DeepSeek hCaptcha did not complete before the deadline "
             f"diagnostic={self.last_diagnostic}"
@@ -330,11 +343,20 @@ def _challenge_evidence(
     return f"prompt={safe_prompt}:actions={action_text}:artifact={artifact or 'disabled'}"
 
 
+def _surface_artifact(surface: Any, label: str) -> str:
+    try:
+        return record_captcha_artifact(label, surface.screenshot(type="png"))
+    except Exception:  # noqa: BLE001 - the provider may replace the challenge frame immediately
+        return ""
+
+
 def _submit(frame: Any, *, required: bool) -> bool:
     for selector in (
         "button.button-submit",
         ".button-submit",
         "button[data-button-action='submit']",
+        "button:has-text('Submit')",
+        "button:has-text('Check')",
         "button:has-text('Verify')",
         "button:has-text('Next')",
     ):

@@ -74,23 +74,16 @@ class DeepseekHcaptchaChallenge:
             artifact = record_captcha_artifact("deepseek-hcaptcha", task.image)
             actions = registry.solve_visual_actions_sync(
                 task.image,
-                "Solve this hCaptcha semantic image challenge. Instruction: "
-                + prompt
-                + "\nFirst reason internally about every object, the row/column pattern, and the "
-                "empty target. Use click actions for selection tasks. For drag tasks, return one "
-                "drag action per object required by the instruction; return multiple drag actions "
-                "when multiple objects must move. Each drag must use "
-                '{"type":"drag","from":[x1,y1],"to":[x2,y2]} '
-                "from the movable object's center to its target center. Coordinates must be "
-                "decimal fractions from 0.0 to 1.0 relative to the supplied task image; never "
-                "return pixel coordinates or values above 1. Do not click the submit button.",
+                _solver_prompt(prompt),
                 timeout_seconds=max(10, deadline - time.monotonic()),
                 ai_policy=ai_policy,
             )
             solver_diagnostic = registry.visual_diagnostic()
             evidence = _challenge_evidence(prompt, artifact, actions)
             if not actions or any(action.type not in {"click", "drag"} for action in actions):
-                self.last_diagnostic = f"solver_rejected:{solver_diagnostic}:{evidence}"[:600]
+                self.last_diagnostic = f"solver_rejected:{evidence}:solver={solver_diagnostic}"[
+                    :600
+                ]
                 _refresh(frame)
                 page.wait_for_timeout(random.randint(600, 1000))
                 continue
@@ -127,14 +120,15 @@ class DeepseekHcaptchaChallenge:
                 ),
             ):
                 self.last_diagnostic = (
-                    f"solved:attempt={attempts}:{solver_diagnostic}:"
-                    f"submitted={submitted}:{evidence}"
+                    f"solved:attempt={attempts}:submitted={submitted}:{evidence}:"
+                    f"solver={solver_diagnostic}"
                 )[:600]
                 return
             after_artifact = _surface_artifact(surface, "deepseek-hcaptcha-after")
             self.last_diagnostic = (
-                f"retry:attempt={attempts}:{solver_diagnostic}:submitted={submitted}:"
-                f"after={after_artifact or 'unavailable'}:{evidence}"
+                f"retry:attempt={attempts}:submitted={submitted}:"
+                f"after={after_artifact or 'unavailable'}:{evidence}:"
+                f"solver={solver_diagnostic}"
             )[:600]
         raise TimeoutError(
             "DeepSeek hCaptcha did not complete before the deadline "
@@ -320,6 +314,31 @@ def _prompt(frame: Any) -> str:
         except Exception:  # noqa: BLE001,S112 - optional prompt selector
             continue
     return "Select every matching target described by the challenge"
+
+
+def _solver_prompt(prompt: str) -> str:
+    rule = ""
+    if "drag one of the animals into the empty spot" in prompt.casefold():
+        rule = (
+            "\nThis specific puzzle has two movable animal candidates and a species-row grid. "
+            "The grid can show more than one empty-looking cell. Return exactly ONE drag: choose "
+            "the movable animal whose species has an incomplete row, and drop it into the empty "
+            "cell in that same species row. The other candidate is a decoy whose species row is "
+            "already complete. Never move a candidate into a different species row."
+        )
+    return (
+        "Solve this hCaptcha semantic image challenge. Instruction: "
+        + prompt
+        + rule
+        + "\nFirst reason internally about every object, the row/column pattern, and the empty "
+        "target. Use click actions for selection tasks. For drag tasks, return one drag action "
+        "per object required by the instruction; return multiple drag actions only when the "
+        "instruction explicitly requires multiple objects. Each drag must use "
+        '{"type":"drag","from":[x1,y1],"to":[x2,y2]} '
+        "from the movable object's center to its target center. Coordinates must be decimal "
+        "fractions from 0.0 to 1.0 relative to the supplied task image; never return pixel "
+        "coordinates or values above 1. Do not click the submit button."
+    )
 
 
 def _challenge_evidence(

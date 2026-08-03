@@ -29,6 +29,7 @@ from any2api_automation.providers.deepseek_challenge import (
     DeepseekHcaptchaChallenge,
     _challenge_evidence,
     _extract_task_image,
+    _solver_prompt,
     _surface_artifact,
     _wait_for_completion,
 )
@@ -442,6 +443,21 @@ def test_hcaptcha_evidence_contains_only_normalized_prompt_actions_and_artifact(
         "actions=click(0.250,0.500),drag(0.100,0.200;0.800,0.700):"
         "artifact=deepseek-hcaptcha-fixture.png"
     )
+
+
+def test_hcaptcha_animal_matrix_prompt_encodes_the_observed_single_drag_rule() -> None:
+    prompt = _solver_prompt("Drag one of the animals into the empty spot to complete the pattern")
+
+    assert "Return exactly ONE drag" in prompt
+    assert "same species row" in prompt
+    assert "other candidate is a decoy" in prompt
+    assert "multiple drag actions only when" in prompt
+
+
+def test_hcaptcha_other_prompts_do_not_receive_the_animal_matrix_rule() -> None:
+    prompt = _solver_prompt("Select all matching images")
+
+    assert "Return exactly ONE drag" not in prompt
 
 
 def test_hcaptcha_post_action_artifact_is_best_effort(monkeypatch) -> None:

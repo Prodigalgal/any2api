@@ -11,6 +11,8 @@ public record RegistrationJobView(
     int target,
     int maxAttempts,
     int concurrency,
+    int attemptIntervalSeconds,
+    int roundIntervalSeconds,
     int attempts,
     int successCount,
     int failureCount,

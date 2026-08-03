@@ -41,7 +41,7 @@ public class ApiKeyAuthenticator {
         this.mapper = mapper;
         var cache = properties.getCache().getApiKey();
         this.grants = new LayeredJsonCache(
-            redis, "any2api:cache:api-key:v2", cache.getLocalTtl(),
+            redis, "any2api:cache:api-key:v3", cache.getLocalTtl(),
             cache.getRedisTtl(), cache.getMaximumEntries());
     }
 

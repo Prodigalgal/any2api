@@ -1,6 +1,7 @@
 package com.any2api.api.admin;
 
 import com.any2api.auth.ApiKeyProtocol;
+import com.any2api.auth.ApiKeyFeature;
 import com.any2api.auth.ApiKeyService;
 import java.time.Instant;
 import java.util.List;
@@ -35,7 +36,8 @@ public class AdminApiKeyController {
     @PostMapping
     public ApiKeyService.Created create(@RequestBody CreateRequest request) {
         return keys.create(new ApiKeyService.CreateCommand(
-            request.name(), request.providerModels(), request.protocols(), request.expiresAt()));
+            request.name(), request.providerModels(), request.protocols(), request.features(),
+            request.expiresAt()));
     }
 
     @PatchMapping("/{id}")
@@ -56,6 +58,7 @@ public class AdminApiKeyController {
         String name,
         Map<String, List<String>> providerModels,
         Set<ApiKeyProtocol> protocols,
+        Set<ApiKeyFeature> features,
         Instant expiresAt
     ) {}
 

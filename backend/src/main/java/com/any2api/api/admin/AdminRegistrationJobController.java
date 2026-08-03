@@ -33,7 +33,8 @@ public class AdminRegistrationJobController {
     public RegistrationJobView create(@RequestBody CreateRequest request) {
         return jobs.create(new RegistrationJobService.CreateCommand(
             request.providerId(), request.target(), request.maxAttempts(),
-            request.concurrency(), request.idempotencyKey()));
+            request.concurrency(), request.attemptIntervalSeconds(),
+            request.roundIntervalSeconds(), request.idempotencyKey()));
     }
 
     @PostMapping("/{jobId}/cancel")
@@ -41,6 +42,7 @@ public class AdminRegistrationJobController {
 
     public record CreateRequest(
         String providerId, Integer target, Integer maxAttempts,
-        Integer concurrency, String idempotencyKey
+        Integer concurrency, Integer attemptIntervalSeconds,
+        Integer roundIntervalSeconds, String idempotencyKey
     ) {}
 }

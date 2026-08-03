@@ -102,7 +102,7 @@ export function LifecycleJobs() {
           <Table size="small">
             <TableHead><TableRow>
               <TableCell>厂商</TableCell><TableCell>状态</TableCell><TableCell>进度</TableCell>
-              <TableCell>尝试</TableCell><TableCell>并发</TableCell><TableCell>最近错误</TableCell>
+              <TableCell>尝试</TableCell><TableCell>并发</TableCell><TableCell>节流</TableCell><TableCell>最近错误</TableCell>
               <TableCell>创建时间</TableCell><TableCell align="right">操作</TableCell>
             </TableRow></TableHead>
             <TableBody>
@@ -117,6 +117,11 @@ export function LifecycleJobs() {
                   </TableCell>
                   <TableCell>{job.attempts} / {job.maxAttempts}</TableCell>
                   <TableCell>{job.concurrency}</TableCell>
+                  <TableCell>
+                    <Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
+                      启 {job.attemptIntervalSeconds ?? 0}s · 轮 {job.roundIntervalSeconds ?? 5}s
+                    </Typography>
+                  </TableCell>
                   <TableCell sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{job.lastErrorClass || "-"}</TableCell>
                   <TableCell>{formatTime(job.createdAt)}</TableCell>
                   <TableCell align="right">
@@ -126,15 +131,15 @@ export function LifecycleJobs() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!jobs.isLoading && (jobs.data?.length ?? 0) === 0 && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 6, color: "text.secondary" }}>暂无注册任务</TableCell></TableRow>}
+              {!jobs.isLoading && (jobs.data?.length ?? 0) === 0 && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>暂无注册任务</TableCell></TableRow>}
             </TableBody>
           </Table>
         </TableContainer>
       </DataSurface>
-      <CreateJobDialog open={createOpen} providers={providers} onClose={() => setCreateOpen(false)} onCreated={() => {
+      {createOpen ? <CreateJobDialog open providers={providers} onClose={() => setCreateOpen(false)} onCreated={() => {
         setCreateOpen(false);
         void queryClient.invalidateQueries({ queryKey: ["registration-jobs"] });
-      }} />
+      }} /> : null}
     </PageContainer>
   );
 }
@@ -146,22 +151,37 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
   const [target, setTarget] = useState(1);
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [concurrency, setConcurrency] = useState(1);
+  const [attemptIntervalSeconds, setAttemptIntervalSeconds] = useState(0);
+  const [roundIntervalSeconds, setRoundIntervalSeconds] = useState(5);
   const mutation = useMutation({
-    mutationFn: () => api.createRegistrationJob({ providerId, target, maxAttempts, concurrency }),
+    mutationFn: () => api.createRegistrationJob({
+      providerId,
+      target,
+      maxAttempts,
+      concurrency,
+      attemptIntervalSeconds,
+      roundIntervalSeconds,
+    }),
     onSuccess: onCreated,
   });
-  return <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+  return <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
     <DialogTitle>新建注册任务</DialogTitle>
     <DialogContent><Stack spacing={2} sx={{ pt: 1 }}>
       {mutation.error && <Alert severity="error">{mutation.error.message}</Alert>}
       <TextField select label="厂商" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
         {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
       </TextField>
-      <TextField label="成功目标" type="number" value={target} onChange={(event) => setTarget(Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 1000 } }} />
-      <TextField label="邮箱任务上限" type="number" value={maxAttempts} onChange={(event) => setMaxAttempts(Number(event.target.value))} slotProps={{ htmlInput: { min: target, max: target * 10 } }} />
-      <TextField select label="任务并发" value={concurrency} onChange={(event) => setConcurrency(Number(event.target.value))}>
-        {[1, 2, 3, 4, 6, 8].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-      </TextField>
+      <Stack direction="row" spacing={2}>
+        <TextField fullWidth label="目标成功数" type="number" value={target} onChange={(event) => setTarget(Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 1000 } }} />
+        <TextField fullWidth label="最大邮箱任务数" type="number" value={maxAttempts} onChange={(event) => setMaxAttempts(Number(event.target.value))} slotProps={{ htmlInput: { min: target, max: target * 10 } }} />
+      </Stack>
+      <Stack direction="row" spacing={2}>
+        <TextField fullWidth select label="并发数" value={concurrency} onChange={(event) => setConcurrency(Number(event.target.value))}>
+          {[1, 2, 3, 4, 6, 8].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+        </TextField>
+        <TextField fullWidth label="任务启动间隔（秒）" type="number" value={attemptIntervalSeconds} onChange={(event) => setAttemptIntervalSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 0, max: 3600 } }} />
+      </Stack>
+      <TextField label="轮次间隔（秒）" type="number" value={roundIntervalSeconds} onChange={(event) => setRoundIntervalSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 0, max: 86400 } }} />
     </Stack></DialogContent>
     <DialogActions><Button onClick={onClose}>取消</Button><Button variant="contained" disabled={!providerId || mutation.isPending || maxAttempts < target} onClick={() => mutation.mutate()}>创建</Button></DialogActions>
   </Dialog>;

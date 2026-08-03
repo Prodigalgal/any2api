@@ -1,6 +1,7 @@
 package com.any2api.api.openai;
 
 import com.any2api.auth.ApiKeyAuthorization;
+import com.any2api.auth.ApiKeyRequestFeatureDetector;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.CanonicalRequestParser;
 import com.any2api.protocol.OpenAiResponseWriter;
@@ -24,6 +25,7 @@ public class OpenAiGatewayController {
     private final OpenAiResponseWriter responseWriter;
     private final RandomInferenceRouter randomRouter;
     private final ApiKeyAuthorization authorization;
+    private final ApiKeyRequestFeatureDetector featureDetector;
 
     public OpenAiGatewayController(
         ProviderRouteResolver routeResolver,
@@ -31,7 +33,8 @@ public class OpenAiGatewayController {
         InferenceCoordinator coordinator,
         OpenAiResponseWriter responseWriter,
         RandomInferenceRouter randomRouter,
-        ApiKeyAuthorization authorization
+        ApiKeyAuthorization authorization,
+        ApiKeyRequestFeatureDetector featureDetector
     ) {
         this.routeResolver = routeResolver;
         this.requestParser = requestParser;
@@ -39,6 +42,7 @@ public class OpenAiGatewayController {
         this.responseWriter = responseWriter;
         this.randomRouter = randomRouter;
         this.authorization = authorization;
+        this.featureDetector = featureDetector;
     }
 
     @PostMapping({
@@ -100,8 +104,10 @@ public class OpenAiGatewayController {
     ) {
         var model = request.path("model").asText("");
         var route = routeResolver.resolve(exchange.getRequest().getPath().value(), model);
+        var grant = authorization.grant(exchange);
         authorization.require(
-            exchange, authorization.protocol(protocol), route.providerId(), route.upstreamModel());
+            grant, authorization.protocol(protocol), route.providerId(), route.upstreamModel());
+        authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
         var canonical = requestParser.parse(protocol, route, request);
         return responseWriter.write(canonical, coordinator.execute(canonical), exchange);
     }
@@ -117,6 +123,7 @@ public class OpenAiGatewayController {
             throw new com.any2api.auth.ApiKeyScopeException(
                 "API key does not allow this protocol");
         }
+        authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
         return randomRouter.select(protocol, request, role, grant).flatMap(selection -> {
             var canonical = selection.request();
             exchange.getResponse().getHeaders().set(

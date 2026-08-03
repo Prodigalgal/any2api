@@ -74,7 +74,8 @@ public class RegistrationJobScheduler {
                 attempts = attempts + 1, failure_count = failure_count + 1,
                 consecutive_failure_batches = consecutive_failure_batches + 1,
                 last_error_class = 'LeaseExpired',
-                next_attempt_at = CURRENT_TIMESTAMP + INTERVAL '1 minute',
+                next_attempt_at = CURRENT_TIMESTAMP
+                    + GREATEST(round_interval_seconds, 60) * INTERVAL '1 second',
                 finished_at = CASE WHEN cancel_requested OR attempts + 1 >= requested
                     THEN CURRENT_TIMESTAMP ELSE finished_at END,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
@@ -94,7 +95,8 @@ public class RegistrationJobScheduler {
             FROM candidates WHERE job.id = candidates.id
             RETURNING job.id, job.provider_id, job.target, job.requested,
                       job.concurrency, job.attempts, job.success_count, job.failure_count,
-                      job.consecutive_failure_batches
+                      job.consecutive_failure_batches, job.attempt_interval_seconds,
+                      job.round_interval_seconds
             """)
             .param("limit", CLAIM_LIMIT).param("owner", owner)
             .param("leaseSeconds", Long.toString(LEASE_TTL.toSeconds()))
@@ -111,8 +113,10 @@ public class RegistrationJobScheduler {
         var payload = proxyPools.runtimeForProvider(
                 job.providerId(), ProxyTrafficScope.REGISTRATION)
             .<Map<String, ?>>map(pool -> Map.of("proxy_pool", pool)).orElseGet(Map::of);
+        var attemptInterval = Duration.ofSeconds(job.attemptIntervalSeconds());
         var operation = Flux.range(0, batch)
-            .flatMap(ignored -> automation.execute(job.providerId(), "register", payload)
+            .flatMap(attempt -> delayedStart(attempt, attemptInterval)
+                .then(automation.execute(job.providerId(), "register", payload))
                 .timeout(AUTOMATION_ATTEMPT_TIMEOUT)
                 .map(result -> importResult(job, result))
                 .onErrorResume(error -> Mono.just(Attempt.failed(error))), job.concurrency())
@@ -120,6 +124,11 @@ public class RegistrationJobScheduler {
             .doOnNext(results -> finalizeBatch(job, owner, results))
             .then();
         return withLeaseRenewal(operation, job, owner);
+    }
+
+    private Mono<Void> delayedStart(int attempt, Duration interval) {
+        if (attempt == 0 || interval.isZero()) return Mono.empty();
+        return Mono.delay(interval.multipliedBy(attempt)).then();
     }
 
     private Mono<Void> withLeaseRenewal(Mono<Void> operation, Job job, String owner) {
@@ -197,7 +206,9 @@ public class RegistrationJobScheduler {
                 .map(UUID::toString).toList();
             var errorClass = results.stream().filter(item -> !item.success())
                 .map(Attempt::errorClass).findFirst().orElse(null);
-            var delay = nextRegistrationDelay(job.id(), failureStreak, fullyFailed);
+            var delay = nextRegistrationDelay(
+                job.id(), failureStreak, fullyFailed,
+                Duration.ofSeconds(job.roundIntervalSeconds()));
             var updated = jdbc.sql("""
                 UPDATE registration_jobs SET status = CASE WHEN cancel_requested THEN 'CANCELLED' ELSE :status END,
                     attempts = :attempts, success_count = :successes, failure_count = :failures,
@@ -242,7 +253,9 @@ public class RegistrationJobScheduler {
                 .param("failureStreak", failureStreak)
                 .param("errorClass", error.getClass().getSimpleName())
                 .param("nextAttempt", PostgresResultValues.timestamp(
-                    Instant.now().plus(registrationDelay(job.id(), failureStreak))))
+                    Instant.now().plus(nextRegistrationDelay(
+                        job.id(), failureStreak, true,
+                        Duration.ofSeconds(job.roundIntervalSeconds())))))
                 .param("id", job.id()).param("owner", owner).update();
         });
     }
@@ -254,9 +267,22 @@ public class RegistrationJobScheduler {
     }
 
     static Duration nextRegistrationDelay(UUID jobId, int failureStreak, boolean fullyFailed) {
-        if (fullyFailed) return registrationDelay(jobId, failureStreak);
+        return nextRegistrationDelay(jobId, failureStreak, fullyFailed, Duration.ofSeconds(5));
+    }
+
+    static Duration nextRegistrationDelay(
+        UUID jobId,
+        int failureStreak,
+        boolean fullyFailed,
+        Duration roundInterval
+    ) {
+        if (fullyFailed) {
+            var backoff = registrationDelay(jobId, failureStreak);
+            return backoff.compareTo(roundInterval) >= 0 ? backoff : roundInterval;
+        }
+        if (roundInterval.isZero()) return Duration.ZERO;
         var jitter = Math.floorMod(31L * jobId.hashCode() + failureStreak, 10_000L);
-        return Duration.ofSeconds(5).plusMillis(jitter);
+        return roundInterval.plusMillis(jitter);
     }
 
     private static Instant instant(String value) {
@@ -268,12 +294,14 @@ public class RegistrationJobScheduler {
         return new Job(row.getObject("id", UUID.class), row.getString("provider_id"),
             row.getInt("target"), row.getInt("requested"), row.getInt("concurrency"),
             row.getInt("attempts"), row.getInt("success_count"), row.getInt("failure_count"),
-            row.getInt("consecutive_failure_batches"));
+            row.getInt("consecutive_failure_batches"),
+            row.getInt("attempt_interval_seconds"), row.getInt("round_interval_seconds"));
     }
 
     private record Job(
         UUID id, String providerId, int target, int maxAttempts, int concurrency,
-        int attempts, int successCount, int failureCount, int consecutiveFailureBatches
+        int attempts, int successCount, int failureCount, int consecutiveFailureBatches,
+        int attemptIntervalSeconds, int roundIntervalSeconds
     ) {}
 
     private record Attempt(boolean success, UUID accountId, String errorClass) {

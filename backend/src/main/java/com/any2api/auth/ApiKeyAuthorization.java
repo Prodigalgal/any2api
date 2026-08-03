@@ -28,6 +28,25 @@ public class ApiKeyAuthorization {
         require(grant(exchange), protocol, providerId, model);
     }
 
+    public void requireFeatures(
+        ApiKeyGrant grant,
+        Iterable<ApiKeyFeature> requiredFeatures
+    ) {
+        for (var feature : requiredFeatures) {
+            if (!grant.allowsFeature(feature)) {
+                throw new ApiKeyScopeException(
+                    "API key does not allow request feature: " + feature.name());
+            }
+        }
+    }
+
+    public void requireFeatures(
+        ServerWebExchange exchange,
+        Iterable<ApiKeyFeature> requiredFeatures
+    ) {
+        requireFeatures(grant(exchange), requiredFeatures);
+    }
+
     public void require(
         ApiKeyGrant grant,
         ApiKeyProtocol protocol,

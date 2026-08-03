@@ -159,7 +159,7 @@ class RandomInferenceRouterTest {
             UUID.randomUUID(), "client", Map.of(
                 "alpha", ApiKeyProviderScope.selectedModels(
                     "alpha", java.util.Set.of("allowed-model"))),
-            java.util.Set.of(ApiKeyProtocol.CHAT_COMPLETIONS), null, false);
+            java.util.Set.of(ApiKeyProtocol.CHAT_COMPLETIONS), java.util.Set.of(), null, false);
 
         var selected = router.select(
             CanonicalRequest.Protocol.CHAT_COMPLETIONS, request,

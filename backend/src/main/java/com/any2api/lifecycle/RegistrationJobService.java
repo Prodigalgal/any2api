@@ -18,6 +18,8 @@ import tools.jackson.databind.ObjectMapper;
 public class RegistrationJobService {
     private static final int MAX_TARGET = 1000;
     private static final int MAX_CONCURRENCY = 8;
+    private static final int MAX_ATTEMPT_INTERVAL_SECONDS = 3600;
+    private static final int MAX_ROUND_INTERVAL_SECONDS = 86400;
 
     private final JdbcClient jdbc;
     private final ProviderRegistry providers;
@@ -52,6 +54,10 @@ public class RegistrationJobService {
         attempts = effectiveMaxAttempts(
             attempts, automationProviders.registrationAttemptMode(command.providerId()));
         var concurrency = bounded(command.concurrency(), 1, MAX_CONCURRENCY, 1);
+        var attemptIntervalSeconds = bounded(
+            command.attemptIntervalSeconds(), 0, MAX_ATTEMPT_INTERVAL_SECONDS, 0);
+        var roundIntervalSeconds = bounded(
+            command.roundIntervalSeconds(), 0, MAX_ROUND_INTERVAL_SECONDS, 5);
         var key = command.idempotencyKey() == null || command.idempotencyKey().isBlank()
             ? "registration:" + command.providerId() + ":" + UUID.randomUUID()
             : command.idempotencyKey().trim();
@@ -59,9 +65,11 @@ public class RegistrationJobService {
         jdbc.sql("""
             INSERT INTO registration_jobs(
                 id, provider_id, status, idempotency_key, requested, target,
-                concurrency, request, result, next_attempt_at)
+                concurrency, attempt_interval_seconds, round_interval_seconds,
+                request, result, next_attempt_at)
             VALUES (:id, :provider, 'PENDING', :key, :requested, :target,
-                    :concurrency, '{}'::jsonb, '{"account_ids":[]}'::jsonb, CURRENT_TIMESTAMP)
+                    :concurrency, :attemptInterval, :roundInterval,
+                    '{}'::jsonb, '{"account_ids":[]}'::jsonb, CURRENT_TIMESTAMP)
             ON CONFLICT (idempotency_key) DO NOTHING
             """)
             .param("id", id)
@@ -70,6 +78,8 @@ public class RegistrationJobService {
             .param("requested", attempts)
             .param("target", target)
             .param("concurrency", concurrency)
+            .param("attemptInterval", attemptIntervalSeconds)
+            .param("roundInterval", roundIntervalSeconds)
             .update();
         return jdbc.sql("SELECT * FROM registration_jobs WHERE idempotency_key = :key")
             .param("key", key).query(this::map).single();
@@ -132,6 +142,7 @@ public class RegistrationJobService {
         return new RegistrationJobView(
             row.getObject("id", UUID.class), row.getString("provider_id"), row.getString("status"),
             row.getInt("target"), row.getInt("requested"), row.getInt("concurrency"),
+            row.getInt("attempt_interval_seconds"), row.getInt("round_interval_seconds"),
             row.getInt("attempts"), row.getInt("success_count"), row.getInt("failure_count"),
             row.getBoolean("cancel_requested"), row.getString("last_error_class"),
             rawResult == null ? null : mapper.readTree(rawResult),
@@ -142,7 +153,8 @@ public class RegistrationJobService {
 
     public record CreateCommand(
         String providerId, Integer target, Integer maxAttempts,
-        Integer concurrency, String idempotencyKey
+        Integer concurrency, Integer attemptIntervalSeconds,
+        Integer roundIntervalSeconds, String idempotencyKey
     ) {
         public CreateCommand {
             if (providerId == null || providerId.isBlank()) {

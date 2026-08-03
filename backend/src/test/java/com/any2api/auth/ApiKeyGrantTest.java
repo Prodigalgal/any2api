@@ -15,10 +15,13 @@ class ApiKeyGrantTest {
             Map.of(
                 "alpha", ApiKeyProviderScope.allModels("alpha"),
                 "beta", ApiKeyProviderScope.selectedModels("beta", Set.of("model-b"))),
-            Set.of(ApiKeyProtocol.CHAT_COMPLETIONS), null, false);
+            Set.of(ApiKeyProtocol.CHAT_COMPLETIONS),
+            Set.of(ApiKeyFeature.FILE_UPLOADS), null, false);
 
         assertThat(grant.allowsProtocol(ApiKeyProtocol.CHAT_COMPLETIONS)).isTrue();
         assertThat(grant.allowsProtocol(ApiKeyProtocol.RESPONSES)).isFalse();
+        assertThat(grant.allowsFeature(ApiKeyFeature.FILE_UPLOADS)).isTrue();
+        assertThat(grant.allowsFeature(ApiKeyFeature.TOOL_CALLING)).isFalse();
         assertThat(grant.allowsModel("alpha", "any-model")).isTrue();
         assertThat(grant.allowsModel("beta", "model-b")).isTrue();
         assertThat(grant.allowsModel("beta", "other-model")).isFalse();

@@ -12,6 +12,7 @@ public record ApiKeyGrant(
     String name,
     Map<String, ApiKeyProviderScope> providerScopes,
     Set<ApiKeyProtocol> protocols,
+    Set<ApiKeyFeature> features,
     Instant expiresAt,
     boolean fullAccess
 ) {
@@ -25,10 +26,11 @@ public record ApiKeyGrant(
         });
         providerScopes = Map.copyOf(copied);
         protocols = Set.copyOf(protocols);
+        features = Set.copyOf(features);
     }
 
     public static ApiKeyGrant unrestricted() {
-        return new ApiKeyGrant(null, "system", Map.of(), Set.of(), null, true);
+        return new ApiKeyGrant(null, "system", Map.of(), Set.of(), Set.of(), null, true);
     }
 
     public boolean allowsProtocol(ApiKeyProtocol protocol) {
@@ -37,6 +39,10 @@ public record ApiKeyGrant(
 
     public boolean allowsProvider(String providerId) {
         return fullAccess || providerScopes.containsKey(providerId);
+    }
+
+    public boolean allowsFeature(ApiKeyFeature feature) {
+        return fullAccess || features.contains(feature);
     }
 
     public boolean allowsModel(String providerId, String model) {

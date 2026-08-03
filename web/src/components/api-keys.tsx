@@ -41,6 +41,7 @@ import { useMemo, useState } from "react";
 import {
   api,
   providerOptions,
+  type ApiKeyFeature,
   type ApiKeyProtocol,
   type CreatedDistributionApiKey,
   type DistributionApiKey,
@@ -52,6 +53,12 @@ const protocolOptions: Array<[ApiKeyProtocol, string]> = [
   ["CHAT_COMPLETIONS", "Chat Completions"],
   ["RESPONSES", "Responses"],
   ["IMAGES", "Images"],
+];
+
+const featureOptions: Array<[ApiKeyFeature, string]> = [
+  ["MULTIMODAL_INPUT", "多模态输入"],
+  ["FILE_UPLOADS", "文件上传"],
+  ["TOOL_CALLING", "工具调用"],
 ];
 
 export function ApiKeys() {
@@ -101,13 +108,14 @@ export function ApiKeys() {
       <DataSurface>
         {keys.isFetching ? <LinearProgress sx={{ position: "absolute", inset: "0 0 auto", height: 2 }} /> : null}
         <TableContainer>
-          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 930 }}>
+          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 1040 }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 130 }}>名称</TableCell>
                 <TableCell sx={{ width: 110 }}>密钥前缀</TableCell>
                 <TableCell sx={{ width: 220 }}>厂商与模型范围</TableCell>
                 <TableCell sx={{ width: 145 }}>协议</TableCell>
+                <TableCell sx={{ width: 145 }}>请求功能</TableCell>
                 <TableCell sx={{ width: 110 }}>最近使用</TableCell>
                 <TableCell sx={{ width: 110 }}>到期时间</TableCell>
                 <TableCell align="center" sx={{ width: 55 }}>启用</TableCell>
@@ -130,7 +138,7 @@ export function ApiKeys() {
               ))}
               {!keys.isLoading && !keys.data?.length ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ height: 260, color: "text.secondary" }}>
+                  <TableCell colSpan={9} align="center" sx={{ height: 260, color: "text.secondary" }}>
                     <KeyOutlined sx={{ display: "block", mx: "auto", mb: 1, fontSize: 25, color: "#95a2a7" }} />
                     暂无分发密钥
                   </TableCell>
@@ -208,6 +216,13 @@ function ApiKeyRow({
           {apiKey.protocols.map(protocolLabel).join(" · ")}
         </Typography>
       </TableCell>
+      <TableCell>
+        <Typography sx={{ fontSize: 11.5 }}>
+          {(apiKey.features ?? []).length
+            ? apiKey.features.map(featureLabel).join(" · ")
+            : "仅文本"}
+        </Typography>
+      </TableCell>
       <TableCell>{formatTime(apiKey.lastUsedAt)}</TableCell>
       <TableCell>{formatTime(apiKey.expiresAt)}</TableCell>
       <TableCell align="center">
@@ -253,11 +268,13 @@ function CreateApiKeyDialog({
   const [protocols, setProtocols] = useState<Set<ApiKeyProtocol>>(
     new Set(["CHAT_COMPLETIONS", "RESPONSES"]),
   );
+  const [features, setFeatures] = useState<Set<ApiKeyFeature>>(new Set());
   const create = useMutation({
     mutationFn: () => api.createApiKey({
       name,
       expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
       protocols: [...protocols],
+      features: [...features],
       providerModels: Object.fromEntries([...selectedProviders].map((provider) => [
         provider,
         allModels.has(provider) ? [] : (selectedModels[provider] ?? []),
@@ -303,6 +320,29 @@ function CreateApiKeyDialog({
                       onChange={(_, checked) => setProtocols((current) => {
                         const next = new Set(current);
                         if (checked) next.add(protocol); else next.delete(protocol);
+                        return next;
+                      })}
+                    />
+                  }
+                />
+              ))}
+            </FormGroup>
+          </Box>
+
+          <Box>
+            <Typography sx={{ mb: 0.75, fontSize: 12.5, fontWeight: 700 }}>允许请求功能</Typography>
+            <FormGroup row sx={{ gap: 2 }}>
+              {featureOptions.map(([feature, label]) => (
+                <FormControlLabel
+                  key={feature}
+                  label={label}
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={features.has(feature)}
+                      onChange={(_, checked) => setFeatures((current) => {
+                        const next = new Set(current);
+                        if (checked) next.add(feature); else next.delete(feature);
                         return next;
                       })}
                     />
@@ -453,6 +493,10 @@ function groupModels(models: Array<{ id: string; owned_by: string }>) {
 
 function protocolLabel(protocol: ApiKeyProtocol) {
   return protocolOptions.find(([value]) => value === protocol)?.[1] ?? protocol;
+}
+
+function featureLabel(feature: ApiKeyFeature) {
+  return featureOptions.find(([value]) => value === feature)?.[1] ?? feature;
 }
 
 function formatTime(value: string | null) {

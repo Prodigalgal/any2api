@@ -43,4 +43,18 @@ class RegistrationJobSchedulerTest {
         assertThat(RegistrationJobScheduler.LEASE_RENEW_INTERVAL)
             .isLessThan(RegistrationJobScheduler.LEASE_TTL);
     }
+
+    @Test
+    void configuredRoundIntervalIsPreservedAndFailureBackoffRemainsTheFloor() {
+        var jobId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+        assertThat(RegistrationJobScheduler.nextRegistrationDelay(
+            jobId, 0, false, Duration.ZERO)).isZero();
+        assertThat(RegistrationJobScheduler.nextRegistrationDelay(
+            jobId, 0, false, Duration.ofMinutes(2)))
+            .isBetween(Duration.ofMinutes(2), Duration.ofMinutes(2).plusSeconds(10));
+        assertThat(RegistrationJobScheduler.nextRegistrationDelay(
+            jobId, 1, true, Duration.ofMinutes(5)))
+            .isEqualTo(Duration.ofMinutes(5));
+    }
 }

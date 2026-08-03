@@ -1,6 +1,7 @@
 package com.any2api.api.openai;
 
 import com.any2api.auth.ApiKeyAuthorization;
+import com.any2api.auth.ApiKeyFeature;
 import com.any2api.auth.ApiKeyProtocol;
 import com.any2api.media.MediaAssetService;
 import com.any2api.media.MediaCoordinator;
@@ -70,6 +71,7 @@ public final class OpenAiImagesController {
         consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
     public Mono<Map<String, Object>> edit(ServerWebExchange exchange) {
+        authorization.requireFeatures(exchange, java.util.Set.of(ApiKeyFeature.FILE_UPLOADS));
         return exchange.getMultipartData().flatMap(parts -> {
             var model = form(parts.getFirst("model"), "");
             var route = routes.resolve(exchange.getRequest().getPath().value(), model);

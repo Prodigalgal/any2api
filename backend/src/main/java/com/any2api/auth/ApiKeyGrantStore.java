@@ -22,6 +22,10 @@ final class ApiKeyGrantStore {
         SELECT 3 AS kind, NULL::VARCHAR AS provider_id, protocol AS value, FALSE AS all_models
         FROM api_key_protocol_grants
         WHERE api_key_id = :apiKeyId
+        UNION ALL
+        SELECT 4 AS kind, NULL::VARCHAR AS provider_id, feature AS value, FALSE AS all_models
+        FROM api_key_feature_grants
+        WHERE api_key_id = :apiKeyId
         ORDER BY kind, provider_id, value
         """;
 
@@ -34,8 +38,11 @@ final class ApiKeyGrantStore {
     void replace(
         UUID apiKeyId,
         Map<String, ApiKeyProviderScope> providerScopes,
-        Set<ApiKeyProtocol> protocols
+        Set<ApiKeyProtocol> protocols,
+        Set<ApiKeyFeature> features
     ) {
+        jdbc.sql("DELETE FROM api_key_feature_grants WHERE api_key_id = :apiKeyId")
+            .param("apiKeyId", apiKeyId).update();
         jdbc.sql("DELETE FROM api_key_protocol_grants WHERE api_key_id = :apiKeyId")
             .param("apiKeyId", apiKeyId).update();
         jdbc.sql("DELETE FROM api_key_provider_grants WHERE api_key_id = :apiKeyId")
@@ -66,11 +73,19 @@ final class ApiKeyGrantStore {
             .param("apiKeyId", apiKeyId)
             .param("protocol", protocol.name())
             .update());
+        features.forEach(feature -> jdbc.sql("""
+            INSERT INTO api_key_feature_grants(api_key_id, feature)
+            VALUES (:apiKeyId, :feature)
+            """)
+            .param("apiKeyId", apiKeyId)
+            .param("feature", feature.name())
+            .update());
     }
 
     ApiKeyGrant read(ApiKeyEntity key) {
         var providers = new LinkedHashMap<String, MutableProviderScope>();
         var protocols = new LinkedHashSet<ApiKeyProtocol>();
+        var features = new LinkedHashSet<ApiKeyFeature>();
         jdbc.sql(GRANT_QUERY)
             .param("apiKeyId", key.getId())
             .query((result, rowNumber) -> new GrantRow(
@@ -92,6 +107,12 @@ final class ApiKeyGrantStore {
                     } catch (IllegalArgumentException ignored) {
                         // Unknown persisted permissions fail closed.
                     }
+                } else if (row.kind() == 4) {
+                    try {
+                        features.add(ApiKeyFeature.valueOf(row.value()));
+                    } catch (IllegalArgumentException ignored) {
+                        // Unknown persisted permissions fail closed.
+                    }
                 }
             });
 
@@ -105,7 +126,8 @@ final class ApiKeyGrantStore {
             }
         });
         return new ApiKeyGrant(
-            key.getId(), key.getName(), immutable, protocols, key.getExpiresAt(), false);
+            key.getId(), key.getName(), immutable, protocols, features,
+            key.getExpiresAt(), false);
     }
 
     private record GrantRow(int kind, String providerId, String value, boolean allModels) {}

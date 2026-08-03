@@ -50,6 +50,8 @@ public class ApiKeyService {
         var providerScopes = normalizedScopes(command.providerModels());
         var protocols = command.protocols() == null ? Set.<ApiKeyProtocol>of()
             : Set.copyOf(command.protocols());
+        var features = command.features() == null ? Set.<ApiKeyFeature>of()
+            : Set.copyOf(command.features());
         if (protocols.isEmpty()) {
             throw new IllegalArgumentException("at least one API key protocol is required");
         }
@@ -64,7 +66,7 @@ public class ApiKeyService {
             name, prefix, ApiKeyAuthenticator.hash(secret),
             command.expiresAt());
         entity = keys.saveAndFlush(entity);
-        grantStore.replace(entity.getId(), providerScopes, protocols);
+        grantStore.replace(entity.getId(), providerScopes, protocols, features);
         return new Created(view(entity), secret);
     }
 
@@ -161,6 +163,7 @@ public class ApiKeyService {
         String name,
         Map<String, List<String>> providerModels,
         Set<ApiKeyProtocol> protocols,
+        Set<ApiKeyFeature> features,
         Instant expiresAt
     ) {}
 
@@ -173,6 +176,7 @@ public class ApiKeyService {
         boolean enabled,
         Map<String, List<String>> providerModels,
         Set<ApiKeyProtocol> protocols,
+        Set<ApiKeyFeature> features,
         Instant lastUsedAt,
         Instant expiresAt,
         Instant createdAt,
@@ -181,7 +185,7 @@ public class ApiKeyService {
         static View from(ApiKeyEntity key, ApiKeyGrant grant) {
             return new View(
                 key.getId(), key.getName(), key.getPrefix(), key.isEnabled(),
-                grant.providerModels(), grant.protocols(), key.getLastUsedAt(),
+                grant.providerModels(), grant.protocols(), grant.features(), key.getLastUsedAt(),
                 key.getExpiresAt(), key.getCreatedAt(), key.getUpdatedAt());
         }
     }

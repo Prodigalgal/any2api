@@ -40,14 +40,16 @@ class ApiKeyServiceTest {
             return new ApiKeyGrant(
                 key.getId(), key.getName(),
                 Map.of("mimo", ApiKeyProviderScope.allModels("mimo")),
-                Set.of(ApiKeyProtocol.CHAT_COMPLETIONS), key.getExpiresAt(), false);
+                Set.of(ApiKeyProtocol.CHAT_COMPLETIONS),
+                Set.of(ApiKeyFeature.FILE_UPLOADS), key.getExpiresAt(), false);
         });
         var service = new ApiKeyService(
             keys, grants, authenticator, providers, mock(JdbcClient.class));
 
         var created = service.create(new ApiKeyService.CreateCommand(
             "desktop client", Map.of("mimo", List.of()),
-            Set.of(ApiKeyProtocol.CHAT_COMPLETIONS), null));
+            Set.of(ApiKeyProtocol.CHAT_COMPLETIONS),
+            Set.of(ApiKeyFeature.FILE_UPLOADS), null));
 
         var entity = ArgumentCaptor.forClass(ApiKeyEntity.class);
         verify(keys).saveAndFlush(entity.capture());
@@ -59,7 +61,8 @@ class ApiKeyServiceTest {
         verify(grants).replace(
             entity.getValue().getId(),
             Map.of("mimo", ApiKeyProviderScope.allModels("mimo")),
-            Set.of(ApiKeyProtocol.CHAT_COMPLETIONS));
+            Set.of(ApiKeyProtocol.CHAT_COMPLETIONS),
+            Set.of(ApiKeyFeature.FILE_UPLOADS));
     }
 
     @Test

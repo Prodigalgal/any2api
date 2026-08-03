@@ -12,10 +12,16 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
+import java.util.regex.Pattern;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class PublicApiKeyWebFilter implements WebFilter {
+    private static final Pattern ROOT_INFERENCE_PATH = Pattern.compile("^/v1(?:/.*)?$");
+    private static final Pattern RANDOM_INFERENCE_PATH = Pattern.compile(
+        "^/(?:random|multimodal-random)/v1(?:/.*)?$");
+    private static final Pattern PROVIDER_INFERENCE_PATH = Pattern.compile(
+        "^/[a-z][a-z0-9_-]{1,31}/v1(?:/.*)?$");
 
     private final Any2ApiProperties properties;
     private final ApiKeyAuthenticator authenticator;
@@ -52,9 +58,10 @@ public class PublicApiKeyWebFilter implements WebFilter {
             });
     }
 
-    private boolean isInferencePath(String path) {
-        return path.startsWith("/v1/")
-            || path.matches("^/[a-z][a-z0-9_-]{1,31}/v1(?:/.*)?$");
+    static boolean isInferencePath(String path) {
+        return ROOT_INFERENCE_PATH.matcher(path).matches()
+            || RANDOM_INFERENCE_PATH.matcher(path).matches()
+            || PROVIDER_INFERENCE_PATH.matcher(path).matches();
     }
 
     private boolean constantTimeEquals(String left, String right) {

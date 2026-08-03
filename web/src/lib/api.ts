@@ -125,6 +125,8 @@ export type RegistrationJob = {
   target: number;
   maxAttempts: number;
   concurrency: number;
+  attemptIntervalSeconds: number;
+  roundIntervalSeconds: number;
   attempts: number;
   successCount: number;
   failureCount: number;
@@ -152,6 +154,7 @@ export type ProxyPool = {
 export type ProxyTrafficScope = "REGISTRATION" | "LIFECYCLE" | "INFERENCE";
 
 export type ApiKeyProtocol = "CHAT_COMPLETIONS" | "RESPONSES" | "IMAGES";
+export type ApiKeyFeature = "MULTIMODAL_INPUT" | "FILE_UPLOADS" | "TOOL_CALLING";
 
 export type DistributionApiKey = {
   id: string;
@@ -160,6 +163,7 @@ export type DistributionApiKey = {
   enabled: boolean;
   providerModels: Record<string, string[]>;
   protocols: ApiKeyProtocol[];
+  features: ApiKeyFeature[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;

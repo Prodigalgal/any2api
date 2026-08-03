@@ -16,10 +16,14 @@ from .security import require_internal_token
 
 application_logger = logging.getLogger("any2api_automation")
 application_logger.setLevel(settings().log_level)
-uvicorn_logger = logging.getLogger("uvicorn.error")
-if uvicorn_logger.handlers:
-    application_logger.handlers = list(uvicorn_logger.handlers)
-    application_logger.propagate = False
+uvicorn_handlers = logging.getLogger("uvicorn").handlers
+if uvicorn_handlers:
+    application_logger.handlers = list(uvicorn_handlers)
+elif not application_logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s: %(name)s %(message)s"))
+    application_logger.addHandler(handler)
+application_logger.propagate = False
 
 
 @asynccontextmanager

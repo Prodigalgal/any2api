@@ -1,8 +1,14 @@
+import logging
+
 from fastapi.testclient import TestClient
 
 from any2api_automation.main import app
 
 client = TestClient(app)
+
+
+def test_application_logger_has_an_output_handler() -> None:
+    assert logging.getLogger("any2api_automation").handlers
 
 
 def test_live_health() -> None:

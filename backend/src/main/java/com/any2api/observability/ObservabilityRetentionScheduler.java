@@ -2,6 +2,7 @@ package com.any2api.observability;
 
 import com.any2api.config.Any2ApiProperties;
 import com.any2api.coordination.PostgresAdvisoryLocks;
+import com.any2api.persistence.PostgresResultValues;
 import java.time.Instant;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -46,7 +47,8 @@ public class ObservabilityRetentionScheduler {
                 WHERE status <> 'RUNNING' AND started_at < :cutoff
                 ORDER BY started_at LIMIT :batchSize
             )
-            """).param("cutoff", cutoff).param("batchSize", BATCH_SIZE).update();
+            """).param("cutoff", PostgresResultValues.timestamp(cutoff))
+            .param("batchSize", BATCH_SIZE).update();
     }
 
     private void deleteUsageEvents() {
@@ -58,6 +60,7 @@ public class ObservabilityRetentionScheduler {
                 WHERE created_at < :cutoff
                 ORDER BY created_at LIMIT :batchSize
             )
-            """).param("cutoff", cutoff).param("batchSize", BATCH_SIZE).update();
+            """).param("cutoff", PostgresResultValues.timestamp(cutoff))
+            .param("batchSize", BATCH_SIZE).update();
     }
 }

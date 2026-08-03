@@ -1,5 +1,6 @@
 package com.any2api.observability;
 
+import com.any2api.persistence.PostgresResultValues;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
@@ -124,7 +125,7 @@ public final class InferenceTelemetryService {
                 .param("cacheReadTokens", snapshot.cacheReadTokens())
                 .param("durationMs", snapshot.durationMs())
                 .param("errorClass", snapshot.errorCode())
-                .param("createdAt", startedAt)
+                .param("createdAt", PostgresResultValues.timestamp(startedAt))
                 .update();
         }
 

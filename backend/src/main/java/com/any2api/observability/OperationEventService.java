@@ -60,7 +60,7 @@ public final class OperationEventService {
             .param("aggregateType", started.aggregateType())
             .param("aggregateId", started.aggregateId())
             .param("attempt", started.attempt())
-            .param("startedAt", started.startedAt())
+            .param("startedAt", PostgresResultValues.timestamp(started.startedAt()))
             .update();
         log.info(
             "operation_started correlation_id={} domain={} provider={} operation={} aggregate_type={} aggregate_id={} attempt={}",
@@ -130,7 +130,8 @@ public final class OperationEventService {
             .param("status", status).param("stage", normalized(stage, "completed"))
             .param("errorCode", failure == null ? null : failure.code())
             .param("errorDetail", failure == null ? null : failure.detail())
-            .param("duration", duration).param("finishedAt", finishedAt)
+            .param("duration", duration)
+            .param("finishedAt", PostgresResultValues.timestamp(finishedAt))
             .param("id", started.id()).update();
         if (updated != 1) return;
         Timer.builder("any2api.operation.duration")

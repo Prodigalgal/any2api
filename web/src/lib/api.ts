@@ -127,6 +127,8 @@ export type RegistrationJob = {
   concurrency: number;
   attemptIntervalSeconds: number;
   roundIntervalSeconds: number;
+  aiCaptchaEnabled: boolean;
+  aiCaptchaMode: CaptchaAiMode;
   attempts: number;
   successCount: number;
   failureCount: number;
@@ -141,6 +143,8 @@ export type RegistrationJob = {
   updatedAt: string;
   finishedAt: string | null;
 };
+
+export type CaptchaAiMode = "AUTO" | "INTERNAL" | "EXTERNAL";
 
 export type OperationEvent = {
   id: string;

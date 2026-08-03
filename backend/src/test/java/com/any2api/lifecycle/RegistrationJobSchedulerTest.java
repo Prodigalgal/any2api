@@ -6,6 +6,7 @@ import com.any2api.account.AccountStatus;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 class RegistrationJobSchedulerTest {
 
@@ -56,5 +57,21 @@ class RegistrationJobSchedulerTest {
         assertThat(RegistrationJobScheduler.nextRegistrationDelay(
             jobId, 1, true, Duration.ofMinutes(5)))
             .isEqualTo(Duration.ofMinutes(5));
+    }
+
+    @Test
+    void registrationPayloadPreservesCaptchaPolicyForTheProviderWorker() {
+        var mapper = new ObjectMapper();
+        var request = mapper.createObjectNode();
+        request.set("captcha", RegistrationCaptchaPolicy.resolve(
+            true, RegistrationCaptchaPolicy.AiMode.EXTERNAL).toWire(mapper));
+
+        var payload = RegistrationJobScheduler.registrationPayload(request, mapper);
+
+        assertThat(payload).containsKey("captcha");
+        assertThat(mapper.valueToTree(payload.get("captcha")).path("ai_enabled").asBoolean())
+            .isTrue();
+        assertThat(mapper.valueToTree(payload.get("captcha")).path("ai_mode").asText())
+            .isEqualTo("external");
     }
 }

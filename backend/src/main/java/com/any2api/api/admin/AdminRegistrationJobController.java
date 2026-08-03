@@ -48,7 +48,8 @@ public class AdminRegistrationJobController {
         return jobs.create(new RegistrationJobService.CreateCommand(
             request.providerId(), request.target(), request.maxAttempts(),
             request.concurrency(), request.attemptIntervalSeconds(),
-            request.roundIntervalSeconds(), request.idempotencyKey()));
+            request.roundIntervalSeconds(), request.aiCaptchaEnabled(),
+            request.aiCaptchaMode(), request.idempotencyKey()));
     }
 
     @PostMapping("/{jobId}/cancel")
@@ -57,6 +58,8 @@ public class AdminRegistrationJobController {
     public record CreateRequest(
         String providerId, Integer target, Integer maxAttempts,
         Integer concurrency, Integer attemptIntervalSeconds,
-        Integer roundIntervalSeconds, String idempotencyKey
+        Integer roundIntervalSeconds, Boolean aiCaptchaEnabled,
+        com.any2api.lifecycle.RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
+        String idempotencyKey
     ) {}
 }

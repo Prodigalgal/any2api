@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw
 from any2api_automation.lifecycle.browser import BrowserResult
 from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationTrace
+from any2api_automation.observability import OperationFailure
 from any2api_automation.providers import provider_registry
 from any2api_automation.providers.deepseek import (
     DeepseekAutomationProvider,
@@ -40,6 +41,29 @@ def test_manifest_is_discovered_with_full_lifecycle_operations() -> None:
         "hcaptcha_grid",
         "hcaptcha_semantic_drag",
     )
+
+
+@pytest.mark.asyncio
+async def test_unavailable_external_captcha_ai_fails_before_mailbox_creation(monkeypatch) -> None:
+    async def unexpected_prepare(*args, **kwargs):
+        raise AssertionError("mailbox must not be created")
+
+    monkeypatch.setattr(
+        "any2api_automation.providers.deepseek.registry.visual_ai_available",
+        lambda policy: False,
+    )
+    monkeypatch.setattr(
+        "any2api_automation.providers.deepseek.prepare_registration", unexpected_prepare
+    )
+
+    with pytest.raises(OperationFailure) as raised:
+        await DeepseekAutomationProvider().register(
+            {"captcha": {"ai_enabled": True, "ai_mode": "external"}}
+        )
+
+    assert raised.value.code == "challenge_failed"
+    assert raised.value.stage == "started"
+    assert "external is unavailable" in raised.value.message
 
 
 def test_request_profile_uses_observed_official_headers() -> None:

@@ -116,11 +116,11 @@ public class RegistrationJobScheduler {
             RETURNING job.id, job.provider_id, job.target, job.requested,
                       job.concurrency, job.attempts, job.success_count, job.failure_count,
                       job.consecutive_failure_batches, job.attempt_interval_seconds,
-                      job.round_interval_seconds
+                      job.round_interval_seconds, job.request
             """)
             .param("limit", CLAIM_LIMIT).param("owner", owner)
             .param("leaseSeconds", Long.toString(LEASE_TTL.toSeconds()))
-            .query(RegistrationJobScheduler::mapJob).list();
+            .query(this::mapJob).list();
     }
 
     private Mono<Void> execute(Job job, String owner) {
@@ -130,9 +130,9 @@ public class RegistrationJobScheduler {
         if (batch <= 0) {
             return Mono.fromRunnable(() -> finalizeBatch(job, owner, List.of()));
         }
-        var payload = proxyPools.runtimeForProvider(
-                job.providerId(), ProxyTrafficScope.REGISTRATION)
-            .<Map<String, ?>>map(pool -> Map.of("proxy_pool", pool)).orElseGet(Map::of);
+        var payload = registrationPayload(job.request(), mapper);
+        proxyPools.runtimeForProvider(job.providerId(), ProxyTrafficScope.REGISTRATION)
+            .ifPresent(pool -> payload.put("proxy_pool", pool));
         var attemptInterval = Duration.ofSeconds(job.attemptIntervalSeconds());
         var operation = Flux.range(0, batch)
             .flatMap(attempt -> delayedStart(attempt, attemptInterval)
@@ -171,6 +171,15 @@ public class RegistrationJobScheduler {
     private Mono<Void> delayedStart(int attempt, Duration interval) {
         if (attempt == 0 || interval.isZero()) return Mono.empty();
         return Mono.delay(interval.multipliedBy(attempt)).then();
+    }
+
+    static HashMap<String, Object> registrationPayload(JsonNode request, ObjectMapper mapper) {
+        var payload = new HashMap<String, Object>();
+        if (request != null && request.isObject()) {
+            payload.putAll(mapper.convertValue(
+                request, new TypeReference<Map<String, Object>>() {}));
+        }
+        return payload;
     }
 
     private Mono<Void> withLeaseRenewal(Mono<Void> operation, Job job, String owner) {
@@ -349,18 +358,19 @@ public class RegistrationJobScheduler {
         catch (RuntimeException ignored) { return null; }
     }
 
-    private static Job mapJob(ResultSet row, int ignored) throws SQLException {
+    private Job mapJob(ResultSet row, int ignored) throws SQLException {
         return new Job(row.getObject("id", UUID.class), row.getString("provider_id"),
             row.getInt("target"), row.getInt("requested"), row.getInt("concurrency"),
             row.getInt("attempts"), row.getInt("success_count"), row.getInt("failure_count"),
             row.getInt("consecutive_failure_batches"),
-            row.getInt("attempt_interval_seconds"), row.getInt("round_interval_seconds"));
+            row.getInt("attempt_interval_seconds"), row.getInt("round_interval_seconds"),
+            mapper.readTree(row.getString("request")));
     }
 
     private record Job(
         UUID id, String providerId, int target, int maxAttempts, int concurrency,
         int attempts, int successCount, int failureCount, int consecutiveFailureBatches,
-        int attemptIntervalSeconds, int roundIntervalSeconds
+        int attemptIntervalSeconds, int roundIntervalSeconds, JsonNode request
     ) {}
 
     private record Attempt(

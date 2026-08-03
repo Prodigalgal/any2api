@@ -10,6 +10,7 @@ from typing import Any
 
 from PIL import Image, ImageStat
 
+from ..captcha.policy import CaptchaAiPolicy
 from ..captcha.registry import registry
 from .deepseek_settings import settings
 
@@ -20,7 +21,13 @@ class DeepseekHcaptchaChallenge:
     def __init__(self) -> None:
         self.last_diagnostic = "not_started"
 
-    def solve(self, page: Any, *, completed: Callable[[], bool] | None = None) -> None:
+    def solve(
+        self,
+        page: Any,
+        *,
+        completed: Callable[[], bool] | None = None,
+        ai_policy: CaptchaAiPolicy | None = None,
+    ) -> None:
         config = settings()
         deadline = time.monotonic() + config.deepseek_hcaptcha_timeout_seconds
         idle_deadline = time.monotonic() + 20
@@ -75,6 +82,7 @@ class DeepseekHcaptchaChallenge:
                 "decimal fractions from 0.0 to 1.0 relative to the supplied task image; never "
                 "return pixel coordinates or values above 1. Do not click the submit button.",
                 timeout_seconds=max(10, deadline - time.monotonic()),
+                ai_policy=ai_policy,
             )
             if not actions or any(action.type not in {"click", "drag"} for action in actions):
                 self.last_diagnostic = "solver_rejected:" + registry.visual_diagnostic()

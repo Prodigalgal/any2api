@@ -58,6 +58,10 @@ public class RegistrationJobService {
             command.attemptIntervalSeconds(), 0, MAX_ATTEMPT_INTERVAL_SECONDS, 0);
         var roundIntervalSeconds = bounded(
             command.roundIntervalSeconds(), 0, MAX_ROUND_INTERVAL_SECONDS, 5);
+        var captcha = RegistrationCaptchaPolicy.resolve(
+            command.aiCaptchaEnabled(), command.aiCaptchaMode());
+        var request = mapper.createObjectNode();
+        request.set("captcha", captcha.toWire(mapper));
         var key = command.idempotencyKey() == null || command.idempotencyKey().isBlank()
             ? "registration:" + command.providerId() + ":" + UUID.randomUUID()
             : command.idempotencyKey().trim();
@@ -69,7 +73,7 @@ public class RegistrationJobService {
                 request, result, next_attempt_at)
             VALUES (:id, :provider, 'PENDING', :key, :requested, :target,
                     :concurrency, :attemptInterval, :roundInterval,
-                    '{}'::jsonb, '{"account_ids":[]}'::jsonb, CURRENT_TIMESTAMP)
+                    CAST(:request AS jsonb), '{"account_ids":[]}'::jsonb, CURRENT_TIMESTAMP)
             ON CONFLICT (idempotency_key) DO NOTHING
             """)
             .param("id", id)
@@ -80,6 +84,7 @@ public class RegistrationJobService {
             .param("concurrency", concurrency)
             .param("attemptInterval", attemptIntervalSeconds)
             .param("roundInterval", roundIntervalSeconds)
+            .param("request", request.toString())
             .update();
         return jdbc.sql("SELECT * FROM registration_jobs WHERE idempotency_key = :key")
             .param("key", key).query(this::map).single();
@@ -138,11 +143,15 @@ public class RegistrationJobService {
     }
 
     private RegistrationJobView map(ResultSet row, int ignored) throws SQLException {
+        var rawRequest = row.getString("request");
+        var request = rawRequest == null ? mapper.createObjectNode() : mapper.readTree(rawRequest);
+        var captcha = RegistrationCaptchaPolicy.from(request);
         var rawResult = row.getString("result");
         return new RegistrationJobView(
             row.getObject("id", UUID.class), row.getString("provider_id"), row.getString("status"),
             row.getInt("target"), row.getInt("requested"), row.getInt("concurrency"),
             row.getInt("attempt_interval_seconds"), row.getInt("round_interval_seconds"),
+            captcha.aiEnabled(), captcha.aiMode(),
             row.getInt("attempts"), row.getInt("success_count"), row.getInt("failure_count"),
             row.getBoolean("cancel_requested"), row.getString("last_error_class"),
             row.getString("last_error_code"), row.getString("last_error_stage"),
@@ -156,7 +165,8 @@ public class RegistrationJobService {
     public record CreateCommand(
         String providerId, Integer target, Integer maxAttempts,
         Integer concurrency, Integer attemptIntervalSeconds,
-        Integer roundIntervalSeconds, String idempotencyKey
+        Integer roundIntervalSeconds, Boolean aiCaptchaEnabled,
+        RegistrationCaptchaPolicy.AiMode aiCaptchaMode, String idempotencyKey
     ) {
         public CreateCommand {
             if (providerId == null || providerId.isBlank()) {

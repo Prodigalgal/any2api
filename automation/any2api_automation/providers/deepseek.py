@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, urlparse
 
 from curl_cffi.requests import Session as CurlSession
 
+from ..captcha.policy import CaptchaAiPolicy
+from ..captcha.registry import registry
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
@@ -64,6 +66,9 @@ class DeepseekAutomationProvider(AutomationProvider):
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace = RegistrationTrace(self.manifest.id)
         try:
+            captcha_policy = CaptchaAiPolicy.from_payload(payload)
+            if captcha_policy.enabled and not registry.visual_ai_available(captcha_policy):
+                raise RuntimeError(f"DeepSeek captcha AI mode {captcha_policy.mode} is unavailable")
             mail, mailbox, password = await prepare_registration(
                 payload,
                 password_policy=RegistrationPasswordPolicy(
@@ -80,6 +85,7 @@ class DeepseekAutomationProvider(AutomationProvider):
                 mailbox,
                 password,
                 trace,
+                captcha_policy,
             )
             return result.response()
         except Exception as error:
@@ -156,14 +162,16 @@ async def _run_registration_browser(
     mailbox: Mailbox,
     password: str,
     trace: RegistrationTrace,
+    captcha_policy: CaptchaAiPolicy | None = None,
 ) -> BrowserResult:
+    captcha_policy = captcha_policy or CaptchaAiPolicy()
     attempts = settings().deepseek_registration_browser_attempts
     for attempt in range(1, attempts + 1):
         try:
             return await asyncio.to_thread(
                 run_browser_flow,
                 lambda page, context, backend, proxy_url: _register_browser(
-                    page, backend, mail, mailbox, password, trace
+                    page, backend, mail, mailbox, password, trace, captcha_policy
                 ),
                 preferred=provider.manifest.browser_backend,
                 fallback=provider.manifest.fallback_backend,
@@ -206,6 +214,7 @@ def _register_browser(
     mailbox: Mailbox,
     password: str,
     trace: RegistrationTrace,
+    captcha_policy: CaptchaAiPolicy,
 ) -> BrowserResult:
     base_url = settings().deepseek_base_url.rstrip("/")
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
@@ -241,7 +250,11 @@ def _register_browser(
     try:
         send.click()
         try:
-            challenge.solve(page, completed=lambda: bool(code_responses))
+            challenge.solve(
+                page,
+                completed=lambda: bool(code_responses),
+                ai_policy=captcha_policy,
+            )
         except Exception as error:
             raise RuntimeError(
                 "DeepSeek hCaptcha failed "
@@ -329,6 +342,8 @@ def _register_browser(
             "captcha": challenge.last_diagnostic,
             "birthday": birthday,
             "registration_backend": backend,
+            "captcha_ai_enabled": captcha_policy.enabled,
+            "captcha_ai_mode": captcha_policy.mode,
             "inference_probe_required": True,
         },
         ready_for_inference=False,

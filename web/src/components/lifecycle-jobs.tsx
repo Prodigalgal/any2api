@@ -15,6 +15,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   LinearProgress,
   MenuItem,
   Stack,
@@ -27,11 +28,20 @@ import {
   TextField,
   Tooltip,
   IconButton,
+  Switch,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, providerOptions, type ProviderOption, type RegistrationJob } from "@/lib/api";
+import {
+  api,
+  providerOptions,
+  type CaptchaAiMode,
+  type ProviderOption,
+  type RegistrationJob,
+} from "@/lib/api";
 import { OperationEventsDialog } from "@/components/operation-events-dialog";
 import {
   DataSurface,
@@ -106,7 +116,7 @@ export function LifecycleJobs() {
           <Table size="small">
             <TableHead><TableRow>
               <TableCell>厂商</TableCell><TableCell>状态</TableCell><TableCell>进度</TableCell>
-              <TableCell>尝试</TableCell><TableCell>并发</TableCell><TableCell>节流</TableCell><TableCell>最近错误</TableCell>
+              <TableCell>尝试</TableCell><TableCell>并发</TableCell><TableCell>AI 打码</TableCell><TableCell>节流</TableCell><TableCell>最近错误</TableCell>
               <TableCell>创建时间</TableCell><TableCell align="right">操作</TableCell>
             </TableRow></TableHead>
             <TableBody>
@@ -121,6 +131,14 @@ export function LifecycleJobs() {
                   </TableCell>
                   <TableCell>{job.attempts} / {job.maxAttempts}</TableCell>
                   <TableCell>{job.concurrency}</TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={job.aiCaptchaEnabled ? "primary" : "default"}
+                      label={job.aiCaptchaEnabled ? captchaModeLabel(job.aiCaptchaMode) : "关闭"}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
                       启 {job.attemptIntervalSeconds ?? 0}s · 轮 {job.roundIntervalSeconds ?? 5}s
@@ -147,7 +165,7 @@ export function LifecycleJobs() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!jobs.isLoading && (jobs.data?.length ?? 0) === 0 && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>暂无注册任务</TableCell></TableRow>}
+              {!jobs.isLoading && (jobs.data?.length ?? 0) === 0 && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 6, color: "text.secondary" }}>暂无注册任务</TableCell></TableRow>}
             </TableBody>
           </Table>
         </TableContainer>
@@ -178,6 +196,8 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
   const [concurrency, setConcurrency] = useState(1);
   const [attemptIntervalSeconds, setAttemptIntervalSeconds] = useState(0);
   const [roundIntervalSeconds, setRoundIntervalSeconds] = useState(5);
+  const [aiCaptchaEnabled, setAiCaptchaEnabled] = useState(true);
+  const [aiCaptchaMode, setAiCaptchaMode] = useState<CaptchaAiMode>("INTERNAL");
   const mutation = useMutation({
     mutationFn: () => api.createRegistrationJob({
       providerId,
@@ -186,10 +206,12 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
       concurrency,
       attemptIntervalSeconds,
       roundIntervalSeconds,
+      aiCaptchaEnabled,
+      aiCaptchaMode,
     }),
     onSuccess: onCreated,
   });
-  return <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+  return <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
     <DialogTitle>新建注册任务</DialogTitle>
     <DialogContent><Stack spacing={2} sx={{ pt: 1 }}>
       {mutation.error && <Alert severity="error">{mutation.error.message}</Alert>}
@@ -207,6 +229,24 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
         <TextField fullWidth label="任务启动间隔（秒）" type="number" value={attemptIntervalSeconds} onChange={(event) => setAttemptIntervalSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 0, max: 3600 } }} />
       </Stack>
       <TextField label="轮次间隔（秒）" type="number" value={roundIntervalSeconds} onChange={(event) => setRoundIntervalSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 0, max: 86400 } }} />
+      <Stack direction="row" spacing={3} sx={{ alignItems: "center" }}>
+        <FormControlLabel
+          control={<Switch checked={aiCaptchaEnabled} onChange={(event) => setAiCaptchaEnabled(event.target.checked)} />}
+          label="AI 打码"
+        />
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={aiCaptchaMode}
+          disabled={!aiCaptchaEnabled}
+          onChange={(_, value: CaptchaAiMode | null) => value && setAiCaptchaMode(value)}
+          aria-label="AI 打码来源"
+        >
+          <ToggleButton value="AUTO">自动</ToggleButton>
+          <ToggleButton value="INTERNAL">内置</ToggleButton>
+          <ToggleButton value="EXTERNAL">外置</ToggleButton>
+        </ToggleButtonGroup>
+      </Stack>
     </Stack></DialogContent>
     <DialogActions><Button onClick={onClose}>取消</Button><Button variant="contained" disabled={!providerId || mutation.isPending || maxAttempts < target} onClick={() => mutation.mutate()}>创建</Button></DialogActions>
   </Dialog>;
@@ -215,6 +255,10 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
 function JobStatus({ status }: { status: RegistrationJob["status"] }) {
   const color = status === "SUCCEEDED" ? "success" : status === "RUNNING" ? "primary" : status === "FAILED" || status === "PARTIAL" ? "error" : "default";
   return <Chip size="small" color={color} variant="outlined" label={status} />;
+}
+
+function captchaModeLabel(mode: CaptchaAiMode) {
+  return mode === "AUTO" ? "自动" : mode === "EXTERNAL" ? "外置" : "内置";
 }
 
 function formatTime(value: string) {

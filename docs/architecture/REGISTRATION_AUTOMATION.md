@@ -65,6 +65,12 @@ Browser retries for the same identity derive a stable proxy affinity and rotate 
 list by attempt number. A provider-specific browser failure therefore advances to another node
 without hard-coding node names or consuming another mailbox.
 
+Each registration job persists a provider-neutral captcha policy. Operators can disable AI while
+retaining deterministic local OCR/OpenCV solvers, or select `internal`, `external`, or `auto` AI.
+Internal AI uses Any2API's authenticated `multimodal-random` route. External AI uses only the
+deployment-configured OpenAI-compatible base URL, key, and model; task payloads and the admin UI
+never accept or expose those secrets. Auto mode tries configured transports in priority order.
+
 GLM uses separate Alibaba Cloud Captcha profiles for authentication and chat. Authentication uses
 the embedded `36qgs6xb` scene in region `cn`; chat uses the popup `didk33e0` scene in region `sgp`.
 A ticket from one region/scene is never reused for the other. The provider first executes the SDK's fixed start action, then treats each

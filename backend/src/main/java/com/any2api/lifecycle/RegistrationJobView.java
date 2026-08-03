@@ -13,6 +13,8 @@ public record RegistrationJobView(
     int concurrency,
     int attemptIntervalSeconds,
     int roundIntervalSeconds,
+    boolean aiCaptchaEnabled,
+    RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
     int attempts,
     int successCount,
     int failureCount,

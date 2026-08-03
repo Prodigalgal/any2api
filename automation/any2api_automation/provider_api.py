@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from .captcha.policy import CaptchaAiPolicy, bind_captcha_policy
 from .observability import OperationFailure, bind_operation, failure_details
 from .providers import provider_registry
 from .resources import lanes
@@ -79,8 +80,10 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
             request.context.attempt,
         )
         try:
-            async with lanes.batch:
-                result = await operation(request.payload)
+            captcha_policy = CaptchaAiPolicy.from_payload(request.payload)
+            with bind_captcha_policy(captcha_policy):
+                async with lanes.batch:
+                    result = await operation(request.payload)
             duration_ms = round((time.monotonic() - started) * 1000)
             logger.info(
                 "automation_operation_finished correlation_id=%s provider=%s operation=%s "

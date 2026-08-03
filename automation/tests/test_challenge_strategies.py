@@ -8,6 +8,7 @@ import pytest
 from PIL import Image, ImageChops, ImageDraw
 
 from any2api_automation.captcha.models import SolverEstimate, VisualAction
+from any2api_automation.captcha.policy import CaptchaAiPolicy, bind_captcha_policy
 from any2api_automation.captcha.registry import _captcha_text_candidate, registry
 from any2api_automation.captcha.strategy import (
     ChallengeAttemptResult,
@@ -457,6 +458,73 @@ def test_visual_completion_reroutes_transient_random_gateway_failure(monkeypatch
     settings.cache_clear()
     assert content.startswith("ACTIONS=")
     assert "attempt=2" in registry.visual_diagnostic()
+
+
+def test_visual_completion_auto_mode_falls_back_to_configured_external_solver(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "internal-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_API_BASE", "https://solver.example/v1")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_API_KEY", "external-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_MODEL", "vision-model")
+    settings.cache_clear()
+    responses = iter((_VisionGatewayErrorResponse(), _VisionActionResponse()))
+    requests: list[tuple[str, str]] = []
+
+    def post(url, **kwargs):
+        requests.append((url, kwargs["json"]["model"]))
+        return next(responses)
+
+    monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
+
+    content = registry._visual_completion_sync(
+        b"fixture-image",
+        "fixture prompt",
+        max_tokens=100,
+        timeout_seconds=10,
+        ai_policy=CaptchaAiPolicy(mode="auto"),
+    )
+
+    settings.cache_clear()
+    assert content.startswith("ACTIONS=")
+    assert requests == [
+        ("http://localhost:8080/multimodal-random/v1/chat/completions", "random"),
+        ("https://solver.example/v1/chat/completions", "vision-model"),
+    ]
+    assert "transport=external" in registry.visual_diagnostic()
+
+
+def test_task_policy_can_disable_ai_without_disabling_local_solvers(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "internal-secret")
+    settings.cache_clear()
+    monkeypatch.setattr(
+        "any2api_automation.captcha.registry.httpx.post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("AI must stay disabled")),
+    )
+
+    with bind_captcha_policy(CaptchaAiPolicy(enabled=False)):
+        content = registry._visual_completion_sync(
+            b"fixture-image", "fixture prompt", max_tokens=100
+        )
+
+    settings.cache_clear()
+    assert content == ""
+    assert registry.visual_diagnostic() == "disabled_or_unconfigured"
+
+
+def test_external_ai_mode_requires_deployment_side_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.delenv("ANY2API_AUTOMATION_CAPTCHA_AI_API_BASE", raising=False)
+    monkeypatch.delenv("ANY2API_AUTOMATION_CAPTCHA_AI_API_KEY", raising=False)
+    monkeypatch.delenv("ANY2API_AUTOMATION_CAPTCHA_AI_MODEL", raising=False)
+    settings.cache_clear()
+
+    available = registry.visual_ai_available(CaptchaAiPolicy(mode="external"))
+
+    settings.cache_clear()
+    assert available is False
 
 
 def test_visual_text_candidate_extracts_structured_or_emphasized_answers_only() -> None:

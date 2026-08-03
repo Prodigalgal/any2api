@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -21,8 +22,17 @@ import httpx
 from ..config import settings
 from ..resources import lanes
 from .models import SolverEstimate, VisualAction
+from .policy import CaptchaAiPolicy, current_captcha_policy
 
 _CAPTCHA_TEXT = r"[0-9A-Za-z\u4e00-\u9fff]{3,12}"
+
+
+@dataclass(frozen=True)
+class _VisualTransport:
+    kind: str
+    endpoint: str
+    api_key: str
+    model: str
 
 
 def _captcha_text_candidate(content: str) -> str | None:
@@ -53,6 +63,9 @@ class SolverRegistry:
 
     def visual_diagnostic(self) -> str:
         return str(getattr(self._diagnostics, "visual", "unavailable"))
+
+    def visual_ai_available(self, policy: CaptchaAiPolicy) -> bool:
+        return bool(self._visual_transports(policy))
 
     def capabilities(self) -> dict[str, dict[str, object]]:
         return {
@@ -111,8 +124,14 @@ class SolverRegistry:
         estimate = self._solve_tap_sync(targets, panel)
         return [estimate] if estimate else []
 
-    def solve_visual_points_sync(self, image: bytes, prompt: str) -> SolverEstimate | None:
-        content = self._visual_completion_sync(image, prompt, max_tokens=120)
+    def solve_visual_points_sync(
+        self,
+        image: bytes,
+        prompt: str,
+        *,
+        ai_policy: CaptchaAiPolicy | None = None,
+    ) -> SolverEstimate | None:
+        content = self._visual_completion_sync(image, prompt, max_tokens=120, ai_policy=ai_policy)
         if not content:
             return None
         try:
@@ -148,12 +167,19 @@ class SolverRegistry:
             self._diagnostics.visual = f"point_parse_error:{type(error).__name__}"
             return None
 
-    def solve_visual_text_sync(self, image: bytes, prompt: str) -> SolverEstimate | None:
+    def solve_visual_text_sync(
+        self,
+        image: bytes,
+        prompt: str,
+        *,
+        ai_policy: CaptchaAiPolicy | None = None,
+    ) -> SolverEstimate | None:
         content = self._visual_completion_sync(
             image,
             prompt
             + "\nReturn exactly CAPTCHA=<characters>. Do not add any other text or formatting.",
             max_tokens=32,
+            ai_policy=ai_policy,
         )
         if not content:
             return None
@@ -175,6 +201,7 @@ class SolverRegistry:
         choices: tuple[str, ...],
         *,
         timeout_seconds: float | None = None,
+        ai_policy: CaptchaAiPolicy | None = None,
     ) -> str | None:
         normalized = tuple(dict.fromkeys(choice.strip().upper() for choice in choices))
         if not 2 <= len(normalized) <= 20 or any(
@@ -194,6 +221,7 @@ class SolverRegistry:
             + ", ".join(normalized)
             + "."
         )
+        resolved_policy = ai_policy or current_captcha_policy()
 
         def sample() -> tuple[str, str]:
             content = self._visual_completion_sync(
@@ -201,6 +229,7 @@ class SolverRegistry:
                 choice_prompt,
                 max_tokens=128,
                 timeout_seconds=sample_timeout,
+                ai_policy=resolved_policy,
             )
             return content, self.visual_diagnostic()
 
@@ -318,8 +347,10 @@ class SolverRegistry:
         prompt: str,
         *,
         timeout_seconds: float | None = None,
+        ai_policy: CaptchaAiPolicy | None = None,
     ) -> list[VisualAction]:
         config = settings()
+        resolved_policy = ai_policy or current_captcha_policy()
         sample_count = max(1, min(5, config.captcha_ai_action_samples))
         sample_timeout = float(max(1, config.captcha_ai_action_sample_timeout_seconds))
         total_budget = sample_timeout * 2 if timeout_seconds is None else max(0, timeout_seconds)
@@ -342,6 +373,7 @@ class SolverRegistry:
                 action_prompt,
                 max_tokens=256,
                 timeout_seconds=initial_timeout,
+                ai_policy=resolved_policy,
             )
             return content, self.visual_diagnostic()
 
@@ -393,6 +425,7 @@ class SolverRegistry:
                 action_prompt,
                 samples,
                 timeout_seconds=review_timeout,
+                ai_policy=resolved_policy,
             )
             if review_timeout > 0
             else []
@@ -418,6 +451,7 @@ class SolverRegistry:
         candidates: list[list[VisualAction]],
         *,
         timeout_seconds: float,
+        ai_policy: CaptchaAiPolicy | None = None,
     ) -> list[VisualAction]:
         if len(candidates) < 2:
             return []
@@ -441,6 +475,7 @@ class SolverRegistry:
                 review_prompt,
                 max_tokens=256,
                 timeout_seconds=timeout_seconds,
+                ai_policy=ai_policy,
             )
             return self._parse_visual_actions(image, content) if content else []
 
@@ -731,19 +766,18 @@ class SolverRegistry:
         *,
         max_tokens: int,
         timeout_seconds: float | None = None,
+        ai_policy: CaptchaAiPolicy | None = None,
     ) -> str:
         config = settings()
-        api_key = config.public_api_key.strip() or config.captcha_ai_api_key.strip()
-        if not (config.captcha_ai_enabled and config.java_base_url.strip() and api_key and image):
+        transports = self._visual_transports(ai_policy or current_captcha_policy())
+        if not transports or not image:
             self._diagnostics.visual = "disabled_or_unconfigured"
             return ""
-        endpoint = f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions"
         mime_type, normalized_image = self._visual_ai_payload(image)
         data_url = f"data:{mime_type};base64," + base64.b64encode(normalized_image).decode("ascii")
         prompt_prefix = config.captcha_ai_prompt_prefix.strip()
         effective_prompt = f"{prompt_prefix}\n\n{prompt}" if prompt_prefix else prompt
-        request_body = {
-            "model": "random",
+        request_body: dict[str, object] = {
             "messages": [
                 {
                     "role": "system",
@@ -760,7 +794,6 @@ class SolverRegistry:
                     ],
                 },
             ],
-            "reasoning_effort": "none",
         }
         budget = max(
             1,
@@ -777,20 +810,27 @@ class SolverRegistry:
             remaining = deadline - time.monotonic()
             if remaining < 1:
                 break
+            transport = transports[(attempt - 1) % len(transports)]
+            request_body["model"] = transport.model
+            if transport.kind == "internal":
+                request_body["reasoning_effort"] = "none"
+            else:
+                request_body.pop("reasoning_effort", None)
             try:
                 response = httpx.post(
-                    endpoint,
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    transport.endpoint,
+                    headers={"Authorization": f"Bearer {transport.api_key}"},
                     json=request_body,
                     timeout=max(1, min(remaining, config.captcha_ai_timeout_seconds)),
                 )
                 headers = getattr(response, "headers", {})
-                provider = str(headers.get("X-Any2API-Provider") or "unknown")
-                model = str(headers.get("X-Any2API-Model") or "unknown")
+                provider = str(headers.get("X-Any2API-Provider") or transport.kind)
+                model = str(headers.get("X-Any2API-Model") or transport.model)
                 error_type = self._response_error_type(response)
                 if error_type == "account_unavailable" and attempt < 3:
                     self._diagnostics.visual = (
-                        f"retrying_account_unavailable:provider={provider}:model={model}"
+                        f"retrying_account_unavailable:transport={transport.kind}:"
+                        f"provider={provider}:model={model}"
                     )
                     time.sleep(min(random.uniform(0.1, 0.4), max(0, remaining - 1)))
                     continue
@@ -810,26 +850,63 @@ class SolverRegistry:
                     )
                     continue
                 self._diagnostics.visual = (
-                    f"response_received:provider={provider}:model={model}:attempt={attempt}"
+                    f"response_received:transport={transport.kind}:"
+                    f"provider={provider}:model={model}:attempt={attempt}"
                 )
                 return str(content)
             except httpx.HTTPStatusError as error:
                 headers = error.response.headers
-                provider = str(headers.get("X-Any2API-Provider") or "unknown")
-                model = str(headers.get("X-Any2API-Model") or "unknown")
+                provider = str(headers.get("X-Any2API-Provider") or transport.kind)
+                model = str(headers.get("X-Any2API-Model") or transport.model)
                 status = error.response.status_code
                 if (status in {408, 409, 425, 429} or status >= 500) and attempt < 3:
                     self._diagnostics.visual = (
-                        f"retrying_http_status:{status}:provider={provider}:model={model}"
+                        f"retrying_http_status:{status}:transport={transport.kind}:"
+                        f"provider={provider}:model={model}"
                     )
                     time.sleep(min(random.uniform(0.1, 0.4), max(0, remaining - 1)))
                     continue
-                self._diagnostics.visual = f"http_status:{status}:provider={provider}:model={model}"
+                self._diagnostics.visual = (
+                    f"http_status:{status}:transport={transport.kind}:"
+                    f"provider={provider}:model={model}"
+                )
                 return ""
             except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
                 self._diagnostics.visual = f"request_error:{type(error).__name__}"
                 return ""
         return ""
+
+    def _visual_transports(self, policy: CaptchaAiPolicy) -> list[_VisualTransport]:
+        config = settings()
+        if not config.captcha_ai_enabled or not policy.enabled:
+            return []
+        internal: _VisualTransport | None = None
+        if config.java_base_url.strip() and config.public_api_key.strip():
+            internal = _VisualTransport(
+                "internal",
+                f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions",
+                config.public_api_key.strip(),
+                "random",
+            )
+        external: _VisualTransport | None = None
+        if (
+            config.captcha_ai_api_base.strip()
+            and config.captcha_ai_api_key.strip()
+            and config.captcha_ai_model.strip()
+        ):
+            base = config.captcha_ai_api_base.rstrip("/")
+            endpoint = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+            external = _VisualTransport(
+                "external",
+                endpoint,
+                config.captcha_ai_api_key.strip(),
+                config.captcha_ai_model.strip(),
+            )
+        if policy.mode == "internal":
+            return [internal] if internal else []
+        if policy.mode == "external":
+            return [external] if external else []
+        return [transport for transport in (internal, external) if transport is not None]
 
     def _visual_ai_payload(self, image: bytes) -> tuple[str, bytes]:
         from PIL import Image, UnidentifiedImageError

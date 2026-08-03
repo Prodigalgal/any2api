@@ -11,10 +11,13 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderRegistry;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import reactor.core.publisher.Mono;
 
 class ApiKeyServiceTest {
     @Test
@@ -57,5 +60,29 @@ class ApiKeyServiceTest {
             entity.getValue().getId(),
             Map.of("mimo", ApiKeyProviderScope.allModels("mimo")),
             Set.of(ApiKeyProtocol.CHAT_COMPLETIONS));
+    }
+
+    @Test
+    void deleteInvalidatesAfterCommitWithoutBlockingTheReactiveThread() {
+        var keys = mock(ApiKeyRepository.class);
+        var grants = mock(ApiKeyGrantStore.class);
+        var authenticator = mock(ApiKeyAuthenticator.class);
+        var entity = ApiKeyEntity.create(
+            "temporary", "sk-a2a-temporary", "hashed-value", null);
+        when(keys.findById(entity.getId())).thenReturn(Optional.of(entity));
+        when(authenticator.invalidate("hashed-value")).thenReturn(Mono.empty());
+        var service = new ApiKeyService(
+            keys, grants, authenticator, mock(ProviderRegistry.class), mock(JdbcClient.class));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.delete(entity.getId());
+            verify(authenticator, org.mockito.Mockito.never()).invalidate(any());
+            TransactionSynchronizationManager.getSynchronizations()
+                .forEach(synchronization -> synchronization.afterCommit());
+            verify(authenticator).invalidate("hashed-value");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 }

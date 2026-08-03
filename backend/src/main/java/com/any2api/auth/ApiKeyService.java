@@ -3,7 +3,6 @@ package com.any2api.auth;
 import com.any2api.provider.ProviderRegistry;
 import java.security.SecureRandom;
 import java.time.Instant;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -91,8 +90,7 @@ public class ApiKeyService {
     }
 
     private void invalidateAfterCommit(String keyHash) {
-        Runnable invalidate = () ->
-            authenticator.invalidate(keyHash).block(Duration.ofSeconds(2));
+        Runnable invalidate = () -> authenticator.invalidate(keyHash).subscribe();
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             invalidate.run();
             return;

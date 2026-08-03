@@ -4,7 +4,6 @@ import com.any2api.cache.LayeredJsonCache;
 import com.any2api.config.Any2ApiProperties;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -68,7 +67,7 @@ public class ModelCatalogCache {
     }
 
     public void invalidateAfterCommit() {
-        Runnable action = () -> invalidate().block(Duration.ofSeconds(2));
+        Runnable action = () -> invalidate().subscribe();
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             action.run();
             return;

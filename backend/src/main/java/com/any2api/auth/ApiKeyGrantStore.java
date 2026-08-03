@@ -6,9 +6,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Component;
 
-@Repository
+@Component
 final class ApiKeyGrantStore {
     private static final String GRANT_QUERY = """
         SELECT 1 AS kind, provider_id, NULL::VARCHAR AS value, all_models

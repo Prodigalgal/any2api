@@ -18,6 +18,11 @@ from .deepseek_settings import settings
 
 logger = logging.getLogger("any2api_automation.providers.deepseek.challenge")
 
+_ANIMAL_MATRIX_INSTRUCTION = "drag one of the animals into the empty spot"
+_ANIMAL_MATRIX_SOURCE_CENTERS = ((0.11, 0.14), (0.11, 0.40))
+_ANIMAL_MATRIX_GRID_X = (0.40, 0.56, 0.72, 0.88)
+_ANIMAL_MATRIX_GRID_Y = (0.14, 0.39, 0.64, 0.88)
+
 
 class DeepseekHcaptchaChallenge:
     def __init__(self) -> None:
@@ -77,6 +82,9 @@ class DeepseekHcaptchaChallenge:
                 _solver_prompt(prompt),
                 timeout_seconds=max(10, deadline - time.monotonic()),
                 ai_policy=ai_policy,
+                action_normalizer=lambda values, task_prompt=prompt: _normalize_actions(
+                    task_prompt, values
+                ),
             )
             solver_diagnostic = registry.visual_diagnostic()
             evidence = _challenge_evidence(prompt, artifact, actions)
@@ -318,7 +326,7 @@ def _prompt(frame: Any) -> str:
 
 def _solver_prompt(prompt: str) -> str:
     rule = ""
-    if "drag one of the animals into the empty spot" in prompt.casefold():
+    if _ANIMAL_MATRIX_INSTRUCTION in prompt.casefold():
         rule = (
             "\nThis specific puzzle has two movable animal candidates and a species-row grid. "
             "The grid can show more than one empty-looking cell. Return exactly ONE drag: choose "
@@ -339,6 +347,25 @@ def _solver_prompt(prompt: str) -> str:
         "fractions from 0.0 to 1.0 relative to the supplied task image; never return pixel "
         "coordinates or values above 1. Do not click the submit button."
     )
+
+
+def _normalize_actions(prompt: str, actions: list[VisualAction]) -> list[VisualAction]:
+    if _ANIMAL_MATRIX_INSTRUCTION not in prompt.casefold() or len(actions) != 1:
+        return actions
+    action = actions[0]
+    if action.type != "drag" or action.start is None or action.end is None:
+        return actions
+    if action.start[0] > 0.28 or action.end[0] < 0.20:
+        return actions
+    source = min(
+        _ANIMAL_MATRIX_SOURCE_CENTERS,
+        key=lambda point: abs(point[0] - action.start[0]) + abs(point[1] - action.start[1]),
+    )
+    target = (
+        min(_ANIMAL_MATRIX_GRID_X, key=lambda value: abs(value - action.end[0])),
+        min(_ANIMAL_MATRIX_GRID_Y, key=lambda value: abs(value - action.end[1])),
+    )
+    return [VisualAction(type="drag", start=source, end=target)]
 
 
 def _challenge_evidence(

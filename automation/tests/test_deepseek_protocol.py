@@ -29,6 +29,7 @@ from any2api_automation.providers.deepseek_challenge import (
     DeepseekHcaptchaChallenge,
     _challenge_evidence,
     _extract_task_image,
+    _normalize_actions,
     _solver_prompt,
     _surface_artifact,
     _wait_for_completion,
@@ -458,6 +459,29 @@ def test_hcaptcha_other_prompts_do_not_receive_the_animal_matrix_rule() -> None:
     prompt = _solver_prompt("Select all matching images")
 
     assert "Return exactly ONE drag" not in prompt
+
+
+def test_hcaptcha_animal_matrix_actions_snap_to_candidate_and_grid_centers() -> None:
+    prompt = "Drag one of the animals into the empty spot to complete the pattern"
+    samples = (
+        VisualAction(type="drag", start=(0.11, 0.15), end=(0.43, 0.60)),
+        VisualAction(type="drag", start=(0.08, 0.17), end=(0.25, 0.625)),
+        VisualAction(type="drag", start=(0.11, 0.15), end=(0.39, 0.68)),
+        VisualAction(type="drag", start=(0.11, 0.15), end=(0.43, 0.62)),
+    )
+
+    normalized = [_normalize_actions(prompt, [action])[0] for action in samples]
+
+    assert normalized == [VisualAction(type="drag", start=(0.11, 0.14), end=(0.40, 0.64))] * 4
+
+
+def test_hcaptcha_action_snapping_does_not_change_other_challenges_or_grid_sources() -> None:
+    action = VisualAction(type="drag", start=(0.5, 0.5), end=(0.8, 0.8))
+
+    assert _normalize_actions("Select all boats", [action]) == [action]
+    assert _normalize_actions(
+        "Drag one of the animals into the empty spot to complete the pattern", [action]
+    ) == [action]
 
 
 def test_hcaptcha_post_action_artifact_is_best_effort(monkeypatch) -> None:

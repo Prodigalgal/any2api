@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -348,6 +349,7 @@ class SolverRegistry:
         *,
         timeout_seconds: float | None = None,
         ai_policy: CaptchaAiPolicy | None = None,
+        action_normalizer: Callable[[list[VisualAction]], list[VisualAction]] | None = None,
     ) -> list[VisualAction]:
         config = settings()
         resolved_policy = ai_policy or current_captcha_policy()
@@ -398,6 +400,12 @@ class SolverRegistry:
                 failures.append(diagnostic)
                 continue
             actions = self._parse_visual_actions(image, content)
+            if actions and action_normalizer is not None:
+                try:
+                    actions = action_normalizer(actions)
+                except Exception as error:  # noqa: BLE001 - provider normalizers are optional
+                    failures.append(f"action_normalizer_error:{type(error).__name__}")
+                    continue
             if actions:
                 samples.append(actions)
                 sources.append(diagnostic)
@@ -431,6 +439,12 @@ class SolverRegistry:
             else []
         )
         if reviewed:
+            if action_normalizer is not None:
+                try:
+                    reviewed = action_normalizer(reviewed)
+                except Exception as error:  # noqa: BLE001 - keep solver failures isolated
+                    self._diagnostics.visual = f"action_normalizer_error:{type(error).__name__}"
+                    return []
             return reviewed
         failure = failures[-1] if failures else "coordinate_disagreement"
         votes = "|".join(self._visual_action_summary(actions) for actions in samples)

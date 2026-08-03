@@ -811,6 +811,40 @@ def test_visual_action_solver_aggregates_same_image_random_samples(
     assert "consensus:2/3" in registry.visual_diagnostic()
 
 
+def test_visual_action_solver_applies_provider_normalizer_before_consensus(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ACTION_SAMPLES", "3")
+    settings.cache_clear()
+    responses = iter(
+        (
+            'ACTIONS=[{"type":"drag","from":[0.1,0.1],"to":[0.25,0.6]}]',
+            'ACTIONS=[{"type":"drag","from":[0.1,0.1],"to":[0.4,0.6]}]',
+            'ACTIONS=[{"type":"drag","from":[0.1,0.1],"to":[0.55,0.6]}]',
+        )
+    )
+    monkeypatch.setattr(
+        registry,
+        "_visual_completion_sync",
+        lambda *args, **kwargs: next(responses),
+    )
+    fixture = io.BytesIO()
+    Image.new("RGB", (200, 100), "white").save(fixture, format="PNG")
+
+    actions = registry.solve_visual_actions_sync(
+        fixture.getvalue(),
+        "fixture prompt",
+        timeout_seconds=10,
+        action_normalizer=lambda values: [
+            VisualAction(type="drag", start=values[0].start, end=(0.4, 0.6))
+        ],
+    )
+
+    settings.cache_clear()
+    assert actions == [VisualAction(type="drag", start=(0.1, 0.1), end=(0.4, 0.6))]
+    assert "consensus:3/3" in registry.visual_diagnostic()
+
+
 def test_visual_action_consensus_uses_majority_cluster_median() -> None:
     samples = [
         [VisualAction(type="drag", start=(0.05, 0.5), end=(0.75, 0.5))],

@@ -18,7 +18,10 @@ from .deepseek_settings import settings
 
 logger = logging.getLogger("any2api_automation.providers.deepseek.challenge")
 
-_ANIMAL_MATRIX_INSTRUCTION = "drag one of the animals into the empty spot"
+_ANIMAL_MATRIX_INSTRUCTIONS = (
+    "drag one of the animals into the empty spot",
+    "place the correct animal into the empty spot",
+)
 _ANIMAL_MATRIX_SOURCE_CENTERS = ((0.11, 0.14), (0.11, 0.40))
 _ANIMAL_MATRIX_GRID_X = (0.40, 0.56, 0.72, 0.88)
 _ANIMAL_MATRIX_GRID_Y = (0.14, 0.39, 0.64, 0.88)
@@ -327,7 +330,7 @@ def _prompt(frame: Any) -> str:
 
 def _solver_prompt(prompt: str) -> str:
     rule = ""
-    if _ANIMAL_MATRIX_INSTRUCTION in prompt.casefold():
+    if _is_animal_matrix_prompt(prompt):
         rule = (
             "\nThis specific puzzle has two movable animal candidates and a species-row grid. "
             "The grid can show more than one empty-looking cell. Return exactly ONE drag: choose "
@@ -355,7 +358,7 @@ def _normalize_actions(
     actions: list[VisualAction],
     empty_targets: tuple[tuple[float, float], ...] = (),
 ) -> list[VisualAction]:
-    if _ANIMAL_MATRIX_INSTRUCTION not in prompt.casefold() or len(actions) != 1:
+    if not _is_animal_matrix_prompt(prompt) or len(actions) != 1:
         return actions
     action = actions[0]
     if action.type != "drag" or action.start is None or action.end is None:
@@ -380,7 +383,7 @@ def _animal_matrix_empty_targets(
     prompt: str,
     image: bytes,
 ) -> tuple[tuple[float, float], ...]:
-    if _ANIMAL_MATRIX_INSTRUCTION not in prompt.casefold():
+    if not _is_animal_matrix_prompt(prompt):
         return ()
     try:
         import cv2
@@ -421,6 +424,11 @@ def _animal_matrix_empty_targets(
         return tuple(targets)
     except Exception:  # noqa: BLE001 - uncertain CV falls back to the full grid
         return ()
+
+
+def _is_animal_matrix_prompt(prompt: str) -> bool:
+    normalized = " ".join(prompt.casefold().split())
+    return any(instruction in normalized for instruction in _ANIMAL_MATRIX_INSTRUCTIONS)
 
 
 def _challenge_evidence(

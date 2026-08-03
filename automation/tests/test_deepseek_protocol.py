@@ -447,8 +447,17 @@ def test_hcaptcha_evidence_contains_only_normalized_prompt_actions_and_artifact(
     )
 
 
-def test_hcaptcha_animal_matrix_prompt_encodes_the_observed_single_drag_rule() -> None:
-    prompt = _solver_prompt("Drag one of the animals into the empty spot to complete the pattern")
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "Drag one of the animals into the empty spot to complete the pattern",
+        "Place the correct animal into the empty spot to complete the pattern",
+    ),
+)
+def test_hcaptcha_animal_matrix_prompt_encodes_the_observed_single_drag_rule(
+    instruction: str,
+) -> None:
+    prompt = _solver_prompt(instruction)
 
     assert "Return exactly ONE drag" in prompt
     assert "same species row" in prompt
@@ -477,7 +486,7 @@ def test_hcaptcha_animal_matrix_actions_snap_to_candidate_and_grid_centers() -> 
 
 
 def test_hcaptcha_animal_matrix_targets_are_restricted_to_cv_empty_cells() -> None:
-    prompt = "Drag one of the animals into the empty spot to complete the pattern"
+    prompt = "Place the correct animal into the empty spot to complete the pattern"
     action = VisualAction(type="drag", start=(0.11, 0.14), end=(0.88, 0.64))
 
     normalized = _normalize_actions(prompt, [action], ((0.40, 0.14), (0.40, 0.64)))

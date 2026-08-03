@@ -27,6 +27,7 @@ from any2api_automation.providers.deepseek import (
 )
 from any2api_automation.providers.deepseek_challenge import (
     DeepseekHcaptchaChallenge,
+    _animal_matrix_empty_targets,
     _challenge_evidence,
     _extract_task_image,
     _normalize_actions,
@@ -473,6 +474,44 @@ def test_hcaptcha_animal_matrix_actions_snap_to_candidate_and_grid_centers() -> 
     normalized = [_normalize_actions(prompt, [action])[0] for action in samples]
 
     assert normalized == [VisualAction(type="drag", start=(0.11, 0.14), end=(0.40, 0.64))] * 4
+
+
+def test_hcaptcha_animal_matrix_targets_are_restricted_to_cv_empty_cells() -> None:
+    prompt = "Drag one of the animals into the empty spot to complete the pattern"
+    action = VisualAction(type="drag", start=(0.11, 0.14), end=(0.88, 0.64))
+
+    normalized = _normalize_actions(prompt, [action], ((0.40, 0.14), (0.40, 0.64)))
+
+    assert normalized == [VisualAction(type="drag", start=(0.11, 0.14), end=(0.40, 0.64))]
+
+
+def test_hcaptcha_animal_matrix_cv_detects_low_detail_empty_cells() -> None:
+    prompt = "Drag one of the animals into the empty spot to complete the pattern"
+    image = Image.new("RGB", (484, 336), (45, 35, 55))
+    draw = ImageDraw.Draw(image)
+    empty = {(0.88, 0.14), (0.40, 0.64)}
+    for y in (0.14, 0.39, 0.64, 0.88):
+        for x in (0.40, 0.56, 0.72, 0.88):
+            center_x, center_y = round(x * image.width), round(y * image.height)
+            if (x, y) in empty:
+                draw.rectangle(
+                    (center_x - 22, center_y - 22, center_x + 22, center_y + 22),
+                    fill=(55, 45, 65),
+                )
+                continue
+            for offset in range(-22, 23, 4):
+                color = (230, 210, 80) if offset % 8 == 0 else (40, 190, 120)
+                draw.line(
+                    (center_x - 22, center_y + offset, center_x + 22, center_y - offset),
+                    fill=color,
+                    width=2,
+                )
+    encoded = io.BytesIO()
+    image.save(encoded, format="PNG")
+
+    targets = _animal_matrix_empty_targets(prompt, encoded.getvalue())
+
+    assert targets == ((0.88, 0.14), (0.40, 0.64))
 
 
 def test_hcaptcha_action_snapping_does_not_change_other_challenges_or_grid_sources() -> None:

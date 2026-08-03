@@ -77,13 +77,14 @@ class DeepseekHcaptchaChallenge:
             prompt = _prompt(frame)
             task = _ready_surface_image(page, surface)
             artifact = record_captcha_artifact("deepseek-hcaptcha", task.image)
+            empty_targets = _animal_matrix_empty_targets(prompt, task.image)
             actions = registry.solve_visual_actions_sync(
                 task.image,
                 _solver_prompt(prompt),
                 timeout_seconds=max(10, deadline - time.monotonic()),
                 ai_policy=ai_policy,
-                action_normalizer=lambda values, task_prompt=prompt: _normalize_actions(
-                    task_prompt, values
+                action_normalizer=lambda values, task_prompt=prompt, targets=empty_targets: (
+                    _normalize_actions(task_prompt, values, targets)
                 ),
             )
             solver_diagnostic = registry.visual_diagnostic()
@@ -349,7 +350,11 @@ def _solver_prompt(prompt: str) -> str:
     )
 
 
-def _normalize_actions(prompt: str, actions: list[VisualAction]) -> list[VisualAction]:
+def _normalize_actions(
+    prompt: str,
+    actions: list[VisualAction],
+    empty_targets: tuple[tuple[float, float], ...] = (),
+) -> list[VisualAction]:
     if _ANIMAL_MATRIX_INSTRUCTION not in prompt.casefold() or len(actions) != 1:
         return actions
     action = actions[0]
@@ -361,11 +366,61 @@ def _normalize_actions(prompt: str, actions: list[VisualAction]) -> list[VisualA
         _ANIMAL_MATRIX_SOURCE_CENTERS,
         key=lambda point: abs(point[0] - action.start[0]) + abs(point[1] - action.start[1]),
     )
-    target = (
-        min(_ANIMAL_MATRIX_GRID_X, key=lambda value: abs(value - action.end[0])),
-        min(_ANIMAL_MATRIX_GRID_Y, key=lambda value: abs(value - action.end[1])),
+    targets = empty_targets or tuple(
+        (x, y) for y in _ANIMAL_MATRIX_GRID_Y for x in _ANIMAL_MATRIX_GRID_X
+    )
+    target = min(
+        targets,
+        key=lambda point: abs(point[0] - action.end[0]) + abs(point[1] - action.end[1]),
     )
     return [VisualAction(type="drag", start=source, end=target)]
+
+
+def _animal_matrix_empty_targets(
+    prompt: str,
+    image: bytes,
+) -> tuple[tuple[float, float], ...]:
+    if _ANIMAL_MATRIX_INSTRUCTION not in prompt.casefold():
+        return ()
+    try:
+        import cv2
+        import numpy as np
+
+        source = cv2.imdecode(np.frombuffer(image, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if source is None or source.shape[0] < 160 or source.shape[1] < 240:
+            return ()
+        height, width = source.shape[:2]
+        radius_x = max(8, round(width * 0.065))
+        radius_y = max(8, round(height * 0.09))
+        targets: list[tuple[float, float]] = []
+        for y in _ANIMAL_MATRIX_GRID_Y:
+            row: list[tuple[float, float, float]] = []
+            for x in _ANIMAL_MATRIX_GRID_X:
+                center_x, center_y = round(x * width), round(y * height)
+                crop = source[
+                    max(0, center_y - radius_y) : min(height, center_y + radius_y),
+                    max(0, center_x - radius_x) : min(width, center_x + radius_x),
+                ]
+                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                laplacian = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                edge_density = float((cv2.Canny(gray, 60, 140) > 0).mean())
+                row.append((x, laplacian, edge_density))
+            median_laplacian = max(1.0, float(np.median([value[1] for value in row])))
+            median_edges = max(0.001, float(np.median([value[2] for value in row])))
+            ranked = sorted(
+                row,
+                key=lambda value: value[1] / median_laplacian + value[2] / median_edges,
+            )
+            x, laplacian, edge_density = ranked[0]
+            laplacian_ratio = laplacian / median_laplacian
+            edge_ratio = edge_density / median_edges
+            if laplacian_ratio + edge_ratio < 1.25 and (
+                laplacian_ratio < 0.65 or edge_ratio < 0.55
+            ):
+                targets.append((x, y))
+        return tuple(targets)
+    except Exception:  # noqa: BLE001 - uncertain CV falls back to the full grid
+        return ()
 
 
 def _challenge_evidence(

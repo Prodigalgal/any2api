@@ -1,9 +1,12 @@
 package com.any2api.provider.minmax;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.RandomModelRole;
+import com.any2api.proxy.ProxyPoolService;
 import java.util.List;
 import java.util.Map;
 import java.net.URI;
@@ -14,6 +17,18 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 class MinmaxProtocolTest {
+    @Test
+    void excludesUnacceptedMultimodalModelFromRandomRouting() {
+        var provider = new MinmaxProvider(
+            mock(MinmaxTransportClient.class), mock(ProxyPoolService.class),
+            mock(MinmaxRequestMapper.class), mock(MinmaxMediaUploader.class),
+            new ObjectMapper());
+
+        assertThat(provider.manifest().randomModelPreferences())
+            .containsKey(RandomModelRole.TOP_TEXT)
+            .doesNotContainKey(RandomModelRole.TOP_MULTIMODAL);
+    }
+
     @Test
     void extractsRotatingRequestProfileFromOfficialFrontendCode() {
         var script = """

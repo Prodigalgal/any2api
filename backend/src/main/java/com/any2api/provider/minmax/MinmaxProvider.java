@@ -68,9 +68,7 @@ public final class MinmaxProvider implements InferenceProvider {
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
                 ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-            Map.of(
-                RandomModelRole.TOP_TEXT, List.of("MiniMax-M3"),
-                RandomModelRole.TOP_MULTIMODAL, List.of("MiniMax-M3")), true);
+            Map.of(RandomModelRole.TOP_TEXT, List.of("MiniMax-M3")), true);
     }
 
     @Override

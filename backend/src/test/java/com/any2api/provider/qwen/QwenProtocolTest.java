@@ -6,6 +6,9 @@ import static org.mockito.Mockito.when;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.RandomModelRole;
+import com.any2api.proxy.ProxyPoolService;
+import com.any2api.transport.BrowserTransportClient;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -14,6 +17,19 @@ import reactor.test.StepVerifier;
 import tools.jackson.databind.ObjectMapper;
 
 class QwenProtocolTest {
+    @Test
+    void excludesUnacceptedMultimodalModelFromRandomRouting() {
+        var provider = new QwenProvider(
+            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
+            new QwenProperties(), mock(QwenRequestMapper.class),
+            mock(QwenTransportRequests.class), mock(QwenMediaUploader.class),
+            new ObjectMapper());
+
+        assertThat(provider.manifest().randomModelPreferences())
+            .containsKey(RandomModelRole.TOP_TEXT)
+            .doesNotContainKey(RandomModelRole.TOP_MULTIMODAL);
+    }
+
     @Test
     void transportSendsTheExactBodyUsedForDynamicRiskHeaders() {
         var risk = mock(QwenRiskHeaderClient.class);

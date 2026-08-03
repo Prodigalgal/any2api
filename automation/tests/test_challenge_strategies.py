@@ -331,6 +331,22 @@ class _VisionAccountUnavailableResponse:
         return {"error": {"type": "account_unavailable"}}
 
 
+class _VisionGatewayErrorResponse:
+    status_code = 502
+    headers: ClassVar[dict[str, str]] = {
+        "X-Any2API-Provider": "qwen",
+        "X-Any2API-Model": "qwen3.7-plus",
+    }
+
+    def raise_for_status(self) -> None:
+        request = httpx.Request("POST", "https://gateway.example")
+        response = httpx.Response(502, request=request, headers=self.headers)
+        raise httpx.HTTPStatusError("upstream failure", request=request, response=response)
+
+    def json(self) -> dict[str, object]:
+        return {"error": {"type": "provider_error"}}
+
+
 def test_visual_solver_parses_normalized_points_without_exposing_response(
     monkeypatch,
 ) -> None:
@@ -420,6 +436,25 @@ def test_visual_completion_reroutes_transient_random_account_contention(monkeypa
 
     settings.cache_clear()
     assert calls == 2
+    assert content.startswith("ACTIONS=")
+    assert "attempt=2" in registry.visual_diagnostic()
+
+
+def test_visual_completion_reroutes_transient_random_gateway_failure(monkeypatch) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
+    settings.cache_clear()
+    responses = iter((_VisionGatewayErrorResponse(), _VisionActionResponse()))
+    monkeypatch.setattr(
+        "any2api_automation.captcha.registry.httpx.post",
+        lambda *args, **kwargs: next(responses),
+    )
+
+    content = registry._visual_completion_sync(
+        b"fixture-image", "fixture prompt", max_tokens=100, timeout_seconds=10
+    )
+
+    settings.cache_clear()
     assert content.startswith("ACTIONS=")
     assert "attempt=2" in registry.visual_diagnostic()
 
@@ -577,6 +612,88 @@ def test_visual_action_parser_accepts_model_per_mille_coordinates() -> None:
     assert len(actions) == 1
     assert actions[0].at == (0.395, 0.62)
     assert "mode:permille" in registry.visual_diagnostic()
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    (
+        ("ACTIONS=[[0.32,0.62],[0.76,0.60]]", ((0.32, 0.62), (0.76, 0.60))),
+        ("ACTIONS=[(0.35,0.55),(0.78,0.58)]", ((0.35, 0.55), (0.78, 0.58))),
+        (
+            (
+                'ACTIONS=[{"action":"click","coordinate":[0.36,0.60]},'
+                '{"action":"click","x":0.77,"y":0.59}]'
+            ),
+            ((0.36, 0.60), (0.77, 0.59)),
+        ),
+    ),
+)
+def test_visual_action_parser_accepts_provider_click_dialects(
+    content: str,
+    expected: tuple[tuple[float, float], ...],
+) -> None:
+    fixture = io.BytesIO()
+    Image.new("RGB", (480, 320), "white").save(fixture, format="PNG")
+
+    actions = registry._parse_visual_actions(fixture.getvalue(), content)
+
+    assert tuple(action.at for action in actions) == expected
+
+
+def test_visual_action_parser_accepts_full_hcaptcha_grid_selection() -> None:
+    fixture = io.BytesIO()
+    Image.new("RGB", (480, 320), "white").save(fixture, format="PNG")
+    content = "ACTIONS=[" + ",".join(f"[{index / 10:.1f},0.5]" for index in range(1, 8)) + "]"
+
+    actions = registry._parse_visual_actions(fixture.getvalue(), content)
+
+    assert len(actions) == 7
+
+
+def test_visual_click_consensus_accepts_same_grid_cell_variance() -> None:
+    samples = [
+        [VisualAction("click", at=(0.32, 0.62)), VisualAction("click", at=(0.76, 0.60))],
+        [VisualAction("click", at=(0.35, 0.55)), VisualAction("click", at=(0.78, 0.58))],
+        [VisualAction("click", at=(0.37, 0.60)), VisualAction("click", at=(0.77, 0.58))],
+        [VisualAction("click", at=(0.10, 0.20)), VisualAction("click", at=(0.45, 0.30))],
+    ]
+
+    actions = registry._visual_action_consensus(samples, 5, tolerance=0.08)
+
+    assert len(actions) == 2
+    assert actions[0].at == pytest.approx((0.35, 0.60))
+    assert actions[1].at == pytest.approx((0.77, 0.58))
+
+
+def test_visual_click_consensus_uses_unique_action_signature_before_coordinates() -> None:
+    samples = [
+        [VisualAction("click", at=(0.35, 0.60)), VisualAction("click", at=(0.76, 0.60))],
+        [VisualAction("click", at=(0.32, 0.56)), VisualAction("click", at=(0.75, 0.53))],
+        [
+            VisualAction("click", at=(0.14, 0.78)),
+            VisualAction("click", at=(0.34, 0.59)),
+            VisualAction("click", at=(0.75, 0.58)),
+        ],
+        [VisualAction("click", at=(0.33, 0.25)), VisualAction("click", at=(0.53, 0.25))],
+    ]
+
+    actions = registry._visual_action_consensus(samples, 5, tolerance=0.08)
+
+    assert len(actions) == 2
+    assert actions[0].at == pytest.approx((0.335, 0.58))
+    assert actions[1].at == pytest.approx((0.755, 0.565))
+
+
+def test_visual_action_consensus_rejects_tied_action_signatures() -> None:
+    samples = [
+        [VisualAction("click", at=(0.30, 0.60))],
+        [VisualAction("click", at=(0.31, 0.61))],
+        [VisualAction("click", at=(0.30, 0.60)), VisualAction("click", at=(0.70, 0.60))],
+        [VisualAction("click", at=(0.31, 0.61)), VisualAction("click", at=(0.71, 0.61))],
+    ]
+
+    assert registry._visual_action_consensus(samples, 5, tolerance=0.08) == []
+    assert registry.visual_diagnostic() == "signature_tie"
 
 
 def test_visual_ai_payload_compresses_large_captcha_below_gateway_limit() -> None:

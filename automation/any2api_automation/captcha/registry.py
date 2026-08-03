@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import base64
 import concurrent.futures
@@ -327,11 +328,18 @@ class SolverRegistry:
         if initial_timeout <= 0:
             self._diagnostics.visual = "deadline_exhausted_before_sampling"
             return []
+        action_prompt = (
+            "The first characters of your response MUST be ACTIONS=. "
+            "Return exactly one JSON array and no analysis or Markdown. "
+            'A click is {"type":"click","at":[x,y]}; a drag is '
+            '{"type":"drag","from":[x1,y1],"to":[x2,y2]}. '
+            "All coordinates must be normalized decimal values from 0.0 to 1.0.\n\n" + prompt
+        )
 
         def sample() -> tuple[str, str]:
             content = self._visual_completion_sync(
                 image,
-                prompt,
+                action_prompt,
                 max_tokens=256,
                 timeout_seconds=initial_timeout,
             )
@@ -363,12 +371,13 @@ class SolverRegistry:
                 sources.append(diagnostic)
             else:
                 failures.append(self.visual_diagnostic())
-        primary_tolerance = (
-            0.1
-            if samples
-            and all(len(actions) == 1 and actions[0].type == "drag" for actions in samples)
-            else 0.06
-        )
+        primary_tolerance = 0.06
+        if samples and all(len(actions) == 1 and actions[0].type == "drag" for actions in samples):
+            primary_tolerance = 0.1
+        elif samples and all(
+            all(action.type == "click" for action in actions) for actions in samples
+        ):
+            primary_tolerance = 0.08
         consensus = self._visual_action_consensus(
             samples,
             sample_count,
@@ -381,7 +390,7 @@ class SolverRegistry:
         reviewed = (
             self._review_visual_actions(
                 image,
-                prompt,
+                action_prompt,
                 samples,
                 timeout_seconds=review_timeout,
             )
@@ -464,8 +473,6 @@ class SolverRegistry:
         tolerance: float = 0.06,
         diagnostic_prefix: str = "consensus",
     ) -> list[VisualAction]:
-        valid_count = len(samples)
-        required = 1 if sample_count == 1 else max(2, valid_count // 2 + 1)
         grouped: dict[tuple[str, ...], list[list[VisualAction]]] = {}
         for actions in samples:
             actions = self._canonical_visual_actions(actions)
@@ -473,7 +480,12 @@ class SolverRegistry:
             grouped.setdefault(signature, []).append(actions)
         if not grouped:
             return []
-        signature, candidates = max(grouped.items(), key=lambda item: len(item[1]))
+        ranked = sorted(grouped.items(), key=lambda item: len(item[1]), reverse=True)
+        if len(ranked) > 1 and len(ranked[0][1]) == len(ranked[1][1]):
+            self._diagnostics.visual = "signature_tie"
+            return []
+        signature, candidates = ranked[0]
+        required = 1 if sample_count == 1 else max(2, len(candidates) // 2 + 1)
         if len(candidates) < required:
             return []
 
@@ -578,8 +590,13 @@ class SolverRegistry:
             if marker is None:
                 self._diagnostics.visual = "response_without_actions"
                 return []
-            decoded, _ = json.JSONDecoder().raw_decode(content[marker.end() :].lstrip())
-            if not isinstance(decoded, list) or not 1 <= len(decoded) <= 4:
+            source = content[marker.end() :].lstrip()
+            try:
+                decoded, _ = json.JSONDecoder().raw_decode(source)
+            except json.JSONDecodeError:
+                decoded = ast.literal_eval(source)
+            decoded = self._normalize_visual_actions(decoded)
+            if not 1 <= len(decoded) <= 9:
                 self._diagnostics.visual = "invalid_action_count"
                 return []
             width, height = self._visual_image_size(image)
@@ -621,9 +638,42 @@ class SolverRegistry:
                 action.type for action in actions
             )
             return actions
-        except (json.JSONDecodeError, TypeError, ValueError) as error:
+        except (json.JSONDecodeError, SyntaxError, TypeError, ValueError) as error:
             self._diagnostics.visual = f"action_parse_error:{type(error).__name__}"
             return []
+
+    def _normalize_visual_actions(self, decoded: object) -> list[dict[str, object]]:
+        if not isinstance(decoded, list | tuple):
+            raise TypeError("visual actions must be a list")
+        normalized: list[dict[str, object]] = []
+        for raw in decoded:
+            if isinstance(raw, list | tuple):
+                if len(raw) != 2:
+                    raise ValueError("visual click shorthand must contain two coordinates")
+                normalized.append({"type": "click", "at": raw})
+                continue
+            if not isinstance(raw, dict):
+                raise TypeError("visual action must be an object")
+            kind = str(raw.get("type") or raw.get("action") or "").strip().lower()
+            if not kind and any(key in raw for key in ("at", "point", "coordinate", "x")):
+                kind = "click"
+            if kind == "click":
+                point = raw.get("at", raw.get("point", raw.get("coordinate")))
+                if point is None and "x" in raw and "y" in raw:
+                    point = [raw["x"], raw["y"]]
+                normalized.append({"type": "click", "at": point})
+                continue
+            if kind == "drag":
+                normalized.append(
+                    {
+                        "type": "drag",
+                        "from": raw.get("from", raw.get("start")),
+                        "to": raw.get("to", raw.get("end")),
+                    }
+                )
+                continue
+            raise ValueError("unsupported visual action")
+        return normalized
 
     def _visual_image_size(self, image: bytes) -> tuple[float, float]:
         from PIL import Image
@@ -767,9 +817,14 @@ class SolverRegistry:
                 headers = error.response.headers
                 provider = str(headers.get("X-Any2API-Provider") or "unknown")
                 model = str(headers.get("X-Any2API-Model") or "unknown")
-                self._diagnostics.visual = (
-                    f"http_status:{error.response.status_code}:provider={provider}:model={model}"
-                )
+                status = error.response.status_code
+                if (status in {408, 409, 425, 429} or status >= 500) and attempt < 3:
+                    self._diagnostics.visual = (
+                        f"retrying_http_status:{status}:provider={provider}:model={model}"
+                    )
+                    time.sleep(min(random.uniform(0.1, 0.4), max(0, remaining - 1)))
+                    continue
+                self._diagnostics.visual = f"http_status:{status}:provider={provider}:model={model}"
                 return ""
             except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
                 self._diagnostics.visual = f"request_error:{type(error).__name__}"

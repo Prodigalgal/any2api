@@ -86,9 +86,7 @@ public final class QwenProvider implements InferenceProvider {
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
                 ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-            Map.of(
-                RandomModelRole.TOP_TEXT, List.of("qwen3.7-plus"),
-                RandomModelRole.TOP_MULTIMODAL, List.of("qwen3.7-plus")), true);
+            Map.of(RandomModelRole.TOP_TEXT, List.of("qwen3.7-plus")), true);
     }
 
     @Override

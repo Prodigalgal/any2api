@@ -14,11 +14,17 @@ from .providers import provider_registry, public_provider_manifests
 from .resources import lanes
 from .security import require_internal_token
 
-logging.getLogger("any2api_automation").setLevel(settings().log_level)
+application_logger = logging.getLogger("any2api_automation")
+application_logger.setLevel(settings().log_level)
+uvicorn_logger = logging.getLogger("uvicorn.error")
+if uvicorn_logger.handlers:
+    application_logger.handlers = list(uvicorn_logger.handlers)
+    application_logger.propagate = False
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    application_logger.info("automation_observability_ready")
     try:
         yield
     finally:

@@ -12,8 +12,12 @@ def test_live_health() -> None:
 
 
 def test_capabilities_include_all_providers() -> None:
-    response = client.get("/internal/v1/capabilities")
+    response = client.get(
+        "/internal/v1/capabilities",
+        headers={"X-Any2API-Correlation-Id": "capability-correlation-123"},
+    )
     assert response.status_code == 200
+    assert response.headers["X-Any2API-Correlation-Id"] == "capability-correlation-123"
     providers = response.json()["providers"]
     provider_ids = [item["id"] for item in providers]
     assert provider_ids

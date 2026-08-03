@@ -71,15 +71,18 @@ public final class OpenAiImagesController {
         consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
     public Mono<Map<String, Object>> edit(ServerWebExchange exchange) {
-        authorization.requireFeatures(exchange, java.util.Set.of(ApiKeyFeature.FILE_UPLOADS));
+        var grant = authorization.grant(exchange);
+        authorization.requireFeatures(grant, java.util.Set.of(ApiKeyFeature.FILE_UPLOADS));
         return exchange.getMultipartData().flatMap(parts -> {
             var model = form(parts.getFirst("model"), "");
             var route = routes.resolve(exchange.getRequest().getPath().value(), model);
             authorization.require(
-                exchange, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
+                grant, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
             return readInputs(parts.get("image")).flatMap(inputs -> {
                 var request = parseEdit(route.providerId(), route.upstreamModel(), parts, inputs);
-                return coordinator.execute(request)
+                exchange.getResponse().getHeaders().set(
+                    "X-Any2API-Request-Id", request.requestId());
+                return coordinator.execute(request, grant.keyId())
                     .flatMap(result -> encode(request, result, exchange));
             });
         });
@@ -95,10 +98,13 @@ public final class OpenAiImagesController {
     ) {
         var route = routes.resolve(
             exchange.getRequest().getPath().value(), body.path("model").asText(""));
+        var grant = authorization.grant(exchange);
         authorization.require(
-            exchange, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
+            grant, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
         var request = parse(route.providerId(), route.upstreamModel(), body);
-        return coordinator.execute(request)
+        exchange.getResponse().getHeaders().set(
+            "X-Any2API-Request-Id", request.requestId());
+        return coordinator.execute(request, grant.keyId())
             .flatMap(result -> encode(request, result, exchange));
     }
 

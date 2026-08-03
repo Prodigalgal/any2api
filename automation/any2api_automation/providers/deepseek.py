@@ -33,6 +33,7 @@ from ..lifecycle.proxy import (
     proxy_parameters,
 )
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
+from ..observability import correlation_id
 from .base import AutomationProvider, AutomationProviderManifest
 from .deepseek_challenge import DeepseekHcaptchaChallenge
 from .deepseek_settings import settings
@@ -187,7 +188,9 @@ async def _run_registration_browser(
             if not diagnostic.startswith("DeepSeek hCaptcha failed"):
                 diagnostic = "unavailable"
             logger.warning(
-                "DeepSeek registration browser retry attempt=%s/%s error_type=%s diagnostic=%s",
+                "DeepSeek registration browser retry correlation_id=%s attempt=%s/%s "
+                "error_type=%s diagnostic=%s",
+                correlation_id(),
                 attempt,
                 attempts,
                 type(error).__name__,

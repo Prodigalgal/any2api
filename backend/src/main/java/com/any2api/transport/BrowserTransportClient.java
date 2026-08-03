@@ -1,6 +1,7 @@
 package com.any2api.transport;
 
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.observability.RequestCorrelation;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -29,6 +30,7 @@ public final class BrowserTransportClient {
     ) {
         client = builder.clone()
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(20 << 20))
+            .filter(RequestCorrelation.propagationFilter())
             .baseUrl(properties.getAutomation().getBaseUrl().toString())
             .build();
         token = properties.getSecurity().getInternalToken();

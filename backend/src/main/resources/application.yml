@@ -52,6 +52,11 @@ management:
       show-details: when_authorized
 
 any2api:
+  observability:
+    operation-retention: ${ANY2API_OBSERVABILITY_OPERATION_RETENTION:30d}
+    usage-retention: ${ANY2API_OBSERVABILITY_USAGE_RETENTION:90d}
+    cleanup-interval: ${ANY2API_OBSERVABILITY_CLEANUP_INTERVAL:1h}
+    cleanup-initial-delay: ${ANY2API_OBSERVABILITY_CLEANUP_INITIAL_DELAY:10m}
   cache:
     api-key:
       local-ttl: ${ANY2API_CACHE_API_KEY_L1_TTL:30s}

@@ -3,10 +3,12 @@
 import {
   AddOutlined,
   CancelOutlined,
+  ManageSearchOutlined,
   RefreshOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   Dialog,
@@ -30,6 +32,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, providerOptions, type ProviderOption, type RegistrationJob } from "@/lib/api";
+import { OperationEventsDialog } from "@/components/operation-events-dialog";
 import {
   DataSurface,
   PageContainer,
@@ -43,6 +46,7 @@ export function LifecycleJobs() {
   const queryClient = useQueryClient();
   const [provider, setProvider] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [traceJob, setTraceJob] = useState<RegistrationJob | null>(null);
   const catalog = useQuery({
     queryKey: ["providers"],
     queryFn: api.providers,
@@ -122,9 +126,21 @@ export function LifecycleJobs() {
                       启 {job.attemptIntervalSeconds ?? 0}s · 轮 {job.roundIntervalSeconds ?? 5}s
                     </Typography>
                   </TableCell>
-                  <TableCell sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{job.lastErrorClass || "-"}</TableCell>
+                  <TableCell>
+                    <Tooltip title={job.lastErrorDetail || job.lastErrorClass || ""}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography noWrap sx={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5, color: job.lastErrorCode ? "error.main" : "text.secondary" }}>
+                          {job.lastErrorCode || job.lastErrorClass || "-"}
+                        </Typography>
+                        {job.lastErrorStage ? <Typography noWrap color="text.secondary" sx={{ fontSize: 10.5 }}>{job.lastErrorStage}</Typography> : null}
+                      </Box>
+                    </Tooltip>
+                  </TableCell>
                   <TableCell>{formatTime(job.createdAt)}</TableCell>
                   <TableCell align="right">
+                    <Tooltip title="查看运行轨迹">
+                      <IconButton size="small" aria-label="查看运行轨迹" onClick={() => setTraceJob(job)}><ManageSearchOutlined fontSize="small" /></IconButton>
+                    </Tooltip>
                     <Tooltip title="取消任务">
                       <span><IconButton size="small" color="error" disabled={!activeStatuses.has(job.status) || cancel.isPending} onClick={() => cancel.mutate(job.id)}><CancelOutlined fontSize="small" /></IconButton></span>
                     </Tooltip>
@@ -140,6 +156,15 @@ export function LifecycleJobs() {
         setCreateOpen(false);
         void queryClient.invalidateQueries({ queryKey: ["registration-jobs"] });
       }} /> : null}
+      {traceJob ? (
+        <OperationEventsDialog
+          open
+          title={`${traceJob.providerId} · ${traceJob.id}`}
+          queryKey={["registration-job-events", traceJob.id]}
+          load={() => api.registrationJobEvents(traceJob.id)}
+          onClose={() => setTraceJob(null)}
+        />
+      ) : null}
     </PageContainer>
   );
 }

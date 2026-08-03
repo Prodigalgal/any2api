@@ -45,3 +45,8 @@ Python browser jobs additionally hold a durable Java job lease and a Redis-fence
 ## Observability
 
 Required metrics include due accounts, oldest due age, action backlog, retry error classes, circuit state, account recovery stage, browser queue wait, captcha success by solver, stale-message count, and lease renewal failures.
+
+Every claimed registration or lifecycle attempt receives a correlation ID before the Python worker
+is called. Its terminal stage, stable error code, sanitized detail, account link, and duration are
+persisted in `operation_events` and exposed in the admin timeline. See
+[Full-Chain Observability](OBSERVABILITY.md) for the cross-service contract and redaction rules.

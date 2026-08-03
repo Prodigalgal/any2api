@@ -1,6 +1,7 @@
 package com.any2api.provider.qwen;
 
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.observability.RequestCorrelation;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
@@ -19,7 +20,10 @@ final class QwenRiskHeaderClient {
     private final String token;
 
     QwenRiskHeaderClient(WebClient.Builder builder, Any2ApiProperties properties) {
-        this.client = builder.baseUrl(properties.getAutomation().getBaseUrl().toString()).build();
+        this.client = builder.clone()
+            .filter(RequestCorrelation.propagationFilter())
+            .baseUrl(properties.getAutomation().getBaseUrl().toString())
+            .build();
         this.token = properties.getSecurity().getInternalToken();
     }
 

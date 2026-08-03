@@ -12,6 +12,7 @@ public class Any2ApiProperties {
     private final ProxyBootstrap proxyBootstrap = new ProxyBootstrap();
     private final Media media = new Media();
     private final CacheSettings cache = new CacheSettings();
+    private final Observability observability = new Observability();
 
     public Security getSecurity() {
         return security;
@@ -24,6 +25,7 @@ public class Any2ApiProperties {
     public ProxyBootstrap getProxyBootstrap() { return proxyBootstrap; }
     public Media getMedia() { return media; }
     public CacheSettings getCache() { return cache; }
+    public Observability getObservability() { return observability; }
 
 
     public static class Security {
@@ -127,6 +129,27 @@ public class Any2ApiProperties {
 
         public Tier getApiKey() { return apiKey; }
         public Tier getModelCatalog() { return modelCatalog; }
+    }
+
+    public static class Observability {
+        private Duration operationRetention = Duration.ofDays(30);
+        private Duration usageRetention = Duration.ofDays(90);
+
+        public Duration getOperationRetention() { return operationRetention; }
+        public void setOperationRetention(Duration value) {
+            operationRetention = positive(value, "operation retention");
+        }
+        public Duration getUsageRetention() { return usageRetention; }
+        public void setUsageRetention(Duration value) {
+            usageRetention = positive(value, "usage retention");
+        }
+
+        private static Duration positive(Duration value, String name) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException(name + " must be positive");
+            }
+            return value;
+        }
     }
 
     public static class Tier {

@@ -5,6 +5,7 @@ import {
   DeleteOutlineOutlined,
   FilterAltOffOutlined,
   LoginOutlined,
+  ManageSearchOutlined,
   MoreVertOutlined,
   RefreshOutlined,
   SearchOutlined,
@@ -52,6 +53,7 @@ import {
   PageHeader,
   ToolbarSurface,
 } from "@/components/page-layout";
+import { OperationEventsDialog } from "@/components/operation-events-dialog";
 
 const pageSizes = [25, 50, 100];
 const statusOptions = [
@@ -82,6 +84,7 @@ export function Accounts() {
   const [importOpen, setImportOpen] = useState(false);
   const [commandAccount, setCommandAccount] = useState<Account | null>(null);
   const [commandAnchor, setCommandAnchor] = useState<HTMLElement | null>(null);
+  const [traceAccount, setTraceAccount] = useState<Account | null>(null);
   const debouncedSearch = useDebouncedValue(search.trim(), 300);
 
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
@@ -316,6 +319,7 @@ export function Accounts() {
                   onToggle={(nextEnabled) => update.mutate({ account, nextEnabled })}
                   onCommands={(event) => openCommands(event, account)}
                   onReauthenticate={() => reauthenticate.mutate(account.id)}
+                  onEvents={() => setTraceAccount(account)}
                   onDelete={() => {
                     if (window.confirm(`删除 ${account.providerId}/${account.externalId}？`)) {
                       remove.mutate(account.id);
@@ -386,6 +390,15 @@ export function Accounts() {
           await invalidateAccounts();
         }}
       />
+      {traceAccount ? (
+        <OperationEventsDialog
+          open
+          title={`${traceAccount.providerId} · ${traceAccount.externalId}`}
+          queryKey={["account-events", traceAccount.id]}
+          load={() => api.accountEvents(traceAccount.id)}
+          onClose={() => setTraceAccount(null)}
+        />
+      ) : null}
     </PageContainer>
   );
 }
@@ -399,6 +412,7 @@ const AccountRow = memo(function AccountRow({
   onToggle,
   onCommands,
   onReauthenticate,
+  onEvents,
   onDelete,
 }: {
   account: Account;
@@ -409,6 +423,7 @@ const AccountRow = memo(function AccountRow({
   onToggle: (enabled: boolean) => void;
   onCommands: (event: MouseEvent<HTMLElement>) => void;
   onReauthenticate: () => void;
+  onEvents: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -449,6 +464,11 @@ const AccountRow = memo(function AccountRow({
       </TableCell>
       <TableCell align="right">
         <Stack direction="row" spacing={0.25} sx={{ justifyContent: "flex-end" }}>
+          <Tooltip title="查看生命周期轨迹">
+            <IconButton size="small" aria-label="查看生命周期轨迹" onClick={onEvents}>
+              <ManageSearchOutlined sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="厂商账号操作">
             <span>
               <IconButton size="small" disabled={!account.enabled} onClick={onCommands}>

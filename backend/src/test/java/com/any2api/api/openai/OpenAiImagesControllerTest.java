@@ -2,11 +2,13 @@ package com.any2api.api.openai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.any2api.media.GeneratedMedia;
 import com.any2api.auth.ApiKeyAuthorization;
+import com.any2api.auth.ApiKeyGrant;
 import com.any2api.media.MediaAssetService;
 import com.any2api.media.MediaCoordinator;
 import com.any2api.media.MediaResult;
@@ -33,13 +35,15 @@ class OpenAiImagesControllerTest {
         var assetId = UUID.randomUUID();
         when(routes.resolve(any(), any())).thenReturn(
             new ResolvedRoute("grok_web", "grok-imagine-image"));
-        when(coordinator.execute(any())).thenReturn(Mono.just(
+        when(coordinator.execute(any(), nullable(UUID.class))).thenReturn(Mono.just(
             new MediaCoordinator.ExecutionResult(accountId, new MediaResult(List.of(
                 new GeneratedMedia("image/webp", new byte[] {1, 2}, "prompt"))))));
         when(assets.save(any(), any(), any())).thenReturn(Mono.just(assetId));
+        var authorization = mock(ApiKeyAuthorization.class);
+        when(authorization.grant(any())).thenReturn(ApiKeyGrant.unrestricted());
         var controller = new OpenAiImagesController(
             routes, coordinator, assets, mapper, new Any2ApiProperties(),
-            mock(ApiKeyAuthorization.class));
+            authorization);
         var request = mapper.createObjectNode()
             .put("model", "grok_web/grok-imagine-image")
             .put("prompt", "prompt");
@@ -63,12 +67,14 @@ class OpenAiImagesControllerTest {
         var assets = mock(MediaAssetService.class);
         when(routes.resolve(any(), any())).thenReturn(
             new ResolvedRoute("grok_web", "grok-imagine-image"));
-        when(coordinator.execute(any())).thenReturn(Mono.just(
+        when(coordinator.execute(any(), nullable(UUID.class))).thenReturn(Mono.just(
             new MediaCoordinator.ExecutionResult(UUID.randomUUID(), new MediaResult(List.of(
                 new GeneratedMedia("image/png", new byte[] {1, 2, 3}, ""))))));
+        var authorization = mock(ApiKeyAuthorization.class);
+        when(authorization.grant(any())).thenReturn(ApiKeyGrant.unrestricted());
         var controller = new OpenAiImagesController(
             routes, coordinator, assets, mapper, new Any2ApiProperties(),
-            mock(ApiKeyAuthorization.class));
+            authorization);
         var request = mapper.createObjectNode()
             .put("model", "grok_web/grok-imagine-image")
             .put("prompt", "prompt")

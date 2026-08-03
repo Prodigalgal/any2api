@@ -7,6 +7,7 @@ import com.any2api.account.AccountStatus;
 import com.any2api.account.AccountView;
 import com.any2api.account.AccountPageView;
 import com.any2api.account.AccountSearchQuery;
+import com.any2api.observability.OperationEventService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,13 +31,16 @@ import tools.jackson.databind.JsonNode;
 public class AdminAccountController {
     private final AccountManagementService accounts;
     private final AccountCommandService commands;
+    private final OperationEventService events;
 
     public AdminAccountController(
         AccountManagementService accounts,
-        AccountCommandService commands
+        AccountCommandService commands,
+        OperationEventService events
     ) {
         this.accounts = accounts;
         this.commands = commands;
+        this.events = events;
     }
 
     @GetMapping("/page")
@@ -97,6 +101,11 @@ public class AdminAccountController {
         @PathVariable UUID accountId
     ) {
         return commands.commands(accountId);
+    }
+
+    @GetMapping("/{accountId}/events")
+    public List<OperationEventService.View> events(@PathVariable UUID accountId) {
+        return events.list("LIFECYCLE", accountId.toString());
     }
 
     @PostMapping("/{accountId}/commands/{command}")

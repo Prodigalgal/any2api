@@ -1,6 +1,7 @@
 package com.any2api.provider.glm;
 
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.observability.RequestCorrelation;
 import com.any2api.transport.BrowserTransportClient;
 import java.nio.charset.StandardCharsets;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -25,6 +26,7 @@ final class GlmCaptchaClient {
         ObjectMapper mapper
     ) {
         this.client = builder.clone()
+            .filter(RequestCorrelation.propagationFilter())
             .baseUrl(properties.getAutomation().getBaseUrl().toString())
             .build();
         this.mapper = mapper;

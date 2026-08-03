@@ -1,6 +1,7 @@
 package com.any2api.provider.minmax;
 
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.observability.RequestCorrelation;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
@@ -17,7 +18,10 @@ final class MinmaxTransportClient {
     private final String token;
 
     MinmaxTransportClient(WebClient.Builder builder, Any2ApiProperties properties) {
-        client = builder.baseUrl(properties.getAutomation().getBaseUrl().toString()).build();
+        client = builder.clone()
+            .filter(RequestCorrelation.propagationFilter())
+            .baseUrl(properties.getAutomation().getBaseUrl().toString())
+            .build();
         token = properties.getSecurity().getInternalToken();
     }
 

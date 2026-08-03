@@ -145,6 +145,8 @@ public class RegistrationJobService {
             row.getInt("attempt_interval_seconds"), row.getInt("round_interval_seconds"),
             row.getInt("attempts"), row.getInt("success_count"), row.getInt("failure_count"),
             row.getBoolean("cancel_requested"), row.getString("last_error_class"),
+            row.getString("last_error_code"), row.getString("last_error_stage"),
+            row.getString("last_error_detail"), row.getString("last_error_correlation_id"),
             rawResult == null ? null : mapper.readTree(rawResult),
             PostgresResultValues.instant(row, "created_at"),
             PostgresResultValues.instant(row, "updated_at"),

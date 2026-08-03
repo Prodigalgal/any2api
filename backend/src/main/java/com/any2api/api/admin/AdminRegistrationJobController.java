@@ -2,6 +2,7 @@ package com.any2api.api.admin;
 
 import com.any2api.lifecycle.RegistrationJobService;
 import com.any2api.lifecycle.RegistrationJobView;
+import com.any2api.observability.OperationEventService;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,8 +17,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/v1/registration-jobs")
 public class AdminRegistrationJobController {
     private final RegistrationJobService jobs;
+    private final OperationEventService events;
 
-    public AdminRegistrationJobController(RegistrationJobService jobs) { this.jobs = jobs; }
+    public AdminRegistrationJobController(
+        RegistrationJobService jobs,
+        OperationEventService events
+    ) {
+        this.jobs = jobs;
+        this.events = events;
+    }
 
     @GetMapping
     public List<RegistrationJobView> list(
@@ -28,6 +36,12 @@ public class AdminRegistrationJobController {
 
     @GetMapping("/{jobId}")
     public RegistrationJobView get(@PathVariable UUID jobId) { return jobs.get(jobId); }
+
+    @GetMapping("/{jobId}/events")
+    public List<OperationEventService.View> events(@PathVariable UUID jobId) {
+        jobs.get(jobId);
+        return events.list("REGISTRATION", jobId.toString());
+    }
 
     @PostMapping
     public RegistrationJobView create(@RequestBody CreateRequest request) {

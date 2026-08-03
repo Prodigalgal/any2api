@@ -1,6 +1,7 @@
 package com.any2api.provider;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.any2api.account.AccountSelectionService;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.coordination.AccountLease;
+import com.any2api.observability.InferenceTelemetryService;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import java.time.Instant;
@@ -32,10 +34,7 @@ class InferenceCoordinatorTest {
         var leased = leased("alpha");
         when(accounts.release(leased)).thenReturn(Mono.just(true));
         var provider = new TestProvider(true);
-        var coordinator = new InferenceCoordinator(
-            new ProviderRegistry(List.of(provider)),
-            accounts,
-            new ProviderFailureDisposition(accounts));
+        var coordinator = coordinator(provider, accounts);
 
         StepVerifier.create(coordinator.execute(request("alpha"), leased))
             .expectErrorMatches(error -> error instanceof IllegalArgumentException
@@ -54,9 +53,7 @@ class InferenceCoordinatorTest {
             .thenReturn(Mono.just(true));
         var provider = new TestProvider(false, new CanonicalEvent.Failed(
             1, "request-id", 1, "tool_call_generation_failed", "missing tool", Map.of()));
-        var coordinator = new InferenceCoordinator(
-            new ProviderRegistry(List.of(provider)), accounts,
-            new ProviderFailureDisposition(accounts));
+        var coordinator = coordinator(provider, accounts);
 
         StepVerifier.create(coordinator.execute(request("alpha"), leased))
             .expectNextMatches(CanonicalEvent.Failed.class::isInstance)
@@ -79,9 +76,7 @@ class InferenceCoordinatorTest {
             first, "model", "empty", java.time.Duration.ofMinutes(5)))
             .thenReturn(Mono.empty());
         when(accounts.reportSuccess(second, "model")).thenReturn(Mono.empty());
-        var coordinator = new InferenceCoordinator(
-            new ProviderRegistry(List.of(new RetryingProvider())), accounts,
-            new ProviderFailureDisposition(accounts));
+        var coordinator = coordinator(new RetryingProvider(), accounts);
 
         StepVerifier.create(coordinator.execute(request("alpha")))
             .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
@@ -108,9 +103,7 @@ class InferenceCoordinatorTest {
         when(accounts.reportModelCooldown(
             leased, "model", "empty", java.time.Duration.ofMinutes(5)))
             .thenReturn(Mono.empty());
-        var coordinator = new InferenceCoordinator(
-            new ProviderRegistry(List.of(new RetryingProvider(true))), accounts,
-            new ProviderFailureDisposition(accounts));
+        var coordinator = coordinator(new RetryingProvider(true), accounts);
 
         StepVerifier.create(coordinator.execute(request("alpha")))
             .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
@@ -137,6 +130,22 @@ class InferenceCoordinatorTest {
             List.of(),
             Map.of(),
             JsonNodeFactory.instance.objectNode());
+    }
+
+    private InferenceCoordinator coordinator(
+        InferenceProvider provider,
+        AccountSelectionService accounts
+    ) {
+        var telemetry = mock(InferenceTelemetryService.class);
+        var started = mock(InferenceTelemetryService.Started.class);
+        when(telemetry.start(
+            any(InferenceTelemetryService.InferenceTrace.class), anyInt()))
+            .thenReturn(started);
+        return new InferenceCoordinator(
+            new ProviderRegistry(List.of(provider)),
+            accounts,
+            new ProviderFailureDisposition(accounts),
+            telemetry);
     }
 
     private LeasedProviderAccount leased(String providerId) {

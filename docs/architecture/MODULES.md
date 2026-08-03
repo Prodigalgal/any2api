@@ -24,6 +24,7 @@
 | `automation` | Typed client and event consumer for the Python service |
 | `transport` | Provider-neutral client for bounded opaque browser sessions |
 | `media` | Provider media SPI, account orchestration, private asset storage, and model cooldown integration |
+| `observability` | Correlation propagation, durable operation events, inference telemetry, metrics, and redaction |
 
 Provider onboarding and model routing rules are defined in
 [Provider Extension Contract](PROVIDER_EXTENSION.md).

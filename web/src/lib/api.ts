@@ -132,10 +132,64 @@ export type RegistrationJob = {
   failureCount: number;
   cancelRequested: boolean;
   lastErrorClass: string | null;
+  lastErrorCode: string | null;
+  lastErrorStage: string | null;
+  lastErrorDetail: string | null;
+  lastErrorCorrelationId: string | null;
   result: { account_ids?: string[] } | null;
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;
+};
+
+export type OperationEvent = {
+  id: string;
+  correlationId: string;
+  domain: "REGISTRATION" | "LIFECYCLE" | "INFERENCE";
+  providerId: string;
+  operation: string;
+  aggregateType: string;
+  aggregateId: string;
+  accountId: string | null;
+  attempt: number;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  stage: string;
+  errorCode: string | null;
+  errorDetail: string | null;
+  durationMs: number;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+export type ObservabilitySummary = {
+  requestCount: number;
+  successCount: number;
+  failureCount: number;
+  p95DurationMs: number;
+  runningOperations: number;
+  operationFailures: Array<{
+    providerId: string;
+    operation: string;
+    stage: string;
+    errorCode: string | null;
+    count: number;
+  }>;
+};
+
+export type UsageEvent = {
+  requestId: string;
+  apiKeyId: string | null;
+  providerId: string;
+  accountId: string | null;
+  modelId: string;
+  protocol: string;
+  success: boolean;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  durationMs: number;
+  errorClass: string | null;
+  createdAt: string;
 };
 
 export type ProxyPool = {
@@ -259,6 +313,9 @@ export const api = {
   accountCommands: (id: string) => adminJson<AccountCommand[]>(
     `/api/admin/v1/accounts/${id}/commands`,
   ),
+  accountEvents: (id: string) => adminJson<OperationEvent[]>(
+    `/api/admin/v1/accounts/${id}/events`,
+  ),
   executeAccountCommand: (id: string, command: string) => adminJson<{ account: Account }>(
     `/api/admin/v1/accounts/${id}/commands/${encodeURIComponent(command)}`, { method: "POST" },
   ),
@@ -270,6 +327,15 @@ export const api = {
   ),
   cancelRegistrationJob: (id: string) => adminJson<RegistrationJob>(
     `/api/admin/v1/registration-jobs/${id}/cancel`, { method: "POST" },
+  ),
+  registrationJobEvents: (id: string) => adminJson<OperationEvent[]>(
+    `/api/admin/v1/registration-jobs/${id}/events`,
+  ),
+  observabilitySummary: () => adminJson<ObservabilitySummary>(
+    "/api/admin/v1/observability/summary",
+  ),
+  usageEvents: (limit = 100) => adminJson<UsageEvent[]>(
+    `/api/admin/v1/observability/usage?limit=${limit}`,
   ),
   proxyPools: () => adminJson<ProxyPool[]>("/api/admin/v1/proxy-pools"),
   createProxyPool: (body: Record<string, unknown>) => adminJson<ProxyPool>(

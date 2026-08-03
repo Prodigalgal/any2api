@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from ..observability import OperationFailure, correlation_id
+
 logger = logging.getLogger(__name__)
 
 _DATA_IMAGE = re.compile(r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=]+")
@@ -43,7 +45,8 @@ class RegistrationTrace:
         if stage not in self.stages:
             self.stages.append(stage)
         logger.warning(
-            "provider registration stage provider=%s stage=%s",
+            "provider registration stage correlation_id=%s provider=%s stage=%s",
+            correlation_id(),
             self.provider_id,
             stage.value,
         )
@@ -51,18 +54,28 @@ class RegistrationTrace:
     def metadata(self) -> dict[str, list[str]]:
         return {"registration_stages": [stage.value for stage in self.stages]}
 
-    def failure(self, error: Exception) -> RuntimeError:
+    def failure(self, error: Exception) -> OperationFailure:
         detail = _sanitize_failure_detail(error)
+        code = (
+            "challenge_failed"
+            if re.search(r"captcha|challenge", detail, re.IGNORECASE)
+            else "registration_stage_failed"
+        )
         logger.warning(
-            "provider registration failed provider=%s stage=%s error_type=%s detail=%s",
+            "provider registration failed correlation_id=%s provider=%s stage=%s "
+            "error_code=%s error_type=%s detail=%s",
+            correlation_id(),
             self.provider_id,
             self.current,
+            code,
             type(error).__name__,
             detail,
         )
-        return RuntimeError(
-            f"provider registration failed at stage={self.current} "
-            f"({type(error).__name__}: {detail})"
+        return OperationFailure(
+            code=code,
+            stage=self.current,
+            message=detail,
+            error_type=type(error).__name__,
         )
 
 

@@ -2,11 +2,13 @@ package com.any2api.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.any2api.observability.OperationContext;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -28,7 +30,8 @@ class LifecycleOperationExecutorTest {
         var proxyPool = Map.<String, Object>of("mode", "NODE_LIST");
         when(registry.handler("mimo", AutomationOperation.REAUTHENTICATE))
             .thenReturn(Optional.empty());
-        when(automation.execute(eq("mimo"), eq("reauthenticate"), anyMap()))
+        when(automation.execute(
+            eq("mimo"), eq("reauthenticate"), anyMap(), any(OperationContext.class)))
             .thenReturn(Mono.just(mapper.createObjectNode().put("healthy", true)));
 
         new LifecycleOperationExecutor(registry, automation)
@@ -38,7 +41,8 @@ class LifecycleOperationExecutorTest {
         @SuppressWarnings({"unchecked", "rawtypes"})
         var payload = (ArgumentCaptor<Map<String, Object>>) (ArgumentCaptor)
             ArgumentCaptor.forClass(Map.class);
-        verify(automation).execute(eq("mimo"), eq("reauthenticate"), payload.capture());
+        verify(automation).execute(
+            eq("mimo"), eq("reauthenticate"), payload.capture(), any(OperationContext.class));
         assertThat(payload.getValue())
             .containsEntry("credential", credential)
             .containsEntry("metadata", metadata)

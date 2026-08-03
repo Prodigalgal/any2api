@@ -58,6 +58,7 @@ provider routes and random routes apply the same authorization object before pro
 | `scheduled_actions` | Durable due-time scheduler |
 | `outbox_events` | Transactional publication to Redis Streams |
 | `usage_events` | Idempotent request telemetry |
+| `operation_events` | Correlated registration and lifecycle attempt timeline with sanitized failures |
 | `provider_response_states` | Provider-local Responses continuation state and account affinity |
 | `media_assets` | Short-lived private generated media copied from protected upstream URLs |
 | `account_model_cooldowns` | Per-account, per-provider, per-model cooldown without degrading unrelated models |
@@ -82,6 +83,12 @@ Each `registration_jobs` row owns its target success count, attempt budget, conc
 within-round attempt start interval, and between-round interval. A fully failed round still uses the
 larger of the configured interval and the scheduler's exponential backoff, so operator tuning cannot
 disable retry-storm protection accidentally.
+
+Each inference retry writes a separate `usage_events` row while retaining the same client-visible
+request correlation. The row identifies the distribution key, actual provider, leased account,
+model, protocol, duration, token counts, and outcome. Registration and lifecycle attempts use
+`operation_events` because their durable stages and structured failures differ from request usage.
+See [Full-Chain Observability](OBSERVABILITY.md).
 
 `media_assets` never stores an upstream authenticated URL. The provider downloads the bytes while
 its account and proxy lease are still active, validates the media type and size, and then stores a

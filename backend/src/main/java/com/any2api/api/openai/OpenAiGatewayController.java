@@ -109,7 +109,10 @@ public class OpenAiGatewayController {
             grant, authorization.protocol(protocol), route.providerId(), route.upstreamModel());
         authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
         var canonical = requestParser.parse(protocol, route, request);
-        return responseWriter.write(canonical, coordinator.execute(canonical), exchange);
+        exchange.getResponse().getHeaders().set(
+            "X-Any2API-Request-Id", canonical.requestId());
+        return responseWriter.write(
+            canonical, coordinator.execute(canonical, grant.keyId()), exchange);
     }
 
     private Mono<Void> executeRandom(
@@ -130,8 +133,12 @@ public class OpenAiGatewayController {
                 "X-Any2API-Provider", canonical.providerId());
             exchange.getResponse().getHeaders().set(
                 "X-Any2API-Model", canonical.model());
+            exchange.getResponse().getHeaders().set(
+                "X-Any2API-Request-Id", canonical.requestId());
             return responseWriter.write(
-                canonical, coordinator.execute(canonical, selection.account()), exchange);
+                canonical,
+                coordinator.execute(canonical, selection.account(), grant.keyId()),
+                exchange);
         });
     }
 }

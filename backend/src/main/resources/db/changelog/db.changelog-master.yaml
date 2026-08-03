@@ -27,3 +27,5 @@ databaseChangeLog:
       file: db/changelog/releases/013-distribution-api-keys.sql
   - include:
       file: db/changelog/releases/014-api-key-features-registration-controls.sql
+  - include:
+      file: db/changelog/releases/015-operation-observability.sql

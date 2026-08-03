@@ -8,6 +8,7 @@ from .browser_transport import router as browser_transport_router
 from .captcha.api import router as captcha_router
 from .captcha.registry import registry
 from .config import settings
+from .observability import CorrelationLoggingMiddleware
 from .provider_api import router as provider_router
 from .providers import provider_registry, public_provider_manifests
 from .resources import lanes
@@ -31,6 +32,7 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+app.add_middleware(CorrelationLoggingMiddleware)
 app.include_router(captcha_router)
 app.include_router(provider_router)
 app.include_router(browser_transport_router)

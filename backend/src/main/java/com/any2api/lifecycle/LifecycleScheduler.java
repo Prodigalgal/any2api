@@ -7,6 +7,9 @@ import com.any2api.credential.CredentialVault;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
+import com.any2api.observability.OperationContext;
+import com.any2api.observability.OperationEventService;
+import com.any2api.observability.RequestCorrelation;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -39,6 +42,7 @@ public class LifecycleScheduler {
     private final LifecycleOperationExecutor lifecycle;
     private final InferenceReadinessProbe readiness;
     private final ObjectMapper mapper;
+    private final OperationEventService observability;
 
     public LifecycleScheduler(
         JdbcClient jdbc,
@@ -49,7 +53,8 @@ public class LifecycleScheduler {
         ProxyPoolService proxyPools,
         LifecycleOperationExecutor lifecycle,
         InferenceReadinessProbe readiness,
-        ObjectMapper mapper
+        ObjectMapper mapper,
+        OperationEventService observability
     ) {
         this.jdbc = jdbc;
         this.transactions = transactions;
@@ -60,6 +65,7 @@ public class LifecycleScheduler {
         this.lifecycle = lifecycle;
         this.readiness = readiness;
         this.mapper = mapper;
+        this.observability = observability;
     }
 
     @Scheduled(fixedDelayString = "${any2api.lifecycle.poll-interval:10s}")
@@ -75,6 +81,33 @@ public class LifecycleScheduler {
     }
 
     private List<Action> claim(String owner) {
+        jdbc.sql("""
+            UPDATE operation_events event SET
+                status = 'FAILED', stage = 'scheduler', error_code = 'action_expired',
+                error_detail = 'lifecycle action expired',
+                duration_ms = GREATEST(
+                    0, (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - event.started_at)) * 1000)::BIGINT),
+                finished_at = CURRENT_TIMESTAMP
+            FROM scheduled_actions action
+            WHERE event.domain = 'LIFECYCLE' AND event.status = 'RUNNING'
+              AND event.aggregate_id = action.entity_id
+              AND event.operation = action.action_family
+              AND action.status = 'LEASED'
+              AND action.expires_at IS NOT NULL AND action.expires_at <= CURRENT_TIMESTAMP
+            """).update();
+        jdbc.sql("""
+            UPDATE operation_events event SET
+                status = 'FAILED', stage = 'scheduler', error_code = 'lease_expired',
+                error_detail = 'lifecycle action lease expired',
+                duration_ms = GREATEST(
+                    0, (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - event.started_at)) * 1000)::BIGINT),
+                finished_at = CURRENT_TIMESTAMP
+            FROM scheduled_actions action
+            WHERE event.domain = 'LIFECYCLE' AND event.status = 'RUNNING'
+              AND event.aggregate_id = action.entity_id
+              AND event.operation = action.action_family
+              AND action.status = 'LEASED' AND action.lease_expires_at < CURRENT_TIMESTAMP
+            """).update();
         jdbc.sql("""
             UPDATE scheduled_actions
             SET status = 'EXPIRED', lease_owner = NULL, lease_expires_at = NULL,
@@ -120,6 +153,10 @@ public class LifecycleScheduler {
     }
 
     private reactor.core.publisher.Mono<Void> execute(Action action, String owner) {
+        var context = new OperationContext(
+            UUID.randomUUID().toString(), "ACCOUNT", action.entityId(), action.attempts() + 1);
+        var observed = observability.start(
+            "LIFECYCLE", action.providerId(), action.action(), context);
         return reactor.core.publisher.Mono.fromCallable(() -> {
             providers.require(action.providerId());
             var accountId = UUID.fromString(action.entityId());
@@ -136,9 +173,10 @@ public class LifecycleScheduler {
                 credential.expiresAt(),
                 proxyPools.runtimeForProvider(
                     action.providerId(), ProxyTrafficScope.LIFECYCLE).orElse(null));
-        }).flatMap(task -> lifecycle.execute(
+        }).doOnNext(task -> observability.linkAccount(observed, task.account().getId()))
+            .flatMap(task -> lifecycle.execute(
                 action.providerId(), action.action(), task.credential(),
-                task.account().getMetadata(), task.proxyPool())
+                task.account().getMetadata(), task.proxyPool(), context)
             .flatMap(result -> {
                 var probe = !requiresReadinessProbe(
                         action.action(), task.account().getStatus(), result.healthy())
@@ -149,10 +187,25 @@ public class LifecycleScheduler {
                         mergedCredential(task.credential(), result.credentialPatch()),
                         task.credentialVersion(), result.credentialExpiresAt() == null
                             ? task.credentialExpiresAt() : result.credentialExpiresAt());
-                return probe.flatMap(probeResult -> reactor.core.publisher.Mono.fromRunnable(() ->
+                return probe.flatMap(probeResult -> reactor.core.publisher.Mono.<Void>fromRunnable(() -> {
                     transactions.executeWithoutResult(ignored ->
-                        complete(action, owner, task, result, probeResult))));
-            }));
+                        complete(action, owner, task, result, probeResult));
+                    if (result.healthy() && probeResult.ready()) {
+                        observability.succeed(observed, probeResult.model().isBlank()
+                            ? "lifecycle_completed" : "inference_probe_ready");
+                    } else {
+                        var code = !probeResult.ready()
+                            ? probeResult.errorClass() : result.errorClass();
+                        observability.fail(
+                            observed,
+                            code == null || code.isBlank() ? "lifecycle_unhealthy" : code,
+                            !probeResult.ready() ? "inference_probe" : "lifecycle_operation",
+                            "lifecycle operation did not establish inference readiness");
+                    }
+                }));
+            }))
+            .doOnError(error -> observability.fail(observed, error))
+            .contextWrite(RequestCorrelation.context(context.correlationId()));
     }
 
     private void complete(

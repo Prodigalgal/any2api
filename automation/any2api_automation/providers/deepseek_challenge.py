@@ -10,6 +10,8 @@ from typing import Any
 
 from PIL import Image, ImageStat
 
+from ..captcha.artifacts import record_captcha_artifact
+from ..captcha.models import VisualAction
 from ..captcha.policy import CaptchaAiPolicy
 from ..captcha.registry import registry
 from .deepseek_settings import settings
@@ -69,6 +71,7 @@ class DeepseekHcaptchaChallenge:
                 )
             prompt = _prompt(frame)
             task = _ready_surface_image(page, surface)
+            artifact = record_captcha_artifact("deepseek-hcaptcha", task.image)
             actions = registry.solve_visual_actions_sync(
                 task.image,
                 "Solve this hCaptcha semantic image challenge. Instruction: "
@@ -84,8 +87,10 @@ class DeepseekHcaptchaChallenge:
                 timeout_seconds=max(10, deadline - time.monotonic()),
                 ai_policy=ai_policy,
             )
+            solver_diagnostic = registry.visual_diagnostic()
+            evidence = _challenge_evidence(prompt, artifact, actions)
             if not actions or any(action.type not in {"click", "drag"} for action in actions):
-                self.last_diagnostic = "solver_rejected:" + registry.visual_diagnostic()
+                self.last_diagnostic = f"solver_rejected:{solver_diagnostic}:{evidence}"[:600]
                 _refresh(frame)
                 page.wait_for_timeout(random.randint(600, 1000))
                 continue
@@ -112,10 +117,10 @@ class DeepseekHcaptchaChallenge:
             _submit(frame, required=all(action.type == "click" for action in actions))
             if _wait_for_completion(page, completed):
                 self.last_diagnostic = (
-                    f"solved:attempt={attempts}:" + registry.visual_diagnostic()
+                    f"solved:attempt={attempts}:{solver_diagnostic}:{evidence}"
                 )[:600]
                 return
-            self.last_diagnostic = (f"retry:attempt={attempts}:" + registry.visual_diagnostic())[
+            self.last_diagnostic = (f"retry:attempt={attempts}:{solver_diagnostic}:{evidence}")[
                 :600
             ]
         raise TimeoutError(
@@ -302,6 +307,27 @@ def _prompt(frame: Any) -> str:
         except Exception:  # noqa: BLE001,S112 - optional prompt selector
             continue
     return "Select every matching target described by the challenge"
+
+
+def _challenge_evidence(
+    prompt: str,
+    artifact: str,
+    actions: list[VisualAction],
+) -> str:
+    safe_prompt = " ".join(prompt.split()).replace(":", ";")[:160]
+    normalized = []
+    for action in actions:
+        if action.type == "click" and action.at is not None:
+            normalized.append(f"click({action.at[0]:.3f},{action.at[1]:.3f})")
+        elif action.type == "drag" and action.start is not None and action.end is not None:
+            normalized.append(
+                f"drag({action.start[0]:.3f},{action.start[1]:.3f};"
+                f"{action.end[0]:.3f},{action.end[1]:.3f})"
+            )
+        else:
+            normalized.append(str(action.type)[:20])
+    action_text = ",".join(normalized) or "none"
+    return f"prompt={safe_prompt}:actions={action_text}:artifact={artifact or 'disabled'}"
 
 
 def _submit(frame: Any, *, required: bool) -> bool:

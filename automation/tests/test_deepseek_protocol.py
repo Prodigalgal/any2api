@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import pytest
 from PIL import Image, ImageDraw
 
+from any2api_automation.captcha.models import VisualAction
 from any2api_automation.lifecycle.browser import BrowserResult
 from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationTrace
@@ -26,6 +27,7 @@ from any2api_automation.providers.deepseek import (
 )
 from any2api_automation.providers.deepseek_challenge import (
     DeepseekHcaptchaChallenge,
+    _challenge_evidence,
     _extract_task_image,
     _wait_for_completion,
 )
@@ -422,3 +424,20 @@ def test_hcaptcha_task_crop_excludes_prompt_header_and_maps_back_to_surface() ->
     with Image.open(io.BytesIO(task.image)) as cropped:
         assert cropped.width > 450
         assert cropped.height > 280
+
+
+def test_hcaptcha_evidence_contains_only_normalized_prompt_actions_and_artifact() -> None:
+    evidence = _challenge_evidence(
+        " Move the wheel: into the empty space. ",
+        "deepseek-hcaptcha-fixture.png",
+        [
+            VisualAction(type="click", at=(0.25, 0.5)),
+            VisualAction(type="drag", start=(0.1, 0.2), end=(0.8, 0.7)),
+        ],
+    )
+
+    assert evidence == (
+        "prompt=Move the wheel; into the empty space.:"
+        "actions=click(0.250,0.500),drag(0.100,0.200;0.800,0.700):"
+        "artifact=deepseek-hcaptcha-fixture.png"
+    )

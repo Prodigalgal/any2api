@@ -51,33 +51,6 @@ class QwenProtocolTest {
     }
 
     @Test
-    void transportMatchesCurrentQwenWebSurfaces() {
-        var risk = mock(QwenRiskHeaderClient.class);
-        var properties = new QwenProperties();
-        var body = "{\"stream\":true}";
-        var completionPath = "/api/v2/chat/completions?chat_id=chat-1";
-        when(risk.generate(properties.getBaseUrl() + completionPath, "POST", body))
-            .thenReturn(Mono.just(Map.of("bx-v", "2.5.37", "version", "0.2.81")));
-        when(risk.generate(properties.getBaseUrl() + "/api/v2/chats/new", "POST", body))
-            .thenReturn(Mono.just(Map.of("bx-v", "2.5.37", "version", "0.2.81")));
-        var transport = new QwenTransportRequests(properties, risk);
-
-        StepVerifier.create(transport.createNewChat("/api/v2/chats/new", body, 90))
-            .assertNext(request -> assertThat(request.headers())
-                .containsEntry("Accept", "application/json, text/plain, */*")
-                .containsEntry("Referer", "https://chat.qwen.ai/c/new-chat")
-                .doesNotContainKey("X-Accel-Buffering"))
-            .verifyComplete();
-        StepVerifier.create(transport.createCompletion(completionPath, body, 90, "chat-1"))
-            .assertNext(request -> assertThat(request.headers())
-                .containsEntry("Accept", "application/json")
-                .containsEntry("Referer", "https://chat.qwen.ai/c/chat-1")
-                .containsEntry("X-Accel-Buffering", "no")
-                .containsEntry("bx-v", "2.5.37"))
-            .verifyComplete();
-    }
-
-    @Test
     void normalizesAliOssRegionForV4Signing() {
         assertThat(QwenMediaUploader.normalizeSigningRegion("oss-ap-southeast-1"))
             .isEqualTo("ap-southeast-1");

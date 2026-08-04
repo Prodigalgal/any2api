@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import logging
 import queue
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
+from ..config import settings as global_settings
 from ..security import require_internal_token
 from .qwen_settings import settings
 
@@ -76,6 +81,23 @@ class RiskHeadersRequest(BaseModel):
     url: str
     method: str = "GET"
     body: str = ""
+
+
+class NativeBrowserRequest(BaseModel):
+    method: Literal["GET", "POST"] = "POST"
+    path: str = Field(min_length=1, max_length=2048)
+    body: str = Field(default="", max_length=2 << 20)
+    bearer_token: str = Field(min_length=20, max_length=16_384)
+    referer_path: str = Field(default="/", min_length=1, max_length=2048)
+    timeout_seconds: int = Field(default=300, ge=1, le=300)
+
+    @model_validator(mode="after")
+    def validate_paths(self) -> NativeBrowserRequest:
+        if not re.fullmatch(r"/api/v[12]/[A-Za-z0-9_./?=&%:-]+", self.path):
+            raise ValueError("Qwen browser transport path is not allowed")
+        if not re.fullmatch(r"/(?:c(?:/[A-Za-z0-9_-]+)?|)", self.referer_path):
+            raise ValueError("Qwen browser transport referer is not allowed")
+        return self
 
 
 @dataclass
@@ -250,7 +272,172 @@ class QwenRiskHeaderProvider:
             task.event.set()
 
 
+class QwenNativeBrowserTransport:
+    """Executes authenticated Qwen fetches in the real browser network stack."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._slots = asyncio.Semaphore(4)
+        self._playwright: Any | None = None
+        self._browser: Any | None = None
+        self._context: Any | None = None
+        self._page: Any | None = None
+        self._frontend_version = ""
+
+    async def fetch(self, request: NativeBrowserRequest) -> dict[str, Any]:
+        await self._ensure_ready()
+        async with self._slots:
+            maximum = global_settings().browser_transport_max_buffered_bytes
+            payload = {
+                "url": settings().qwen_base_url.rstrip("/") + request.path,
+                "method": request.method,
+                "body": request.body,
+                "bearerToken": request.bearer_token,
+                "referrer": settings().qwen_base_url.rstrip("/") + request.referer_path,
+                "timeoutMs": request.timeout_seconds * 1000,
+                "version": self._frontend_version,
+                "requestId": str(uuid4()),
+                "maximumBytes": maximum,
+            }
+            result = await self._page.evaluate(
+                r"""async (request) => {
+                  const controller = new AbortController();
+                  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+                  try {
+                    const headers = {
+                      'Accept': request.path.includes('/chat/completions')
+                        ? 'application/json'
+                        : 'application/json, text/plain, */*',
+                      'Content-Type': 'application/json',
+                      'Authorization': 'Bearer ' + request.bearerToken,
+                      'source': 'web',
+                      'Timezone': new Date().toString(),
+                      'X-Request-Id': request.requestId,
+                      'version': request.version
+                    };
+                    if (request.path.includes('/chat/completions')) {
+                      headers['X-Accel-Buffering'] = 'no';
+                    }
+                    const response = await fetch(request.url, {
+                      method: request.method,
+                      headers,
+                      body: request.method === 'GET' ? undefined : request.body,
+                      credentials: 'omit',
+                      cache: 'no-store',
+                      referrer: request.referrer,
+                      signal: controller.signal
+                    });
+                    const contentLength = Number(response.headers.get('content-length') || 0);
+                    if (contentLength > request.maximumBytes) {
+                      throw new Error('Qwen browser response exceeds the buffered byte limit');
+                    }
+                    const bytes = new Uint8Array(await response.arrayBuffer());
+                    if (bytes.length > request.maximumBytes) {
+                      throw new Error('Qwen browser response exceeds the buffered byte limit');
+                    }
+                    let binary = '';
+                    for (let offset = 0; offset < bytes.length; offset += 32768) {
+                      binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+                    }
+                    return {
+                      status: response.status,
+                      contentType: response.headers.get('content-type') || 'application/octet-stream',
+                      requestId: response.headers.get('x-request-id') || request.requestId,
+                      retryAfter: response.headers.get('retry-after') || '',
+                      bodyBase64: btoa(binary)
+                    };
+                  } finally {
+                    clearTimeout(timeout);
+                  }
+                }""",
+                payload,
+            )
+            encoded = str(result.get("bodyBase64") or "")
+            body = base64.b64decode(encoded, validate=True)
+            if len(body) > maximum:
+                raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
+            return {
+                "status": int(result.get("status") or 502),
+                "content_type": str(result.get("contentType") or "application/octet-stream"),
+                "headers": {
+                    "x-request-id": str(result.get("requestId") or ""),
+                    "retry-after": str(result.get("retryAfter") or ""),
+                },
+                "body_base64": encoded,
+                "transport_mode": "native_browser_buffered",
+            }
+
+    async def close(self) -> None:
+        async with self._lock:
+            await self._close_unlocked()
+
+    async def _close_unlocked(self) -> None:
+        for value in (self._context, self._browser):
+            if value is not None:
+                try:
+                    await value.close()
+                except Exception:
+                    logger.exception("Qwen native browser cleanup failed")
+        if self._playwright is not None:
+            try:
+                await self._playwright.stop()
+            except Exception:
+                logger.exception("Qwen native Playwright cleanup failed")
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._frontend_version = ""
+
+    async def _ensure_ready(self) -> None:
+        if self._page is not None and not self._page.is_closed():
+            return
+        async with self._lock:
+            if self._page is not None and not self._page.is_closed():
+                return
+            config = settings()
+            try:
+                self._playwright = await async_playwright().start()
+                self._browser = await self._playwright.chromium.launch(
+                    headless=config.qwen_risk_headless
+                )
+                self._context = await self._browser.new_context(
+                    locale="zh-CN",
+                    timezone_id="Asia/Shanghai",
+                    viewport={"width": 1440, "height": 900},
+                )
+                self._page = await self._context.new_page()
+                self._page.set_default_timeout(60_000)
+                await self._page.goto(
+                    config.qwen_base_url,
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+                await self._page.wait_for_function(
+                    r"""() => performance.getEntriesByType('resource').some(
+                      entry => /\/sd\/baxia\/[\d.]+\/baxiaCommon\.js/.test(entry.name)
+                    )""",
+                    timeout=45_000,
+                )
+                await self._page.wait_for_timeout(2_000)
+                self._frontend_version = await self._page.evaluate(
+                    r"""() => {
+                      for (const entry of performance.getEntriesByType('resource')) {
+                        const match = entry.name.match(/qwen-chat-fe\/([^/]+)\/js\/main\.js/);
+                        if (match) return match[1];
+                      }
+                      return '';
+                    }"""
+                )
+                if not self._frontend_version:
+                    raise RuntimeError("could not derive the current Qwen frontend version")
+            except Exception:
+                await self._close_unlocked()
+                raise
+
+
 provider = QwenRiskHeaderProvider()
+native_transport = QwenNativeBrowserTransport()
 router = APIRouter(
     prefix="/internal/v1/providers/qwen",
     dependencies=[Depends(require_internal_token)],
@@ -269,3 +456,14 @@ def risk_headers(request: RiskHeadersRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/browser-fetch")
+async def browser_fetch(request: NativeBrowserRequest) -> dict[str, Any]:
+    try:
+        return await native_transport.fetch(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Qwen native browser fetch failed")
+        raise HTTPException(status_code=502, detail="Qwen native browser fetch failed") from exc

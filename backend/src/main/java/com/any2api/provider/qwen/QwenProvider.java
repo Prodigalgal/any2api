@@ -172,15 +172,16 @@ public final class QwenProvider implements InferenceProvider {
             transport.open(sessionCommand(credential, affinityKey)),
             session -> mediaUploader.prepare(session, request.messages(), credential)
                 .flatMapMany(preparedMessages -> createChat(
-                        session, request.model())
+                        credential, request.model())
                     .flatMapMany(chatId -> {
                         var body = requestMapper.prepare(request, chatId, preparedMessages);
                         var path = "/api/v2/chat/completions?chat_id=" + chatId;
                         var bodyText = mapper.writeValueAsString(body);
                         var decoder = new QwenEventDecoder(request.requestId());
                         var sse = new SseDataDecoder();
-                        return requests.createCompletion(path, bodyText, 300, chatId)
-                            .flatMapMany(command -> transport.stream(session.id(), command))
+                        return requests.browserFetch(
+                                path, bodyText, credential, "/c/" + chatId, 300)
+                            .flatMapMany(response -> browserResponse(response))
                             .concatMapIterable(sse::decode)
                             .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
                             .concatMapIterable(decoder::decode)
@@ -248,7 +249,7 @@ public final class QwenProvider implements InferenceProvider {
         return "";
     }
 
-    private Mono<String> createChat(BrowserTransportClient.Session session, String model) {
+    private Mono<String> createChat(QwenCredential credential, String model) {
         var body = mapper.createObjectNode()
             .put("chatId", "")
             .put("project_id", "")
@@ -258,14 +259,17 @@ public final class QwenProvider implements InferenceProvider {
         body.putArray("models").add(model);
         var bodyText = mapper.writeValueAsString(body);
         var path = "/api/v2/chats/new";
-        return requests.createNewChat(path, bodyText, 120)
-            .flatMap(command -> transport.request(session.id(), command))
+        return requests.browserFetch(path, bodyText, credential, "/c/new-chat", 120)
             .flatMap(response -> {
-                var json = json(response);
                 if (!response.successful()) {
                     return Mono.error(new QwenUpstreamException(response.status(),
-                        summarize(response.status(), json.toString())));
+                        summarize(response.status(), response.text())));
                 }
+                if (response.contentType().toLowerCase().contains("text/html")) {
+                    return Mono.error(new QwenUpstreamException(
+                        403, "Qwen native browser was redirected to an anti-bot challenge"));
+                }
+                var json = json(response.text());
                 var id = json.path("id").asText(json.path("data").path("id").asText(
                     json.path("chat_id").asText(""))).trim();
                 return id.isBlank()
@@ -273,6 +277,18 @@ public final class QwenProvider implements InferenceProvider {
                         "Qwen chats/new returned no chat id"))
                     : Mono.just(id);
             });
+    }
+
+    private Flux<byte[]> browserResponse(QwenRiskHeaderClient.BrowserResponse response) {
+        if (!response.successful()) {
+            return Flux.error(new QwenUpstreamException(
+                response.status(), summarize(response.status(), response.text())));
+        }
+        if (response.contentType().toLowerCase().contains("text/html")) {
+            return Flux.error(new QwenUpstreamException(
+                403, "Qwen native browser was redirected to an anti-bot challenge"));
+        }
+        return Flux.just(response.body());
     }
 
     private BrowserTransportClient.OpenCommand sessionCommand(
@@ -295,6 +311,14 @@ public final class QwenProvider implements InferenceProvider {
     private JsonNode json(BrowserTransportClient.BufferedResponse response) {
         try {
             return mapper.readTree(response.text());
+        } catch (RuntimeException error) {
+            throw new QwenUpstreamException(502, "Qwen upstream returned invalid JSON");
+        }
+    }
+
+    private JsonNode json(String response) {
+        try {
+            return mapper.readTree(response);
         } catch (RuntimeException error) {
             throw new QwenUpstreamException(502, "Qwen upstream returned invalid JSON");
         }

@@ -1,3 +1,4 @@
+import asyncio
 import re
 from dataclasses import asdict
 
@@ -39,3 +40,6 @@ class AutomationProviderRegistry:
 
     def routers(self) -> list[object]:
         return [router for provider in self._providers.values() for router in provider.routers()]
+
+    async def close(self) -> None:
+        await asyncio.gather(*(provider.close() for provider in self._providers.values()))

@@ -47,6 +47,9 @@ class AutomationProvider(ABC):
     def routers(self) -> tuple[Any, ...]:
         return ()
 
+    async def close(self) -> None:
+        return None
+
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile()
 

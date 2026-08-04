@@ -31,48 +31,17 @@ final class QwenTransportRequests {
         String body,
         int timeout
     ) {
-        return create(method, path, body, timeout, WebSurface.DEFAULT, "");
-    }
-
-    Mono<BrowserTransportClient.Request> createNewChat(
-        String path,
-        String body,
-        int timeout
-    ) {
-        return create("POST", path, body, timeout, WebSurface.NEW_CHAT, "");
-    }
-
-    Mono<BrowserTransportClient.Request> createCompletion(
-        String path,
-        String body,
-        int timeout,
-        String chatId
-    ) {
-        return create("POST", path, body, timeout, WebSurface.COMPLETION, chatId);
-    }
-
-    private Mono<BrowserTransportClient.Request> create(
-        String method,
-        String path,
-        String body,
-        int timeout,
-        WebSurface surface,
-        String chatId
-    ) {
         var payload = body == null ? "" : body;
         return riskHeaders.generate(properties.getBaseUrl() + path, method, payload)
             .map(risk -> {
                 var headers = new LinkedHashMap<String, String>();
-                headers.put("Accept", surface.accept());
+                headers.put("Accept", "application/json, text/event-stream");
                 headers.put("Content-Type", "application/json");
                 headers.put("Origin", properties.getBaseUrl());
-                headers.put("Referer", properties.getBaseUrl() + surface.referer(chatId));
+                headers.put("Referer", properties.getBaseUrl() + "/");
                 headers.put("source", properties.getSource());
                 headers.put("Timezone", ZonedDateTime.now(QWEN_TIMEZONE).format(WEB_TIMEZONE));
                 headers.put("X-Request-Id", UUID.randomUUID().toString());
-                if (surface == WebSurface.COMPLETION) {
-                    headers.put("X-Accel-Buffering", "no");
-                }
                 headers.putAll(risk);
                 return BrowserTransportClient.Request.binary(
                     method, path, Map.copyOf(headers),
@@ -81,23 +50,14 @@ final class QwenTransportRequests {
             });
     }
 
-    private enum WebSurface {
-        DEFAULT("application/json, text/event-stream", "/"),
-        NEW_CHAT("application/json, text/plain, */*", "/c/new-chat"),
-        COMPLETION("application/json", "/c/");
-
-        private final String accept;
-        private final String referer;
-
-        WebSurface(String accept, String referer) {
-            this.accept = accept;
-            this.referer = referer;
-        }
-
-        String accept() { return accept; }
-
-        String referer(String chatId) {
-            return this == COMPLETION ? referer + chatId : referer;
-        }
+    Mono<QwenRiskHeaderClient.BrowserResponse> browserFetch(
+        String path,
+        String body,
+        QwenCredential credential,
+        String refererPath,
+        int timeout
+    ) {
+        return riskHeaders.browserFetch(
+            "POST", path, body, credential.token(), refererPath, timeout);
     }
 }

@@ -32,6 +32,7 @@ class QwenAutomationProvider(AutomationProvider):
         challenge_types=("slider",),
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
+        inference_transport=True,
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -97,6 +98,11 @@ class QwenAutomationProvider(AutomationProvider):
         from .qwen_risk import router
 
         return (router,)
+
+    async def close(self) -> None:
+        from .qwen_risk import native_transport
+
+        await native_transport.close()
 
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile(

@@ -32,6 +32,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        await provider_registry.close()
         browser_session_manager.close_all()
 
 

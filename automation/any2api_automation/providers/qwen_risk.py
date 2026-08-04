@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,59 @@ from ..security import require_internal_token
 from .qwen_settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _browser_major(profile: str) -> str:
+    match = re.fullmatch(r"chrome(\d{2,3})", profile.strip().lower())
+    if not match:
+        raise ValueError("Qwen risk browser profile must be chrome followed by a major version")
+    return match.group(1)
+
+
+def _client_hints(profile: str) -> dict[str, str]:
+    major = _browser_major(profile)
+    return {
+        "sec-ch-ua": (f'"Not;A=Brand";v="99", "Chromium";v="{major}", "Google Chrome";v="{major}"'),
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+    }
+
+
+def _fingerprint_script(profile: str) -> str:
+    major = _browser_major(profile)
+    return f"""
+    (() => {{
+      const brands = [
+        {{brand: 'Not;A=Brand', version: '99'}},
+        {{brand: 'Chromium', version: '{major}'}},
+        {{brand: 'Google Chrome', version: '{major}'}}
+      ];
+      const userAgentData = {{
+        brands,
+        mobile: false,
+        platform: 'Windows',
+        getHighEntropyValues: async (hints) => ({{
+          architecture: 'x86',
+          bitness: '64',
+          brands,
+          fullVersionList: brands.map(value => ({{
+            brand: value.brand,
+            version: value.version + '.0.0.0'
+          }})),
+          mobile: false,
+          model: '',
+          platform: 'Windows',
+          platformVersion: '10.0.0',
+          uaFullVersion: '{major}.0.0.0',
+          wow64: false
+        }})
+      }};
+      Object.defineProperty(Navigator.prototype, 'platform', {{get: () => 'Win32'}});
+      Object.defineProperty(Navigator.prototype, 'userAgentData', {{
+        get: () => userAgentData
+      }});
+    }})();
+    """
 
 
 class RiskHeadersRequest(BaseModel):
@@ -76,12 +130,19 @@ class QwenRiskHeaderProvider:
     def _run(self) -> None:
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=settings().qwen_risk_headless)
+                config = settings()
+                browser = playwright.chromium.launch(headless=config.qwen_risk_headless)
                 context = browser.new_context(
                     locale="zh-CN",
                     timezone_id="Asia/Shanghai",
                     viewport={"width": 1440, "height": 900},
+                    user_agent=config.qwen_risk_user_agent,
+                    extra_http_headers={
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        **_client_hints(config.qwen_risk_browser_profile),
+                    },
                 )
+                context.add_init_script(_fingerprint_script(config.qwen_risk_browser_profile))
                 page = context.new_page()
                 page.set_default_timeout(45_000)
                 self._load(page)
@@ -171,6 +232,9 @@ class QwenRiskHeaderProvider:
             )
             result = {key: captured[key] for key in allowed if captured.get(key)}
             if result.get("bx-v"):
+                expected = settings().qwen_risk_user_agent
+                if result.get("user-agent") != expected:
+                    raise RuntimeError("Qwen risk browser emitted an inconsistent User-Agent")
                 result["version"] = self._frontend_version
                 return result
             page.wait_for_timeout(1_500)

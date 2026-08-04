@@ -1,5 +1,6 @@
 package com.any2api.provider.qwen;
 
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties("any2api.provider.qwen")
@@ -10,6 +11,7 @@ public class QwenProperties {
     private String source = "web";
     private String requestVersion = "2.1";
     private int maxUploadBytes = 20 * 1024 * 1024;
+    private Duration modelProbeTimeout = Duration.ofSeconds(120);
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = trim(baseUrl); }
@@ -23,6 +25,14 @@ public class QwenProperties {
     public void setMaxUploadBytes(int maxUploadBytes) {
         if (maxUploadBytes < 1) throw new IllegalArgumentException("maxUploadBytes must be positive");
         this.maxUploadBytes = maxUploadBytes;
+    }
+    public Duration getModelProbeTimeout() { return modelProbeTimeout; }
+    public void setModelProbeTimeout(Duration modelProbeTimeout) {
+        if (modelProbeTimeout == null || modelProbeTimeout.isZero()
+            || modelProbeTimeout.isNegative()) {
+            throw new IllegalArgumentException("modelProbeTimeout must be positive");
+        }
+        this.modelProbeTimeout = modelProbeTimeout;
     }
     private static String trim(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;

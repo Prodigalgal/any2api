@@ -3,7 +3,6 @@ package com.any2api.provider;
 import com.any2api.persistence.PostgresResultValues;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -17,8 +16,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 @Service
 public final class ModelProbeService {
-    private static final Duration TIMEOUT = Duration.ofSeconds(45);
-
     private final ProviderRegistry providers;
     private final InferenceCoordinator coordinator;
     private final JdbcClient jdbc;
@@ -42,13 +39,13 @@ public final class ModelProbeService {
     public Mono<Result> probe(String providerId, String modelId) {
         var normalizedProvider = required(providerId, "provider_id");
         var normalizedModel = required(modelId, "model_id");
-        providers.require(normalizedProvider);
+        var provider = providers.require(normalizedProvider);
         var request = request(normalizedProvider, normalizedModel);
         var startedAt = System.nanoTime();
         return requireCataloged(normalizedProvider, normalizedModel).then(Mono.defer(() ->
             coordinator.executeProbe(request)
                 .collectList()
-                .timeout(TIMEOUT)
+                .timeout(provider.modelProbeTimeout())
                 .map(events -> result(normalizedProvider, normalizedModel, events, startedAt))
                 .onErrorResume(error -> Mono.just(new Result(
                     normalizedProvider, normalizedModel, "FAILED",

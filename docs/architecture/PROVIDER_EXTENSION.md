@@ -4,6 +4,9 @@ Adding a provider must not change the public controllers, account scheduler, Red
 canonical event renderer, or frontend navigation. Every provider uses one stable lowercase
 `providerId` across Java, Python, PostgreSQL, Redis keys, metrics, and audit events.
 
+Providers whose first response requires browser startup or challenge recovery override
+`InferenceProvider.modelProbeTimeout()`; the default remains 45 seconds for direct transports.
+
 ## Routing and model identity
 
 The text inference surface is intentionally limited to OpenAI Chat Completions and Responses.

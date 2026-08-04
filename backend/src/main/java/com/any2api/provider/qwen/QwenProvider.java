@@ -20,6 +20,7 @@ import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.SseDataDecoder;
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -92,6 +93,11 @@ public final class QwenProvider implements InferenceProvider {
     @Override
     public ProviderProtocolContract protocolContract() {
         return PROTOCOL;
+    }
+
+    @Override
+    public Duration modelProbeTimeout() {
+        return properties.getModelProbeTimeout();
     }
 
     @Override

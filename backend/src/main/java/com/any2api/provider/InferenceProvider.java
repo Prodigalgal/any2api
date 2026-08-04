@@ -3,6 +3,7 @@ package com.any2api.provider;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import java.time.Duration;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
@@ -27,6 +28,10 @@ public interface InferenceProvider {
 
     default ProviderRetryPolicy retryPolicy() {
         return ProviderRetryPolicy.standard();
+    }
+
+    default Duration modelProbeTimeout() {
+        return Duration.ofSeconds(45);
     }
 
     default ModelCapabilityContract modelContract(DiscoveredModel model) {

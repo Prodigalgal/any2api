@@ -128,6 +128,7 @@ any2api:
       source: ${ANY2API_PROVIDER_QWEN_SOURCE:web}
       request-version: ${ANY2API_PROVIDER_QWEN_REQUEST_VERSION:2.1}
       max-upload-bytes: ${ANY2API_PROVIDER_QWEN_MAX_UPLOAD_BYTES:20971520}
+      model-probe-timeout: ${ANY2API_PROVIDER_QWEN_MODEL_PROBE_TIMEOUT:120s}
     glm:
       base-url: ${ANY2API_PROVIDER_GLM_BASE_URL:https://chat.z.ai}
       frontend-version: ${ANY2API_PROVIDER_GLM_FRONTEND_VERSION:1.1.79}

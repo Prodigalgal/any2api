@@ -9,6 +9,7 @@ import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.BrowserTransportClient;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,6 +19,17 @@ import reactor.test.StepVerifier;
 import tools.jackson.databind.ObjectMapper;
 
 class QwenProtocolTest {
+    @Test
+    void allowsBrowserInitializationAndOneChallengeDuringModelProbes() {
+        var provider = new QwenProvider(
+            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
+            new QwenProperties(), mock(QwenRequestMapper.class),
+            mock(QwenTransportRequests.class), mock(QwenMediaUploader.class),
+            new ObjectMapper());
+
+        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
+    }
+
     @Test
     void preservesProviderCookiesForTheNativeBrowserSession() {
         var payload = new ObjectMapper().readTree("""

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import json
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -8,6 +10,7 @@ from pydantic import ValidationError
 from any2api_automation.providers.qwen_risk import (
     NativeBrowserRequest,
     QwenNativeBrowserTransport,
+    _qwen_punish_url,
 )
 
 
@@ -75,3 +78,75 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
     assert response["status"] == 200
     assert base64.b64decode(response["body_base64"]) == b'{"data":{"id":"chat"}}'
+
+
+def test_qwen_punish_url_accepts_only_the_configured_qwen_origin() -> None:
+    valid = json.dumps(
+        {
+            "ret": ["FAIL_SYS_USER_VALIDATE", "captcha required"],
+            "data": {
+                "url": (
+                    "https://chat.qwen.ai:443/api/v2/chat/completions/"
+                    "_____tmd_____/punish?x5step=2&action=captcha"
+                )
+            },
+        }
+    ).encode()
+    foreign = valid.replace(b"chat.qwen.ai", b"example.com")
+
+    assert _qwen_punish_url(valid).startswith("https://chat.qwen.ai:443/")
+    assert _qwen_punish_url(foreign) == ""
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_solves_and_replays_one_punished_request() -> None:
+    punish_url = (
+        "https://chat.qwen.ai/api/v2/chat/completions/_____tmd_____/punish?x5step=2&action=captcha"
+    )
+    punished = json.dumps(
+        {
+            "ret": ["FAIL_SYS_USER_VALIDATE", "captcha required"],
+            "data": {"url": punish_url},
+        }
+    ).encode()
+    completed = b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def is_closed(self) -> bool:
+            return False
+
+        async def evaluate(self, _script: str, _payload: dict[str, object]) -> dict[str, object]:
+            self.calls += 1
+            body = punished if self.calls == 1 else completed
+            return {
+                "status": 200,
+                "contentType": "application/json" if self.calls == 1 else "text/event-stream",
+                "requestId": "request-id",
+                "retryAfter": "",
+                "bodyBase64": base64.b64encode(body).decode(),
+            }
+
+    transport = QwenNativeBrowserTransport()
+    transport._page = FakePage()
+    transport._frontend_version = "current"
+    transport._challenge_solver.solve = AsyncMock(
+        return_value=type("Outcome", (), {"attempts": 1, "diagnostic": "ok"})()
+    )
+    transport._load_page_runtime = AsyncMock()
+
+    response = await transport.fetch(
+        NativeBrowserRequest(
+            path="/api/v2/chat/completions?chat_id=chat",
+            body="{}",
+            bearer_token="token-value-that-is-long-enough",
+            referer_path="/c/chat",
+        )
+    )
+
+    assert transport._page.calls == 2
+    transport._challenge_solver.solve.assert_awaited_once_with(transport._page, punish_url)
+    transport._load_page_runtime.assert_awaited_once()
+    assert base64.b64decode(response["body_base64"]) == completed

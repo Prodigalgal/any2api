@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from ..config import settings as global_settings
 from ..security import require_internal_token
+from .qwen_inference_challenge import QwenInferenceChallengeSolver
 from .qwen_settings import settings
 
 logger = logging.getLogger(__name__)
@@ -279,32 +280,41 @@ class QwenNativeBrowserTransport:
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
-        self._slots = asyncio.Semaphore(4)
+        self._request_lock = asyncio.Lock()
         self._playwright: Any | None = None
         self._browser: Any | None = None
         self._context: Any | None = None
         self._page: Any | None = None
         self._frontend_version = ""
+        self._challenge_solver = QwenInferenceChallengeSolver()
 
     async def fetch(self, request: NativeBrowserRequest) -> dict[str, Any]:
         await self._ensure_ready()
-        async with self._slots:
-            maximum = global_settings().browser_transport_max_buffered_bytes
-            payload = {
-                "url": settings().qwen_base_url.rstrip("/") + request.path,
-                "path": request.path,
-                "method": request.method,
-                "body": request.body,
-                "bearerToken": request.bearer_token,
-                "referrer": settings().qwen_base_url.rstrip("/") + request.referer_path,
-                "timeoutMs": request.timeout_seconds * 1000,
-                "version": self._frontend_version,
-                "requestId": str(uuid4()),
-                "maximumBytes": maximum,
-                "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
-            }
-            result = await self._page.evaluate(
-                r"""async (request) => {
+        async with self._request_lock:
+            result, body = await self._evaluate(request)
+            punish_url = _qwen_punish_url(body)
+            if punish_url:
+                await self._recover_from_challenge(punish_url)
+                result, body = await self._evaluate(request)
+            return self._response(request, result, body)
+
+    async def _evaluate(self, request: NativeBrowserRequest) -> tuple[dict[str, Any], bytes]:
+        maximum = global_settings().browser_transport_max_buffered_bytes
+        payload = {
+            "url": settings().qwen_base_url.rstrip("/") + request.path,
+            "path": request.path,
+            "method": request.method,
+            "body": request.body,
+            "bearerToken": request.bearer_token,
+            "referrer": settings().qwen_base_url.rstrip("/") + request.referer_path,
+            "timeoutMs": request.timeout_seconds * 1000,
+            "version": self._frontend_version,
+            "requestId": str(uuid4()),
+            "maximumBytes": maximum,
+            "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
+        }
+        result = await self._page.evaluate(
+            r"""async (request) => {
                   const controller = new AbortController();
                   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
                   try {
@@ -354,36 +364,52 @@ class QwenNativeBrowserTransport:
                     clearTimeout(timeout);
                   }
                 }""",
-                payload,
-            )
-            encoded = str(result.get("bodyBase64") or "")
-            body = base64.b64decode(encoded, validate=True)
-            if len(body) > maximum:
-                raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
-            content_type = str(result.get("contentType") or "application/octet-stream")
+            payload,
+        )
+        encoded = str(result.get("bodyBase64") or "")
+        body = base64.b64decode(encoded, validate=True)
+        if len(body) > maximum:
+            raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
+        return result, body
+
+    def _response(
+        self,
+        request: NativeBrowserRequest,
+        result: dict[str, Any],
+        body: bytes,
+    ) -> dict[str, Any]:
+        content_type = str(result.get("contentType") or "application/octet-stream")
+        logger.info(
+            "qwen_native_browser_response path=%s status=%s content_type=%s bytes=%s",
+            request.path,
+            result.get("status"),
+            content_type,
+            len(body),
+        )
+        if "/chat/completions" in request.path and b"data:" not in body:
+            code = _qwen_failure_code(body) or "unknown"
+            logger.warning("qwen_native_browser_unexpected_completion code=%s", code)
+        return {
+            "status": int(result.get("status") or 502),
+            "content_type": content_type,
+            "headers": {
+                "x-request-id": str(result.get("requestId") or ""),
+                "retry-after": str(result.get("retryAfter") or ""),
+            },
+            "body_base64": str(result.get("bodyBase64") or ""),
+            "transport_mode": "native_browser_buffered",
+        }
+
+    async def _recover_from_challenge(self, punish_url: str) -> None:
+        try:
+            outcome = await self._challenge_solver.solve(self._page, punish_url)
             logger.info(
-                "qwen_native_browser_response path=%s status=%s content_type=%s bytes=%s",
-                request.path,
-                result.get("status"),
-                content_type,
-                len(body),
+                "qwen_native_browser_challenge_cleared attempts=%s diagnostic=%s",
+                outcome.attempts,
+                outcome.diagnostic,
             )
-            if "/chat/completions" in request.path and b"data:" not in body:
-                preview = body[:800].decode("utf-8", errors="replace")
-                logger.warning(
-                    "qwen_native_browser_unexpected_completion preview=%r",
-                    preview,
-                )
-            return {
-                "status": int(result.get("status") or 502),
-                "content_type": content_type,
-                "headers": {
-                    "x-request-id": str(result.get("requestId") or ""),
-                    "retry-after": str(result.get("retryAfter") or ""),
-                },
-                "body_base64": encoded,
-                "transport_mode": "native_browser_buffered",
-            }
+        finally:
+            await self._load_page_runtime()
 
     async def close(self) -> None:
         async with self._lock:
@@ -425,33 +451,68 @@ class QwenNativeBrowserTransport:
                     viewport={"width": 1440, "height": 900},
                 )
                 self._page = await self._context.new_page()
-                self._page.set_default_timeout(60_000)
-                await self._page.goto(
-                    config.qwen_base_url,
-                    wait_until="domcontentloaded",
-                    timeout=60_000,
-                )
-                await self._page.wait_for_function(
-                    r"""() => performance.getEntriesByType('resource').some(
-                      entry => /\/sd\/baxia\/[\d.]+\/baxiaCommon\.js/.test(entry.name)
-                    )""",
-                    timeout=45_000,
-                )
-                await self._page.wait_for_timeout(2_000)
-                self._frontend_version = await self._page.evaluate(
-                    r"""() => {
-                      for (const entry of performance.getEntriesByType('resource')) {
-                        const match = entry.name.match(/qwen-chat-fe\/([^/]+)\/js\/main\.js/);
-                        if (match) return match[1];
-                      }
-                      return '';
-                    }"""
-                )
-                if not self._frontend_version:
-                    raise RuntimeError("could not derive the current Qwen frontend version")
+                await self._load_page_runtime()
             except Exception:
                 await self._close_unlocked()
                 raise
+
+    async def _load_page_runtime(self) -> None:
+        config = settings()
+        self._page.set_default_timeout(60_000)
+        await self._page.goto(
+            config.qwen_base_url,
+            wait_until="domcontentloaded",
+            timeout=60_000,
+        )
+        await self._page.wait_for_function(
+            r"""() => performance.getEntriesByType('resource').some(
+              entry => /\/sd\/baxia\/[\d.]+\/baxiaCommon\.js/.test(entry.name)
+            )""",
+            timeout=45_000,
+        )
+        await self._page.wait_for_timeout(2_000)
+        self._frontend_version = await self._page.evaluate(
+            r"""() => {
+              for (const entry of performance.getEntriesByType('resource')) {
+                const match = entry.name.match(/qwen-chat-fe\/([^/]+)\/js\/main\.js/);
+                if (match) return match[1];
+              }
+              return '';
+            }"""
+        )
+        if not self._frontend_version:
+            raise RuntimeError("could not derive the current Qwen frontend version")
+
+
+def _qwen_failure_code(body: bytes) -> str:
+    try:
+        payload = json.loads(body)
+        values = payload.get("ret") if isinstance(payload, dict) else None
+        return str(values[0]) if isinstance(values, list) and values else ""
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return ""
+
+
+def _qwen_punish_url(body: bytes) -> str:
+    if _qwen_failure_code(body) != "FAIL_SYS_USER_VALIDATE":
+        return ""
+    try:
+        payload = json.loads(body)
+        value = str((payload.get("data") or {}).get("url") or "").strip()
+        target = urlparse(value)
+        expected = urlparse(settings().qwen_base_url)
+        valid_port = target.port in {None, 443}
+        if (
+            target.scheme == "https"
+            and target.hostname == expected.hostname
+            and valid_port
+            and "/punish" in target.path
+            and target.query
+        ):
+            return value
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return ""
+    return ""
 
 
 provider = QwenRiskHeaderProvider()

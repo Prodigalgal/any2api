@@ -29,3 +29,5 @@ databaseChangeLog:
       file: db/changelog/releases/014-api-key-features-registration-controls.sql
   - include:
       file: db/changelog/releases/015-operation-observability.sql
+  - include:
+      file: db/changelog/releases/016-model-runtime.sql

@@ -40,7 +40,9 @@ public final class AdminObservabilityController {
         return Mono.fromCallable(() -> jdbc.sql("""
                 SELECT request_id, api_key_id, provider_id, account_id, model_id,
                        protocol, success, input_tokens, output_tokens,
-                       cache_read_tokens, duration_ms, error_class, created_at
+                       cache_read_tokens, duration_ms, error_class, created_at,
+                       attempt, request_kind, usage_source, queue_ms,
+                       account_acquire_ms, ttfb_ms, generation_ms
                 FROM usage_events ORDER BY created_at DESC LIMIT :limit
                 """)
             .param("limit", limit).query(AdminObservabilityController::mapUsage).list())
@@ -54,7 +56,14 @@ public final class AdminObservabilityController {
                    COUNT(*) FILTER (WHERE NOT success) AS failure_count,
                    COALESCE(ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP
                        (ORDER BY duration_ms)), 0)::BIGINT AS p95_duration_ms
-            FROM usage_events WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+            FROM (
+                SELECT request_id,
+                       (ARRAY_AGG(success ORDER BY attempt DESC))[1] AS success,
+                       SUM(duration_ms) AS duration_ms
+                FROM usage_events
+                WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+                GROUP BY request_id
+            ) logical_request
             """).query((row, ignored) -> new RequestSummary(
                 row.getLong("request_count"), row.getLong("success_count"),
                 row.getLong("failure_count"), row.getLong("p95_duration_ms"))).single();
@@ -85,6 +94,10 @@ public final class AdminObservabilityController {
             row.getBoolean("success"), row.getLong("input_tokens"),
             row.getLong("output_tokens"), row.getLong("cache_read_tokens"),
             row.getLong("duration_ms"), row.getString("error_class"),
+            row.getInt("attempt"), row.getString("request_kind"),
+            row.getString("usage_source"), row.getLong("queue_ms"),
+            row.getLong("account_acquire_ms"), row.getLong("ttfb_ms"),
+            row.getLong("generation_ms"),
             PostgresResultValues.instant(row, "created_at"));
     }
 
@@ -125,6 +138,13 @@ public final class AdminObservabilityController {
         long cacheReadTokens,
         long durationMs,
         String errorClass,
+        int attempt,
+        String requestKind,
+        String usageSource,
+        long queueMs,
+        long accountAcquireMs,
+        long ttfbMs,
+        long generationMs,
         Instant createdAt
     ) {}
 }

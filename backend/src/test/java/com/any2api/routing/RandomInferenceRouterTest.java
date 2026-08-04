@@ -21,6 +21,7 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.CanonicalRequestParser;
 import com.any2api.provider.InferenceProvider;
+import com.any2api.provider.ModelRuntimeGuard;
 import com.any2api.provider.ProviderAccountProfile;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
@@ -68,7 +69,8 @@ class RandomInferenceRouterTest {
             new ProviderRegistry(List.of(provider("alpha"), provider("beta"))),
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
-            executor);
+            executor,
+            runtimeGuard());
         var request = new ObjectMapper().createObjectNode();
         request.putArray("messages").addObject().put("role", "user").put("content", "hello");
         request.putObject("provider_options").putObject("alpha").put("flag", true);
@@ -94,7 +96,8 @@ class RandomInferenceRouterTest {
             new ProviderRegistry(List.of(provider("alpha"))),
             mock(AccountSelectionService.class),
             new CanonicalRequestParser(new ObjectMapper()),
-            executor);
+            executor,
+            runtimeGuard());
         var request = new ObjectMapper().createObjectNode().put("model", "alpha/model");
 
         assertThatThrownBy(() -> router.select(
@@ -120,7 +123,8 @@ class RandomInferenceRouterTest {
                 provider("alpha"), provider("beta"), provider("gamma"))),
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
-            executor);
+            executor,
+            runtimeGuard());
         var request = new ObjectMapper().createObjectNode();
         request.putArray("messages").addObject()
             .put("role", "user").put("content", "hello");
@@ -152,7 +156,8 @@ class RandomInferenceRouterTest {
             new ProviderRegistry(List.of(provider("alpha"), provider("beta"))),
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
-            executor);
+            executor,
+            runtimeGuard());
         var request = new ObjectMapper().createObjectNode();
         request.putArray("messages").addObject().put("role", "user").put("content", "hello");
         var grant = new ApiKeyGrant(
@@ -188,6 +193,12 @@ class RandomInferenceRouterTest {
                 UUID.randomUUID().toString(),
                 1,
                 Instant.now().plusSeconds(300)));
+    }
+
+    private ModelRuntimeGuard runtimeGuard() {
+        var guard = mock(ModelRuntimeGuard.class);
+        when(guard.callable(anyString(), anyString())).thenReturn(true);
+        return guard;
     }
 
     private InferenceProvider provider(String id) {

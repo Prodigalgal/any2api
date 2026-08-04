@@ -13,6 +13,7 @@ public class Any2ApiProperties {
     private final Media media = new Media();
     private final CacheSettings cache = new CacheSettings();
     private final Observability observability = new Observability();
+    private final ModelRuntime modelRuntime = new ModelRuntime();
 
     public Security getSecurity() {
         return security;
@@ -26,6 +27,7 @@ public class Any2ApiProperties {
     public Media getMedia() { return media; }
     public CacheSettings getCache() { return cache; }
     public Observability getObservability() { return observability; }
+    public ModelRuntime getModelRuntime() { return modelRuntime; }
 
 
     public static class Security {
@@ -142,6 +144,52 @@ public class Any2ApiProperties {
         public Duration getUsageRetention() { return usageRetention; }
         public void setUsageRetention(Duration value) {
             usageRetention = positive(value, "usage retention");
+        }
+
+        private static Duration positive(Duration value, String name) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException(name + " must be positive");
+            }
+            return value;
+        }
+    }
+
+    public static class ModelRuntime {
+        private int maxConcurrentRequests = 32;
+        private Duration maxQueueWait = Duration.ofSeconds(2);
+        private int circuitSlidingWindow = 20;
+        private int circuitMinimumCalls = 5;
+        private float circuitFailureRateThreshold = 60f;
+        private Duration circuitOpenDuration = Duration.ofSeconds(30);
+        private Duration healthWindow = Duration.ofHours(24);
+        private Duration probeFreshness = Duration.ofMinutes(30);
+        private int scheduledProbeBatchSize = 5;
+
+        public int getMaxConcurrentRequests() { return maxConcurrentRequests; }
+        public void setMaxConcurrentRequests(int value) { maxConcurrentRequests = positive(value, "max concurrent requests"); }
+        public Duration getMaxQueueWait() { return maxQueueWait; }
+        public void setMaxQueueWait(Duration value) { maxQueueWait = positive(value, "max queue wait"); }
+        public int getCircuitSlidingWindow() { return circuitSlidingWindow; }
+        public void setCircuitSlidingWindow(int value) { circuitSlidingWindow = positive(value, "circuit sliding window"); }
+        public int getCircuitMinimumCalls() { return circuitMinimumCalls; }
+        public void setCircuitMinimumCalls(int value) { circuitMinimumCalls = positive(value, "circuit minimum calls"); }
+        public float getCircuitFailureRateThreshold() { return circuitFailureRateThreshold; }
+        public void setCircuitFailureRateThreshold(float value) {
+            if (value <= 0 || value > 100) throw new IllegalArgumentException("circuit failure rate threshold must be in (0,100]");
+            circuitFailureRateThreshold = value;
+        }
+        public Duration getCircuitOpenDuration() { return circuitOpenDuration; }
+        public void setCircuitOpenDuration(Duration value) { circuitOpenDuration = positive(value, "circuit open duration"); }
+        public Duration getHealthWindow() { return healthWindow; }
+        public void setHealthWindow(Duration value) { healthWindow = positive(value, "health window"); }
+        public Duration getProbeFreshness() { return probeFreshness; }
+        public void setProbeFreshness(Duration value) { probeFreshness = positive(value, "probe freshness"); }
+        public int getScheduledProbeBatchSize() { return scheduledProbeBatchSize; }
+        public void setScheduledProbeBatchSize(int value) { scheduledProbeBatchSize = positive(value, "scheduled probe batch size"); }
+
+        private static int positive(int value, String name) {
+            if (value < 1) throw new IllegalArgumentException(name + " must be positive");
+            return value;
         }
 
         private static Duration positive(Duration value, String name) {

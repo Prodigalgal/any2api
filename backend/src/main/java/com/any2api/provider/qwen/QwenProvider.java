@@ -157,7 +157,7 @@ public final class QwenProvider implements InferenceProvider {
 
     @Override
     public ProviderRetryPolicy retryPolicy() {
-        return new ProviderRetryPolicy(4, Set.of("empty_model_response"));
+        return ProviderRetryPolicy.standard(4);
     }
 
     @Override

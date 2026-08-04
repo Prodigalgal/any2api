@@ -5,6 +5,8 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalEventStream;
 import com.any2api.protocol.CanonicalProtocolException;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.protocol.CanonicalResponseGuard;
+import com.any2api.protocol.UsageNormalizer;
 import com.any2api.observability.InferenceTelemetryService;
 import com.any2api.observability.RequestCorrelation;
 import java.time.Duration;
@@ -26,17 +28,23 @@ public class InferenceCoordinator {
     private final AccountSelectionService accounts;
     private final ProviderFailureDisposition failures;
     private final InferenceTelemetryService telemetry;
+    private final ModelRuntimeGuard runtime;
+    private final UsageNormalizer usage;
 
     public InferenceCoordinator(
         ProviderRegistry providers,
         AccountSelectionService accounts,
         ProviderFailureDisposition failures,
-        InferenceTelemetryService telemetry
+        InferenceTelemetryService telemetry,
+        ModelRuntimeGuard runtime,
+        UsageNormalizer usage
     ) {
         this.providers = providers;
         this.accounts = accounts;
         this.failures = failures;
         this.telemetry = telemetry;
+        this.runtime = runtime;
+        this.usage = usage;
     }
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request) {
@@ -44,19 +52,38 @@ public class InferenceCoordinator {
     }
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request, UUID apiKeyId) {
+        return execute(request, apiKeyId, "INFERENCE");
+    }
+
+    public Flux<CanonicalEvent> executeProbe(CanonicalRequest request) {
+        return execute(request, null, "PROBE");
+    }
+
+    private Flux<CanonicalEvent> execute(
+        CanonicalRequest request,
+        UUID apiKeyId,
+        String requestKind
+    ) {
         var provider = providers.require(request.providerId());
-        ProviderRequestValidation.requireSupportedRequest(
-            request, provider.manifest(), provider.protocolContract());
-        provider.validate(request);
-        return executeWithRetries(request, provider,
-            accountLease(request, provider), false, 1, apiKeyId);
+        validateRequest(request, provider);
+        return runtime.execute(request, admission ->
+            executeWithRetries(request, provider,
+                accountLease(request, provider), false, 1, apiKeyId, requestKind,
+                admission.queueMs()));
     }
 
     public Flux<CanonicalEvent> execute(
         CanonicalRequest request,
         com.any2api.account.LeasedProviderAccount account
     ) {
-        return execute(request, account, null);
+        return execute(request, account, null, "INFERENCE");
+    }
+
+    public Flux<CanonicalEvent> executeProbe(
+        CanonicalRequest request,
+        com.any2api.account.LeasedProviderAccount account
+    ) {
+        return execute(request, account, null, "PROBE");
     }
 
     public Flux<CanonicalEvent> execute(
@@ -64,14 +91,26 @@ public class InferenceCoordinator {
         com.any2api.account.LeasedProviderAccount account,
         UUID apiKeyId
     ) {
+        return execute(request, account, apiKeyId, "INFERENCE");
+    }
+
+    private Flux<CanonicalEvent> execute(
+        CanonicalRequest request,
+        com.any2api.account.LeasedProviderAccount account,
+        UUID apiKeyId,
+        String requestKind
+    ) {
         if (!request.providerId().equals(account.providerId())) {
             return accounts.release(account).thenMany(Flux.error(
                 new IllegalArgumentException(
                     "random route account provider does not match the request")));
         }
         var provider = providers.require(request.providerId());
-        return executeWithRetries(
-            request, provider, reactor.core.publisher.Mono.just(account), true, 1, apiKeyId);
+        return runtime.execute(request, admission ->
+                executeWithRetries(request, provider, reactor.core.publisher.Mono.just(account),
+                    true, 1, apiKeyId, requestKind, admission.queueMs()))
+            .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
+                error -> accounts.release(account).thenMany(Flux.error(error)));
     }
 
     private reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> accountLease(
@@ -82,30 +121,59 @@ public class InferenceCoordinator {
             account -> provider.supportsAccount(request, account));
     }
 
+    private void validateRequest(CanonicalRequest request, InferenceProvider provider) {
+        try {
+            ProviderRequestValidation.requireSupportedRequest(
+                request, provider.manifest(), provider.protocolContract());
+            provider.validate(request);
+        } catch (com.any2api.protocol.OpenAiRequestException error) {
+            throw error.withAcceptedParameters(ProviderRequestValidation.acceptedParameters(
+                request.protocol(), provider.protocolContract()));
+        }
+    }
+
     private Flux<CanonicalEvent> executeWithRetries(
         CanonicalRequest request,
         InferenceProvider provider,
         reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> lease,
         boolean validateInsideLease,
         int attempt,
-        UUID apiKeyId
+        UUID apiKeyId,
+        String requestKind,
+        long queueMs
     ) {
-        return Flux.defer(() -> {
+        var attemptEvents = Flux.defer(() -> {
             var observed = telemetry.start(new InferenceTelemetryService.InferenceTrace(
                 request.requestId(), request.providerId(), request.model(),
-                request.protocol().name(), apiKeyId), attempt);
-            return executeWithLease(request, provider, lease, validateInsideLease, observed)
+                request.protocol().name(), apiKeyId, requestKind), attempt, queueMs);
+            return usage.normalize(request,
+                    executeWithLease(request, provider, lease, validateInsideLease, observed))
                 .doOnNext(event -> recordTelemetry(observed, event))
                 .doOnError(observed::recordError)
                 .doFinally(observed::finish);
-        }).contextWrite(RequestCorrelation.context(request.requestId()))
-            .switchOnFirst((signal, events) -> {
+        }).contextWrite(RequestCorrelation.context(request.requestId()));
+        if (!request.stream()) {
+            return attemptEvents.collectList().flatMapMany(events -> {
+                var failure = events.stream()
+                    .filter(CanonicalEvent.Failed.class::isInstance)
+                    .map(CanonicalEvent.Failed.class::cast)
+                    .findFirst();
+                if (failure.isPresent()
+                    && provider.retryPolicy().shouldRetry(failure.get().errorType(), attempt)) {
+                    return executeWithRetries(
+                        request, provider, accountLease(request, provider), false,
+                        attempt + 1, apiKeyId, requestKind, 0);
+                }
+                return Flux.fromIterable(events);
+            });
+        }
+        return attemptEvents.switchOnFirst((signal, events) -> {
                 if (signal.hasValue()
                     && signal.get() instanceof CanonicalEvent.Failed failure
                     && provider.retryPolicy().shouldRetry(failure.errorType(), attempt)) {
                     return events.thenMany(executeWithRetries(
                         request, provider, accountLease(request, provider), false,
-                        attempt + 1, apiKeyId));
+                        attempt + 1, apiKeyId, requestKind, 0));
                 }
                 return events;
             });
@@ -115,9 +183,13 @@ public class InferenceCoordinator {
         InferenceTelemetryService.Started observed,
         CanonicalEvent event
     ) {
+        if (!(event instanceof CanonicalEvent.Usage)) observed.firstByte();
+        if (event instanceof CanonicalEvent.Completed || event instanceof CanonicalEvent.Failed) {
+            observed.terminal();
+        }
         if (event instanceof CanonicalEvent.Usage usage) {
             observed.usage(
-                usage.inputTokens(), usage.outputTokens(), usage.cacheReadTokens());
+                usage.inputTokens(), usage.outputTokens(), usage.cacheReadTokens(), usage.source());
         } else if (event instanceof CanonicalEvent.Failed failed) {
             observed.failure(failed.errorType());
         }
@@ -134,6 +206,7 @@ public class InferenceCoordinator {
             lease,
             account -> {
                 observed.account(account.accountId());
+                observed.accountAcquired();
                 if (validateInsideLease) {
                     ProviderRequestValidation.requireSupportedRequest(
                         request, provider.manifest(), provider.protocolContract());
@@ -153,6 +226,8 @@ public class InferenceCoordinator {
                         request,
                         Flux.defer(() -> provider.generate(request, context, account))),
                     account)
+                    .transform(events -> CanonicalResponseGuard.holdUntilMeaningfulOutput(
+                        request, events))
                     .concatMap(event -> {
                         lastSequence.accumulateAndGet(event.sequenceNumber(), Math::max);
                         if (event instanceof CanonicalEvent.Failed failure) {

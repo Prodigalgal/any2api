@@ -32,6 +32,13 @@ Model metadata has two layers:
 1. `default-models` in provider configuration is the cold-start fallback.
 2. The PostgreSQL `models` table is the runtime catalog populated by discovery or an administrator.
 
+The provider-level protocol contract and each `DiscoveredModel.metadata` snapshot produce a
+`ModelCapabilityContract`. The default implementation publishes supported Chat/Responses
+parameters, typed provider options, official token limits, reasoning levels, tools, streaming, and
+multimodal input/output. Override `InferenceProvider.modelContract` only when a provider exposes
+model-specific capabilities that cannot be represented by the default merge. Core catalog and
+controller code must remain provider-neutral.
+
 Random routing is a separate provider-owned declaration. `randomModelPreferences` lists ordered
 model IDs for `TOP_TEXT` and, only after native image-input verification, `TOP_MULTIMODAL`. Catalog
 synchronization chooses the first available preference for each role and stores typed role tags in
@@ -96,6 +103,7 @@ closing it, and public responses may expose only Any2API-owned asset URLs or bas
 authenticate
   -> resolve provider and model
   -> validate capability and provider options
+  -> enter per-model queue/concurrency/circuit guard
   -> select eligible account
   -> acquire fenced Redis lease
   -> prepare provider request
@@ -104,6 +112,13 @@ authenticate
   -> render Chat/Responses stream
   -> persist usage and release lease
 ```
+
+The shared coordinator performs finite account switching only for normalized failure classes in
+the provider retry policy. The standard policy retries `empty_model_response`, rejected or blocked
+credentials, transient rate limits, and exhausted per-account quota. Providers may change the
+attempt limit or classification, but never implement their own account-selection loop. A streaming
+attempt may switch accounts only before its first externally visible provider event; non-streaming
+attempts are buffered and may switch before the collected response is committed.
 
 Standard parameters are represented once in `CanonicalRequest`. Vendor-only fields are accepted only
 under `provider_options.<providerId>`. A provider may also recognize documented legacy top-level

@@ -1,7 +1,9 @@
 package com.any2api.protocol;
 
 import com.any2api.account.AccountUnavailableException;
+import com.any2api.provider.ModelRuntimeGuard;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -38,9 +40,13 @@ public class OpenAiResponseWriter {
             request.requestId(),
             1,
             error instanceof AccountUnavailableException
-                ? "account_unavailable" : "gateway_execution_error",
+                ? "account_unavailable"
+                : error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException
+                    ? "model_unavailable" : "gateway_execution_error",
             error instanceof AccountUnavailableException
-                ? error.getMessage() : "gateway execution failed",
+                ? error.getMessage()
+                : error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException rejected
+                    ? rejected.reason() : "gateway execution failed",
             Map.of("exception", error.getClass().getSimpleName()))));
         return request.stream()
             ? writeStream(request, guarded, exchange)
@@ -59,8 +65,16 @@ public class OpenAiResponseWriter {
         var renderer = request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS
             ? (EventRenderer) new ChatStreamRenderer(request, objectMapper)
             : new ResponsesStreamRenderer(request, objectMapper);
-        Flux<DataBuffer> body = events
+        var rendered = events
             .concatMapIterable(renderer::render)
+            .publish(shared -> Flux.concat(
+                Flux.just(": request_id=" + request.requestId() + "\n\n"),
+                Flux.merge(
+                    shared,
+                    Flux.interval(Duration.ofSeconds(10))
+                        .map(ignored -> ": heartbeat\n\n")
+                        .takeUntilOther(shared.ignoreElements()))));
+        Flux<DataBuffer> body = rendered
             .map(frame -> exchange.getResponse().bufferFactory().wrap(
                 frame.getBytes(StandardCharsets.UTF_8)));
         return exchange.getResponse().writeWith(body);
@@ -428,7 +442,10 @@ public class OpenAiResponseWriter {
         private HttpStatus status() {
             if (!failed()) return HttpStatus.OK;
             return Set.of("rate_limited", "quota_exhausted").contains(failure.errorType())
-                ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.BAD_GATEWAY;
+                ? HttpStatus.TOO_MANY_REQUESTS
+                : Set.of("account_unavailable", "model_unavailable")
+                    .contains(failure.errorType())
+                    ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY;
         }
 
         private ObjectNode chatResponse() {
@@ -544,6 +561,7 @@ public class OpenAiResponseWriter {
             .put("prompt_tokens", input)
             .put("completion_tokens", output)
             .put("total_tokens", input + output)
+            .put("usage_source", usage == null ? "ESTIMATED" : usage.source().name())
             .set("prompt_tokens_details",
                 mapper.createObjectNode().put("cached_tokens", cached));
     }
@@ -556,6 +574,7 @@ public class OpenAiResponseWriter {
             .put("input_tokens", input)
             .put("output_tokens", output)
             .put("total_tokens", input + output)
+            .put("usage_source", usage == null ? "ESTIMATED" : usage.source().name())
             .set("input_tokens_details", mapper.createObjectNode().put("cached_tokens", cached));
     }
 

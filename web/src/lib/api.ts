@@ -3,7 +3,36 @@ export type ProviderModel = {
   owned_by: string;
   provider_name: string;
   available: boolean;
-  capabilities: Record<string, string>;
+  cataloged: boolean;
+  capabilities: Record<string, unknown>;
+  supported_parameters: Record<string, string[]>;
+  provider_options: Record<string, string>;
+  max_context_tokens: number | null;
+  max_input_tokens: number | null;
+  max_output_tokens: number | null;
+  reasoning: { supported: boolean; levels: string[] };
+  tools: { supported: boolean; types: string[]; parallel: boolean };
+  streaming: boolean;
+  multimodal: { input: string[]; output: string[] };
+  runtime: {
+    status: "READY" | "DEGRADED" | "UNAVAILABLE";
+    eligible_account_count: number;
+    available_account_count: number;
+    quota_limited_account_count: number;
+    rolling_request_count: number;
+    rolling_attempt_count: number;
+    rolling_success_rate: number;
+    p50_ms: number;
+    p95_ms: number;
+    last_attempt_at: string | null;
+    last_success_at: string | null;
+    probe_status: string | null;
+    probe_error: string | null;
+    probed_at: string | null;
+    concurrent: number;
+    queue_depth: number;
+    circuit_state: string;
+  };
 };
 
 export type ModelsResponse = {
@@ -221,6 +250,13 @@ export type UsageEvent = {
   cacheReadTokens: number;
   durationMs: number;
   errorClass: string | null;
+  attempt: number;
+  requestKind: "INFERENCE" | "PROBE";
+  usageSource: "UPSTREAM" | "ESTIMATED";
+  queueMs: number;
+  accountAcquireMs: number;
+  ttfbMs: number;
+  generationMs: number;
   createdAt: string;
 };
 

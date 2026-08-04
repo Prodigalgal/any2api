@@ -2,6 +2,7 @@ package com.any2api.provider;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -13,8 +14,10 @@ import com.any2api.account.AccountSelectionService;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.coordination.AccountLease;
 import com.any2api.observability.InferenceTelemetryService;
+import com.any2api.config.Any2ApiProperties;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.protocol.UsageNormalizer;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +84,8 @@ class InferenceCoordinatorTest {
         StepVerifier.create(coordinator.execute(request("alpha")))
             .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
             .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(event -> event instanceof CanonicalEvent.Usage usage
+                && usage.source() == com.any2api.protocol.UsageSource.ESTIMATED)
             .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
             .verifyComplete();
 
@@ -93,7 +98,34 @@ class InferenceCoordinatorTest {
     }
 
     @Test
-    void doesNotRetryAfterAClientVisibleEvent() {
+    void retriesAfterResponseStartedWhenNoMeaningfulOutputWasVisible() {
+        var accounts = mock(AccountSelectionService.class);
+        var first = leased("alpha");
+        var second = leased("alpha");
+        when(accounts.acquire(eq("alpha"), eq("model"), any()))
+            .thenReturn(Mono.just(first), Mono.just(second));
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportModelCooldown(
+            first, "model", "empty", java.time.Duration.ofMinutes(5)))
+            .thenReturn(Mono.empty());
+        when(accounts.reportSuccess(second, "model")).thenReturn(Mono.empty());
+        var coordinator = coordinator(new RetryingProvider(true), accounts);
+
+        StepVerifier.create(coordinator.execute(request("alpha", true)))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Usage.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
+            .verifyComplete();
+
+        verify(accounts, times(2)).acquire(eq("alpha"), eq("model"), any());
+        verify(accounts).release(first);
+        verify(accounts).release(second);
+    }
+
+    @Test
+    void doesNotRetryAfterMeaningfulOutputWasVisible() {
         var accounts = mock(AccountSelectionService.class);
         var leased = leased("alpha");
         when(accounts.acquire(eq("alpha"), eq("model"), any()))
@@ -103,10 +135,11 @@ class InferenceCoordinatorTest {
         when(accounts.reportModelCooldown(
             leased, "model", "empty", java.time.Duration.ofMinutes(5)))
             .thenReturn(Mono.empty());
-        var coordinator = coordinator(new RetryingProvider(true), accounts);
+        var coordinator = coordinator(new RetryingProvider(true, true), accounts);
 
-        StepVerifier.create(coordinator.execute(request("alpha")))
+        StepVerifier.create(coordinator.execute(request("alpha", true)))
             .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
             .expectNextMatches(event -> event instanceof CanonicalEvent.Failed failed
                 && failed.errorType().equals("empty_model_response"))
             .verifyComplete();
@@ -115,7 +148,38 @@ class InferenceCoordinatorTest {
         verify(accounts).release(leased);
     }
 
+    @Test
+    void retriesANonStreamingFailureEvenAfterTheAttemptStartedAResponse() {
+        var accounts = mock(AccountSelectionService.class);
+        var first = leased("alpha");
+        var second = leased("alpha");
+        when(accounts.acquire(eq("alpha"), eq("model"), any()))
+            .thenReturn(Mono.just(first), Mono.just(second));
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportModelCooldown(
+            first, "model", "empty", java.time.Duration.ofMinutes(5)))
+            .thenReturn(Mono.empty());
+        when(accounts.reportSuccess(second, "model")).thenReturn(Mono.empty());
+        var coordinator = coordinator(new RetryingProvider(true), accounts);
+
+        StepVerifier.create(coordinator.execute(request("alpha", false)))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Usage.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
+            .verifyComplete();
+
+        verify(accounts, times(2)).acquire(eq("alpha"), eq("model"), any());
+        verify(accounts).release(first);
+        verify(accounts).release(second);
+    }
+
     private CanonicalRequest request(String providerId) {
+        return request(providerId, false);
+    }
+
+    private CanonicalRequest request(String providerId, boolean stream) {
         var message = JsonNodeFactory.instance.objectNode()
             .put("role", "user").put("content", "hello");
         return new CanonicalRequest(
@@ -123,13 +187,13 @@ class InferenceCoordinatorTest {
             CanonicalRequest.Protocol.CHAT_COMPLETIONS,
             providerId,
             "model",
-            false,
+            stream,
             List.of(message),
             Map.of(),
             Map.of(),
             List.of(),
             Map.of(),
-            JsonNodeFactory.instance.objectNode());
+            JsonNodeFactory.instance.objectNode().put("stream", stream));
     }
 
     private InferenceCoordinator coordinator(
@@ -139,13 +203,17 @@ class InferenceCoordinatorTest {
         var telemetry = mock(InferenceTelemetryService.class);
         var started = mock(InferenceTelemetryService.Started.class);
         when(telemetry.start(
-            any(InferenceTelemetryService.InferenceTrace.class), anyInt()))
+            any(InferenceTelemetryService.InferenceTrace.class), anyInt(), anyLong()))
             .thenReturn(started);
         return new InferenceCoordinator(
             new ProviderRegistry(List.of(provider)),
             accounts,
             new ProviderFailureDisposition(accounts),
-            telemetry);
+            telemetry,
+            new ModelRuntimeGuard(
+                new Any2ApiProperties(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
+            new UsageNormalizer());
     }
 
     private LeasedProviderAccount leased(String providerId) {
@@ -190,7 +258,8 @@ class InferenceCoordinatorTest {
                 List.of(),
                 Map.of(
                     ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-                    ProviderCapability.RESPONSES, SupportLevel.NATIVE),
+                    ProviderCapability.RESPONSES, SupportLevel.NATIVE,
+                    ProviderCapability.STREAMING, SupportLevel.NATIVE),
                 true);
         }
 
@@ -219,13 +288,22 @@ class InferenceCoordinatorTest {
     private static final class RetryingProvider implements InferenceProvider {
         private final AtomicInteger attempts = new AtomicInteger();
         private final boolean exposeResponseBeforeFailure;
+        private final boolean exposeOutputBeforeFailure;
 
         private RetryingProvider() {
-            this(false);
+            this(false, false);
         }
 
         private RetryingProvider(boolean exposeResponseBeforeFailure) {
+            this(exposeResponseBeforeFailure, false);
+        }
+
+        private RetryingProvider(
+            boolean exposeResponseBeforeFailure,
+            boolean exposeOutputBeforeFailure
+        ) {
             this.exposeResponseBeforeFailure = exposeResponseBeforeFailure;
+            this.exposeOutputBeforeFailure = exposeOutputBeforeFailure;
         }
 
         @Override
@@ -234,7 +312,8 @@ class InferenceCoordinatorTest {
                 "alpha", "Alpha", "test", "1", List.of(),
                 Map.of(
                     ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-                    ProviderCapability.RESPONSES, SupportLevel.NATIVE),
+                    ProviderCapability.RESPONSES, SupportLevel.NATIVE,
+                    ProviderCapability.STREAMING, SupportLevel.NATIVE),
                 true);
         }
 
@@ -251,12 +330,17 @@ class InferenceCoordinatorTest {
         ) {
             if (attempts.getAndIncrement() == 0) {
                 if (exposeResponseBeforeFailure) {
-                    return Flux.just(
-                        new CanonicalEvent.ResponseStarted(
-                            1, request.requestId(), 0, "response-id"),
-                        new CanonicalEvent.Failed(
-                            1, request.requestId(), 1,
-                            "empty_model_response", "empty", Map.of()));
+                    var events = new java.util.ArrayList<CanonicalEvent>();
+                    events.add(new CanonicalEvent.ResponseStarted(
+                        1, request.requestId(), 0, "response-id"));
+                    if (exposeOutputBeforeFailure) {
+                        events.add(new CanonicalEvent.OutputTextDelta(
+                            1, request.requestId(), 1, "partial"));
+                    }
+                    events.add(new CanonicalEvent.Failed(
+                        1, request.requestId(), exposeOutputBeforeFailure ? 2 : 1,
+                        "empty_model_response", "empty", Map.of()));
+                    return Flux.fromIterable(events);
                 }
                 return Flux.just(new CanonicalEvent.Failed(
                     1, request.requestId(), 0,

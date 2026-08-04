@@ -86,7 +86,7 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
                 account -> provider.discoverModels(account)
                     .flatMap(models -> Mono.fromRunnable(() -> transactions.executeWithoutResult(
                         ignored -> {
-                            synchronizeModels(provider.manifest(), models, "OFFICIAL");
+                            synchronizeModels(provider, models, "OFFICIAL");
                             modelCatalog.invalidateAfterCommit();
                         }))
                         .subscribeOn(Schedulers.fromExecutor(databaseExecutor))),
@@ -123,7 +123,7 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
         var models = manifest.defaultModels().stream()
             .map(id -> new DiscoveredModel(id, id, Map.of("source", "manifest")))
             .toList();
-        synchronizeModels(manifest, models, "MANIFEST");
+        synchronizeModels(provider, models, "MANIFEST");
     }
 
     private void retireRemovedProviderWork() {
@@ -155,10 +155,11 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
     }
 
     private void synchronizeModels(
-        ProviderManifest manifest,
+        InferenceProvider provider,
         java.util.List<DiscoveredModel> discovered,
         String source
     ) {
+        var manifest = provider.manifest();
         if (discovered.isEmpty()) {
             return;
         }
@@ -170,9 +171,10 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
                 .param("providerId", manifest.id())
                 .update();
         }
-        var capabilities = objectMapper.valueToTree(manifest.capabilities()).toString();
         var rolesByModel = selectedRandomRoles(manifest, discovered);
         for (var model : discovered) {
+            var capabilities = objectMapper.valueToTree(
+                provider.modelContract(model).asMap()).toString();
             var metadata = objectMapper.valueToTree(model.metadata()).toString();
             var randomRoles = rolesByModel.getOrDefault(model.id(), Set.of()).stream()
                 .map(RandomModelRole::catalogValue)

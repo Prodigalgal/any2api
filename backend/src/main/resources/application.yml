@@ -52,6 +52,16 @@ management:
       show-details: when_authorized
 
 any2api:
+  model-runtime:
+    max-concurrent-requests: ${ANY2API_MODEL_MAX_CONCURRENCY:32}
+    max-queue-wait: ${ANY2API_MODEL_MAX_QUEUE_WAIT:2s}
+    circuit-sliding-window: ${ANY2API_MODEL_CIRCUIT_WINDOW:20}
+    circuit-minimum-calls: ${ANY2API_MODEL_CIRCUIT_MIN_CALLS:5}
+    circuit-failure-rate-threshold: ${ANY2API_MODEL_CIRCUIT_FAILURE_RATE:60}
+    circuit-open-duration: ${ANY2API_MODEL_CIRCUIT_OPEN_DURATION:30s}
+    health-window: ${ANY2API_MODEL_HEALTH_WINDOW:24h}
+    probe-freshness: ${ANY2API_MODEL_PROBE_FRESHNESS:30m}
+    scheduled-probe-batch-size: ${ANY2API_MODEL_PROBE_BATCH_SIZE:5}
   observability:
     operation-retention: ${ANY2API_OBSERVABILITY_OPERATION_RETENTION:30d}
     usage-retention: ${ANY2API_OBSERVABILITY_USAGE_RETENTION:90d}

@@ -14,6 +14,7 @@ import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.observability.RequestCorrelation;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -82,6 +83,7 @@ public final class GrokProvider implements InferenceProvider {
     ) {
         this.webClient = webClientBuilder
             .baseUrl(trimTrailingSlash(properties.getBaseUrl().toString()))
+            .filter(RequestCorrelation.propagationFilter())
             .build();
         this.properties = properties;
         this.requestMapper = requestMapper;

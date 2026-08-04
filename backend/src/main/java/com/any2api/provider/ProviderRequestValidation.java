@@ -20,6 +20,17 @@ public final class ProviderRequestValidation {
     private ProviderRequestValidation() {
     }
 
+    public static List<String> acceptedParameters(
+        CanonicalRequest.Protocol protocol,
+        ProviderProtocolContract contract
+    ) {
+        var accepted = new java.util.TreeSet<String>(
+            protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
+                ? CHAT_PLATFORM_PARAMETERS : RESPONSES_PLATFORM_PARAMETERS);
+        accepted.addAll(contract.parameters(protocol));
+        return List.copyOf(accepted);
+    }
+
     public static void requireKnownOptions(CanonicalRequest request, Set<String> allowed) {
         var unknown = request.providerOptions().keySet().stream()
             .filter(key -> !allowed.contains(key))

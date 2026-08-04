@@ -13,6 +13,7 @@ import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.observability.RequestCorrelation;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.BrowserTransportClient;
@@ -73,7 +74,8 @@ public final class GlmProvider implements InferenceProvider {
         this.properties = properties;
         this.proxyPools = proxyPools;
         this.mapper = mapper;
-        this.webClient = webClientBuilder.baseUrl(properties.getBaseUrl()).build();
+        this.webClient = webClientBuilder.baseUrl(properties.getBaseUrl())
+            .filter(RequestCorrelation.propagationFilter()).build();
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }

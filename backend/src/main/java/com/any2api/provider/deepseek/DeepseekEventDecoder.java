@@ -63,8 +63,6 @@ final class DeepseekEventDecoder {
             output.add(new CanonicalEvent.Failed(1, requestId, next(),
                 "empty_model_response", "DeepSeek returned no answer text", java.util.Map.of()));
         } else {
-            if (usage > 0) output.add(new CanonicalEvent.Usage(
-                1, requestId, next(), 0, usage, 0));
             output.add(new CanonicalEvent.Completed(1, requestId, next(), "stop"));
         }
         completed = true;

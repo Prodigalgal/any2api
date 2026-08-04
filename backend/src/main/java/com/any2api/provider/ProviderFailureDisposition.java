@@ -20,7 +20,7 @@ public final class ProviderFailureDisposition {
         ProviderFailure failure
     ) {
         return switch (failure.type()) {
-            case "rate_limited" -> accounts.reportModelCooldown(
+            case "rate_limited", "quota_exhausted" -> accounts.reportModelCooldown(
                 account, modelId, failure.message(), Duration.ofMinutes(5));
             case "empty_model_response" -> accounts.reportModelCooldown(
                 account, modelId, failure.message(), Duration.ofMinutes(5));

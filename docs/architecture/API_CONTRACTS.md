@@ -26,7 +26,49 @@ rejected on these endpoints. Responses expose the selected route through
 
 `GET /v1/models` reads the PostgreSQL runtime catalog and namespaces IDs as
 `provider/upstream-model`. `GET /{provider}/v1/models` returns the same catalog without the namespace.
-Each row reports `catalog_source`, official metadata, and account-backed availability.
+Catalog membership and callability are separate: `cataloged` reports discovery, while `available`
+requires a usable account and recent successful inference or a fresh successful probe. The runtime
+state is `READY`, `DEGRADED`, or `UNAVAILABLE`; an open per-model circuit always forces
+`UNAVAILABLE`.
+
+Each model publishes a machine-readable contract and runtime snapshot:
+
+```json
+{
+  "id": "acme/acme-ultra",
+  "cataloged": true,
+  "available": true,
+  "supported_parameters": {
+    "chat_completions": ["model", "messages", "stream"],
+    "responses": ["model", "input", "stream"]
+  },
+  "provider_options": {"thinking_budget": "integer"},
+  "max_context_tokens": 131072,
+  "max_input_tokens": 114688,
+  "max_output_tokens": 16384,
+  "reasoning": {"supported": true, "levels": ["low", "medium", "high"]},
+  "tools": {"supported": true, "types": ["function"], "parallel": true},
+  "streaming": true,
+  "multimodal": {"input": ["text", "image"], "output": ["text"]},
+  "runtime": {
+    "status": "READY",
+    "available_account_count": 4,
+    "quota_limited_account_count": 1,
+    "rolling_request_count": 120,
+    "rolling_attempt_count": 126,
+    "rolling_success_rate": 0.98,
+    "p50_ms": 1830,
+    "p95_ms": 6200,
+    "probe_status": "READY",
+    "circuit_state": "CLOSED"
+  }
+}
+```
+
+Unknown official token limits remain JSON `null`; the gateway does not invent limits. Model
+metadata and provider protocol declarations are merged at catalog synchronization. A provider may
+override `InferenceProvider.modelContract` when the official catalog exposes a provider-specific
+capability shape.
 
 Common fields enter `CanonicalRequest`; native differences enter:
 
@@ -57,7 +99,16 @@ MinMax request-only options are isolated in its namespace:
 }
 ```
 
-Contradictory standard and provider-native parameters return `parameter_conflict`. Unknown provider options return `unknown_provider_option`. Explicit unsupported features return `unsupported_parameter`.
+Contradictory standard and provider-native parameters return `parameter_conflict`. Unknown provider
+options return `unknown_provider_option`. Explicit unsupported features return
+`unsupported_parameter`. Strict validation errors include `accepted_parameters` for the selected
+protocol so clients can correct a request without querying another endpoint.
+
+Non-streaming and streaming responses normalize token counts. `usage_source=UPSTREAM` means the
+provider returned a complete non-zero counter set; otherwise the gateway estimates from the actual
+canonical input and emitted output and returns `usage_source=ESTIMATED`. Streaming responses emit an
+immediate SSE comment containing the request ID, followed by heartbeat comments until the first
+provider event and throughout long quiet periods.
 
 Every inference plugin publishes a `protocolContract` in
 `GET /api/catalog/v1/providers`. The contract is the machine-readable source of truth for:

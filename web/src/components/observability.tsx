@@ -88,18 +88,27 @@ export function Observability() {
             </TableRow></TableHead>
             <TableBody>
               {(usage.data ?? []).map((event) => (
-                <TableRow key={event.requestId} hover>
+                <TableRow key={`${event.requestId}:${event.attempt}`} hover>
                   <TableCell><Chip size="small" variant="outlined" color={event.success ? "success" : "error"} label={event.success ? "SUCCEEDED" : event.errorClass || "FAILED"} /></TableCell>
                   <TableCell><Chip size="small" variant="outlined" label={event.providerId} /></TableCell>
                   <TableCell>
                     <Typography noWrap sx={{ ...mono, color: "text.primary" }}>{event.modelId}</Typography>
-                    <Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{event.protocol}</Typography>
+                    <Typography color="text.secondary" sx={{ fontSize: 10.5 }}>
+                      {event.protocol} · {event.requestKind} · attempt {event.attempt}
+                    </Typography>
                   </TableCell>
-                  <TableCell><Identifier value={event.requestId.replace(/:\d+$/, "")} /></TableCell>
+                  <TableCell><Identifier value={event.requestId} /></TableCell>
                   <TableCell><Identifier value={event.accountId} /></TableCell>
                   <TableCell><Identifier value={event.apiKeyId} /></TableCell>
-                  <TableCell align="right" sx={mono}>{event.inputTokens} / {event.outputTokens}</TableCell>
-                  <TableCell align="right" sx={mono}>{formatDuration(event.durationMs)}</TableCell>
+                  <TableCell align="right">
+                    <Typography sx={mono}>{event.inputTokens} / {event.outputTokens}</Typography>
+                    <Typography color="text.secondary" sx={{ fontSize: 9.5 }}>{event.usageSource}</Typography>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Tooltip title={`排队 ${formatDuration(event.queueMs)} · 取号 ${formatDuration(event.accountAcquireMs)} · TTFB ${formatDuration(event.ttfbMs)} · 生成 ${formatDuration(event.generationMs)}`}>
+                      <Typography sx={mono}>{formatDuration(event.durationMs)}</Typography>
+                    </Tooltip>
+                  </TableCell>
                   <TableCell sx={{ fontSize: 11.5 }}>{formatTime(event.createdAt)}</TableCell>
                 </TableRow>
               ))}

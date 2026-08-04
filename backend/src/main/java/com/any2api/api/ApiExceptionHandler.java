@@ -31,6 +31,9 @@ public class ApiExceptionHandler {
         detail.put("message", error.getMessage());
         detail.put("param", error.parameter());
         detail.put("code", error.type());
+        if (!error.acceptedParameters().isEmpty()) {
+            detail.put("accepted_parameters", error.acceptedParameters());
+        }
         return Map.of("error", detail);
     }
 

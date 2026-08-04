@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.observability.RequestCorrelation;
 import java.util.List;
 import java.util.Map;
 import org.springframework.core.ParameterizedTypeReference;
@@ -62,7 +63,8 @@ public final class GrokConsoleProvider implements InferenceProvider {
         GrokConsoleRequestMapper requestMapper,
         ObjectMapper mapper
     ) {
-        this.client = builder.baseUrl(trim(properties.getBaseUrl().toString())).build();
+        this.client = builder.baseUrl(trim(properties.getBaseUrl().toString()))
+            .filter(RequestCorrelation.propagationFilter()).build();
         this.properties = properties;
         this.requestMapper = requestMapper;
         this.mapper = mapper;

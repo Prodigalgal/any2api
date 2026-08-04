@@ -7,6 +7,12 @@ public record ProviderRetryPolicy(
     Set<String> retryablePreOutputFailures
 ) {
     private static final ProviderRetryPolicy NONE = new ProviderRetryPolicy(1, Set.of());
+    private static final Set<String> STANDARD_FAILURES = Set.of(
+        "empty_model_response",
+        "credential_rejected",
+        "account_blocked",
+        "rate_limited",
+        "quota_exhausted");
 
     public ProviderRetryPolicy {
         if (maxAttempts < 1) {
@@ -18,6 +24,14 @@ public record ProviderRetryPolicy(
 
     public static ProviderRetryPolicy none() {
         return NONE;
+    }
+
+    public static ProviderRetryPolicy standard() {
+        return standard(3);
+    }
+
+    public static ProviderRetryPolicy standard(int maxAttempts) {
+        return new ProviderRetryPolicy(maxAttempts, STANDARD_FAILURES);
     }
 
     public boolean shouldRetry(String failureType, int completedAttempts) {

@@ -9,6 +9,7 @@ import com.any2api.protocol.CanonicalRequestParser;
 import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.ModelRuntimeGuard;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -33,6 +34,7 @@ public class RandomInferenceRouter {
     private final AccountSelectionService accounts;
     private final CanonicalRequestParser parser;
     private final ExecutorService databaseExecutor;
+    private final ModelRuntimeGuard runtimeGuard;
     private final Object shuffleLock = new Object();
     private final Map<String, ArrayDeque<String>> providerBags = new HashMap<>();
 
@@ -41,13 +43,15 @@ public class RandomInferenceRouter {
         ProviderRegistry providers,
         AccountSelectionService accounts,
         CanonicalRequestParser parser,
-        ExecutorService databaseExecutor
+        ExecutorService databaseExecutor,
+        ModelRuntimeGuard runtimeGuard
     ) {
         this.catalog = catalog;
         this.providers = providers;
         this.accounts = accounts;
         this.parser = parser;
         this.databaseExecutor = databaseExecutor;
+        this.runtimeGuard = runtimeGuard;
     }
 
     public Mono<RandomSelection> select(
@@ -93,6 +97,7 @@ public class RandomInferenceRouter {
         var byProvider = new LinkedHashMap<String, List<CanonicalRequest>>();
         for (var route : catalog.installedModels(role)) {
             if (!grant.allowsModel(route.providerId(), route.modelId())) continue;
+            if (!runtimeGuard.callable(route.providerId(), route.modelId())) continue;
             var provider = providers.require(route.providerId());
             if (provider.manifest().capabilities()
                 .getOrDefault(capability, SupportLevel.UNSUPPORTED)

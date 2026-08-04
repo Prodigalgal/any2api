@@ -2,6 +2,7 @@ package com.any2api.provider.mimo;
 
 import com.any2api.media.MediaInputValidation;
 import com.any2api.transport.BrowserTransportClient;
+import com.any2api.observability.RequestCorrelation;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
@@ -29,7 +30,8 @@ final class MimoMediaUploader {
         MimoProperties properties,
         ObjectMapper mapper
     ) {
-        this.client = builder.baseUrl(properties.getBaseUrl()).build();
+        this.client = builder.baseUrl(properties.getBaseUrl())
+            .filter(RequestCorrelation.propagationFilter()).build();
         this.transport = transport;
         this.properties = properties;
         this.mapper = mapper;

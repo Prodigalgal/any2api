@@ -1,6 +1,7 @@
 package com.any2api.observability;
 
 import com.any2api.persistence.PostgresResultValues;
+import com.any2api.protocol.UsageSource;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
@@ -34,35 +35,60 @@ public final class InferenceTelemetryService {
     }
 
     public Started start(InferenceTrace request, int attempt) {
+        return start(request, attempt, 0);
+    }
+
+    public Started start(InferenceTrace request, int attempt, long queueMs) {
         log.info(
             "inference_started correlation_id={} provider={} model={} protocol={} attempt={}",
             request.requestId(), request.providerId(), request.model(), request.protocol(), attempt);
-        return new Started(request, attempt, Instant.now());
+        return new Started(request, attempt, Instant.now(), queueMs);
     }
 
     public final class Started {
         private final InferenceTrace request;
         private final int attempt;
         private final Instant startedAt;
+        private final long startedNanos = System.nanoTime();
+        private final long queueMs;
         private final AtomicReference<UUID> accountId = new AtomicReference<>();
         private final AtomicLong inputTokens = new AtomicLong();
         private final AtomicLong outputTokens = new AtomicLong();
         private final AtomicLong cacheReadTokens = new AtomicLong();
         private final AtomicReference<String> errorCode = new AtomicReference<>();
+        private final AtomicReference<UsageSource> usageSource =
+            new AtomicReference<>(UsageSource.ESTIMATED);
+        private final AtomicLong accountAcquiredNanos = new AtomicLong();
+        private final AtomicLong firstByteNanos = new AtomicLong();
+        private final AtomicLong terminalNanos = new AtomicLong();
         private final AtomicBoolean finished = new AtomicBoolean();
 
-        private Started(InferenceTrace request, int attempt, Instant startedAt) {
+        private Started(InferenceTrace request, int attempt, Instant startedAt, long queueMs) {
             this.request = request;
             this.attempt = attempt;
             this.startedAt = startedAt;
+            this.queueMs = Math.max(0, queueMs);
         }
 
         public void account(UUID value) { accountId.set(value); }
 
-        public void usage(long input, long output, long cacheRead) {
+        public void accountAcquired() {
+            accountAcquiredNanos.compareAndSet(0, System.nanoTime());
+        }
+
+        public void firstByte() {
+            firstByteNanos.compareAndSet(0, System.nanoTime());
+        }
+
+        public void terminal() {
+            terminalNanos.compareAndSet(0, System.nanoTime());
+        }
+
+        public void usage(long input, long output, long cacheRead, UsageSource source) {
             inputTokens.set(input);
             outputTokens.set(output);
             cacheReadTokens.set(cacheRead);
+            usageSource.set(source == null ? UsageSource.ESTIMATED : source);
         }
 
         public void failure(String code) {
@@ -77,12 +103,22 @@ public final class InferenceTelemetryService {
             if (!finished.compareAndSet(false, true)) return;
             if (signal == SignalType.CANCEL) errorCode.compareAndSet(null, "downstream_cancelled");
             var endedAt = Instant.now();
-            var durationMs = Math.max(0, Duration.between(startedAt, endedAt).toMillis());
+            var endedNanos = System.nanoTime();
+            var durationMs = queueMs + elapsed(startedNanos, endedNanos);
+            var accountAt = accountAcquiredNanos.get();
+            var firstAt = firstByteNanos.get();
+            var terminalAt = terminalNanos.get();
+            var accountAcquireMs = accountAt == 0 ? 0 : elapsed(startedNanos, accountAt);
+            var ttfbMs = firstAt == 0 ? 0 : elapsed(
+                accountAt == 0 ? startedNanos : accountAt, firstAt);
+            var generationMs = firstAt == 0 ? 0 : elapsed(
+                firstAt, terminalAt == 0 ? endedNanos : terminalAt);
             var error = errorCode.get();
             var success = error == null;
             var snapshot = new Snapshot(
                 accountId.get(), inputTokens.get(), outputTokens.get(), cacheReadTokens.get(),
-                durationMs, error, success);
+                usageSource.get(), durationMs, queueMs, accountAcquireMs, ttfbMs,
+                generationMs, error, success);
             recordMetricAndLog(snapshot);
             try {
                 databaseExecutor.execute(() -> {
@@ -106,14 +142,16 @@ public final class InferenceTelemetryService {
                 INSERT INTO usage_events(
                     id, request_id, api_key_id, provider_id, account_id, model_id, protocol,
                     success, input_tokens, output_tokens, cache_read_tokens,
-                    duration_ms, error_class, created_at)
+                    duration_ms, error_class, created_at, attempt, request_kind, usage_source,
+                    queue_ms, account_acquire_ms, ttfb_ms, generation_ms)
                 VALUES (:id, :requestId, :apiKeyId, :providerId, :accountId, :modelId, :protocol,
                         :success, :inputTokens, :outputTokens, :cacheReadTokens,
-                        :durationMs, :errorClass, :createdAt)
-                ON CONFLICT (request_id) DO NOTHING
+                        :durationMs, :errorClass, :createdAt, :attempt, :requestKind, :usageSource,
+                        :queueMs, :accountAcquireMs, :ttfbMs, :generationMs)
+                ON CONFLICT (request_id, attempt) DO NOTHING
                 """)
                 .param("id", UUID.randomUUID())
-                .param("requestId", request.requestId() + ":" + attempt)
+                .param("requestId", request.requestId())
                 .param("apiKeyId", request.apiKeyId())
                 .param("providerId", request.providerId())
                 .param("accountId", snapshot.accountId())
@@ -126,25 +164,47 @@ public final class InferenceTelemetryService {
                 .param("durationMs", snapshot.durationMs())
                 .param("errorClass", snapshot.errorCode())
                 .param("createdAt", PostgresResultValues.timestamp(startedAt))
+                .param("attempt", attempt)
+                .param("requestKind", request.requestKind())
+                .param("usageSource", snapshot.usageSource().name())
+                .param("queueMs", snapshot.queueMs())
+                .param("accountAcquireMs", snapshot.accountAcquireMs())
+                .param("ttfbMs", snapshot.ttfbMs())
+                .param("generationMs", snapshot.generationMs())
                 .update();
         }
 
         private void recordMetricAndLog(Snapshot snapshot) {
             Timer.builder("any2api.inference.duration")
                 .tag("provider", request.providerId())
+                .tag("model", request.model())
                 .tag("protocol", request.protocol())
                 .tag("outcome", snapshot.success() ? "success" : "failure")
                 .register(meters)
                 .record(Duration.ofMillis(snapshot.durationMs()));
+            recordStage("queue", snapshot.queueMs());
+            recordStage("account_acquire", snapshot.accountAcquireMs());
+            recordStage("ttfb", snapshot.ttfbMs());
+            recordStage("generation", snapshot.generationMs());
             log.atLevel(snapshot.success() ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN)
                 .log(
-                    "inference_finished correlation_id={} provider={} model={} protocol={} attempt={} account_id={} status={} error_code={} duration_ms={} input_tokens={} output_tokens={} cache_read_tokens={}",
+                    "inference_finished correlation_id={} provider={} model={} protocol={} attempt={} account_id={} status={} error_code={} duration_ms={} queue_ms={} account_acquire_ms={} ttfb_ms={} generation_ms={} input_tokens={} output_tokens={} cache_read_tokens={} usage_source={}",
                     request.requestId(), request.providerId(), request.model(),
                     request.protocol(), attempt, snapshot.accountId(),
                     snapshot.success() ? "SUCCEEDED" : "FAILED",
                     snapshot.errorCode() == null ? "" : snapshot.errorCode(),
-                    snapshot.durationMs(), snapshot.inputTokens(), snapshot.outputTokens(),
-                    snapshot.cacheReadTokens());
+                    snapshot.durationMs(), snapshot.queueMs(), snapshot.accountAcquireMs(),
+                    snapshot.ttfbMs(), snapshot.generationMs(), snapshot.inputTokens(),
+                    snapshot.outputTokens(), snapshot.cacheReadTokens(), snapshot.usageSource());
+        }
+
+        private void recordStage(String stage, long durationMs) {
+            Timer.builder("any2api.inference.stage.duration")
+                .tag("provider", request.providerId())
+                .tag("model", request.model())
+                .tag("stage", stage)
+                .register(meters)
+                .record(Duration.ofMillis(Math.max(0, durationMs)));
         }
     }
 
@@ -153,7 +213,12 @@ public final class InferenceTelemetryService {
         long inputTokens,
         long outputTokens,
         long cacheReadTokens,
+        UsageSource usageSource,
         long durationMs,
+        long queueMs,
+        long accountAcquireMs,
+        long ttfbMs,
+        long generationMs,
         String errorCode,
         boolean success
     ) {}
@@ -163,8 +228,19 @@ public final class InferenceTelemetryService {
         String providerId,
         String model,
         String protocol,
-        UUID apiKeyId
+        UUID apiKeyId,
+        String requestKind
     ) {
+        public InferenceTrace(
+            String requestId,
+            String providerId,
+            String model,
+            String protocol,
+            UUID apiKeyId
+        ) {
+            this(requestId, providerId, model, protocol, apiKeyId, "INFERENCE");
+        }
+
         public InferenceTrace {
             if (requestId == null || requestId.isBlank()) {
                 throw new IllegalArgumentException("requestId is required");
@@ -178,6 +254,13 @@ public final class InferenceTelemetryService {
             if (protocol == null || protocol.isBlank()) {
                 throw new IllegalArgumentException("protocol is required");
             }
+            requestKind = requestKind == null || requestKind.isBlank()
+                ? "INFERENCE" : requestKind;
         }
+    }
+
+    private static long elapsed(long fromNanos, long toNanos) {
+        return Math.max(0, java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+            toNanos - fromNanos));
     }
 }

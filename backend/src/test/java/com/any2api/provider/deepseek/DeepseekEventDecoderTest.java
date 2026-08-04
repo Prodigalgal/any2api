@@ -9,7 +9,7 @@ import tools.jackson.databind.ObjectMapper;
 
 class DeepseekEventDecoderTest {
     @Test
-    void decodesReasoningResponsePatchesAndUsage() {
+    void decodesReasoningResponsePatchesWithoutTreatingAccumulatedUsageAsOutput() {
         var decoder = new DeepseekEventDecoder("req-1", new ObjectMapper());
         var events = new ArrayList<CanonicalEvent>();
         events.addAll(decoder.decode("""
@@ -35,9 +35,7 @@ class DeepseekEventDecoderTest {
         assertThat(events.stream().filter(CanonicalEvent.OutputTextDelta.class::isInstance)
             .map(CanonicalEvent.OutputTextDelta.class::cast)
             .map(CanonicalEvent.OutputTextDelta::delta)).containsExactly("answer", "!");
-        assertThat(events.stream().filter(CanonicalEvent.Usage.class::isInstance)
-            .map(CanonicalEvent.Usage.class::cast)
-            .map(CanonicalEvent.Usage::outputTokens)).containsExactly(42L);
+        assertThat(events).noneMatch(CanonicalEvent.Usage.class::isInstance);
         assertThat(events).anyMatch(CanonicalEvent.Completed.class::isInstance);
     }
 }

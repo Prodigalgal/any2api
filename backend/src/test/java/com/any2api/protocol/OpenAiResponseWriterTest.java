@@ -26,10 +26,12 @@ class OpenAiResponseWriterTest {
         writer.write(request, events(), exchange).block();
         var body = exchange.getResponse().getBodyAsString().block();
 
-        assertThat(body).contains("chat.completion.chunk")
+        assertThat(body).startsWith(": request_id=request-id\n\n")
+            .contains("chat.completion.chunk")
             .contains("reasoning_content")
             .contains("tool_calls")
             .contains("prompt_tokens")
+            .contains("\"usage_source\":\"UPSTREAM\"")
             .contains("data: [DONE]");
         assertThat(body.indexOf("\"finish_reason\":\"tool_calls\""))
             .isLessThan(body.indexOf("\"prompt_tokens\":4"));
@@ -78,7 +80,8 @@ class OpenAiResponseWriterTest {
         writer.write(request, events(), exchange).block();
         var body = exchange.getResponse().getBodyAsString().block();
 
-        assertThat(body).contains("response.created")
+        assertThat(body).startsWith(": request_id=request-id\n\n")
+            .contains("response.created")
             .contains("response.reasoning_summary_text.done")
             .contains("response.output_text.done")
             .contains("response.function_call_arguments.done")
@@ -122,8 +125,8 @@ class OpenAiResponseWriterTest {
         writer.write(request(CanonicalRequest.Protocol.RESPONSES, false), failure, responses)
             .block();
 
-        assertThat(chat.getResponse().getStatusCode().value()).isEqualTo(502);
-        assertThat(responses.getResponse().getStatusCode().value()).isEqualTo(502);
+        assertThat(chat.getResponse().getStatusCode().value()).isEqualTo(503);
+        assertThat(responses.getResponse().getStatusCode().value()).isEqualTo(503);
         assertThat(chat.getResponse().getBodyAsString().block())
             .contains("account_unavailable")
             .contains("no eligible account for provider alpha");

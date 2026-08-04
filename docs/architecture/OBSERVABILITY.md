@@ -12,8 +12,12 @@ One identifier follows each operation across its owning boundary:
 
 Public inference responses include `X-Any2API-Request-Id`. Java stores the same value with the
 distribution key, selected provider, selected account, model, protocol, retry attempt, token usage,
-duration, and final outcome. A retry appends its attempt number to the durable request key without
-changing the client-visible correlation ID.
+duration, and final outcome. Retries keep the same durable and client-visible `request_id`; the
+separate `attempt` column makes `(request_id, attempt)` unique.
+
+Every usage attempt stores `queue_ms`, `account_acquire_ms`, `ttfb_ms`, and `generation_ms`.
+`request_kind` distinguishes client inference from a real `PROBE`. The admin timeline therefore
+shows account switching without fragmenting one logical request across unrelated identifiers.
 
 Java propagates the correlation ID through Reactor Context only to WebClients whose destination is
 the internal Python service. Python returns the correlation header and records the final response
@@ -60,11 +64,24 @@ redaction. Unknown failures become `provider_operation_failed` at stage `provide
 Spring Actuator exposes these Micrometer timers through the configured metrics endpoint:
 
 - `any2api.operation.duration`: `domain`, `provider`, `operation`, `outcome`
-- `any2api.inference.duration`: `provider`, `protocol`, `outcome`
+- `any2api.inference.duration`: `provider`, `model`, `protocol`, `outcome`
+- `any2api.inference.stage.duration`: `provider`, `model`, `stage`
+- `any2api.model.concurrent`: current admitted requests by provider and model
+- `any2api.model.queue.depth`: current bounded waiters by provider and model
+- `any2api.model.queue.rejected`: rejected requests by provider, model, and stable reason
+- `any2api.model.circuit.state`: closed `0`, half-open `1`, open `2`
+- `any2api.model.accounts`: eligible, available, and quota-limited account gauges
+- `any2api.model.health`: unavailable `0`, degraded `1`, ready `2`
+- `any2api.model.success.rate`: rolling logical-request success ratio
 
-Correlation IDs, account IDs, API-key IDs, model strings, emails, and exception messages are not
-metric labels. They belong in durable events or structured logs, because putting them in metrics
-would create unbounded cardinality.
+Provider and model labels come only from the bounded enabled catalog. Correlation IDs, account IDs,
+API-key IDs, emails, and exception messages are never metric labels. They belong in durable events
+or structured logs, because putting them in metrics would create unbounded cardinality.
+
+Rolling model health groups all attempts by `request_id`: the final attempt determines success and
+the sum of attempt durations feeds P50/P95. A fresh failed probe newer than the last successful call
+forces the model unavailable. Client cancellation releases admission without counting as an
+upstream circuit failure.
 
 ## Redaction rules
 

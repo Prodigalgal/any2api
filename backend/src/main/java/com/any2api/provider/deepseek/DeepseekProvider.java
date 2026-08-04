@@ -125,7 +125,7 @@ public final class DeepseekProvider implements InferenceProvider {
     }
 
     @Override public ProviderRetryPolicy retryPolicy() {
-        return new ProviderRetryPolicy(3, Set.of("empty_model_response"));
+        return ProviderRetryPolicy.standard(3);
     }
 
     @Override

@@ -26,7 +26,11 @@ public interface InferenceProvider {
     }
 
     default ProviderRetryPolicy retryPolicy() {
-        return ProviderRetryPolicy.none();
+        return ProviderRetryPolicy.standard();
+    }
+
+    default ModelCapabilityContract modelContract(DiscoveredModel model) {
+        return ModelCapabilityContract.from(manifest(), protocolContract(), model);
     }
 
     Flux<CanonicalEvent> generate(

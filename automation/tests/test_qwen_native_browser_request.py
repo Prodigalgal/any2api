@@ -47,7 +47,8 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
         def is_closed(self) -> bool:
             return False
 
-        async def evaluate(self, _script: str, payload: dict[str, object]) -> dict[str, object]:
+        async def evaluate(self, script: str, payload: dict[str, object]) -> dict[str, object]:
+            assert "credentials: 'same-origin'" in script
             assert payload["path"] == "/api/v2/chats/new"
             assert str(payload["timezone"]).isascii()
             assert str(payload["timezone"]).endswith("GMT+0800")

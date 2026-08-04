@@ -326,7 +326,7 @@ class QwenNativeBrowserTransport:
                       method: request.method,
                       headers,
                       body: request.method === 'GET' ? undefined : request.body,
-                      credentials: 'omit',
+                      credentials: 'same-origin',
                       cache: 'no-store',
                       referrer: request.referrer,
                       signal: controller.signal
@@ -360,9 +360,23 @@ class QwenNativeBrowserTransport:
             body = base64.b64decode(encoded, validate=True)
             if len(body) > maximum:
                 raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
+            content_type = str(result.get("contentType") or "application/octet-stream")
+            logger.info(
+                "qwen_native_browser_response path=%s status=%s content_type=%s bytes=%s",
+                request.path,
+                result.get("status"),
+                content_type,
+                len(body),
+            )
+            if "/chat/completions" in request.path and b"data:" not in body:
+                preview = body[:800].decode("utf-8", errors="replace")
+                logger.warning(
+                    "qwen_native_browser_unexpected_completion preview=%r",
+                    preview,
+                )
             return {
                 "status": int(result.get("status") or 502),
-                "content_type": str(result.get("contentType") or "application/octet-stream"),
+                "content_type": content_type,
                 "headers": {
                     "x-request-id": str(result.get("requestId") or ""),
                     "retry-after": str(result.get("retryAfter") or ""),

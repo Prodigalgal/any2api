@@ -52,10 +52,11 @@ public class ModelCatalogCache {
                    ELSE 'DEGRADED'
                END AS runtime_status,
                account_runtime.available_accounts > 0
-                 AND NOT (
+                 AND NOT COALESCE(
                    probe.status = 'FAILED' AND probe.probed_at >= :probeFreshAfter
-                   AND (usage_runtime.last_success_at IS NULL
-                     OR probe.probed_at > usage_runtime.last_success_at)
+                     AND (usage_runtime.last_success_at IS NULL
+                       OR probe.probed_at > usage_runtime.last_success_at),
+                   FALSE
                  )
                  AND (
                    usage_runtime.success_count > 0

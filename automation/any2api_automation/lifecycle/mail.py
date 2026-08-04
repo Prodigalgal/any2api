@@ -57,9 +57,7 @@ class TempMailClient:
         self.domains = _available_domains(domain_values)
         self.timeout = float(request_timeout_seconds or 30)
         self.poll_seconds = float(poll_seconds or config.mail_poll_seconds)
-        self.message_timeout_seconds = float(
-            message_timeout_seconds or config.mail_timeout_seconds
-        )
+        self.message_timeout_seconds = float(message_timeout_seconds or config.mail_timeout_seconds)
         if not self.base_url:
             raise ValueError("temporary mail API is not configured")
 

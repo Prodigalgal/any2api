@@ -47,9 +47,7 @@ class MimoAutomationProvider(AutomationProvider):
         last_error: Exception | None = None
         for _ in range(attempts):
             try:
-                return await asyncio.to_thread(
-                    _register_protocol, payload, mail, mailbox, password
-                )
+                return await asyncio.to_thread(_register_protocol, payload, mail, mailbox, password)
             except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
                 last_error = error
         assert last_error is not None

@@ -15,8 +15,8 @@ from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
+from curl_cffi import requests as curl_requests
 from fastapi import APIRouter, Depends, HTTPException
-from patchright.async_api import TimeoutError as AsyncPlaywrightTimeoutError
 from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from pydantic import BaseModel, Field, model_validator
@@ -328,6 +328,7 @@ class QwenNativeBrowserTransport:
             "timeoutMs": request.timeout_seconds * 1000,
             "version": self._frontend_version,
             "requestId": str(uuid4()),
+            "maximumBytes": maximum,
             "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
         }
         result, body = await self._fetch_in_main_world(payload)
@@ -342,12 +343,9 @@ class QwenNativeBrowserTransport:
         encoded = base64.b64encode(
             json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode()
         ).decode()
-        marker_id = f"qwen-fetch-{payload['requestId']}"
         script = f"""(() => {{
           const bytes = Uint8Array.from(atob('{encoded}'), value => value.charCodeAt(0));
           const request = JSON.parse(new TextDecoder().decode(bytes));
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
           const headers = {{
             'Accept': request.path.includes('/chat/completions')
               ? 'application/json'
@@ -366,47 +364,39 @@ class QwenNativeBrowserTransport:
             body: request.method === 'GET' ? undefined : request.body,
             credentials: 'same-origin',
             cache: 'no-store',
-            referrer: request.referrer,
-            signal: controller.signal
-          }}).catch(error => {{
-            const marker = document.createElement('meta');
-            marker.id = '{marker_id}';
-            marker.dataset.error = error?.name || 'FetchError';
-            document.head.appendChild(marker);
-          }}).finally(() => clearTimeout(timeout));
+            referrer: request.referrer
+          }}).catch(() => {{}});
           if (document.currentScript) document.currentScript.remove();
         }})();"""
-        # A script tag runs in Qwen's main world, where Baxia wraps fetch and adds bx-* headers.
         target_url = str(payload["url"])
         method = str(payload["method"])
         request_id = str(payload["requestId"])
-        try:
-            async with self._page.expect_response(
-                lambda response: (
-                    response.url == target_url
-                    and response.request.method == method
-                    and response.request.headers.get("x-request-id") == request_id
-                ),
-                timeout=int(payload["timeoutMs"]) + 5_000,
-            ) as response_info:
-                await self._page.add_script_tag(content=script)
-            response = await response_info.value
-        except AsyncPlaywrightTimeoutError as error:
-            marker = self._page.locator(f"#{marker_id}")
-            failure = await marker.get_attribute("data-error") if await marker.count() else None
-            raise RuntimeError(
-                f"Qwen main-world fetch failed: {failure or 'response timeout'}"
-            ) from error
-        finally:
+        probe_aborted = asyncio.Event()
+
+        # Baxia only hooks the page's main world; abort that probe before the same-process
+        # curl session sends the captured browser-shaped request and consumes its stream.
+        async def abort_probe(route: Any) -> None:
             try:
-                await self._page.evaluate(
-                    "markerId => document.getElementById(markerId)?.remove()", marker_id
-                )
-            except Exception:
-                logger.debug("Qwen main-world fetch marker cleanup skipped", exc_info=True)
-        body = await response.body()
-        headers = await response.all_headers()
-        request_headers = await response.request.all_headers()
+                await route.abort()
+            finally:
+                probe_aborted.set()
+
+        await self._page.route(target_url, abort_probe, times=1)
+        try:
+            async with self._page.expect_request(
+                lambda request: (
+                    request.url == target_url
+                    and request.method == method
+                    and request.headers.get("x-request-id") == request_id
+                ),
+                timeout=30_000,
+            ) as request_info:
+                await self._page.add_script_tag(content=script)
+            browser_request = await request_info.value
+            await asyncio.wait_for(probe_aborted.wait(), timeout=10)
+        finally:
+            await self._page.unroute(target_url)
+        request_headers = await browser_request.all_headers()
         baxia_headers = {"bx-ua", "bx-umidtoken", "bx-v"}
         if not baxia_headers.issubset(request_headers):
             logger.warning(
@@ -414,13 +404,11 @@ class QwenNativeBrowserTransport:
                 payload["path"],
                 sorted(baxia_headers.difference(request_headers)),
             )
-        return {
-            "status": response.status,
-            "contentType": headers.get("content-type", "application/octet-stream"),
-            "requestId": headers.get("x-request-id", request_id),
-            "retryAfter": headers.get("retry-after", ""),
-            "bodyBase64": base64.b64encode(body).decode(),
-        }, body
+        return await asyncio.to_thread(
+            _send_qwen_request,
+            payload,
+            request_headers,
+        )
 
     async def _prepare_authenticated_surface(self, request: NativeBrowserRequest) -> None:
         base_url = settings().qwen_base_url.rstrip("/")
@@ -594,6 +582,7 @@ class QwenNativeBrowserTransport:
                     timezone_id="Asia/Shanghai",
                     viewport={"width": 1440, "height": 900},
                     user_agent=user_agent,
+                    service_workers="block",
                     extra_http_headers={
                         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                         **_client_hints(browser_profile),
@@ -637,6 +626,99 @@ class QwenNativeBrowserTransport:
         )
         if not self._frontend_version:
             raise RuntimeError("could not derive the current Qwen frontend version")
+
+
+def _send_qwen_request(
+    payload: dict[str, Any],
+    browser_headers: dict[str, str],
+) -> tuple[dict[str, Any], bytes]:
+    maximum = int(payload["maximumBytes"])
+    headers = {
+        name: value
+        for name, value in browser_headers.items()
+        if name.lower() not in {"content-length", "host", "connection"}
+    }
+    with curl_requests.Session(
+        impersonate=settings().qwen_risk_browser_profile,
+        http_version="v2",
+        default_headers=False,
+    ) as client:
+        response = client.request(
+            str(payload["method"]),
+            str(payload["url"]),
+            headers=headers,
+            data=None if payload["method"] == "GET" else str(payload["body"]),
+            timeout=int(payload["timeoutMs"]) / 1000,
+            allow_redirects=False,
+            stream=True,
+        )
+        try:
+            body_buffer = bytearray()
+            event_stream = "text/event-stream" in response.headers.get("content-type", "")
+            for chunk in response.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                body_buffer.extend(chunk)
+                if len(body_buffer) > maximum:
+                    raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
+                if event_stream and _qwen_sse_finished(bytes(body_buffer[-65_536:])):
+                    break
+            body = bytes(body_buffer)
+            result = {
+                "status": response.status_code,
+                "contentType": response.headers.get("content-type", "application/octet-stream"),
+                "requestId": response.headers.get("x-request-id", str(payload["requestId"])),
+                "retryAfter": response.headers.get("retry-after", ""),
+                "bodyBase64": base64.b64encode(body).decode(),
+            }
+            return result, body
+        finally:
+            response.close()
+
+
+def _qwen_sse_finished(body: bytes) -> bool:
+    for raw_line in body.decode("utf-8", errors="replace").splitlines():
+        line = raw_line.lstrip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            return True
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("response.completed"):
+            return True
+        choice = _first_qwen_choice(payload)
+        delta = choice.get("delta") or choice.get("message") or {}
+        phase = str(delta.get("phase") or "") if isinstance(delta, dict) else ""
+        status = str(delta.get("status") or "") if isinstance(delta, dict) else ""
+        if choice.get("finish_reason") or str(payload.get("status") or "") in {
+            "completed",
+            "finished",
+        }:
+            return True
+        if status == "finished" and phase not in {"thinking", "thinking_summary"}:
+            return True
+    return False
+
+
+def _first_qwen_choice(payload: dict[str, Any]) -> dict[str, Any]:
+    for candidate in (
+        payload.get("choices"),
+        (payload.get("data") or {}).get("choices")
+        if isinstance(payload.get("data"), dict)
+        else None,
+        (payload.get("output") or {}).get("choices")
+        if isinstance(payload.get("output"), dict)
+        else None,
+    ):
+        if isinstance(candidate, list) and candidate and isinstance(candidate[0], dict):
+            return candidate[0]
+    return {}
 
 
 def _qwen_failure_code(body: bytes) -> str:

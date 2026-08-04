@@ -13,6 +13,7 @@ from any2api_automation.providers.qwen_risk import (
     NativeBrowserRequest,
     QwenNativeBrowserTransport,
     _qwen_punish_url,
+    _qwen_sse_finished,
 )
 
 
@@ -98,10 +99,26 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
 
 @pytest.mark.asyncio
-async def test_qwen_native_transport_fetches_in_the_baxia_main_world() -> None:
+async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     body = b'{"data":{"id":"chat"}}'
+    captured_headers: dict[str, str] = {}
+
+    def send(_payload: dict[str, object], headers: dict[str, str]):
+        captured_headers.update(headers)
+        return {
+            "status": 200,
+            "contentType": "application/json",
+            "requestId": "upstream-id",
+            "retryAfter": "",
+            "bodyBase64": base64.b64encode(body).decode(),
+        }, body
+
+    monkeypatch.setattr("any2api_automation.providers.qwen_risk._send_qwen_request", send)
 
     class FakeRequest:
+        url = "https://chat.qwen.ai/api/v2/chats/new"
         method = "POST"
         headers: ClassVar = {"x-request-id": "request-id"}
 
@@ -113,18 +130,7 @@ async def test_qwen_native_transport_fetches_in_the_baxia_main_world() -> None:
                 "bx-v": "2.5.37",
             }
 
-    class FakeResponse:
-        url = "https://chat.qwen.ai/api/v2/chats/new"
-        status = 200
-        request = FakeRequest()
-
-        async def body(self) -> bytes:
-            return body
-
-        async def all_headers(self) -> dict[str, str]:
-            return {"content-type": "application/json", "x-request-id": "upstream-id"}
-
-    class FakeResponseInfo:
+    class FakeRequestInfo:
         async def __aenter__(self) -> Self:
             return self
 
@@ -133,24 +139,40 @@ async def test_qwen_native_transport_fetches_in_the_baxia_main_world() -> None:
 
         @property
         def value(self):
-            async def resolve() -> FakeResponse:
-                return FakeResponse()
+            async def resolve() -> FakeRequest:
+                return FakeRequest()
 
             return resolve()
+
+    class FakeRoute:
+        def __init__(self) -> None:
+            self.aborted = False
+
+        async def abort(self) -> None:
+            self.aborted = True
 
     class FakePage:
         def __init__(self) -> None:
             self.script = ""
+            self.routed = False
+            self.unrouted = False
+            self.route_handler = None
+            self.fake_route = FakeRoute()
 
-        def expect_response(self, predicate, **_kwargs: object) -> FakeResponseInfo:
-            assert predicate(FakeResponse())
-            return FakeResponseInfo()
+        async def route(self, _url: str, handler, **_kwargs: object) -> None:
+            self.routed = True
+            self.route_handler = handler
+
+        async def unroute(self, _url: str) -> None:
+            self.unrouted = True
+
+        def expect_request(self, predicate, **_kwargs: object) -> FakeRequestInfo:
+            assert predicate(FakeRequest())
+            return FakeRequestInfo()
 
         async def add_script_tag(self, *, content: str) -> None:
             self.script = content
-
-        async def evaluate(self, _script: str, _marker_id: str) -> None:
-            return None
+            await self.route_handler(self.fake_route)
 
     page = FakePage()
     transport = QwenNativeBrowserTransport()
@@ -164,6 +186,7 @@ async def test_qwen_native_transport_fetches_in_the_baxia_main_world() -> None:
         "useBearer": True,
         "referrer": "https://chat.qwen.ai/c/new-chat",
         "timeoutMs": 60_000,
+        "maximumBytes": 1024,
         "version": "current",
         "requestId": "request-id",
         "timezone": "Wed Aug 05 2026 12:00:00 GMT+0800",
@@ -172,13 +195,36 @@ async def test_qwen_native_transport_fetches_in_the_baxia_main_world() -> None:
     result, actual_body = await transport._fetch_in_main_world(payload)
 
     assert "fetch(request.url" in page.script
+    assert page.routed is True
+    assert page.unrouted is True
+    assert page.fake_route.aborted is True
     assert "token-value-that-is-long-enough" not in page.script
     encoded_match = re.search(r"atob\('([^']+)'\)", page.script)
     assert encoded_match is not None
     encoded = encoded_match.group(1)
     assert json.loads(base64.b64decode(encoded))["bearerToken"] == payload["bearerToken"]
+    assert captured_headers["bx-v"] == "2.5.37"
     assert result["requestId"] == "upstream-id"
     assert actual_body == body
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"data: [DONE]\n\n",
+        b'data: {"choices":[{"finish_reason":"stop","delta":{}}]}\n\n',
+        b'data: {"choices":[{"delta":{"phase":"answer","status":"finished"}}]}\n\n',
+        b'data: {"response.completed":{"response_id":"response"}}\n\n',
+    ],
+)
+def test_qwen_sse_terminal_events_finish_the_browser_shaped_stream(body: bytes) -> None:
+    assert _qwen_sse_finished(body) is True
+
+
+def test_qwen_thinking_summary_does_not_finish_the_stream() -> None:
+    body = b'data: {"choices":[{"delta":{"phase":"thinking_summary","status":"finished"}}]}\n\n'
+
+    assert _qwen_sse_finished(body) is False
 
 
 @pytest.mark.asyncio

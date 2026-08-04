@@ -80,6 +80,26 @@ export type Account = {
   updatedAt?: string;
 };
 
+export type AccountDetail = {
+  account: Account & {
+    cooldownUntil: string | null;
+    metadata: Record<string, unknown>;
+    version: number;
+    lastUsedAt: string | null;
+    lastSuccessAt: string | null;
+    lastFailureAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  credential: {
+    configured: boolean;
+    type: string | null;
+    version: number;
+    expiresAt: string | null;
+    updatedAt: string | null;
+  };
+};
+
 export type AccountExpiryFilter = "ANY" | "VALID" | "EXPIRING_SOON" | "EXPIRED" | "NEVER";
 
 export type AccountPageQuery = {
@@ -307,6 +327,13 @@ export const api = {
   ),
   updateAccount: (id: string, body: Record<string, unknown>) => adminJson<Account>(
     `/api/admin/v1/accounts/${id}`, { method: "PATCH", body: JSON.stringify(body) },
+  ),
+  accountDetail: (id: string) => adminJson<AccountDetail>(
+    `/api/admin/v1/accounts/${id}`,
+  ),
+  probeAccount: (id: string, spreadSeconds = 1) => adminJson<Account>(
+    `/api/admin/v1/accounts/${id}/probe`,
+    { method: "POST", body: JSON.stringify({ spreadSeconds }) },
   ),
   deleteAccount: (id: string) => adminJson<void>(
     `/api/admin/v1/accounts/${id}`, { method: "DELETE" },

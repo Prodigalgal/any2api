@@ -2,6 +2,7 @@ package com.any2api.api.admin;
 
 import com.any2api.account.AccountManagementService;
 import com.any2api.account.AccountCommandService;
+import com.any2api.account.AccountDetailView;
 import com.any2api.provider.ProviderAccountCommandHandler;
 import com.any2api.account.AccountStatus;
 import com.any2api.account.AccountView;
@@ -64,6 +65,11 @@ public class AdminAccountController {
             request.credentialExpiresAt(), request.metadata(), request.priority(), request.weight(),
             request.maxConcurrency(), request.status(), request.enabled(), request.credential(),
             request.scheduleLifecycle()));
+    }
+
+    @GetMapping("/{accountId}")
+    public AccountDetailView detail(@PathVariable UUID accountId) {
+        return accounts.detail(accountId);
     }
 
     @PatchMapping("/{accountId}")

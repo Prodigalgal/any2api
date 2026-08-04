@@ -55,6 +55,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       router.replace("/login");
     },
   });
+  const activeNavigation = navigation.find(([, , href]) => (
+    href === "/" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`)
+  ));
 
   useEffect(() => {
     if (session.isError || session.data?.authenticated === false) router.replace("/login");
@@ -79,7 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             key={label}
             component={Link}
             href={href}
-            selected={pathname === href}
+            selected={activeNavigation?.[2] === href}
             sx={{
               minHeight: 42,
               mb: 0.5,
@@ -102,7 +105,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ListItemText
               primary={label}
               slotProps={{
-                primary: { sx: { fontSize: 13, fontWeight: pathname === href ? 700 : 500 } },
+                primary: { sx: { fontSize: 13, fontWeight: activeNavigation?.[2] === href ? 700 : 500 } },
               }}
             />
           </ListItemButton>
@@ -119,7 +122,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AppBar position="fixed" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: "divider", ml: `${drawerWidth}px`, width: `calc(100% - ${drawerWidth}px)` }}>
         <Toolbar sx={{ minHeight: "64px !important", px: 3 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 14 }}>
-            {navigation.find(([, , href]) => href === pathname)?.[0] ?? "Any2API"}
+            {activeNavigation?.[0] ?? "Any2API"}
           </Typography>
           <Box sx={{ flex: 1 }} />
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>

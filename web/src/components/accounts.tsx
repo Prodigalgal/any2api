@@ -6,6 +6,7 @@ import {
   FilterAltOffOutlined,
   LoginOutlined,
   ManageSearchOutlined,
+  MonitorHeartOutlined,
   MoreVertOutlined,
   RefreshOutlined,
   SearchOutlined,
@@ -40,6 +41,7 @@ import {
 } from "@mui/material";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useMemo, useState, type MouseEvent } from "react";
+import Link from "next/link";
 import {
   api,
   providerOptions,
@@ -90,6 +92,11 @@ export function Accounts() {
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
   const providers = providerOptions(catalog.data);
   const providerNames = useMemo(() => new Map(providers), [providers]);
+  const probeProviders = useMemo(() => new Set(
+    (catalog.data?.data ?? [])
+      .filter((item) => item.lifecycleOperations.includes("keepalive"))
+      .map((item) => item.id),
+  ), [catalog.data]);
   const accounts = useQuery({
     queryKey: ["accounts-page", provider, status, enabled, expiry, debouncedSearch, page, pageSize],
     queryFn: () => api.accountPage({
@@ -129,6 +136,10 @@ export function Accounts() {
     mutationFn: (id: string) => api.reauthenticateAccount(id),
     onSuccess: invalidateAccounts,
   });
+  const probe = useMutation({
+    mutationFn: (id: string) => api.probeAccount(id),
+    onSuccess: invalidateAccounts,
+  });
   const commands = useQuery({
     queryKey: ["account-commands", commandAccount?.id],
     queryFn: () => api.accountCommands(commandAccount!.id),
@@ -150,7 +161,7 @@ export function Accounts() {
   };
   const filtersActive = Boolean(provider || status || enabled || expiry !== "ANY" || search);
   const error = accounts.error ?? commands.error ?? executeCommand.error
-    ?? update.error ?? remove.error ?? reauthenticate.error;
+    ?? update.error ?? remove.error ?? reauthenticate.error ?? probe.error;
 
   return (
     <PageContainer>
@@ -303,7 +314,7 @@ export function Accounts() {
                 <TableCell align="right" sx={{ width: 155 }}>请求 / 成功 / 失败</TableCell>
                 <TableCell sx={{ width: 120 }}>到期时间</TableCell>
                 <TableCell align="center" sx={{ width: 65 }}>启用</TableCell>
-                <TableCell align="right" sx={{ width: 105 }}>操作</TableCell>
+                <TableCell align="right" sx={{ width: 135 }}>操作</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -316,9 +327,12 @@ export function Accounts() {
                   updating={update.isPending && update.variables?.account.id === account.id}
                   removing={remove.isPending && remove.variables === account.id}
                   reauthenticating={reauthenticate.isPending && reauthenticate.variables === account.id}
+                  probing={probe.isPending && probe.variables === account.id}
+                  probeSupported={probeProviders.has(account.providerId)}
                   onToggle={(nextEnabled) => update.mutate({ account, nextEnabled })}
                   onCommands={(event) => openCommands(event, account)}
                   onReauthenticate={() => reauthenticate.mutate(account.id)}
+                  onProbe={() => probe.mutate(account.id)}
                   onEvents={() => setTraceAccount(account)}
                   onDelete={() => {
                     if (window.confirm(`删除 ${account.providerId}/${account.externalId}？`)) {
@@ -409,9 +423,12 @@ const AccountRow = memo(function AccountRow({
   updating,
   removing,
   reauthenticating,
+  probing,
+  probeSupported,
   onToggle,
   onCommands,
   onReauthenticate,
+  onProbe,
   onEvents,
   onDelete,
 }: {
@@ -420,9 +437,12 @@ const AccountRow = memo(function AccountRow({
   updating: boolean;
   removing: boolean;
   reauthenticating: boolean;
+  probing: boolean;
+  probeSupported: boolean;
   onToggle: (enabled: boolean) => void;
   onCommands: (event: MouseEvent<HTMLElement>) => void;
   onReauthenticate: () => void;
+  onProbe: () => void;
   onEvents: () => void;
   onDelete: () => void;
 }) {
@@ -437,7 +457,13 @@ const AccountRow = memo(function AccountRow({
         ) : null}
       </TableCell>
       <TableCell>
-        <Typography noWrap title={account.externalId} sx={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
+        <Typography
+          component={Link}
+          href={`/accounts/${encodeURIComponent(account.id)}`}
+          noWrap
+          title={account.externalId}
+          sx={{ display: "block", color: "text.primary", fontFamily: "ui-monospace, monospace", fontSize: 11.5, textDecoration: "none", "&:hover": { color: "primary.main", textDecoration: "underline" } }}
+        >
           {account.externalId}
         </Typography>
       </TableCell>
@@ -473,6 +499,18 @@ const AccountRow = memo(function AccountRow({
             <span>
               <IconButton size="small" disabled={!account.enabled} onClick={onCommands}>
                 <MoreVertOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title={probeSupported ? "立即测活" : "该厂商不支持测活"}>
+            <span>
+              <IconButton
+                size="small"
+                aria-label="立即测活"
+                disabled={probing || !probeSupported}
+                onClick={onProbe}
+              >
+                <MonitorHeartOutlined sx={{ fontSize: 18 }} />
               </IconButton>
             </span>
           </Tooltip>

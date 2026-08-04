@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.any2api.account.AccountManagementService.ImportCommand;
 import com.any2api.credential.CredentialVault;
 import com.any2api.credential.DecryptedCredential;
+import com.any2api.credential.CredentialSummary;
 import com.any2api.lifecycle.LifecycleScheduleService;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
@@ -23,6 +24,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.SupportLevel;
 import com.any2api.provider.xai_identity.XaiAccountDerivationPolicy;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -147,6 +149,57 @@ class AccountManagementServiceTest {
     }
 
     @Test
+    void accountDetailIncludesOnlyTheCredentialSummary() {
+        var repository = mock(AccountRepository.class);
+        var vault = mock(CredentialVault.class);
+        var account = AccountEntity.create(
+            "qwen", "upstream-account", "same@example.com", null,
+            Map.of("inference_probe_status", "READY"));
+        var updatedAt = Instant.parse("2026-08-04T00:00:00Z");
+        var summary = new CredentialSummary(
+            true, "provider-session", 3, updatedAt.plusSeconds(3600), updatedAt);
+        when(repository.findById(account.getId())).thenReturn(Optional.of(account));
+        when(vault.summary(account, "qwen")).thenReturn(summary);
+        var service = new AccountManagementService(
+            repository,
+            vault,
+            new ProviderRegistry(List.of(provider("qwen"))),
+            mock(LifecycleScheduleService.class),
+            List.of());
+
+        var detail = service.detail(account.getId());
+
+        assertThat(detail.account().id()).isEqualTo(account.getId());
+        assertThat(detail.account().metadata()).containsEntry("inference_probe_status", "READY");
+        assertThat(detail.credential()).isEqualTo(summary);
+        verify(vault, never()).read(any(), any());
+    }
+
+    @Test
+    void scheduledProbeRejectsProvidersWithoutKeepaliveBeforeDisablingTheAccount() {
+        var repository = mock(AccountRepository.class);
+        var schedules = mock(LifecycleScheduleService.class);
+        var account = AccountEntity.create(
+            "alpha", "upstream-account", "same@example.com", null, Map.of());
+        when(repository.findById(account.getId())).thenReturn(Optional.of(account));
+        var service = new AccountManagementService(
+            repository,
+            mock(CredentialVault.class),
+            new ProviderRegistry(List.of(provider("alpha", false))),
+            schedules,
+            List.of());
+
+        assertThatThrownBy(() -> service.scheduleProbe(account.getId(), java.time.Duration.ofSeconds(1)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("does not support account probing");
+
+        assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        assertThat(account.isEnabled()).isTrue();
+        verify(repository, never()).save(any());
+        verify(schedules, never()).rescheduleProbe(any(), any(), any());
+    }
+
+    @Test
     void grokSsoCreatesDisabledIndependentWebAndConsoleAccounts() {
         var repository = mock(AccountRepository.class);
         var vault = mock(CredentialVault.class);
@@ -231,13 +284,23 @@ class AccountManagementServiceTest {
     }
 
     private InferenceProvider provider(String id) {
+        return provider(id, true);
+    }
+
+    private InferenceProvider provider(String id, boolean keepalive) {
+        var capabilities = keepalive
+            ? Map.of(
+                ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                ProviderCapability.RESPONSES, SupportLevel.NATIVE,
+                ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
+                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE)
+            : Map.of(
+                ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                ProviderCapability.RESPONSES, SupportLevel.NATIVE);
         return new InferenceProvider() {
             @Override public ProviderManifest manifest() {
-                return new ProviderManifest(id, id, "1", "1", List.of(), Map.of(
-                    ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-                    ProviderCapability.RESPONSES, SupportLevel.NATIVE,
-                    ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-                    ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE), true);
+                return new ProviderManifest(
+                    id, id, "1", "1", List.of(), capabilities, true);
             }
             @Override public Flux<CanonicalEvent> generate(
                 CanonicalRequest request, ProviderExecutionContext context,

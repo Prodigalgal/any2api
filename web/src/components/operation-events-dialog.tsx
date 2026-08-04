@@ -51,9 +51,33 @@ export function OperationEventsDialog({
         <Typography color="text.secondary" sx={{ mt: 0.5, fontSize: 12.5 }}>{title}</Typography>
       </DialogTitle>
       <DialogContent dividers sx={{ p: 0, minHeight: 300 }}>
-        {events.isFetching ? <LinearProgress sx={{ height: 2 }} /> : null}
-        {events.error ? <Alert severity="error" sx={{ m: 2 }}>{events.error.message}</Alert> : null}
-        <TableContainer sx={{ maxHeight: 560 }}>
+        <OperationEventsTable
+          events={events.data ?? []}
+          isFetching={events.isFetching}
+          error={events.error}
+        />
+      </DialogContent>
+      <DialogActions><Button onClick={onClose}>关闭</Button></DialogActions>
+    </Dialog>
+  );
+}
+
+export function OperationEventsTable({
+  events,
+  isFetching = false,
+  error,
+  maxHeight = 560,
+}: {
+  events: OperationEvent[];
+  isFetching?: boolean;
+  error?: Error | null;
+  maxHeight?: number;
+}) {
+  return (
+    <>
+      {isFetching ? <LinearProgress sx={{ height: 2 }} /> : null}
+      {error ? <Alert severity="error" sx={{ m: 2 }}>{error.message}</Alert> : null}
+      <TableContainer sx={{ maxHeight }}>
           <Table stickyHeader size="small" sx={{ minWidth: 980 }}>
             <TableHead>
               <TableRow>
@@ -68,7 +92,7 @@ export function OperationEventsDialog({
               </TableRow>
             </TableHead>
             <TableBody>
-              {(events.data ?? []).map((event) => (
+              {events.map((event) => (
                 <TableRow key={event.id} hover>
                   <TableCell sx={{ fontVariantNumeric: "tabular-nums" }}>#{event.attempt}</TableCell>
                   <TableCell><EventStatus status={event.status} /></TableCell>
@@ -100,15 +124,13 @@ export function OperationEventsDialog({
                   </TableCell>
                 </TableRow>
               ))}
-              {!events.isLoading && (events.data?.length ?? 0) === 0 ? (
+              {!isFetching && events.length === 0 ? (
                 <TableRow><TableCell colSpan={8} align="center" sx={{ py: 8, color: "text.secondary" }}>暂无运行事件</TableCell></TableRow>
               ) : null}
             </TableBody>
           </Table>
-        </TableContainer>
-      </DialogContent>
-      <DialogActions><Button onClick={onClose}>关闭</Button></DialogActions>
-    </Dialog>
+      </TableContainer>
+    </>
   );
 }
 

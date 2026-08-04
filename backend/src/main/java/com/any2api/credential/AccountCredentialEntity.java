@@ -94,6 +94,10 @@ public class AccountCredentialEntity {
         return expiresAt;
     }
 
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
     void replace(byte[] payload, byte[] nonce, int keyVersion, Instant expiresAt) {
         this.encryptedPayload = payload.clone();
         this.nonce = nonce.clone();

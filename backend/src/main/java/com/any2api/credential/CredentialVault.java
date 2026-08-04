@@ -82,6 +82,19 @@ public class CredentialVault {
         }
     }
 
+    @Transactional(readOnly = true)
+    public CredentialSummary summary(AccountEntity account, String expectedProviderId) {
+        requireProvider(account, expectedProviderId);
+        return credentials.findByAccountIdAndCredentialType(account.getId(), CREDENTIAL_TYPE)
+            .map(entity -> new CredentialSummary(
+                true,
+                entity.getCredentialType(),
+                entity.getCredentialVersion(),
+                entity.getExpiresAt(),
+                entity.getUpdatedAt()))
+            .orElseGet(CredentialSummary::missing);
+    }
+
     private String aad(AccountEntity account, long credentialVersion) {
         return (account.getProviderId() + ":" + account.getId() + ":" + CREDENTIAL_TYPE + ":"
             + credentialVersion);

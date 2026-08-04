@@ -48,6 +48,14 @@ public class AccountManagementService {
             AccountSpecifications.matching(query, Instant.now()), pageable));
     }
 
+    @Transactional(readOnly = true)
+    public AccountDetailView detail(UUID accountId) {
+        var account = require(accountId);
+        return new AccountDetailView(
+            AccountView.from(account),
+            credentials.summary(account, account.getProviderId()));
+    }
+
     @Transactional
     public ImportResult importAccount(ImportCommand command) {
         return importAccount(command, false);
@@ -163,7 +171,12 @@ public class AccountManagementService {
             throw new IllegalArgumentException("probe spread must be between 1 second and 7 days");
         }
         var account = require(accountId);
-        providers.require(account.getProviderId());
+        var provider = providers.require(account.getProviderId());
+        if (provider.manifest().capabilities().getOrDefault(
+            ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.UNSUPPORTED)
+            == SupportLevel.UNSUPPORTED) {
+            throw new IllegalArgumentException("provider does not support account probing");
+        }
         account.updateState(AccountStatus.PENDING, false);
         account = accounts.save(account);
         schedules.rescheduleProbe(account.getId(), account.getProviderId(), spread);

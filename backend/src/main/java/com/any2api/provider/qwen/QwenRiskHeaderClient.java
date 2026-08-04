@@ -58,6 +58,7 @@ final class QwenRiskHeaderClient {
         String path,
         String body,
         String bearerToken,
+        Map<String, String> cookies,
         String refererPath,
         int timeoutSeconds
     ) {
@@ -66,6 +67,7 @@ final class QwenRiskHeaderClient {
         request.put("path", path);
         request.put("body", body == null ? "" : body);
         request.put("bearer_token", bearerToken);
+        request.put("cookies", cookies);
         request.put("referer_path", refererPath);
         request.put("timeout_seconds", timeoutSeconds);
         return client.post()

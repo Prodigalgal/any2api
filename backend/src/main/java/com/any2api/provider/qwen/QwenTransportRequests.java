@@ -58,6 +58,6 @@ final class QwenTransportRequests {
         int timeout
     ) {
         return riskHeaders.browserFetch(
-            "POST", path, body, credential.token(), refererPath, timeout);
+            "POST", path, body, credential.token(), credential.cookies(), refererPath, timeout);
     }
 }

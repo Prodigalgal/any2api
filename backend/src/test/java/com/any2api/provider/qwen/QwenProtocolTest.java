@@ -11,12 +11,29 @@ import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.BrowserTransportClient;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import tools.jackson.databind.ObjectMapper;
 
 class QwenProtocolTest {
+    @Test
+    void preservesProviderCookiesForTheNativeBrowserSession() {
+        var payload = new ObjectMapper().readTree("""
+            {"token":"account-token","user_id":"user-1",
+             "cookies":{"session":"cookie-value","empty":""}}
+            """);
+        var account = new com.any2api.account.LeasedProviderAccount(
+            UUID.randomUUID(), "qwen", "external", "user@example.com", 1,
+            null, payload, Map.of(), null);
+
+        var credential = QwenCredential.from(account);
+
+        assertThat(credential.cookies())
+            .containsExactly(Map.entry("session", "cookie-value"));
+    }
+
     @Test
     void excludesUnacceptedMultimodalModelFromRandomRouting() {
         var provider = new QwenProvider(

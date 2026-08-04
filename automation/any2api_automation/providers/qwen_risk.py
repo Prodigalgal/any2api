@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import queue
 import re
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -91,6 +93,7 @@ class NativeBrowserRequest(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
     body: str = Field(default="", max_length=2 << 20)
     bearer_token: str = Field(min_length=20, max_length=16_384)
+    cookies: dict[str, str] = Field(default_factory=dict)
     referer_path: str = Field(default="/", min_length=1, max_length=2048)
     timeout_seconds: int = Field(default=300, ge=1, le=300)
 
@@ -100,6 +103,16 @@ class NativeBrowserRequest(BaseModel):
             raise ValueError("Qwen browser transport path is not allowed")
         if not re.fullmatch(r"/(?:c(?:/[A-Za-z0-9_-]+)?|)", self.referer_path):
             raise ValueError("Qwen browser transport referer is not allowed")
+        if len(self.cookies) > 128:
+            raise ValueError("Qwen browser transport received too many cookies")
+        if any(
+            not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}", name)
+            or len(value) > 8_192
+            or "\r" in value
+            or "\n" in value
+            for name, value in self.cookies.items()
+        ):
+            raise ValueError("Qwen browser transport received an invalid cookie")
         return self
 
 
@@ -287,6 +300,8 @@ class QwenNativeBrowserTransport:
         self._page: Any | None = None
         self._frontend_version = ""
         self._challenge_solver = QwenInferenceChallengeSolver()
+        self._active_account_key = ""
+        self._cookie_jars: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
 
     async def fetch(self, request: NativeBrowserRequest) -> dict[str, Any]:
         await self._ensure_ready()
@@ -299,6 +314,7 @@ class QwenNativeBrowserTransport:
             return self._response(request, result, body)
 
     async def _evaluate(self, request: NativeBrowserRequest) -> tuple[dict[str, Any], bytes]:
+        await self._prepare_authenticated_surface(request)
         maximum = global_settings().browser_transport_max_buffered_bytes
         payload = {
             "url": settings().qwen_base_url.rstrip("/") + request.path,
@@ -306,6 +322,7 @@ class QwenNativeBrowserTransport:
             "method": request.method,
             "body": request.body,
             "bearerToken": request.bearer_token,
+            "useBearer": not bool(request.cookies),
             "referrer": settings().qwen_base_url.rstrip("/") + request.referer_path,
             "timeoutMs": request.timeout_seconds * 1000,
             "version": self._frontend_version,
@@ -323,12 +340,14 @@ class QwenNativeBrowserTransport:
                         ? 'application/json'
                         : 'application/json, text/plain, */*',
                       'Content-Type': 'application/json',
-                      'Authorization': 'Bearer ' + request.bearerToken,
                       'source': 'web',
                       'Timezone': request.timezone,
                       'X-Request-Id': request.requestId,
                       'version': request.version
                     };
+                    if (request.useBearer) {
+                      headers['Authorization'] = 'Bearer ' + request.bearerToken;
+                    }
                     if (request.path.includes('/chat/completions')) {
                       headers['X-Accel-Buffering'] = 'no';
                     }
@@ -371,6 +390,90 @@ class QwenNativeBrowserTransport:
         if len(body) > maximum:
             raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
         return result, body
+
+    async def _prepare_authenticated_surface(self, request: NativeBrowserRequest) -> None:
+        base_url = settings().qwen_base_url.rstrip("/")
+        await self._activate_account(request)
+        logger.info(
+            "qwen_native_browser_surface path=%s auth_mode=%s credential_cookies=%s",
+            request.referer_path,
+            "cookie" if request.cookies else "bearer_fallback",
+            len(request.cookies),
+        )
+        await self._page.evaluate(
+            "token => localStorage.setItem('token', token)",
+            request.bearer_token,
+        )
+        target = base_url + request.referer_path
+        current = urlparse(self._page.url)
+        desired = urlparse(target)
+        if current.path != desired.path:
+            await self._page.goto(target, wait_until="domcontentloaded", timeout=60_000)
+            await self._page.wait_for_function(
+                "() => localStorage.getItem('token') && document.readyState !== 'loading'",
+                timeout=30_000,
+            )
+            await self._page.wait_for_timeout(750)
+        await self._ensure_baxia_ready()
+
+    async def _activate_account(self, request: NativeBrowserRequest) -> None:
+        account_key = hashlib.sha256(request.bearer_token.encode()).hexdigest()
+        base_url = settings().qwen_base_url.rstrip("/")
+        credential_cookies = [
+            {"name": name, "value": value, "url": base_url}
+            for name, value in request.cookies.items()
+        ]
+        if self._active_account_key == account_key:
+            if credential_cookies:
+                await self._context.add_cookies(credential_cookies)
+            return
+        if self._active_account_key:
+            self._cookie_jars[self._active_account_key] = await self._context.cookies()
+            self._cookie_jars.move_to_end(self._active_account_key)
+        await self._context.clear_cookies()
+        jar = self._cookie_jars.pop(account_key, [])
+        if jar:
+            await self._context.add_cookies(jar)
+        if credential_cookies:
+            await self._context.add_cookies(credential_cookies)
+        self._cookie_jars[account_key] = []
+        self._active_account_key = account_key
+        while len(self._cookie_jars) > 64:
+            self._cookie_jars.popitem(last=False)
+
+    async def _ensure_baxia_ready(self) -> None:
+        await self._page.evaluate(
+            r"""() => {
+              const baxia = window.__baxia__;
+              if (window.baxiaCommon && baxia?.baxiaPromptInit && !window.baxiaInitialized) {
+                const protectedPaths = [
+                  '/api/chat/completions', '/api/chats/new', '/api/v2/chats',
+                  '/api/v2/chat/completions', '/api/v2/files/getstsToken',
+                  '/api/v2/files/getfilelink', '/api/v2/files/parse'
+                ];
+                window.baxiaCommon.init({
+                  appendTo: 'header',
+                  uabOptions: {location: 'sea'},
+                  checkApiPath: path => protectedPaths.some(value => path.includes(value)),
+                  showCallback: () => {},
+                  hideCallback: () => {},
+                  paramstype: ['uab', 'umid'],
+                  autoSize: true
+                });
+                window.baxiaInitialized = true;
+              }
+            }"""
+        )
+        await self._page.wait_for_function(
+            r"""() => {
+              const module = window.__baxia__?.getFYModule;
+              return Boolean(
+                window.baxiaCommon && window.__baxia__?.baxiaPromptInit &&
+                window.baxiaInitialized && module?.getUidToken?.call(module)
+              );
+            }""",
+            timeout=30_000,
+        )
 
     def _response(
         self,
@@ -432,6 +535,8 @@ class QwenNativeBrowserTransport:
         self._context = None
         self._page = None
         self._frontend_version = ""
+        self._active_account_key = ""
+        self._cookie_jars.clear()
 
     async def _ensure_ready(self) -> None:
         if self._page is not None and not self._page.is_closed():
@@ -445,12 +550,31 @@ class QwenNativeBrowserTransport:
                 self._browser = await self._playwright.chromium.launch(
                     headless=config.qwen_risk_headless
                 )
+                browser_version = str(self._browser.version)
+                browser_major = browser_version.split(".", 1)[0]
+                browser_profile = f"chrome{browser_major}"
+                user_agent = re.sub(
+                    r"Chrome/[\d.]+",
+                    f"Chrome/{browser_version}",
+                    config.qwen_risk_user_agent,
+                )
                 self._context = await self._browser.new_context(
                     locale="zh-CN",
                     timezone_id="Asia/Shanghai",
                     viewport={"width": 1440, "height": 900},
+                    user_agent=user_agent,
+                    extra_http_headers={
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        **_client_hints(browser_profile),
+                    },
                 )
+                await self._context.add_init_script(_fingerprint_script(browser_profile))
                 self._page = await self._context.new_page()
+                logger.info(
+                    "qwen_native_browser_started profile=%s user_agent=%s",
+                    browser_profile,
+                    user_agent,
+                )
                 await self._load_page_runtime()
             except Exception:
                 await self._close_unlocked()

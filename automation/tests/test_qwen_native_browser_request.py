@@ -44,6 +44,15 @@ def test_qwen_native_browser_request_rejects_cross_origin_paths(path: str, refer
         )
 
 
+def test_qwen_native_browser_request_rejects_cookie_header_injection() -> None:
+    with pytest.raises(ValidationError):
+        NativeBrowserRequest(
+            path="/api/v2/chats/new",
+            bearer_token="token-value-that-is-long-enough",
+            cookies={"session": "value\r\nX-Injected: true"},
+        )
+
+
 @pytest.mark.asyncio
 async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> None:
     class FakePage:
@@ -65,7 +74,10 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
     transport = QwenNativeBrowserTransport()
     transport._page = FakePage()
+    transport._activate_account = AsyncMock()
+    transport._ensure_baxia_ready = AsyncMock()
     transport._frontend_version = "current"
+    transport._prepare_authenticated_surface = AsyncMock()
 
     response = await transport.fetch(
         NativeBrowserRequest(
@@ -78,6 +90,44 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
     assert response["status"] == 200
     assert base64.b64decode(response["body_base64"]) == b'{"data":{"id":"chat"}}'
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_hydrates_login_state_on_the_real_chat_route() -> None:
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://chat.qwen.ai/"
+            self.token = ""
+            self.visited = ""
+
+        async def evaluate(self, _script: str, token: str) -> None:
+            self.token = token
+
+        async def goto(self, url: str, **_kwargs: object) -> None:
+            self.url = url
+            self.visited = url
+
+        async def wait_for_function(self, _script: str, **_kwargs: object) -> None:
+            return None
+
+        async def wait_for_timeout(self, _timeout: int) -> None:
+            return None
+
+    transport = QwenNativeBrowserTransport()
+    transport._page = FakePage()
+    transport._activate_account = AsyncMock()
+    transport._ensure_baxia_ready = AsyncMock()
+    request = NativeBrowserRequest(
+        path="/api/v2/chats/new",
+        body="{}",
+        bearer_token="token-value-that-is-long-enough",
+        referer_path="/c/new-chat",
+    )
+
+    await transport._prepare_authenticated_surface(request)
+
+    assert transport._page.token == request.bearer_token
+    assert transport._page.visited == "https://chat.qwen.ai/c/new-chat"
 
 
 def test_qwen_punish_url_accepts_only_the_configured_qwen_origin() -> None:
@@ -132,6 +182,7 @@ async def test_qwen_native_transport_solves_and_replays_one_punished_request() -
     transport = QwenNativeBrowserTransport()
     transport._page = FakePage()
     transport._frontend_version = "current"
+    transport._prepare_authenticated_surface = AsyncMock()
     transport._challenge_solver.solve = AsyncMock(
         return_value=type("Outcome", (), {"attempts": 1, "diagnostic": "ok"})()
     )

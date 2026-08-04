@@ -113,9 +113,11 @@ export function AccountDetails({ accountId }: { accountId: string }) {
   const readiness = stringMetadata(account.metadata, "inference_probe_status") || "未探测";
   const eventRunning = events.data?.some((event) => event.status === "RUNNING") ?? false;
   const checking = probe.isPending || eventRunning;
-  const awaitingRetry = account.status === "PENDING" && !checking;
-  const probeBlocked = checking || awaitingRetry;
-  const displayedReadiness = checking && readiness === "READY" ? "CHECKING" : readiness;
+  const queued = account.status === "PENDING" && !checking;
+  const probeBlocked = checking || queued;
+  const displayedReadiness = readiness === "READY" && (checking || queued)
+    ? checking ? "CHECKING" : "QUEUED"
+    : readiness;
 
   return (
     <PageContainer maxWidth={1480}>
@@ -154,7 +156,9 @@ export function AccountDetails({ accountId }: { accountId: string }) {
                   disabled={!probeSupported || probeBlocked}
                   onClick={() => probe.mutate()}
                 >
-                  {checking ? "测活中" : awaitingRetry ? "待复测" : "立即测活"}
+                  {checking ? "测活中" : queued
+                    ? readiness === "FAILED" ? "待复测" : "排队中"
+                    : "立即测活"}
                 </Button>
               </span>
             </Tooltip>

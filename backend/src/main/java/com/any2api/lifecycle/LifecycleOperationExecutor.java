@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import com.any2api.observability.OperationContext;
+import com.any2api.settings.RuntimeSettingsService;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
@@ -12,13 +13,16 @@ import tools.jackson.databind.JsonNode;
 final class LifecycleOperationExecutor {
     private final ProviderLifecycleRegistry local;
     private final LifecycleAutomationClient automation;
+    private final RuntimeSettingsService runtimeSettings;
 
     LifecycleOperationExecutor(
         ProviderLifecycleRegistry local,
-        LifecycleAutomationClient automation
+        LifecycleAutomationClient automation,
+        RuntimeSettingsService runtimeSettings
     ) {
         this.local = local;
         this.automation = automation;
+        this.runtimeSettings = runtimeSettings;
     }
 
     Mono<LifecycleResult> execute(
@@ -53,6 +57,7 @@ final class LifecycleOperationExecutor {
                 if (proxyPool != null && !proxyPool.isEmpty()) {
                     payload.put("proxy_pool", proxyPool);
                 }
+                runtimeSettings.applyMailSettings(payload, null);
                 return automation.execute(
                         providerId, externalOperation, Map.copyOf(payload), context)
                     .map(LifecycleResult::fromAutomation);

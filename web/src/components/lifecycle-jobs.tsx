@@ -40,6 +40,8 @@ import {
   providerOptions,
   type CaptchaAiMode,
   type ProviderOption,
+  type RegistrationProxyPolicy,
+  type SystemSettings,
   type RegistrationJob,
 } from "@/lib/api";
 import { OperationEventsDialog } from "@/components/operation-events-dialog";
@@ -71,6 +73,7 @@ export function LifecycleJobs() {
     queryFn: () => api.registrationJobs(provider || undefined),
     refetchInterval: (query) => query.state.data?.some((job) => activeStatuses.has(job.status)) ? 3_000 : false,
   });
+  const settings = useQuery({ queryKey: ["system-settings"], queryFn: api.systemSettings });
   const cancel = useMutation({
     mutationFn: api.cancelRegistrationJob,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["registration-jobs"] }),
@@ -92,7 +95,7 @@ export function LifecycleJobs() {
                 <RefreshOutlined sx={{ fontSize: 18 }} />
               </IconButton>
             </Tooltip>
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setCreateOpen(true)}>
+            <Button variant="contained" startIcon={<AddOutlined />} disabled={settings.isLoading} onClick={() => setCreateOpen(true)}>
               新建注册任务
             </Button>
           </>
@@ -116,7 +119,7 @@ export function LifecycleJobs() {
           <Table size="small">
             <TableHead><TableRow>
               <TableCell>厂商</TableCell><TableCell>状态</TableCell><TableCell>进度</TableCell>
-              <TableCell>尝试</TableCell><TableCell>并发</TableCell><TableCell>AI 打码</TableCell><TableCell>节流</TableCell><TableCell>最近错误</TableCell>
+              <TableCell>尝试</TableCell><TableCell>执行策略</TableCell><TableCell>AI 打码</TableCell><TableCell>节流</TableCell><TableCell>最近错误</TableCell>
               <TableCell>创建时间</TableCell><TableCell align="right">操作</TableCell>
             </TableRow></TableHead>
             <TableBody>
@@ -130,7 +133,7 @@ export function LifecycleJobs() {
                     </Typography>
                   </TableCell>
                   <TableCell>{job.attempts} / {job.maxAttempts}</TableCell>
-                  <TableCell>{job.concurrency}</TableCell>
+                  <TableCell><Typography sx={{ fontSize: 11.5 }}>{job.concurrency} 并发 · {job.flowMaxAttempts} 流程/邮箱</Typography><Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{job.proxyPolicy} · {job.headless ? "HEADLESS" : "HEADED"}</Typography></TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -170,7 +173,7 @@ export function LifecycleJobs() {
           </Table>
         </TableContainer>
       </DataSurface>
-      {createOpen ? <CreateJobDialog open providers={providers} onClose={() => setCreateOpen(false)} onCreated={() => {
+      {createOpen ? <CreateJobDialog open providers={providers} settings={settings.data} onClose={() => setCreateOpen(false)} onCreated={() => {
         setCreateOpen(false);
         void queryClient.invalidateQueries({ queryKey: ["registration-jobs"] });
       }} /> : null}
@@ -187,17 +190,25 @@ export function LifecycleJobs() {
   );
 }
 
-function CreateJobDialog({ open, providers, onClose, onCreated }: {
-  open: boolean; providers: ProviderOption[]; onClose: () => void; onCreated: () => void;
+function CreateJobDialog({ open, providers, settings, onClose, onCreated }: {
+  open: boolean; providers: ProviderOption[]; settings?: SystemSettings;
+  onClose: () => void; onCreated: () => void;
 }) {
+  const defaults = settings?.registrationDefaults;
   const [providerId, setProviderId] = useState("");
-  const [target, setTarget] = useState(1);
-  const [maxAttempts, setMaxAttempts] = useState(3);
-  const [concurrency, setConcurrency] = useState(1);
-  const [attemptIntervalSeconds, setAttemptIntervalSeconds] = useState(0);
-  const [roundIntervalSeconds, setRoundIntervalSeconds] = useState(5);
-  const [aiCaptchaEnabled, setAiCaptchaEnabled] = useState(true);
-  const [aiCaptchaMode, setAiCaptchaMode] = useState<CaptchaAiMode>("INTERNAL");
+  const [target, setTarget] = useState(defaults?.target ?? 1);
+  const [maxAttempts, setMaxAttempts] = useState(defaults?.maxAttempts ?? 3);
+  const [concurrency, setConcurrency] = useState(defaults?.concurrency ?? 1);
+  const [attemptIntervalSeconds, setAttemptIntervalSeconds] = useState(defaults?.attemptIntervalSeconds ?? 0);
+  const [roundIntervalSeconds, setRoundIntervalSeconds] = useState(defaults?.roundIntervalSeconds ?? 5);
+  const [attemptTimeoutSeconds, setAttemptTimeoutSeconds] = useState(defaults?.attemptTimeoutSeconds ?? 2100);
+  const [flowMaxAttempts, setFlowMaxAttempts] = useState(defaults?.flowMaxAttempts ?? 3);
+  const [maxConsecutiveFailureBatches, setMaxConsecutiveFailureBatches] = useState(defaults?.maxConsecutiveFailureBatches ?? 5);
+  const [proxyPolicy, setProxyPolicy] = useState<RegistrationProxyPolicy>(defaults?.proxyPolicy ?? "PROVIDER_DEFAULT");
+  const [headless, setHeadless] = useState(defaults?.headless ?? true);
+  const [mailDomain, setMailDomain] = useState("");
+  const [aiCaptchaEnabled, setAiCaptchaEnabled] = useState(defaults?.aiCaptchaEnabled ?? true);
+  const [aiCaptchaMode, setAiCaptchaMode] = useState<CaptchaAiMode>(defaults?.aiCaptchaMode ?? "INTERNAL");
   const mutation = useMutation({
     mutationFn: () => api.createRegistrationJob({
       providerId,
@@ -206,6 +217,12 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
       concurrency,
       attemptIntervalSeconds,
       roundIntervalSeconds,
+      attemptTimeoutSeconds,
+      flowMaxAttempts,
+      maxConsecutiveFailureBatches,
+      proxyPolicy,
+      headless,
+      mailDomain: mailDomain || null,
       aiCaptchaEnabled,
       aiCaptchaMode,
     }),
@@ -218,17 +235,21 @@ function CreateJobDialog({ open, providers, onClose, onCreated }: {
       <TextField select label="厂商" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
         {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
       </TextField>
-      <Stack direction="row" spacing={2}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 2 }}>
         <TextField fullWidth label="目标成功数" type="number" value={target} onChange={(event) => setTarget(Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 1000 } }} />
         <TextField fullWidth label="最大邮箱任务数" type="number" value={maxAttempts} onChange={(event) => setMaxAttempts(Number(event.target.value))} slotProps={{ htmlInput: { min: target, max: target * 10 } }} />
-      </Stack>
-      <Stack direction="row" spacing={2}>
         <TextField fullWidth select label="并发数" value={concurrency} onChange={(event) => setConcurrency(Number(event.target.value))}>
           {[1, 2, 3, 4, 6, 8].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>
         <TextField fullWidth label="任务启动间隔（秒）" type="number" value={attemptIntervalSeconds} onChange={(event) => setAttemptIntervalSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 0, max: 3600 } }} />
-      </Stack>
-      <TextField label="轮次间隔（秒）" type="number" value={roundIntervalSeconds} onChange={(event) => setRoundIntervalSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 0, max: 86400 } }} />
+        <TextField label="轮次间隔（秒）" type="number" value={roundIntervalSeconds} onChange={(event) => setRoundIntervalSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 0, max: 86400 } }} />
+        <TextField label="单邮箱任务超时（秒）" type="number" value={attemptTimeoutSeconds} onChange={(event) => setAttemptTimeoutSeconds(Number(event.target.value))} slotProps={{ htmlInput: { min: 60, max: 3600 } }} />
+        <TextField label="同邮箱浏览器流程数" type="number" value={flowMaxAttempts} onChange={(event) => setFlowMaxAttempts(Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 10 } }} />
+        <TextField label="连续失败轮次上限" type="number" value={maxConsecutiveFailureBatches} onChange={(event) => setMaxConsecutiveFailureBatches(Number(event.target.value))} slotProps={{ htmlInput: { min: 1, max: 20 } }} />
+        <TextField select label="注册代理策略" value={proxyPolicy} onChange={(event) => setProxyPolicy(event.target.value as RegistrationProxyPolicy)}><MenuItem value="PROVIDER_DEFAULT">使用厂商绑定</MenuItem><MenuItem value="DIRECT">强制直连</MenuItem><MenuItem value="REQUIRED_POOL">必须使用代理池</MenuItem></TextField>
+        <TextField select label="邮箱域名" value={mailDomain} onChange={(event) => setMailDomain(event.target.value)}><MenuItem value="">随机可用域名</MenuItem>{(settings?.tempMail.domains ?? []).map((domain) => <MenuItem key={domain} value={domain}>{domain}</MenuItem>)}</TextField>
+        <FormControlLabel control={<Switch checked={headless} onChange={(event) => setHeadless(event.target.checked)} />} label="无头浏览器" />
+      </Box>
       <Stack direction="row" spacing={3} sx={{ alignItems: "center" }}>
         <FormControlLabel
           control={<Switch checked={aiCaptchaEnabled} onChange={(event) => setAiCaptchaEnabled(event.target.checked)} />}

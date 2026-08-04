@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
@@ -32,7 +33,16 @@ public class CanonicalRequestParser {
         ResolvedRoute route,
         ObjectNode raw
     ) {
-        return parse(protocol, route, raw, false);
+        return parse(protocol, route, raw, false, UUID.randomUUID().toString());
+    }
+
+    public CanonicalRequest parse(
+        CanonicalRequest.Protocol protocol,
+        ResolvedRoute route,
+        ObjectNode raw,
+        String requestId
+    ) {
+        return parse(protocol, route, raw, false, requestId);
     }
 
     public CanonicalRequest parseCandidate(
@@ -40,18 +50,28 @@ public class CanonicalRequestParser {
         ResolvedRoute route,
         ObjectNode raw
     ) {
-        return parse(protocol, route, raw, true);
+        return parse(protocol, route, raw, true, UUID.randomUUID().toString());
+    }
+
+    public CanonicalRequest parseCandidate(
+        CanonicalRequest.Protocol protocol,
+        ResolvedRoute route,
+        ObjectNode raw,
+        String requestId
+    ) {
+        return parse(protocol, route, raw, true, requestId);
     }
 
     private CanonicalRequest parse(
         CanonicalRequest.Protocol protocol,
         ResolvedRoute route,
         ObjectNode raw,
-        boolean allowForeignProviderOptions
+        boolean allowForeignProviderOptions,
+        String requestId
     ) {
         validateShape(protocol, raw);
         rejectLimitConflicts(raw);
-        var requestId = UUID.randomUUID().toString();
+        if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
         var stream = raw.path("stream").asBoolean(false);
         var messages = protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
             ? elements(raw.path("messages"))
@@ -300,6 +320,15 @@ public class CanonicalRequestParser {
         }
         var flatEffort = raw.path("reasoning_effort");
         var nestedEffort = raw.path("reasoning").path("effort");
+        for (var effort : List.of(flatEffort, nestedEffort)) {
+            if (effort.isTextual() && !Set.of(
+                "auto", "none", "minimal", "low", "medium", "high")
+                .contains(effort.asText().trim().toLowerCase())) {
+                throw OpenAiRequestException.invalid(
+                    "reasoning_effort",
+                    "reasoning effort must be one of auto, none, minimal, low, medium, high");
+            }
+        }
         if (flatEffort.isTextual() && nestedEffort.isTextual()
             && !flatEffort.asText().equalsIgnoreCase(nestedEffort.asText())) {
             throw OpenAiRequestException.conflict(

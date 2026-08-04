@@ -19,7 +19,10 @@ public final class RequestCorrelation {
         return (request, next) -> reactor.core.publisher.Mono.deferContextual(context -> {
             if (!context.hasKey(CONTEXT_KEY)) return next.exchange(request);
             var propagated = ClientRequest.from(request)
-                .headers(headers -> headers.set(HEADER, context.get(CONTEXT_KEY)))
+                .headers(headers -> {
+                    headers.set(HEADER, context.get(CONTEXT_KEY));
+                    headers.set("X-Request-Id", context.get(CONTEXT_KEY));
+                })
                 .build();
             return next.exchange(propagated);
         });

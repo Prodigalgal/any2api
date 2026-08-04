@@ -48,7 +48,10 @@ public class AdminRegistrationJobController {
         return jobs.create(new RegistrationJobService.CreateCommand(
             request.providerId(), request.target(), request.maxAttempts(),
             request.concurrency(), request.attemptIntervalSeconds(),
-            request.roundIntervalSeconds(), request.aiCaptchaEnabled(),
+            request.roundIntervalSeconds(), request.attemptTimeoutSeconds(),
+            request.flowMaxAttempts(), request.maxConsecutiveFailureBatches(),
+            request.proxyPolicy(), request.headless(), request.mailDomain(),
+            request.aiCaptchaEnabled(),
             request.aiCaptchaMode(), request.idempotencyKey()));
     }
 
@@ -58,7 +61,10 @@ public class AdminRegistrationJobController {
     public record CreateRequest(
         String providerId, Integer target, Integer maxAttempts,
         Integer concurrency, Integer attemptIntervalSeconds,
-        Integer roundIntervalSeconds, Boolean aiCaptchaEnabled,
+        Integer roundIntervalSeconds, Integer attemptTimeoutSeconds,
+        Integer flowMaxAttempts, Integer maxConsecutiveFailureBatches,
+        com.any2api.lifecycle.RegistrationProxyPolicy proxyPolicy,
+        Boolean headless, String mailDomain, Boolean aiCaptchaEnabled,
         com.any2api.lifecycle.RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
         String idempotencyKey
     ) {}

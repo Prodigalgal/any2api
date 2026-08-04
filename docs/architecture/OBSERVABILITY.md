@@ -10,19 +10,19 @@ One identifier follows each operation across its owning boundary:
 | Registration attempt | Java scheduler | `operation_events.correlation_id` |
 | Keepalive, reauthentication, and readiness probe | Java scheduler | `operation_events.correlation_id` |
 
-Public inference responses include `X-Any2API-Request-Id`. Java stores the same value with the
+Public inference responses include the standard `X-Request-Id` and compatibility
+`X-Any2API-Request-Id` headers. A valid client-supplied `X-Request-Id` is retained. Java stores the same value with the
 distribution key, selected provider, selected account, model, protocol, retry attempt, token usage,
-duration, and final outcome. Retries keep the same durable and client-visible `request_id`; the
+duration, full canonical input/output snapshots, and final outcome. Retries keep the same durable and client-visible `request_id`; the
 separate `attempt` column makes `(request_id, attempt)` unique.
 
 Every usage attempt stores `queue_ms`, `account_acquire_ms`, `ttfb_ms`, and `generation_ms`.
 `request_kind` distinguishes client inference from a real `PROBE`. The admin timeline therefore
 shows account switching without fragmenting one logical request across unrelated identifiers.
 
-Java propagates the correlation ID through Reactor Context only to WebClients whose destination is
-the internal Python service. Python returns the correlation header and records the final response
-body or streaming termination. Internal correlation headers are never forwarded to provider
-origins.
+Java propagates the correlation ID through Reactor Context to participating internal and provider
+WebClients as `X-Request-Id` plus the compatibility correlation header. Python returns the same ID
+and records the final response body or streaming termination.
 
 ## Durable operation events
 
@@ -31,7 +31,7 @@ automation begins and changes that row to `SUCCEEDED`, `FAILED`, or `CANCELLED` 
 stage. It does not store browser pages, screenshots, credentials, mail content, captcha images, or
 provider response bodies.
 
-Registration jobs additionally retain the latest structured error code, stage, sanitized detail,
+Registration jobs additionally retain the latest structured error code, stage, credential-safe detail,
 and correlation ID. The admin UI exposes the complete attempt timeline. Account rows expose the
 same view for lifecycle operations, so operators do not need database or pod access for routine
 triage.
@@ -56,8 +56,8 @@ Python provider workers return this internal-only error envelope:
 ```
 
 Java persists the stable `code` and `stage`; exception class names remain secondary diagnostics.
-Provider packages own their stage details, while the shared boundary owns envelope translation and
-redaction. Unknown failures become `provider_operation_failed` at stage `provider_operation`.
+Provider packages own their stage details, while the shared boundary owns envelope translation.
+Unknown failures become `provider_operation_failed` at stage `provider_operation`.
 
 ## Metrics and labels
 
@@ -83,18 +83,13 @@ the sum of attempt durations feeds P50/P95. A fresh failed probe newer than the 
 forces the model unavailable. Client cancellation releases admission without counting as an
 upstream circuit failure.
 
-## Redaction rules
+## Administration content
 
-The Java persistence boundary and Python API boundary both remove:
-
-- password, token, authorization, cookie, JWT, and secret field values;
-- email addresses;
-- URL query strings;
-- embedded base64 data URLs;
-- details beyond 1,200 characters.
-
-Provider code may add a stable error code and non-sensitive stage, but cannot bypass the shared
-sanitizer. Raw browser or provider payloads remain ephemeral and must not enter logs or PostgreSQL.
+The administrator-only request detail endpoint returns the complete canonical input and output.
+Lists remain metadata-only and server-paginated; the UI loads large JSON snapshots only after an
+operator opens one request attempt. Authentication headers and account credentials are transport
+metadata and never enter `CanonicalRequest` snapshots. Operational diagnostics still remove
+credentials because the account-pool observability contract forbids exposing them.
 
 Terminal operation events are retained for 30 days and inference usage events for 90 days by
 default. A single advisory-lock owner deletes bounded batches. `RUNNING` events are never deleted;
@@ -111,3 +106,6 @@ Layered catalog and API-key cache reads use L1 Caffeine, L2 Redis, then L3 Postg
 populate L1 synchronously and return immediately; the idempotent L2 write runs asynchronously with
 one bounded Reactor retry. Redis read failure falls back to PostgreSQL, while Redis write latency can
 never extend a client request.
+
+The old combined observability screen is removed. `/requests` and `/operations` are independent
+menus backed by `/api/admin/v1/requests` and `/api/admin/v1/operations` page contracts.

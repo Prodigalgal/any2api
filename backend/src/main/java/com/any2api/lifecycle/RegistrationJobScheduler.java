@@ -7,6 +7,7 @@ import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.observability.OperationContext;
 import com.any2api.observability.OperationEventService;
+import com.any2api.settings.RuntimeSettingsService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -32,7 +33,7 @@ public class RegistrationJobScheduler {
     static final Duration LEASE_TTL = Duration.ofMinutes(12);
     static final Duration LEASE_RENEW_INTERVAL = Duration.ofMinutes(4);
     static final Duration AUTOMATION_ATTEMPT_TIMEOUT = Duration.ofMinutes(35);
-    static final Duration POLL_EXECUTION_TIMEOUT = Duration.ofMinutes(40);
+    static final Duration POLL_EXECUTION_TIMEOUT = Duration.ofMinutes(70);
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transactions;
@@ -41,6 +42,7 @@ public class RegistrationJobScheduler {
     private final ProxyPoolService proxyPools;
     private final ObjectMapper mapper;
     private final OperationEventService observability;
+    private final RuntimeSettingsService runtimeSettings;
 
     public RegistrationJobScheduler(
         JdbcClient jdbc,
@@ -49,7 +51,8 @@ public class RegistrationJobScheduler {
         AccountManagementService accounts,
         ProxyPoolService proxyPools,
         ObjectMapper mapper,
-        OperationEventService observability
+        OperationEventService observability,
+        RuntimeSettingsService runtimeSettings
     ) {
         this.jdbc = jdbc;
         this.transactions = transactions;
@@ -58,6 +61,7 @@ public class RegistrationJobScheduler {
         this.proxyPools = proxyPools;
         this.mapper = mapper;
         this.observability = observability;
+        this.runtimeSettings = runtimeSettings;
     }
 
     @Scheduled(fixedDelayString = "${any2api.lifecycle.registration-poll-interval:5s}")
@@ -131,8 +135,18 @@ public class RegistrationJobScheduler {
             return Mono.fromRunnable(() -> finalizeBatch(job, owner, List.of()));
         }
         var payload = registrationPayload(job.request(), mapper);
-        proxyPools.runtimeForProvider(job.providerId(), ProxyTrafficScope.REGISTRATION)
-            .ifPresent(pool -> payload.put("proxy_pool", pool));
+        runtimeSettings.applyMailSettings(payload, job.mailDomain());
+        var proxy = proxyPools.runtimeForProvider(
+            job.providerId(), ProxyTrafficScope.REGISTRATION);
+        if (job.proxyPolicy() == RegistrationProxyPolicy.REQUIRED_POOL && proxy.isEmpty()) {
+            return Mono.error(new IllegalStateException(
+                "registration requires an assigned proxy pool"));
+        }
+        if (job.proxyPolicy() == RegistrationProxyPolicy.DIRECT) {
+            payload.put("dynamic_proxy", false);
+        } else {
+            proxy.ifPresent(pool -> payload.put("proxy_pool", pool));
+        }
         var attemptInterval = Duration.ofSeconds(job.attemptIntervalSeconds());
         var operation = Flux.range(0, batch)
             .flatMap(attempt -> delayedStart(attempt, attemptInterval)
@@ -146,7 +160,7 @@ public class RegistrationJobScheduler {
     private Mono<Attempt> executeAttempt(
         Job job,
         int batchOffset,
-        Map<String, ?> payload
+        Map<String, Object> payload
     ) {
         return Mono.defer(() -> {
             var context = new OperationContext(
@@ -155,7 +169,7 @@ public class RegistrationJobScheduler {
             var observed = observability.start(
                 "REGISTRATION", job.providerId(), "register", context);
             return automation.execute(job.providerId(), "register", payload, context)
-                .timeout(AUTOMATION_ATTEMPT_TIMEOUT)
+                .timeout(Duration.ofSeconds(job.attemptTimeoutSeconds()))
                 .map(result -> importResult(job, result))
                 .doOnNext(result -> {
                     observability.linkAccount(observed, result.accountId());
@@ -249,9 +263,12 @@ public class RegistrationJobScheduler {
             var failures = job.failureCount() + failure;
             var fullyFailed = failure > 0 && success == 0;
             var failureStreak = fullyFailed ? job.consecutiveFailureBatches() + 1 : 0;
-            var completed = successes >= job.target() || attempts >= job.maxAttempts();
+            var failureLimitReached = failureStreak >= job.maxConsecutiveFailureBatches();
+            var completed = successes >= job.target() || attempts >= job.maxAttempts()
+                || failureLimitReached;
             var status = successes >= job.target() ? "SUCCEEDED"
-                : attempts >= job.maxAttempts() ? (successes > 0 ? "PARTIAL" : "FAILED")
+                : (attempts >= job.maxAttempts() || failureLimitReached)
+                    ? (successes > 0 ? "PARTIAL" : "FAILED")
                 : "PENDING";
             var ids = results.stream().filter(Attempt::success).map(Attempt::accountId)
                 .map(UUID::toString).toList();
@@ -298,6 +315,8 @@ public class RegistrationJobScheduler {
             var attempts = job.attempts() + 1;
             var failureStreak = job.consecutiveFailureBatches() + 1;
             var failure = observability.describe(error);
+            var exhausted = attempts >= job.maxAttempts()
+                || failureStreak >= job.maxConsecutiveFailureBatches();
             jdbc.sql("""
                 UPDATE registration_jobs SET
                     status = CASE WHEN cancel_requested THEN 'CANCELLED'
@@ -313,7 +332,7 @@ public class RegistrationJobScheduler {
                         THEN CURRENT_TIMESTAMP ELSE finished_at END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND status = 'RUNNING' AND lease_owner = :owner
-                """).param("exhausted", attempts >= job.maxAttempts())
+                """).param("exhausted", exhausted)
                 .param("attempts", attempts)
                 .param("failureStreak", failureStreak)
                 .param("errorClass", error.getClass().getSimpleName())
@@ -371,7 +390,21 @@ public class RegistrationJobScheduler {
         UUID id, String providerId, int target, int maxAttempts, int concurrency,
         int attempts, int successCount, int failureCount, int consecutiveFailureBatches,
         int attemptIntervalSeconds, int roundIntervalSeconds, JsonNode request
-    ) {}
+    ) {
+        int attemptTimeoutSeconds() { return request.path("attempt_timeout_seconds").asInt(2100); }
+        int maxConsecutiveFailureBatches() {
+            return request.path("max_consecutive_failure_batches").asInt(5);
+        }
+        RegistrationProxyPolicy proxyPolicy() {
+            try {
+                return RegistrationProxyPolicy.valueOf(
+                    request.path("proxy_policy").asText("PROVIDER_DEFAULT"));
+            } catch (IllegalArgumentException error) {
+                return RegistrationProxyPolicy.PROVIDER_DEFAULT;
+            }
+        }
+        String mailDomain() { return request.path("mail_domain").asText(""); }
+    }
 
     private record Attempt(
         boolean success,

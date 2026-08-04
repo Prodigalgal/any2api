@@ -31,3 +31,5 @@ databaseChangeLog:
       file: db/changelog/releases/015-operation-observability.sql
   - include:
       file: db/changelog/releases/016-model-runtime.sql
+  - include:
+      file: db/changelog/releases/017-admin-console.sql

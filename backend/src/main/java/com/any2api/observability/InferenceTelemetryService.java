@@ -6,6 +6,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -16,6 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.SignalType;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public final class InferenceTelemetryService {
@@ -23,15 +28,18 @@ public final class InferenceTelemetryService {
     private final JdbcClient jdbc;
     private final MeterRegistry meters;
     private final ExecutorService databaseExecutor;
+    private final ObjectMapper mapper;
 
     public InferenceTelemetryService(
         JdbcClient jdbc,
         MeterRegistry meters,
-        ExecutorService databaseExecutor
+        ExecutorService databaseExecutor,
+        ObjectMapper mapper
     ) {
         this.jdbc = jdbc;
         this.meters = meters;
         this.databaseExecutor = databaseExecutor;
+        this.mapper = mapper;
     }
 
     public Started start(InferenceTrace request, int attempt) {
@@ -62,6 +70,9 @@ public final class InferenceTelemetryService {
         private final AtomicLong firstByteNanos = new AtomicLong();
         private final AtomicLong terminalNanos = new AtomicLong();
         private final AtomicBoolean finished = new AtomicBoolean();
+        private final List<JsonNode> outputEvents =
+            Collections.synchronizedList(new ArrayList<>());
+        private final AtomicReference<JsonNode> explicitOutput = new AtomicReference<>();
 
         private Started(InferenceTrace request, int attempt, Instant startedAt, long queueMs) {
             this.request = request;
@@ -99,6 +110,14 @@ public final class InferenceTelemetryService {
             errorCode.compareAndSet(null, error.getClass().getSimpleName());
         }
 
+        public void record(Object event) {
+            if (event != null) outputEvents.add(mapper.valueToTree(event));
+        }
+
+        public void output(Object value) {
+            explicitOutput.set(value == null ? mapper.createObjectNode() : mapper.valueToTree(value));
+        }
+
         public void finish(SignalType signal) {
             if (!finished.compareAndSet(false, true)) return;
             if (signal == SignalType.CANCEL) errorCode.compareAndSet(null, "downstream_cancelled");
@@ -115,10 +134,19 @@ public final class InferenceTelemetryService {
                 firstAt, terminalAt == 0 ? endedNanos : terminalAt);
             var error = errorCode.get();
             var success = error == null;
+            var output = explicitOutput.get();
+            if (output == null) {
+                var eventSnapshot = mapper.createObjectNode();
+                var events = eventSnapshot.putArray("events");
+                synchronized (outputEvents) {
+                    outputEvents.forEach(events::add);
+                }
+                output = eventSnapshot;
+            }
             var snapshot = new Snapshot(
                 accountId.get(), inputTokens.get(), outputTokens.get(), cacheReadTokens.get(),
                 usageSource.get(), durationMs, queueMs, accountAcquireMs, ttfbMs,
-                generationMs, error, success);
+                generationMs, error, success, output);
             recordMetricAndLog(snapshot);
             try {
                 databaseExecutor.execute(() -> {
@@ -143,11 +171,13 @@ public final class InferenceTelemetryService {
                     id, request_id, api_key_id, provider_id, account_id, model_id, protocol,
                     success, input_tokens, output_tokens, cache_read_tokens,
                     duration_ms, error_class, created_at, attempt, request_kind, usage_source,
-                    queue_ms, account_acquire_ms, ttfb_ms, generation_ms)
+                    queue_ms, account_acquire_ms, ttfb_ms, generation_ms,
+                    input_snapshot, output_snapshot)
                 VALUES (:id, :requestId, :apiKeyId, :providerId, :accountId, :modelId, :protocol,
                         :success, :inputTokens, :outputTokens, :cacheReadTokens,
                         :durationMs, :errorClass, :createdAt, :attempt, :requestKind, :usageSource,
-                        :queueMs, :accountAcquireMs, :ttfbMs, :generationMs)
+                        :queueMs, :accountAcquireMs, :ttfbMs, :generationMs,
+                        CAST(:inputSnapshot AS jsonb), CAST(:outputSnapshot AS jsonb))
                 ON CONFLICT (request_id, attempt) DO NOTHING
                 """)
                 .param("id", UUID.randomUUID())
@@ -171,6 +201,9 @@ public final class InferenceTelemetryService {
                 .param("accountAcquireMs", snapshot.accountAcquireMs())
                 .param("ttfbMs", snapshot.ttfbMs())
                 .param("generationMs", snapshot.generationMs())
+                .param("inputSnapshot", mapper.writeValueAsString(
+                    request.input() == null ? mapper.createObjectNode() : request.input()))
+                .param("outputSnapshot", mapper.writeValueAsString(snapshot.output()))
                 .update();
         }
 
@@ -220,7 +253,8 @@ public final class InferenceTelemetryService {
         long ttfbMs,
         long generationMs,
         String errorCode,
-        boolean success
+        boolean success,
+        JsonNode output
     ) {}
 
     public record InferenceTrace(
@@ -229,7 +263,8 @@ public final class InferenceTelemetryService {
         String model,
         String protocol,
         UUID apiKeyId,
-        String requestKind
+        String requestKind,
+        JsonNode input
     ) {
         public InferenceTrace(
             String requestId,
@@ -238,7 +273,18 @@ public final class InferenceTelemetryService {
             String protocol,
             UUID apiKeyId
         ) {
-            this(requestId, providerId, model, protocol, apiKeyId, "INFERENCE");
+            this(requestId, providerId, model, protocol, apiKeyId, "INFERENCE", null);
+        }
+
+        public InferenceTrace(
+            String requestId,
+            String providerId,
+            String model,
+            String protocol,
+            UUID apiKeyId,
+            String requestKind
+        ) {
+            this(requestId, providerId, model, protocol, apiKeyId, requestKind, null);
         }
 
         public InferenceTrace {

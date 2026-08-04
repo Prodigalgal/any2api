@@ -7,7 +7,13 @@ from urllib.parse import urlencode
 import httpx
 
 from ..config import settings as core_settings
-from ..lifecycle.account import credential, prepare_registration, required
+from ..lifecycle.account import (
+    credential,
+    flow_max_attempts,
+    mail_client,
+    prepare_registration,
+    required,
+)
 from ..lifecycle.browser import (
     BrowserContextProfile,
     BrowserLaunchProfile,
@@ -16,7 +22,7 @@ from ..lifecycle.browser import (
     first_visible,
     run_browser_flow,
 )
-from ..lifecycle.mail import Mailbox, TempMailClient
+from ..lifecycle.mail import Mailbox
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
@@ -37,11 +43,11 @@ class LongcatAutomationProvider(AutomationProvider):
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_failure: RuntimeError | None = None
         failures: list[str] = []
-        attempts = max(1, settings().longcat_registration_attempts)
+        attempts = flow_max_attempts(payload, settings().longcat_registration_attempts)
+        mail, mailbox, password = await prepare_registration(payload)
         for attempt in range(1, attempts + 1):
             trace = RegistrationTrace(self.manifest.id)
             try:
-                mail, mailbox, password = await prepare_registration(payload)
                 trace.mark(RegistrationStage.MAILBOX_CREATED)
                 flow_payload = {**payload}
                 flow_payload.setdefault("proxy_check_url", _login_url())
@@ -78,7 +84,7 @@ class LongcatAutomationProvider(AutomationProvider):
         current = credential(payload)
         email = required(current, "email")
         password = required(current, "password")
-        mail = TempMailClient()
+        mail = mail_client(payload)
         mailbox = Mailbox(email, required(current, "mail_jwt"))
         trace = RegistrationTrace(self.manifest.id)
         trace.mark(RegistrationStage.MAILBOX_CREATED)

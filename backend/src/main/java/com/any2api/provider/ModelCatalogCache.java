@@ -44,9 +44,11 @@ public class ModelCatalogCache {
                    WHEN probe.status = 'FAILED' AND probe.probed_at >= :probeFreshAfter
                      AND (usage_runtime.last_success_at IS NULL
                        OR probe.probed_at > usage_runtime.last_success_at) THEN 'UNAVAILABLE'
-                   WHEN usage_runtime.success_count > 0
-                     AND usage_runtime.success_rate >= 0.80 THEN 'READY'
-                   WHEN probe.status = 'READY' AND probe.probed_at >= :probeFreshAfter THEN 'READY'
+                   WHEN usage_runtime.request_count >= 3
+                     AND usage_runtime.success_rate >= :readySuccessRate
+                     AND usage_runtime.p95_ms <= :readyP95Ms THEN 'READY'
+                   WHEN usage_runtime.request_count < 3
+                     AND probe.status = 'READY' AND probe.probed_at >= :probeFreshAfter THEN 'READY'
                    WHEN usage_runtime.attempt_count >= 3
                      AND usage_runtime.success_count = 0 THEN 'UNAVAILABLE'
                    ELSE 'DEGRADED'
@@ -125,6 +127,8 @@ public class ModelCatalogCache {
     private final LayeredJsonCache cache;
     private final java.time.Duration healthWindow;
     private final java.time.Duration probeFreshness;
+    private final double readySuccessRate;
+    private final long readyP95Ms;
 
     public ModelCatalogCache(
         JdbcClient jdbc,
@@ -140,6 +144,8 @@ public class ModelCatalogCache {
             policy.getRedisTtl(), policy.getMaximumEntries());
         this.healthWindow = properties.getModelRuntime().getHealthWindow();
         this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
+        this.readySuccessRate = properties.getModelRuntime().getReadySuccessRateThreshold() / 100.0;
+        this.readyP95Ms = properties.getModelRuntime().getReadyP95Threshold().toMillis();
     }
 
     public Mono<List<Entry>> list() {
@@ -173,6 +179,8 @@ public class ModelCatalogCache {
         return jdbc.sql(MODEL_QUERY)
             .param("windowStart", PostgresResultValues.timestamp(now.minus(healthWindow)))
             .param("probeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness)))
+            .param("readySuccessRate", readySuccessRate)
+            .param("readyP95Ms", readyP95Ms)
             .query(this::row).list();
     }
 

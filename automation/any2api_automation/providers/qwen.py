@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from ..lifecycle.account import credential, prepare_registration, required
+from ..lifecycle.account import credential, flow_max_attempts, prepare_registration, required
 from ..lifecycle.browser import (
     BrowserContextProfile,
     BrowserFingerprintPolicy,
@@ -35,38 +35,45 @@ class QwenAutomationProvider(AutomationProvider):
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
-        trace = RegistrationTrace(self.manifest.id)
-        try:
-            await asyncio.sleep(random.uniform(2.0, 4.0))
-            mail, mailbox, password = await prepare_registration(payload)
-            trace.mark(RegistrationStage.MAILBOX_CREATED)
-            await asyncio.sleep(random.uniform(2.0, 4.0))
-            flow_payload = {**payload}
-            flow_payload.setdefault(
-                "proxy_check_url", f"{settings().qwen_base_url.rstrip('/')}/auth?mode=register"
-            )
-            result = await asyncio.to_thread(
-                run_browser_flow,
-                lambda page, context, backend, proxy_url: _register_browser(
-                    page,
-                    context,
-                    backend,
-                    proxy_url,
-                    mail,
-                    mailbox,
-                    password,
-                    trace,
-                ),
-                preferred=self.manifest.browser_backend,
-                fallback=self.manifest.fallback_backend,
-                payload=flow_payload,
-                context_profile=self.browser_context_profile(),
-                launch_profile=self.browser_launch_profile(),
-                fingerprint_policy=self.browser_fingerprint_policy(),
-            )
-            return result.response()
-        except Exception as error:
-            raise trace.failure(error) from error
+        await asyncio.sleep(random.uniform(2.0, 4.0))
+        mail, mailbox, password = await prepare_registration(payload)
+        attempts = flow_max_attempts(payload, 1)
+        last_error: RuntimeError | None = None
+        for attempt in range(1, attempts + 1):
+            trace = RegistrationTrace(self.manifest.id)
+            try:
+                trace.mark(RegistrationStage.MAILBOX_CREATED)
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+                flow_payload = {**payload}
+                flow_payload.setdefault(
+                    "proxy_check_url", f"{settings().qwen_base_url.rstrip('/')}/auth?mode=register"
+                )
+                result = await asyncio.to_thread(
+                    run_browser_flow,
+                    lambda page, context, backend, proxy_url, _trace=trace: _register_browser(
+                        page,
+                        context,
+                        backend,
+                        proxy_url,
+                        mail,
+                        mailbox,
+                        password,
+                        _trace,
+                    ),
+                    preferred=self.manifest.browser_backend,
+                    fallback=self.manifest.fallback_backend,
+                    payload=flow_payload,
+                    context_profile=self.browser_context_profile(),
+                    launch_profile=self.browser_launch_profile(),
+                    fingerprint_policy=self.browser_fingerprint_policy(),
+                )
+                response = result.response()
+                response.setdefault("metadata", {})["browser_attempt"] = attempt
+                return response
+            except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
+                last_error = trace.failure(error)
+        assert last_error is not None
+        raise last_error
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(

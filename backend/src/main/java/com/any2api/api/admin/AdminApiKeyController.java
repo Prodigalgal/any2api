@@ -3,6 +3,7 @@ package com.any2api.api.admin;
 import com.any2api.auth.ApiKeyProtocol;
 import com.any2api.auth.ApiKeyFeature;
 import com.any2api.auth.ApiKeyService;
+import com.any2api.auth.ApiKeyUsageService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -23,14 +24,21 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/v1/api-keys")
 public class AdminApiKeyController {
     private final ApiKeyService keys;
+    private final ApiKeyUsageService usage;
 
-    public AdminApiKeyController(ApiKeyService keys) {
+    public AdminApiKeyController(ApiKeyService keys, ApiKeyUsageService usage) {
         this.keys = keys;
+        this.usage = usage;
     }
 
     @GetMapping
     public List<ApiKeyService.View> list() {
         return keys.list();
+    }
+
+    @GetMapping("/{id}")
+    public ApiKeyUsageService.Detail get(@PathVariable UUID id) {
+        return usage.get(id);
     }
 
     @PostMapping

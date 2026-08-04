@@ -9,6 +9,7 @@ import com.any2api.provider.InferenceCoordinator;
 import com.any2api.routing.ProviderRouteResolver;
 import com.any2api.routing.RandomInferenceRouter;
 import com.any2api.provider.RandomModelRole;
+import com.any2api.observability.RequestIdWebFilter;
 import tools.jackson.databind.node.ObjectNode;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -104,13 +105,14 @@ public class OpenAiGatewayController {
     ) {
         var model = request.path("model").asText("");
         var route = routeResolver.resolve(exchange.getRequest().getPath().value(), model);
+        exchange.getAttributes().put(RequestIdWebFilter.PROVIDER_ATTRIBUTE, route.providerId());
+        exchange.getAttributes().put(RequestIdWebFilter.MODEL_ATTRIBUTE, route.upstreamModel());
         var grant = authorization.grant(exchange);
         authorization.require(
             grant, authorization.protocol(protocol), route.providerId(), route.upstreamModel());
         authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
-        var canonical = requestParser.parse(protocol, route, request);
-        exchange.getResponse().getHeaders().set(
-            "X-Any2API-Request-Id", canonical.requestId());
+        var canonical = requestParser.parse(
+            protocol, route, request, RequestIdWebFilter.get(exchange));
         return responseWriter.write(
             canonical, coordinator.execute(canonical, grant.keyId()), exchange);
     }
@@ -127,14 +129,16 @@ public class OpenAiGatewayController {
                 "API key does not allow this protocol");
         }
         authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
-        return randomRouter.select(protocol, request, role, grant).flatMap(selection -> {
+        return randomRouter.select(
+            protocol, request, role, grant, RequestIdWebFilter.get(exchange)).flatMap(selection -> {
             var canonical = selection.request();
+            exchange.getAttributes().put(
+                RequestIdWebFilter.PROVIDER_ATTRIBUTE, canonical.providerId());
+            exchange.getAttributes().put(RequestIdWebFilter.MODEL_ATTRIBUTE, canonical.model());
             exchange.getResponse().getHeaders().set(
                 "X-Any2API-Provider", canonical.providerId());
             exchange.getResponse().getHeaders().set(
                 "X-Any2API-Model", canonical.model());
-            exchange.getResponse().getHeaders().set(
-                "X-Any2API-Request-Id", canonical.requestId());
             return responseWriter.write(
                 canonical,
                 coordinator.execute(canonical, selection.account(), grant.keyId()),

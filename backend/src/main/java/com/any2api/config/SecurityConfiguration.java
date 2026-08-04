@@ -23,6 +23,8 @@ public class SecurityConfiguration {
                 .pathMatchers(HttpMethod.POST, "/api/admin/v1/session").permitAll()
                 .pathMatchers(HttpMethod.GET, "/api/admin/v1/session").permitAll()
                 .pathMatchers(HttpMethod.GET, "/api/admin/v1/login-challenge").permitAll()
+                .pathMatchers("/healthz", "/readyz", "/actuator/health/**").permitAll()
+                .pathMatchers("/actuator/**").hasRole("ADMIN")
                 .pathMatchers("/api/admin/**").hasRole("ADMIN")
                 .anyExchange().permitAll())
             .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)

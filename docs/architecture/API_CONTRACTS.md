@@ -30,6 +30,8 @@ Catalog membership and callability are separate: `cataloged` reports discovery, 
 requires a usable account and recent successful inference or a fresh successful probe. The runtime
 state is `READY`, `DEGRADED`, or `UNAVAILABLE`; an open per-model circuit always forces
 `UNAVAILABLE`.
+The inference entry guard reads the same cached catalog and returns `503 model_unavailable` before
+queue or account acquisition when a model is marked unavailable.
 
 Each model publishes a machine-readable contract and runtime snapshot:
 
@@ -65,7 +67,8 @@ Each model publishes a machine-readable contract and runtime snapshot:
 }
 ```
 
-Unknown official token limits remain JSON `null`; the gateway does not invent limits. Model
+Unknown official token limits remain JSON `null`; the gateway does not invent limits. The
+`token_limits` object also returns the catalog source and `HIGH` or `BEST_EFFORT` confidence. Model
 metadata and provider protocol declarations are merged at catalog synchronization. A provider may
 override `InferenceProvider.modelContract` when the official catalog exposes a provider-specific
 capability shape.
@@ -110,6 +113,14 @@ request and emitted output. Missing, partial, zero, or implausibly inflated fiel
 the actual canonical input and emitted output and return `usage_source=ESTIMATED`. Streaming
 responses emit an immediate SSE comment containing the request ID, followed by heartbeat comments
 until the first provider event and throughout long quiet periods.
+Both response families expose `raw_usage` and `normalized_usage`; compatibility token fields use
+the normalized values.
+
+All public success and failure responses include `X-Request-Id`. Provider errors use one envelope
+with `type`, `code`, `message`, `param`, `retryable`, `provider`, `model`, and `request_id`.
+Authentication and request-validation errors use the same fields. `/healthz` is a public liveness
+endpoint and `/readyz` is a dependency readiness endpoint; detailed Actuator metrics require an
+administrator session.
 
 Every inference plugin publishes a `protocolContract` in
 `GET /api/catalog/v1/providers`. The contract is the machine-readable source of truth for:
@@ -178,6 +189,13 @@ POST /api/admin/v1/accounts/{accountId}/reauthenticate
 ```
 
 Registration job responses contain counters, status, timestamps, error class, and created account IDs. They never contain provider credentials or mailbox/proxy secrets.
+Creation also accepts per-identity flow retries, attempt timeout, consecutive failed-round limit,
+proxy policy, browser headless mode, and an optional configured mail domain. One Java attempt owns
+one mailbox; provider-local browser retries reuse it.
+
+System settings are administered through `GET /api/admin/v1/settings` and typed `PUT` endpoints for
+Temp Mail and registration defaults. Settings are AES-GCM encrypted in PostgreSQL and are injected
+into new automation attempts without restarting Java or Python.
 
 ## Proxy pool administration
 

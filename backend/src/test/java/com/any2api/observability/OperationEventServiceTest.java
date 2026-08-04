@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 class OperationEventServiceTest {
 
     @Test
-    void sanitizesSecretsAndPrivateInputsBeforePersistence() {
+    void sanitizesCredentialsOutsideRequestSnapshots() {
         var sanitized = OperationEventService.sanitize("""
             failed {"token":"top secret", "password": "private-value"}
             for operator@example.test at https://example.test/callback?code=private

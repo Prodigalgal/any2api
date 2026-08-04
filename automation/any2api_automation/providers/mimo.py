@@ -8,6 +8,8 @@ from ..config import settings as core_settings
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
+    flow_max_attempts,
+    mail_client,
     prepare_registration,
     required,
 )
@@ -41,7 +43,17 @@ class MimoAutomationProvider(AutomationProvider):
             payload,
             password_policy=_MIMO_PASSWORD_POLICY,
         )
-        return await asyncio.to_thread(_register_protocol, payload, mail, mailbox, password)
+        attempts = flow_max_attempts(payload, 1)
+        last_error: Exception | None = None
+        for _ in range(attempts):
+            try:
+                return await asyncio.to_thread(
+                    _register_protocol, payload, mail, mailbox, password
+                )
+            except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
+                last_error = error
+        assert last_error is not None
+        raise last_error
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
@@ -90,7 +102,7 @@ class MimoAutomationProvider(AutomationProvider):
         result = await asyncio.to_thread(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _login_browser(
-                page, context, backend, current
+                page, context, backend, current, payload
             ),
             preferred="camoufox",
             fallback="patchright",
@@ -204,7 +216,7 @@ def _register_protocol(
     }
 
 
-def _login_browser(page, context, backend, current) -> BrowserResult:
+def _login_browser(page, context, backend, current, payload) -> BrowserResult:
     config = settings()
     page.goto(
         f"{config.mimo_account_url}/pass/serviceLogin?sid=xiaomichatbot",
@@ -221,7 +233,7 @@ def _login_browser(page, context, backend, current) -> BrowserResult:
     page.locator('button[type="submit"]').first.click()
     page.wait_for_timeout(2500)
     if page.locator('input[autocomplete="one-time-code"], input[maxlength="6"]').count():
-        mail = TempMailClient()
+        mail = mail_client(payload)
         mailbox = Mailbox(required(current, "email"), required(current, "mail_jwt"))
         code = mail.wait_for_code_sync(mailbox)
         from ..lifecycle.browser import enter_code
@@ -261,7 +273,7 @@ def _password_otp_reauthenticate(
     ) as proxy_url:
         client = XiaomiProtocolClient(proxy_url)
         try:
-            mail = TempMailClient()
+            mail = mail_client(payload)
             mailbox = Mailbox(required(current, "email"), required(current, "mail_jwt"))
             return client.reauthenticate_password(current, mail, mailbox)
         finally:

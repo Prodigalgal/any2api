@@ -14,7 +14,7 @@ import httpx
 
 from ..captcha.turnstile import LocalTurnstileSolver
 from ..config import settings as core_settings
-from ..lifecycle.account import credential, prepare_registration, required
+from ..lifecycle.account import credential, flow_max_attempts, prepare_registration, required
 from ..lifecycle.browser import BrowserResult, credential_from_context, fill_first
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
@@ -42,13 +42,13 @@ class GrokAutomationProvider(AutomationProvider):
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
-        attempts = max(1, settings().grok_registration_attempts)
+        attempts = flow_max_attempts(payload, settings().grok_registration_attempts)
         failures: list[str] = []
         last_failure: RuntimeError | None = None
+        mail, mailbox, password = await prepare_registration(payload)
         for attempt in range(1, attempts + 1):
             trace = RegistrationTrace(self.manifest.id)
             try:
-                mail, mailbox, password = await prepare_registration(payload)
                 trace.mark(RegistrationStage.MAILBOX_CREATED)
                 result = await asyncio.to_thread(
                     _register_same_session,

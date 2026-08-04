@@ -34,20 +34,39 @@ class TempMailClient:
         admin_password: str | None = None,
         site_password: str | None = None,
         domain: str | None = None,
-        timeout: float = 30,
+        domains: list[str] | tuple[str, ...] | str | None = None,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
     ) -> None:
         config = settings()
-        self.base_url = str(base_url or config.mail_api_base).rstrip("/")
-        self.admin_password = str(admin_password or config.mail_admin_password)
-        self.site_password = str(site_password or config.mail_site_password)
-        self.domain = str(domain or config.mail_domain).strip()
-        self.timeout = timeout
+        self.base_url = str(config.mail_api_base if base_url is None else base_url).rstrip("/")
+        self.admin_password = str(
+            config.mail_admin_password if admin_password is None else admin_password
+        )
+        self.site_password = str(
+            config.mail_site_password if site_password is None else site_password
+        )
+        self.domain = str(
+            config.mail_domain if domain is None and domains is None else domain or ""
+        ).strip()
+        if isinstance(domains, str):
+            domain_values = domains.split(",")
+        else:
+            domain_values = list(domains or ())
+        self.domains = _available_domains(domain_values)
+        self.timeout = float(request_timeout_seconds or 30)
+        self.poll_seconds = float(poll_seconds or config.mail_poll_seconds)
+        self.message_timeout_seconds = float(
+            message_timeout_seconds or config.mail_timeout_seconds
+        )
         if not self.base_url:
             raise ValueError("temporary mail API is not configured")
 
     async def create_address(self, local_part: str | None = None) -> Mailbox:
         local = local_part or _random_local_part()
-        domain = self.domain or await self._default_domain()
+        domain = self.domain or (secrets.choice(self.domains) if self.domains else None)
+        domain = domain or await self._default_domain()
         headers = self._headers(admin=True)
         body: dict[str, Any] = {"name": local, "domain": domain}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -147,8 +166,7 @@ class TempMailClient:
         predicate: Callable[[dict[str, Any]], bool] | None,
         seen_ids: set[str] | None,
     ) -> str:
-        config = settings()
-        deadline = time.monotonic() + float(timeout or config.mail_timeout_seconds)
+        deadline = time.monotonic() + float(timeout or self.message_timeout_seconds)
         seen = set(seen_ids or ())
         polls = 0
         max_mail_count = 0
@@ -172,7 +190,7 @@ class TempMailClient:
                         return _match_value(match)
             except (httpx.HTTPError, ValueError) as error:
                 last_error = type(error).__name__
-            await asyncio.sleep(max(1, config.mail_poll_seconds))
+            await asyncio.sleep(max(1, self.poll_seconds))
         raise TimeoutError(
             "temporary mailbox did not receive the expected message "
             f"(polls={polls}, max_mails={max_mail_count}, last_error={last_error})"
@@ -199,8 +217,7 @@ class TempMailClient:
         timeout: float | None,
         seen_ids: set[str] | None,
     ) -> str:
-        config = settings()
-        deadline = time.monotonic() + float(timeout or config.mail_timeout_seconds)
+        deadline = time.monotonic() + float(timeout or self.message_timeout_seconds)
         seen = set(seen_ids or ())
         polls = 0
         max_mail_count = 0
@@ -222,7 +239,7 @@ class TempMailClient:
                         return _match_value(match)
             except (httpx.HTTPError, ValueError) as error:
                 last_error = type(error).__name__
-            time.sleep(max(1, config.mail_poll_seconds))
+            time.sleep(max(1, self.poll_seconds))
         raise TimeoutError(
             "temporary mailbox did not receive the expected message "
             f"(polls={polls}, max_mails={max_mail_count}, last_error={last_error})"

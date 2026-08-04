@@ -16,6 +16,7 @@ from ..captcha.registry import registry
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
+    flow_max_attempts,
     prepare_registration,
     required,
     strong_password,
@@ -165,7 +166,7 @@ async def _run_registration_browser(
     captcha_policy: CaptchaAiPolicy | None = None,
 ) -> BrowserResult:
     captcha_policy = captcha_policy or CaptchaAiPolicy()
-    attempts = settings().deepseek_registration_browser_attempts
+    attempts = flow_max_attempts(payload, settings().deepseek_registration_browser_attempts)
     for attempt in range(1, attempts + 1):
         try:
             return await asyncio.to_thread(

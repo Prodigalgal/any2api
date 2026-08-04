@@ -33,19 +33,36 @@ async def prepare_registration(
     *,
     password_policy: RegistrationPasswordPolicy | None = None,
 ) -> tuple[TempMailClient, Mailbox, str]:
+    mail = mail_client(payload)
     mail_payload = payload.get("mail") or {}
-    if not isinstance(mail_payload, dict):
-        raise TypeError("mail must be an object")
-    mail = TempMailClient(
-        base_url=mail_payload.get("base_url"),
-        admin_password=mail_payload.get("admin_password"),
-        site_password=mail_payload.get("site_password"),
-        domain=mail_payload.get("domain"),
-    )
     mailbox = await mail.create_address(str(mail_payload.get("local_part") or "") or None)
     policy = password_policy or RegistrationPasswordPolicy(strong_password)
     password = policy.resolve(payload.get("password"))
     return mail, mailbox, password
+
+
+def mail_client(payload: dict[str, Any]) -> TempMailClient:
+    mail_payload = payload.get("mail") or {}
+    if not isinstance(mail_payload, dict):
+        raise TypeError("mail must be an object")
+    return TempMailClient(
+        base_url=mail_payload.get("base_url"),
+        admin_password=mail_payload.get("admin_password"),
+        site_password=mail_payload.get("site_password"),
+        domain=mail_payload.get("domain"),
+        domains=mail_payload.get("domains"),
+        request_timeout_seconds=mail_payload.get("request_timeout_seconds"),
+        poll_seconds=mail_payload.get("poll_seconds"),
+        message_timeout_seconds=mail_payload.get("message_timeout_seconds"),
+    )
+
+
+def flow_max_attempts(payload: dict[str, Any], fallback: int, maximum: int = 10) -> int:
+    try:
+        value = int(payload.get("flow_max_attempts", fallback))
+    except (TypeError, ValueError):
+        value = fallback
+    return max(1, min(maximum, value))
 
 
 def strong_password(length: int = 20) -> str:

@@ -44,6 +44,11 @@ public class ApiKeyService {
         return keys.findAllByOrderByCreatedAtDesc().stream().map(this::view).toList();
     }
 
+    @Transactional(readOnly = true)
+    public View get(UUID id) {
+        return view(require(id));
+    }
+
     @Transactional
     public Created create(CreateCommand command) {
         var name = normalizedName(command.name());

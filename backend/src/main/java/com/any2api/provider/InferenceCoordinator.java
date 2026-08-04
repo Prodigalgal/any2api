@@ -30,6 +30,7 @@ public class InferenceCoordinator {
     private final InferenceTelemetryService telemetry;
     private final ModelRuntimeGuard runtime;
     private final UsageNormalizer usage;
+    private final ModelAvailabilityGuard availability;
 
     public InferenceCoordinator(
         ProviderRegistry providers,
@@ -37,7 +38,8 @@ public class InferenceCoordinator {
         ProviderFailureDisposition failures,
         InferenceTelemetryService telemetry,
         ModelRuntimeGuard runtime,
-        UsageNormalizer usage
+        UsageNormalizer usage,
+        ModelAvailabilityGuard availability
     ) {
         this.providers = providers;
         this.accounts = accounts;
@@ -45,6 +47,7 @@ public class InferenceCoordinator {
         this.telemetry = telemetry;
         this.runtime = runtime;
         this.usage = usage;
+        this.availability = availability;
     }
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request) {
@@ -66,10 +69,12 @@ public class InferenceCoordinator {
     ) {
         var provider = providers.require(request.providerId());
         validateRequest(request, provider);
-        return runtime.execute(request, admission ->
-            executeWithRetries(request, provider,
-                accountLease(request, provider), false, 1, apiKeyId, requestKind,
-                admission.queueMs()));
+        var execution = runtime.execute(request, admission -> executeWithRetries(
+            request, provider, accountLease(request, provider), false, 1, apiKeyId,
+            requestKind, admission.queueMs()));
+        return "PROBE".equals(requestKind) ? execution
+            : availability.requireCallable(request.providerId(), request.model())
+                .thenMany(execution);
     }
 
     public Flux<CanonicalEvent> execute(
@@ -106,10 +111,15 @@ public class InferenceCoordinator {
                     "random route account provider does not match the request")));
         }
         var provider = providers.require(request.providerId());
-        return runtime.execute(request, admission ->
+        var execution = runtime.execute(request, admission ->
                 executeWithRetries(request, provider, reactor.core.publisher.Mono.just(account),
                     true, 1, apiKeyId, requestKind, admission.queueMs()))
             .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
+                error -> accounts.release(account).thenMany(Flux.error(error)));
+        if ("PROBE".equals(requestKind)) return execution;
+        return availability.requireCallable(request.providerId(), request.model())
+            .thenMany(execution)
+            .onErrorResume(ModelAvailabilityGuard.ModelUnavailableException.class,
                 error -> accounts.release(account).thenMany(Flux.error(error)));
     }
 
@@ -145,7 +155,8 @@ public class InferenceCoordinator {
         var attemptEvents = Flux.defer(() -> {
             var observed = telemetry.start(new InferenceTelemetryService.InferenceTrace(
                 request.requestId(), request.providerId(), request.model(),
-                request.protocol().name(), apiKeyId, requestKind), attempt, queueMs);
+                request.protocol().name(), apiKeyId, requestKind, request.rawRequest()),
+                attempt, queueMs);
             return usage.normalize(request,
                     executeWithLease(request, provider, lease, validateInsideLease, observed))
                 .doOnNext(event -> recordTelemetry(observed, event))
@@ -183,6 +194,7 @@ public class InferenceCoordinator {
         InferenceTelemetryService.Started observed,
         CanonicalEvent event
     ) {
+        observed.record(event);
         if (!(event instanceof CanonicalEvent.Usage)) observed.firstByte();
         if (event instanceof CanonicalEvent.Completed || event instanceof CanonicalEvent.Failed) {
             observed.terminal();

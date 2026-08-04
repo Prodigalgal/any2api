@@ -11,6 +11,7 @@ import com.any2api.media.MediaInputValidation;
 import com.any2api.media.MediaRequest;
 import com.any2api.routing.ProviderRouteResolver;
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.observability.RequestIdWebFilter;
 import java.net.URI;
 import java.time.Instant;
 import java.util.Base64;
@@ -76,12 +77,13 @@ public final class OpenAiImagesController {
         return exchange.getMultipartData().flatMap(parts -> {
             var model = form(parts.getFirst("model"), "");
             var route = routes.resolve(exchange.getRequest().getPath().value(), model);
+            routeAttributes(exchange, route.providerId(), route.upstreamModel());
             authorization.require(
                 grant, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
             return readInputs(parts.get("image")).flatMap(inputs -> {
-                var request = parseEdit(route.providerId(), route.upstreamModel(), parts, inputs);
-                exchange.getResponse().getHeaders().set(
-                    "X-Any2API-Request-Id", request.requestId());
+                var request = parseEdit(
+                    RequestIdWebFilter.get(exchange), route.providerId(),
+                    route.upstreamModel(), parts, inputs);
                 return coordinator.execute(request, grant.keyId())
                     .flatMap(result -> encode(request, result, exchange));
             });
@@ -98,12 +100,12 @@ public final class OpenAiImagesController {
     ) {
         var route = routes.resolve(
             exchange.getRequest().getPath().value(), body.path("model").asText(""));
+        routeAttributes(exchange, route.providerId(), route.upstreamModel());
         var grant = authorization.grant(exchange);
         authorization.require(
             grant, ApiKeyProtocol.IMAGES, route.providerId(), route.upstreamModel());
-        var request = parse(route.providerId(), route.upstreamModel(), body);
-        exchange.getResponse().getHeaders().set(
-            "X-Any2API-Request-Id", request.requestId());
+        var request = parse(
+            RequestIdWebFilter.get(exchange), route.providerId(), route.upstreamModel(), body);
         return coordinator.execute(request, grant.keyId())
             .flatMap(result -> encode(request, result, exchange));
     }
@@ -120,7 +122,12 @@ public final class OpenAiImagesController {
             .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build()));
     }
 
-    private MediaRequest parse(String providerId, String model, ObjectNode body) {
+    private MediaRequest parse(
+        String requestId,
+        String providerId,
+        String model,
+        ObjectNode body
+    ) {
         var prompt = body.path("prompt").asText("").trim();
         if (prompt.isBlank()) throw new IllegalArgumentException("prompt is required");
         if (prompt.length() > 32000) {
@@ -144,11 +151,12 @@ public final class OpenAiImagesController {
             }
         });
         return new MediaRequest(
-            UUID.randomUUID().toString(), providerId, model,
+            requestId, providerId, model,
             MediaOperation.IMAGE_GENERATION, prompt, count, format, options, body);
     }
 
     private MediaRequest parseEdit(
+        String requestId,
         String providerId,
         String model,
         org.springframework.util.MultiValueMap<String,
@@ -180,8 +188,13 @@ public final class OpenAiImagesController {
             .put("model", model).put("prompt", prompt).put("n", count)
             .put("response_format", format == MediaRequest.ResponseFormat.URL
                 ? "url" : "b64_json");
+        var rawInputs = raw.putArray("images");
+        inputs.forEach(input -> rawInputs.addObject()
+            .put("filename", input.filename())
+            .put("content_type", input.contentType())
+            .put("base64", Base64.getEncoder().encodeToString(input.content())));
         return new MediaRequest(
-            UUID.randomUUID().toString(), providerId, model,
+            requestId, providerId, model,
             MediaOperation.IMAGE_EDITING, prompt, count, format,
             inputs, options, raw);
     }
@@ -300,5 +313,14 @@ public final class OpenAiImagesController {
         } catch (IllegalArgumentException ignored) {
             return MediaType.APPLICATION_OCTET_STREAM;
         }
+    }
+
+    private void routeAttributes(
+        ServerWebExchange exchange,
+        String providerId,
+        String model
+    ) {
+        exchange.getAttributes().put(RequestIdWebFilter.PROVIDER_ATTRIBUTE, providerId);
+        exchange.getAttributes().put(RequestIdWebFilter.MODEL_ATTRIBUTE, model);
     }
 }

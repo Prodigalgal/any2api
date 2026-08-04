@@ -58,6 +58,10 @@ flows for that identity. Java counts the completed registration call as one iden
 each browser flow. If all provider-local flows fail, a batch may create a replacement identity only
 when its configured `maxAttempts` budget still has room. This lets a success target tolerate bounded
 failed identities without sharing one mailbox across concurrent calls.
+The provider-neutral `flow_max_attempts` task control applies to every migrated registration
+plugin. A scheduler attempt creates its mailbox once, then Qwen, LongCat, Grok, MiMo, MinMax,
+DeepSeek, or GLM reuses that identity for its bounded local flows. Only exhaustion of that mailbox
+task consumes another `maxAttempts` slot.
 Registration-job backoff follows consecutive fully failed batches, not lifetime attempt totals. A
 batch with at least one successful identity resets the failure streak and resumes the short jittered
 delay; an entirely failed batch increments the streak and backs off exponentially up to 15 minutes.
@@ -70,6 +74,11 @@ retaining deterministic local OCR/OpenCV solvers, or select `internal`, `externa
 Internal AI uses Any2API's authenticated `multimodal-random` route. External AI uses only the
 deployment-configured OpenAI-compatible base URL, key, and model; task payloads and the admin UI
 never accept or expose those secrets. Auto mode tries configured transports in priority order.
+
+Temp Mail URL, credentials, available domains, HTTP timeout, OTP wait timeout, and poll interval are
+typed runtime settings. Java injects the current encrypted settings into each internal registration
+call. Unless a task pins one configured domain, the Python mailbox client randomly selects from the
+current domain set for every mailbox task.
 
 GLM uses separate Alibaba Cloud Captcha profiles for authentication and chat. Authentication uses
 the embedded `36qgs6xb` scene in region `cn`; chat uses the popup `didk33e0` scene in region `sgp`.

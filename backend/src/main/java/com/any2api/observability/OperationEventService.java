@@ -27,7 +27,6 @@ public final class OperationEventService {
     private static final Pattern SECRET = Pattern.compile(
         "(?i)([\"']?(?:password|token|authorization|cookie|jwt|secret)"
             + "[\"']?\\s*[:=]\\s*[\"']?)[^,}'\"\\r\\n]+");
-
     private final JdbcClient jdbc;
     private final MeterRegistry meters;
 

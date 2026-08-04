@@ -2,6 +2,7 @@ package com.any2api.config;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "any2api")
@@ -14,6 +15,7 @@ public class Any2ApiProperties {
     private final CacheSettings cache = new CacheSettings();
     private final Observability observability = new Observability();
     private final ModelRuntime modelRuntime = new ModelRuntime();
+    private final TempMail tempMail = new TempMail();
 
     public Security getSecurity() {
         return security;
@@ -28,6 +30,7 @@ public class Any2ApiProperties {
     public CacheSettings getCache() { return cache; }
     public Observability getObservability() { return observability; }
     public ModelRuntime getModelRuntime() { return modelRuntime; }
+    public TempMail getTempMail() { return tempMail; }
 
 
     public static class Security {
@@ -106,6 +109,35 @@ public class Any2ApiProperties {
         }
     }
 
+    public static class TempMail {
+        private String apiBase = "";
+        private String adminPassword = "";
+        private String sitePassword = "";
+        private List<String> domains = List.of();
+        private double pollSeconds = 4;
+        private int messageTimeoutSeconds = 240;
+        private int requestTimeoutSeconds = 30;
+
+        public String getApiBase() { return apiBase; }
+        public void setApiBase(String value) { apiBase = value == null ? "" : value; }
+        public String getAdminPassword() { return adminPassword; }
+        public void setAdminPassword(String value) {
+            adminPassword = value == null ? "" : value;
+        }
+        public String getSitePassword() { return sitePassword; }
+        public void setSitePassword(String value) { sitePassword = value == null ? "" : value; }
+        public List<String> getDomains() { return domains; }
+        public void setDomains(List<String> value) {
+            domains = value == null ? List.of() : List.copyOf(value);
+        }
+        public double getPollSeconds() { return pollSeconds; }
+        public void setPollSeconds(double value) { pollSeconds = value; }
+        public int getMessageTimeoutSeconds() { return messageTimeoutSeconds; }
+        public void setMessageTimeoutSeconds(int value) { messageTimeoutSeconds = value; }
+        public int getRequestTimeoutSeconds() { return requestTimeoutSeconds; }
+        public void setRequestTimeoutSeconds(int value) { requestTimeoutSeconds = value; }
+    }
+
     public static class ProxyBootstrap {
         private String directory = "";
         private String poolName = "Self-hosted Oracle";
@@ -164,6 +196,8 @@ public class Any2ApiProperties {
         private Duration healthWindow = Duration.ofHours(24);
         private Duration probeFreshness = Duration.ofMinutes(30);
         private int scheduledProbeBatchSize = 5;
+        private float readySuccessRateThreshold = 90f;
+        private Duration readyP95Threshold = Duration.ofSeconds(60);
 
         public int getMaxConcurrentRequests() { return maxConcurrentRequests; }
         public void setMaxConcurrentRequests(int value) { maxConcurrentRequests = positive(value, "max concurrent requests"); }
@@ -186,6 +220,15 @@ public class Any2ApiProperties {
         public void setProbeFreshness(Duration value) { probeFreshness = positive(value, "probe freshness"); }
         public int getScheduledProbeBatchSize() { return scheduledProbeBatchSize; }
         public void setScheduledProbeBatchSize(int value) { scheduledProbeBatchSize = positive(value, "scheduled probe batch size"); }
+        public float getReadySuccessRateThreshold() { return readySuccessRateThreshold; }
+        public void setReadySuccessRateThreshold(float value) {
+            if (value <= 0 || value > 100) throw new IllegalArgumentException("ready success threshold must be in (0,100]");
+            readySuccessRateThreshold = value;
+        }
+        public Duration getReadyP95Threshold() { return readyP95Threshold; }
+        public void setReadyP95Threshold(Duration value) {
+            readyP95Threshold = positive(value, "ready p95 threshold");
+        }
 
         private static int positive(int value, String name) {
             if (value < 1) throw new IllegalArgumentException(name + " must be positive");

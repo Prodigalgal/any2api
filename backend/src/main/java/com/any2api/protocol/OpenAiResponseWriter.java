@@ -2,6 +2,7 @@ package com.any2api.protocol;
 
 import com.any2api.account.AccountUnavailableException;
 import com.any2api.provider.ModelRuntimeGuard;
+import com.any2api.provider.ModelAvailabilityGuard;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -42,12 +43,17 @@ public class OpenAiResponseWriter {
             error instanceof AccountUnavailableException
                 ? "account_unavailable"
                 : error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException
+                    || error instanceof ModelAvailabilityGuard.ModelUnavailableException
                     ? "model_unavailable" : "gateway_execution_error",
             error instanceof AccountUnavailableException
                 ? error.getMessage()
                 : error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException rejected
-                    ? rejected.reason() : "gateway execution failed",
-            Map.of("exception", error.getClass().getSimpleName()))));
+                    ? rejected.reason()
+                    : error instanceof ModelAvailabilityGuard.ModelUnavailableException
+                        ? error.getMessage() : "gateway execution failed",
+            Map.of(
+                "exception", error.getClass().getSimpleName(),
+                "retryable", !(error instanceof ModelAvailabilityGuard.ModelUnavailableException)))));
         return request.stream()
             ? writeStream(request, guarded, exchange)
             : writeCollected(request, guarded, exchange);
@@ -171,10 +177,7 @@ public class OpenAiResponseWriter {
                 return frames;
             }
             if (event instanceof CanonicalEvent.Failed failed) {
-                var error = mapper.createObjectNode()
-                    .put("type", failed.errorType())
-                    .put("message", failed.message())
-                    .put("code", failed.errorType());
+                var error = gatewayError(mapper, request, failed);
                 var payload = mapper.createObjectNode().set("error", error);
                 return List.of(data(payload), "data: [DONE]\n\n");
             }
@@ -340,9 +343,7 @@ public class OpenAiResponseWriter {
                     object("response", accumulator.responsesResponse())));
             } else if (event instanceof CanonicalEvent.Failed failed) {
                 var response = baseResponse("failed");
-                response.set("error", mapper.createObjectNode()
-                    .put("code", failed.errorType())
-                    .put("message", failed.message()));
+                response.set("error", gatewayError(mapper, request, failed));
                 frames.add(event("response.failed", object("response", response)));
             }
             return frames;
@@ -526,10 +527,8 @@ public class OpenAiResponseWriter {
         }
 
         private ObjectNode error() {
-            return mapper.createObjectNode().set("error", mapper.createObjectNode()
-                .put("type", failure.errorType())
-                .put("message", failure.message())
-                .put("code", failure.errorType()));
+            return mapper.createObjectNode().set(
+                "error", gatewayError(mapper, request, failure));
         }
 
         private ObjectNode tool(ToolState tool) {
@@ -540,6 +539,37 @@ public class OpenAiResponseWriter {
                     .put("name", tool.name)
                     .put("arguments", tool.arguments.toString()));
         }
+    }
+
+    private static ObjectNode gatewayError(
+        ObjectMapper mapper,
+        CanonicalRequest request,
+        CanonicalEvent.Failed failure
+    ) {
+        var detail = failure.detail() == null ? Map.<String, Object>of() : failure.detail();
+        var error = mapper.createObjectNode()
+            .put("type", failure.errorType())
+            .put("code", failure.errorType())
+            .put("message", failure.message())
+            .put("retryable", retryable(failure, detail))
+            .put("provider", request.providerId())
+            .put("model", request.model())
+            .put("request_id", request.requestId());
+        var parameter = detail.get("param");
+        if (parameter == null) error.putNull("param");
+        else error.put("param", String.valueOf(parameter));
+        return error;
+    }
+
+    private static boolean retryable(
+        CanonicalEvent.Failed failure,
+        Map<String, Object> detail
+    ) {
+        if (detail.get("retryable") instanceof Boolean value) return value;
+        return Set.of(
+            "account_unavailable", "rate_limited", "quota_exhausted",
+            "empty_model_response", "upstream_unavailable", "gateway_execution_error")
+            .contains(failure.errorType());
     }
 
     private static final class ToolState {
@@ -557,25 +587,42 @@ public class OpenAiResponseWriter {
         var input = usage == null ? 0 : usage.inputTokens();
         var output = usage == null ? 0 : usage.outputTokens();
         var cached = usage == null ? 0 : usage.cacheReadTokens();
-        return mapper.createObjectNode()
+        var result = mapper.createObjectNode()
             .put("prompt_tokens", input)
             .put("completion_tokens", output)
             .put("total_tokens", input + output)
             .put("usage_source", usage == null ? "ESTIMATED" : usage.source().name())
             .set("prompt_tokens_details",
                 mapper.createObjectNode().put("cached_tokens", cached));
+        result.set("raw_usage", rawUsage(mapper, usage));
+        result.set("normalized_usage", mapper.createObjectNode()
+            .put("input_tokens", input).put("output_tokens", output)
+            .put("cache_read_tokens", cached));
+        return result;
     }
 
     private static ObjectNode responsesUsage(ObjectMapper mapper, CanonicalEvent.Usage usage) {
         var input = usage == null ? 0 : usage.inputTokens();
         var output = usage == null ? 0 : usage.outputTokens();
         var cached = usage == null ? 0 : usage.cacheReadTokens();
-        return mapper.createObjectNode()
+        var result = mapper.createObjectNode()
             .put("input_tokens", input)
             .put("output_tokens", output)
             .put("total_tokens", input + output)
             .put("usage_source", usage == null ? "ESTIMATED" : usage.source().name())
             .set("input_tokens_details", mapper.createObjectNode().put("cached_tokens", cached));
+        result.set("raw_usage", rawUsage(mapper, usage));
+        result.set("normalized_usage", mapper.createObjectNode()
+            .put("input_tokens", input).put("output_tokens", output)
+            .put("cache_read_tokens", cached));
+        return result;
+    }
+
+    private static ObjectNode rawUsage(ObjectMapper mapper, CanonicalEvent.Usage usage) {
+        return mapper.createObjectNode()
+            .put("input_tokens", usage == null ? 0 : usage.rawInputTokens())
+            .put("output_tokens", usage == null ? 0 : usage.rawOutputTokens())
+            .put("cache_read_tokens", usage == null ? 0 : usage.rawCacheReadTokens());
     }
 
     private static void applyResponsesConfiguration(

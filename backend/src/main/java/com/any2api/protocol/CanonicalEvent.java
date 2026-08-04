@@ -65,8 +65,24 @@ public sealed interface CanonicalEvent permits
         long inputTokens,
         long outputTokens,
         long cacheReadTokens,
-        UsageSource source
+        UsageSource source,
+        long rawInputTokens,
+        long rawOutputTokens,
+        long rawCacheReadTokens
     ) implements CanonicalEvent {
+        public Usage(
+            int schemaVersion,
+            String requestId,
+            long sequenceNumber,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            UsageSource source
+        ) {
+            this(schemaVersion, requestId, sequenceNumber, inputTokens, outputTokens,
+                cacheReadTokens, source, inputTokens, outputTokens, cacheReadTokens);
+        }
+
         public Usage(
             int schemaVersion,
             String requestId,
@@ -76,7 +92,8 @@ public sealed interface CanonicalEvent permits
             long cacheReadTokens
         ) {
             this(schemaVersion, requestId, sequenceNumber, inputTokens, outputTokens,
-                cacheReadTokens, UsageSource.UPSTREAM);
+                cacheReadTokens, UsageSource.UPSTREAM,
+                inputTokens, outputTokens, cacheReadTokens);
         }
 
         public Usage {

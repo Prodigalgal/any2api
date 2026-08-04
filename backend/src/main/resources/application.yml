@@ -62,6 +62,8 @@ any2api:
     health-window: ${ANY2API_MODEL_HEALTH_WINDOW:24h}
     probe-freshness: ${ANY2API_MODEL_PROBE_FRESHNESS:30m}
     scheduled-probe-batch-size: ${ANY2API_MODEL_PROBE_BATCH_SIZE:5}
+    ready-success-rate-threshold: ${ANY2API_MODEL_READY_SUCCESS_RATE:90}
+    ready-p95-threshold: ${ANY2API_MODEL_READY_P95:60s}
   observability:
     operation-retention: ${ANY2API_OBSERVABILITY_OPERATION_RETENTION:30d}
     usage-retention: ${ANY2API_OBSERVABILITY_USAGE_RETENTION:90d}
@@ -92,6 +94,14 @@ any2api:
     login-pow-difficulty: ${ANY2API_LOGIN_POW_DIFFICULTY:18}
   automation:
     base-url: ${AUTOMATION_BASE_URL:http://localhost:8090}
+  temp-mail:
+    api-base: ${ANY2API_AUTOMATION_MAIL_API_BASE:}
+    admin-password: ${ANY2API_AUTOMATION_MAIL_ADMIN_PASSWORD:}
+    site-password: ${ANY2API_AUTOMATION_MAIL_SITE_PASSWORD:}
+    domains: ${ANY2API_AUTOMATION_MAIL_DOMAINS:${ANY2API_AUTOMATION_MAIL_DOMAIN:}}
+    poll-seconds: ${ANY2API_AUTOMATION_MAIL_POLL_SECONDS:4}
+    message-timeout-seconds: ${ANY2API_AUTOMATION_MAIL_TIMEOUT_SECONDS:240}
+    request-timeout-seconds: ${ANY2API_AUTOMATION_MAIL_REQUEST_TIMEOUT_SECONDS:30}
   provider:
     deepseek:
       base-url: ${ANY2API_PROVIDER_DEEPSEEK_BASE_URL:https://chat.deepseek.com}

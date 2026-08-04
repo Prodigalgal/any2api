@@ -34,7 +34,9 @@ class LifecycleOperationExecutorTest {
             eq("mimo"), eq("reauthenticate"), anyMap(), any(OperationContext.class)))
             .thenReturn(Mono.just(mapper.createObjectNode().put("healthy", true)));
 
-        new LifecycleOperationExecutor(registry, automation)
+        var settings = org.mockito.Mockito.mock(
+            com.any2api.settings.RuntimeSettingsService.class);
+        new LifecycleOperationExecutor(registry, automation, settings)
             .execute("mimo", "reauthenticate", credential, metadata, proxyPool)
             .block();
 

@@ -3,6 +3,7 @@ package com.any2api.provider;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -213,7 +214,13 @@ class InferenceCoordinatorTest {
             new ModelRuntimeGuard(
                 new Any2ApiProperties(),
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
-            new UsageNormalizer());
+            new UsageNormalizer(), callableAvailability());
+    }
+
+    private ModelAvailabilityGuard callableAvailability() {
+        var availability = mock(ModelAvailabilityGuard.class);
+        when(availability.requireCallable(anyString(), anyString())).thenReturn(Mono.empty());
+        return availability;
     }
 
     private LeasedProviderAccount leased(String providerId) {

@@ -5,6 +5,7 @@ import {
   ContentCopyOutlined,
   DeleteOutlineOutlined,
   KeyOutlined,
+  InfoOutlined,
   RefreshOutlined,
 } from "@mui/icons-material";
 import {
@@ -38,6 +39,7 @@ import {
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   api,
   providerOptions,
@@ -191,7 +193,7 @@ function ApiKeyRow({
   return (
     <TableRow hover>
       <TableCell>
-        <Typography noWrap sx={{ fontWeight: 700, fontSize: 12.5 }}>{apiKey.name}</Typography>
+        <Typography component={Link} href={`/api-keys/${apiKey.id}`} noWrap sx={{ display: "block", color: "text.primary", textDecoration: "none", fontWeight: 700, fontSize: 12.5, "&:hover": { color: "primary.main" } }}>{apiKey.name}</Typography>
         <Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{formatTime(apiKey.createdAt)}</Typography>
       </TableCell>
       <TableCell>
@@ -235,6 +237,11 @@ function ApiKeyRow({
         />
       </TableCell>
       <TableCell align="right">
+        <Tooltip title="密钥详情">
+          <IconButton component={Link} href={`/api-keys/${apiKey.id}`}>
+            <InfoOutlined sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
         <Tooltip title="删除密钥">
           <span>
             <IconButton color="error" disabled={removing} onClick={onDelete}>

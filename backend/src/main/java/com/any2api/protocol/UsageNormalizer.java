@@ -8,8 +8,8 @@ import reactor.core.publisher.Flux;
 
 @Component
 public final class UsageNormalizer {
-    private static final long PLAUSIBILITY_RATIO = 8;
-    private static final long PLAUSIBILITY_SLACK = 512;
+    private static final long PLAUSIBILITY_RATIO = 4;
+    private static final long PLAUSIBILITY_SLACK = 128;
 
     public Flux<CanonicalEvent> normalize(CanonicalRequest request, Flux<CanonicalEvent> events) {
         return Flux.defer(() -> {
@@ -48,7 +48,10 @@ public final class UsageNormalizer {
                         reported == null || !inputTrusted ? 0
                             : Math.min(reported.inputTokens(),
                                 Math.max(0, reported.cacheReadTokens())),
-                        completeUpstream ? UsageSource.UPSTREAM : UsageSource.ESTIMATED);
+                        completeUpstream ? UsageSource.UPSTREAM : UsageSource.ESTIMATED,
+                        reported == null ? 0 : reported.rawInputTokens(),
+                        reported == null ? 0 : reported.rawOutputTokens(),
+                        reported == null ? 0 : reported.rawCacheReadTokens());
                     var terminal = new CanonicalEvent.Completed(
                         completed.schemaVersion(), completed.requestId(),
                         completed.sequenceNumber() + 1, completed.finishReason());

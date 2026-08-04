@@ -7,12 +7,14 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 import java.util.regex.Pattern;
+import com.any2api.observability.RequestIdWebFilter;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
@@ -51,7 +53,15 @@ public class PublicApiKeyWebFilter implements WebFilter {
             .flatMap(grant -> {
                 if (grant.isEmpty()) {
                     exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                    return exchange.getResponse().setComplete();
+                    exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                    var requestId = RequestIdWebFilter.get(exchange);
+                    var body = ("{\"error\":{\"type\":\"authentication_error\","
+                        + "\"code\":\"invalid_api_key\",\"message\":\"invalid API key\","
+                        + "\"param\":null,\"retryable\":false,\"provider\":null,"
+                        + "\"model\":null,\"request_id\":\"" + requestId + "\"}}")
+                        .getBytes(StandardCharsets.UTF_8);
+                    return exchange.getResponse().writeWith(Mono.just(
+                        exchange.getResponse().bufferFactory().wrap(body)));
                 }
                 exchange.getAttributes().put(ApiKeyAuthorization.GRANT_ATTRIBUTE, grant.get());
                 return chain.filter(exchange);

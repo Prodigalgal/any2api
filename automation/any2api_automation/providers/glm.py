@@ -12,6 +12,7 @@ import httpx
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
+    flow_max_attempts,
     prepare_registration,
     required,
     strong_password,
@@ -144,7 +145,7 @@ async def _run_registration_browser(
     password: str,
     trace: RegistrationTrace,
 ) -> BrowserResult:
-    attempts = max(1, min(8, settings().glm_registration_browser_attempts))
+    attempts = flow_max_attempts(payload, settings().glm_registration_browser_attempts, 8)
     for attempt in range(1, attempts + 1):
         logger.info("GLM registration browser attempt attempt=%s/%s", attempt, attempts)
         try:

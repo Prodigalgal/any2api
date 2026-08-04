@@ -105,4 +105,17 @@ class CanonicalRequestParserTest {
             .isInstanceOf(OpenAiRequestException.class)
             .hasMessageContaining("cannot be supplied together");
     }
+
+    @Test
+    void rejectsReasoningEffortAbovePublishedHighMaximum() {
+        var raw = mapper.createObjectNode()
+            .put("model", "qwen/qwen3.7-plus")
+            .put("reasoning_effort", "max");
+        raw.putArray("messages").addObject().put("role", "user").put("content", "hello");
+
+        assertThatThrownBy(() -> parser.parse(
+            CanonicalRequest.Protocol.CHAT_COMPLETIONS, route, raw))
+            .isInstanceOf(OpenAiRequestException.class)
+            .hasMessageContaining("must be one of");
+    }
 }

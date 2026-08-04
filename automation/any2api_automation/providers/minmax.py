@@ -17,7 +17,13 @@ import httpx
 from curl_cffi.requests import Session as CurlSession
 
 from ..config import settings as core_settings
-from ..lifecycle.account import credential, prepare_registration, required
+from ..lifecycle.account import (
+    credential,
+    flow_max_attempts,
+    mail_client,
+    prepare_registration,
+    required,
+)
 from ..lifecycle.browser import (
     BrowserResult,
     click_first,
@@ -27,7 +33,7 @@ from ..lifecycle.browser import (
     first_visible,
     run_browser_flow,
 )
-from ..lifecycle.mail import Mailbox, TempMailClient
+from ..lifecycle.mail import Mailbox
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from .base import AutomationProvider, AutomationProviderManifest
 from .minmax_settings import settings
@@ -59,16 +65,24 @@ class MinmaxAutomationProvider(AutomationProvider):
         ):
             raise RuntimeError("MinMax overseas registration requires the CF dynamic proxy")
         mail, mailbox, password = await prepare_registration(payload)
-        result = await asyncio.to_thread(
-            run_browser_flow,
-            lambda page, context, backend, proxy_url: _account_browser_flow(
-                page, context, backend, mail, mailbox, password
-            ),
-            preferred=self.manifest.browser_backend,
-            fallback=self.manifest.fallback_backend,
-            payload=browser_payload,
-        )
-        return result.response()
+        attempts = flow_max_attempts(payload, 1)
+        last_error: Exception | None = None
+        for _ in range(attempts):
+            try:
+                result = await asyncio.to_thread(
+                    run_browser_flow,
+                    lambda page, context, backend, proxy_url: _account_browser_flow(
+                        page, context, backend, mail, mailbox, password
+                    ),
+                    preferred=self.manifest.browser_backend,
+                    fallback=self.manifest.fallback_backend,
+                    payload=browser_payload,
+                )
+                return result.response()
+            except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
+                last_error = error
+        assert last_error is not None
+        raise last_error
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = settings()
@@ -78,7 +92,7 @@ class MinmaxAutomationProvider(AutomationProvider):
             "proxy_reject_redirect_hosts": ["minimaxi.com"],
         }
         current = credential(payload)
-        mail = TempMailClient()
+        mail = mail_client(payload)
         mailbox = Mailbox(required(current, "email"), required(current, "mail_jwt"))
         result = await asyncio.to_thread(
             run_browser_flow,

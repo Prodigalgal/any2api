@@ -184,6 +184,12 @@ export type RegistrationJob = {
   concurrency: number;
   attemptIntervalSeconds: number;
   roundIntervalSeconds: number;
+  attemptTimeoutSeconds: number;
+  flowMaxAttempts: number;
+  maxConsecutiveFailureBatches: number;
+  proxyPolicy: RegistrationProxyPolicy;
+  headless: boolean;
+  mailDomain: string;
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
   attempts: number;
@@ -202,6 +208,7 @@ export type RegistrationJob = {
 };
 
 export type CaptchaAiMode = "AUTO" | "INTERNAL" | "EXTERNAL";
+export type RegistrationProxyPolicy = "PROVIDER_DEFAULT" | "DIRECT" | "REQUIRED_POOL";
 
 export type OperationEvent = {
   id: string;
@@ -220,21 +227,6 @@ export type OperationEvent = {
   durationMs: number;
   startedAt: string;
   finishedAt: string | null;
-};
-
-export type ObservabilitySummary = {
-  requestCount: number;
-  successCount: number;
-  failureCount: number;
-  p95DurationMs: number;
-  runningOperations: number;
-  operationFailures: Array<{
-    providerId: string;
-    operation: string;
-    stage: string;
-    errorCode: string | null;
-    count: number;
-  }>;
 };
 
 export type UsageEvent = {
@@ -258,6 +250,28 @@ export type UsageEvent = {
   ttfbMs: number;
   generationMs: number;
   createdAt: string;
+};
+
+export type RequestLogPage = {
+  items: UsageEvent[];
+  totalElements: number;
+  page: number;
+  size: number;
+  totalPages: number;
+};
+
+export type RequestLogDetail = {
+  request: UsageEvent;
+  input: unknown;
+  output: unknown;
+};
+
+export type OperationLogPage = {
+  items: OperationEvent[];
+  totalElements: number;
+  page: number;
+  size: number;
+  totalPages: number;
 };
 
 export type ProxyPool = {
@@ -295,6 +309,67 @@ export type DistributionApiKey = {
 export type CreatedDistributionApiKey = {
   key: DistributionApiKey;
   secret: string;
+};
+
+export type ApiKeyUsageWindow = {
+  requestCount: number;
+  attemptCount: number;
+  successCount: number;
+  failureCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  p50DurationMs: number;
+  p95DurationMs: number;
+  lastUsedAt: string | null;
+};
+
+export type ApiKeyDetail = {
+  key: DistributionApiKey;
+  lifetime: ApiKeyUsageWindow;
+  last24Hours: ApiKeyUsageWindow;
+  last7Days: ApiKeyUsageWindow;
+  last30Days: ApiKeyUsageWindow;
+  modelUsage: Array<{
+    providerId: string;
+    modelId: string;
+    requestCount: number;
+    successCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    p95DurationMs: number;
+    lastUsedAt: string | null;
+  }>;
+};
+
+export type TempMailSettings = {
+  apiBase: string;
+  adminPassword: string;
+  sitePassword: string;
+  domains: string[];
+  pollSeconds: number;
+  messageTimeoutSeconds: number;
+  requestTimeoutSeconds: number;
+};
+
+export type RegistrationDefaults = {
+  target: number;
+  maxAttempts: number;
+  concurrency: number;
+  attemptIntervalSeconds: number;
+  roundIntervalSeconds: number;
+  attemptTimeoutSeconds: number;
+  flowMaxAttempts: number;
+  maxConsecutiveFailureBatches: number;
+  proxyPolicy: RegistrationProxyPolicy;
+  headless: boolean;
+  aiCaptchaEnabled: boolean;
+  aiCaptchaMode: CaptchaAiMode;
+};
+
+export type SystemSettings = {
+  tempMail: TempMailSettings;
+  registrationDefaults: RegistrationDefaults;
 };
 
 async function getJson<T>(url: string): Promise<T> {
@@ -406,12 +481,23 @@ export const api = {
   registrationJobEvents: (id: string) => adminJson<OperationEvent[]>(
     `/api/admin/v1/registration-jobs/${id}/events`,
   ),
-  observabilitySummary: () => adminJson<ObservabilitySummary>(
-    "/api/admin/v1/observability/summary",
+  requestLogs: (query: Record<string, string | number>) => {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== "") params.set(key, String(value));
+    });
+    return adminJson<RequestLogPage>(`/api/admin/v1/requests?${params.toString()}`);
+  },
+  requestLogDetail: (requestId: string, attempt: number) => adminJson<RequestLogDetail>(
+    `/api/admin/v1/requests/${encodeURIComponent(requestId)}/attempts/${attempt}`,
   ),
-  usageEvents: (limit = 100) => adminJson<UsageEvent[]>(
-    `/api/admin/v1/observability/usage?limit=${limit}`,
-  ),
+  operationLogs: (query: Record<string, string | number>) => {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== "") params.set(key, String(value));
+    });
+    return adminJson<OperationLogPage>(`/api/admin/v1/operations?${params.toString()}`);
+  },
   proxyPools: () => adminJson<ProxyPool[]>("/api/admin/v1/proxy-pools"),
   createProxyPool: (body: Record<string, unknown>) => adminJson<ProxyPool>(
     "/api/admin/v1/proxy-pools", { method: "POST", body: JSON.stringify(body) },
@@ -423,6 +509,7 @@ export const api = {
     `/api/admin/v1/proxy-pools/${id}`, { method: "DELETE" },
   ),
   apiKeys: () => adminJson<DistributionApiKey[]>("/api/admin/v1/api-keys"),
+  apiKeyDetail: (id: string) => adminJson<ApiKeyDetail>(`/api/admin/v1/api-keys/${id}`),
   createApiKey: (body: Record<string, unknown>) => adminJson<CreatedDistributionApiKey>(
     "/api/admin/v1/api-keys", { method: "POST", body: JSON.stringify(body) },
   ),
@@ -432,5 +519,13 @@ export const api = {
   ),
   deleteApiKey: (id: string) => adminJson<void>(
     `/api/admin/v1/api-keys/${id}`, { method: "DELETE" },
+  ),
+  systemSettings: () => adminJson<SystemSettings>("/api/admin/v1/settings"),
+  updateTempMailSettings: (body: TempMailSettings) => adminJson<TempMailSettings>(
+    "/api/admin/v1/settings/temp-mail", { method: "PUT", body: JSON.stringify(body) },
+  ),
+  updateRegistrationDefaults: (body: RegistrationDefaults) => adminJson<RegistrationDefaults>(
+    "/api/admin/v1/settings/registration-defaults",
+    { method: "PUT", body: JSON.stringify(body) },
   ),
 };

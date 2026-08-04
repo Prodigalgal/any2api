@@ -85,6 +85,13 @@ public class ModelsController {
         result.put("max_context_tokens", nullable(model.capabilities(), "max_context_tokens"));
         result.put("max_input_tokens", nullable(model.capabilities(), "max_input_tokens"));
         result.put("max_output_tokens", nullable(model.capabilities(), "max_output_tokens"));
+        result.put("token_limits", Map.of(
+            "max_context_tokens", nullableOrUnknown(model.capabilities(), "max_context_tokens"),
+            "max_input_tokens", nullableOrUnknown(model.capabilities(), "max_input_tokens"),
+            "max_output_tokens", nullableOrUnknown(model.capabilities(), "max_output_tokens"),
+            "source", model.catalogSource(),
+            "confidence", "OFFICIAL".equalsIgnoreCase(model.catalogSource())
+                ? "HIGH" : "BEST_EFFORT"));
         result.put("reasoning", model.capabilities().path("reasoning"));
         result.put("tools", model.capabilities().path("tools"));
         result.put("streaming", model.capabilities().path("streaming").asBoolean(false));
@@ -126,6 +133,11 @@ public class ModelsController {
     private Object nullable(tools.jackson.databind.JsonNode node, String field) {
         var value = node.path(field);
         return value.isMissingNode() || value.isNull() ? null : value;
+    }
+
+    private Object nullableOrUnknown(tools.jackson.databind.JsonNode node, String field) {
+        var value = nullable(node, field);
+        return value == null ? "UNKNOWN" : value;
     }
 
 }

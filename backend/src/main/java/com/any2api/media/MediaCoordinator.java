@@ -41,7 +41,7 @@ public final class MediaCoordinator {
         var handler = handlers.require(request);
         var observed = telemetry.start(new InferenceTelemetryService.InferenceTrace(
             request.requestId(), request.providerId(), request.model(),
-            request.operation().name(), apiKeyId), 1);
+            request.operation().name(), apiKeyId, "INFERENCE", request.rawRequest()), 1);
         return Mono.usingWhen(
             accounts.acquire(request.providerId(), request.model(), account ->
                 handler.supportsAccount(request, account)),
@@ -63,6 +63,7 @@ public final class MediaCoordinator {
             accounts::release,
             (account, ignored) -> accounts.release(account),
             accounts::release)
+            .doOnNext(result -> observed.output(result.result().items()))
             .doOnError(observed::recordError)
             .doFinally(observed::finish)
             .contextWrite(RequestCorrelation.context(request.requestId()));

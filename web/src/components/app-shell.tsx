@@ -9,7 +9,9 @@ import {
   LogoutOutlined,
   LanOutlined,
   KeyOutlined,
-  QueryStatsOutlined,
+  ReceiptLongOutlined,
+  HistoryOutlined,
+  SettingsOutlined,
 } from "@mui/icons-material";
 import {
   AppBar,
@@ -38,9 +40,11 @@ const navigation = [
   ["运行概览", DashboardOutlined, "/"],
   ["账号池", AccountTreeOutlined, "/accounts"],
   ["生命周期", AutorenewOutlined, "/lifecycle"],
-  ["运行观测", QueryStatsOutlined, "/observability"],
+  ["请求记录", ReceiptLongOutlined, "/requests"],
+  ["操作记录", HistoryOutlined, "/operations"],
   ["代理池", LanOutlined, "/proxy-pools"],
   ["分发密钥", KeyOutlined, "/api-keys"],
+  ["系统设置", SettingsOutlined, "/settings"],
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

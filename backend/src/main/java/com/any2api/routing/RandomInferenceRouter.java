@@ -59,7 +59,7 @@ public class RandomInferenceRouter {
         ObjectNode request,
         RandomModelRole role
     ) {
-        return select(protocol, request, role, ApiKeyGrant.unrestricted());
+        return select(protocol, request, role, ApiKeyGrant.unrestricted(), null);
     }
 
     public Mono<RandomSelection> select(
@@ -68,7 +68,18 @@ public class RandomInferenceRouter {
         RandomModelRole role,
         ApiKeyGrant grant
     ) {
-        return Mono.fromCallable(() -> candidatesBlocking(protocol, request, role, grant))
+        return select(protocol, request, role, grant, null);
+    }
+
+    public Mono<RandomSelection> select(
+        CanonicalRequest.Protocol protocol,
+        ObjectNode request,
+        RandomModelRole role,
+        ApiKeyGrant grant,
+        String requestId
+    ) {
+        return Mono.fromCallable(() -> candidatesBlocking(
+                protocol, request, role, grant, requestId))
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
             .flatMapMany(Flux::fromIterable)
             .concatMap(candidate -> {
@@ -88,7 +99,8 @@ public class RandomInferenceRouter {
         CanonicalRequest.Protocol protocol,
         ObjectNode request,
         RandomModelRole role,
-        ApiKeyGrant grant
+        ApiKeyGrant grant,
+        String requestId
     ) {
         requireRandomModel(request);
         var capability = protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
@@ -107,7 +119,7 @@ public class RandomInferenceRouter {
             var raw = request.deepCopy();
             raw.put("model", route.modelId());
             var canonical = parser.parseCandidate(
-                protocol, new ResolvedRoute(route.providerId(), route.modelId()), raw);
+                protocol, new ResolvedRoute(route.providerId(), route.modelId()), raw, requestId);
             try {
                 ProviderRequestValidation.requireSupportedRequest(
                     canonical, provider.manifest(), provider.protocolContract());

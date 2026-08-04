@@ -8,6 +8,8 @@ import reactor.core.publisher.Flux;
 
 @Component
 public final class UsageNormalizer {
+    private static final long PLAUSIBILITY_RATIO = 8;
+    private static final long PLAUSIBILITY_SLACK = 512;
 
     public Flux<CanonicalEvent> normalize(CanonicalRequest request, Flux<CanonicalEvent> events) {
         return Flux.defer(() -> {
@@ -29,17 +31,23 @@ public final class UsageNormalizer {
                     var reported = upstreamUsage.get();
                     var estimatedInput = estimate(bytes(request.rawRequest().toString()));
                     var estimatedOutput = outputBytes.get() == 0 ? 0 : estimate(outputBytes.get());
+                    var inputTrusted = reported != null && reported.inputTokens() > 0
+                        && plausible(reported.inputTokens(), estimatedInput);
+                    var outputTrusted = reported != null && reported.outputTokens() > 0
+                        && plausible(reported.outputTokens(), estimatedOutput);
                     var completeUpstream = reported != null
                         && reported.source() == UsageSource.UPSTREAM
-                        && reported.inputTokens() > 0
-                        && (reported.outputTokens() > 0 || outputBytes.get() == 0);
+                        && inputTrusted
+                        && (outputTrusted || outputBytes.get() == 0);
                     var normalized = new CanonicalEvent.Usage(
                         completed.schemaVersion(), completed.requestId(), completed.sequenceNumber(),
-                        reported != null && reported.inputTokens() > 0
+                        inputTrusted
                             ? reported.inputTokens() : estimatedInput,
-                        reported != null && reported.outputTokens() > 0
+                        outputTrusted
                             ? reported.outputTokens() : estimatedOutput,
-                        reported == null ? 0 : Math.max(0, reported.cacheReadTokens()),
+                        reported == null || !inputTrusted ? 0
+                            : Math.min(reported.inputTokens(),
+                                Math.max(0, reported.cacheReadTokens())),
                         completeUpstream ? UsageSource.UPSTREAM : UsageSource.ESTIMATED);
                     var terminal = new CanonicalEvent.Completed(
                         completed.schemaVersion(), completed.requestId(),
@@ -57,5 +65,11 @@ public final class UsageNormalizer {
 
     private long estimate(long bytes) {
         return Math.max(1, (bytes + 3) / 4);
+    }
+
+    private boolean plausible(long reported, long estimated) {
+        var ceiling = estimated > (Long.MAX_VALUE - PLAUSIBILITY_SLACK) / PLAUSIBILITY_RATIO
+            ? Long.MAX_VALUE : estimated * PLAUSIBILITY_RATIO + PLAUSIBILITY_SLACK;
+        return reported <= ceiling;
     }
 }

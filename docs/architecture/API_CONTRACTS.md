@@ -105,10 +105,11 @@ options return `unknown_provider_option`. Explicit unsupported features return
 protocol so clients can correct a request without querying another endpoint.
 
 Non-streaming and streaming responses normalize token counts. `usage_source=UPSTREAM` means the
-provider returned a complete non-zero counter set; otherwise the gateway estimates from the actual
-canonical input and emitted output and returns `usage_source=ESTIMATED`. Streaming responses emit an
-immediate SSE comment containing the request ID, followed by heartbeat comments until the first
-provider event and throughout long quiet periods.
+provider returned a complete non-zero counter set within a generous bound relative to the public
+request and emitted output. Missing, partial, zero, or implausibly inflated fields are replaced from
+the actual canonical input and emitted output and return `usage_source=ESTIMATED`. Streaming
+responses emit an immediate SSE comment containing the request ID, followed by heartbeat comments
+until the first provider event and throughout long quiet periods.
 
 Every inference plugin publishes a `protocolContract` in
 `GET /api/catalog/v1/providers`. The contract is the machine-readable source of truth for:

@@ -65,6 +65,21 @@ class UsageNormalizerTest {
         assertThat(usage.source()).isEqualTo(UsageSource.ESTIMATED);
     }
 
+    @Test
+    void replacesImplausiblyInflatedFieldsButKeepsReasonableCounters() {
+        var usage = normalizer.normalize(request(), Flux.just(
+            new CanonicalEvent.ResponseStarted(1, "request-id", 0, "response-id"),
+            new CanonicalEvent.OutputTextDelta(1, "request-id", 1, "OK."),
+            new CanonicalEvent.Usage(1, "request-id", 2, 3102, 16, 0),
+            new CanonicalEvent.Completed(1, "request-id", 3, "stop")))
+            .ofType(CanonicalEvent.Usage.class).single().block();
+
+        assertThat(usage).isNotNull();
+        assertThat(usage.inputTokens()).isLessThan(3102);
+        assertThat(usage.outputTokens()).isEqualTo(16);
+        assertThat(usage.source()).isEqualTo(UsageSource.ESTIMATED);
+    }
+
     private CanonicalRequest request() {
         var message = JsonNodeFactory.instance.objectNode()
             .put("role", "user").put("content", "hello");

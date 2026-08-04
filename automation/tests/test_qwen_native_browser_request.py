@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 from pydantic import ValidationError
 
-from any2api_automation.providers.qwen_risk import NativeBrowserRequest
+from any2api_automation.providers.qwen_risk import (
+    NativeBrowserRequest,
+    QwenNativeBrowserTransport,
+)
 
 
 def test_qwen_native_browser_request_accepts_provider_scoped_paths() -> None:
@@ -34,3 +39,36 @@ def test_qwen_native_browser_request_rejects_cross_origin_paths(path: str, refer
             bearer_token="token-value-that-is-long-enough",
             referer_path=referer,
         )
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> None:
+    class FakePage:
+        def is_closed(self) -> bool:
+            return False
+
+        async def evaluate(self, _script: str, payload: dict[str, object]) -> dict[str, object]:
+            assert payload["path"] == "/api/v2/chats/new"
+            return {
+                "status": 200,
+                "contentType": "application/json",
+                "requestId": "request-id",
+                "retryAfter": "",
+                "bodyBase64": base64.b64encode(b'{"data":{"id":"chat"}}').decode(),
+            }
+
+    transport = QwenNativeBrowserTransport()
+    transport._page = FakePage()
+    transport._frontend_version = "current"
+
+    response = await transport.fetch(
+        NativeBrowserRequest(
+            path="/api/v2/chats/new",
+            body="{}",
+            bearer_token="token-value-that-is-long-enough",
+            referer_path="/c/new-chat",
+        )
+    )
+
+    assert response["status"] == 200
+    assert base64.b64decode(response["body_base64"]) == b'{"data":{"id":"chat"}}'

@@ -290,6 +290,7 @@ class QwenNativeBrowserTransport:
             maximum = global_settings().browser_transport_max_buffered_bytes
             payload = {
                 "url": settings().qwen_base_url.rstrip("/") + request.path,
+                "path": request.path,
                 "method": request.method,
                 "body": request.body,
                 "bearerToken": request.bearer_token,

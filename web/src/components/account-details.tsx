@@ -111,7 +111,11 @@ export function AccountDetails({ accountId }: { accountId: string }) {
   const value = detail.data;
   const account = value.account;
   const readiness = stringMetadata(account.metadata, "inference_probe_status") || "未探测";
-  const checking = account.status === "PENDING" || probe.isPending;
+  const eventRunning = events.data?.some((event) => event.status === "RUNNING") ?? false;
+  const checking = probe.isPending || eventRunning;
+  const awaitingRetry = account.status === "PENDING" && !checking;
+  const probeBlocked = checking || awaitingRetry;
+  const displayedReadiness = checking && readiness === "READY" ? "CHECKING" : readiness;
 
   return (
     <PageContainer maxWidth={1480}>
@@ -147,10 +151,10 @@ export function AccountDetails({ accountId }: { accountId: string }) {
                 <Button
                   variant="contained"
                   startIcon={checking ? <CircularProgress size={15} color="inherit" /> : <MonitorHeartOutlined />}
-                  disabled={!probeSupported || checking}
+                  disabled={!probeSupported || probeBlocked}
                   onClick={() => probe.mutate()}
                 >
-                  {checking ? "测活中" : "立即测活"}
+                  {checking ? "测活中" : awaitingRetry ? "待复测" : "立即测活"}
                 </Button>
               </span>
             </Tooltip>
@@ -159,7 +163,9 @@ export function AccountDetails({ accountId }: { accountId: string }) {
       />
 
       {error ? <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert> : null}
-      {probe.isSuccess ? (
+      {probe.isSuccess && readiness === "FAILED" ? (
+        <Alert severity="warning" sx={{ mb: 2 }}>本次测活未通过，账号已退出推理路由并进入自动复测队列。</Alert>
+      ) : probe.isSuccess && account.status === "PENDING" ? (
         <Alert severity="info" sx={{ mb: 2 }}>测活任务已进入生命周期队列，结果将在本页自动更新。</Alert>
       ) : null}
 
@@ -174,7 +180,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
           <SummaryCell label="账号状态">
             <StatusValue status={account.status} error={account.lastError} />
           </SummaryCell>
-          <SummaryCell label="推理就绪"><ReadinessValue value={readiness} /></SummaryCell>
+          <SummaryCell label="推理就绪"><ReadinessValue value={displayedReadiness} /></SummaryCell>
           <SummaryCell label="累计请求" value={formatNumber(account.requestCount)} />
           <SummaryCell label="成功请求" value={formatNumber(account.successCount)} tone="success.main" />
           <SummaryCell label="连续失败" value={formatNumber(account.failureCount)} tone={account.failureCount ? "error.main" : undefined} />
@@ -201,7 +207,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
             <Switch
               size="small"
               checked={account.enabled}
-              disabled={update.isPending || checking}
+              disabled={update.isPending || probeBlocked}
               onChange={(_, enabled) => update.mutate(enabled)}
               slotProps={{ input: { "aria-label": "账号启用状态" } }}
             />
@@ -214,7 +220,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
               <Button
                 size="small"
                 startIcon={<LoginOutlined />}
-                disabled={reauthenticate.isPending || checking}
+                disabled={reauthenticate.isPending || probeBlocked}
                 onClick={() => reauthenticate.mutate()}
               >
                 重新认证

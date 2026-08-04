@@ -502,12 +502,14 @@ const AccountRow = memo(function AccountRow({
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title={probeSupported ? "立即测活" : "该厂商不支持测活"}>
+          <Tooltip title={!probeSupported
+            ? "该厂商不支持测活"
+            : account.status === "PENDING" ? "等待当前生命周期任务" : "立即测活"}>
             <span>
               <IconButton
                 size="small"
                 aria-label="立即测活"
-                disabled={probing || !probeSupported}
+                disabled={probing || !probeSupported || account.status === "PENDING"}
                 onClick={onProbe}
               >
                 <MonitorHeartOutlined sx={{ fontSize: 18 }} />

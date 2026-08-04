@@ -180,32 +180,17 @@ def _qwen_api_browser(
     if operation == "reauthenticate":
         email = required(current, "email")
         password = required(current, "password")
-        url = f"{base_url}/api/v1/auths/signin"
-        for candidate in (hashlib.sha256(password.encode()).hexdigest(), password):
-            body = f'{{"email":"{email}","password":"{candidate}"}}'
-            risk = _risk_headers_from_page(page, url, "POST", body)
-            response = httpx.post(
-                url,
-                json={"email": email, "password": candidate},
-                headers={"source": config.qwen_source, **risk},
-                proxy=proxy_url or None,
-                timeout=60,
+        token = _signin_with_current_protocol(page, email, password, proxy_url)
+        if token:
+            return BrowserResult(
+                email,
+                email,
+                {},
+                metadata={
+                    "healthy": True,
+                    "credential_patch": {**current, "token": token},
+                },
             )
-            if response.is_success:
-                data = response.json()
-                token = data.get("token") or (data.get("data") or {}).get("token")
-                if token:
-                    return BrowserResult(
-                        email,
-                        email,
-                        {},
-                        metadata={
-                            "healthy": True,
-                            "credential_patch": {**current, "token": token},
-                        },
-                    )
-            if response.status_code not in {400, 401, 403}:
-                response.raise_for_status()
         return BrowserResult(
             email,
             email,
@@ -379,26 +364,40 @@ def _random_display_name() -> str:
 
 
 def _signin_sync(page, email: str, password: str, proxy_url: str = "") -> str:
-    config = settings()
-    url = f"{config.qwen_base_url.rstrip('/')}/api/v1/auths/signin"
-    for candidate in (hashlib.sha256(password.encode()).hexdigest(), password):
-        body = f'{{"email":"{email}","password":"{candidate}"}}'
-        risk = _risk_headers_from_page(page, url, "POST", body)
-        response = httpx.post(
-            url,
-            json={"email": email, "password": candidate},
-            headers={"source": config.qwen_source, **risk},
-            proxy=proxy_url or None,
-            timeout=60,
-        )
-        if response.is_success:
-            data = response.json()
-            token = data.get("token") or (data.get("data") or {}).get("token")
-            if token:
-                return str(token)
-        if response.status_code not in {400, 401, 403}:
-            response.raise_for_status()
+    token = _signin_with_current_protocol(page, email, password, proxy_url)
+    if token:
+        return token
     raise RuntimeError("Qwen post-registration sign-in failed")
+
+
+def _signin_with_current_protocol(
+    page, email: str, password: str, proxy_url: str = ""
+) -> str | None:
+    config = settings()
+    base_url = config.qwen_base_url.rstrip("/")
+    candidates = (hashlib.sha256(password.encode()).hexdigest(), password)
+    for path in ("/api/v2/auths/signin", "/api/v1/auths/signin"):
+        url = base_url + path
+        for candidate in candidates:
+            body = f'{{"email":"{email}","password":"{candidate}"}}'
+            risk = _risk_headers_from_page(page, url, "POST", body)
+            response = httpx.post(
+                url,
+                json={"email": email, "password": candidate},
+                headers={"source": config.qwen_source, **risk},
+                proxy=proxy_url or None,
+                timeout=60,
+            )
+            if response.is_success:
+                data = response.json()
+                token = data.get("token") or (data.get("data") or {}).get("token")
+                if token:
+                    return str(token)
+            if response.status_code not in {400, 401, 403, 404, 405}:
+                response.raise_for_status()
+            if response.status_code in {404, 405}:
+                break
+    return None
 
 
 def _risk_headers_from_page(page, url: str, method: str, body: str) -> dict[str, str]:

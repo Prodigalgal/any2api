@@ -39,6 +39,7 @@ final class QwenRequestMapper {
     ) {
         var messages = foldSystemMessages(preparedMessages);
         var ids = messages.stream().map(ignored -> UUID.randomUUID().toString()).toList();
+        var responsePlaceholderId = UUID.randomUUID().toString();
         var upstream = mapper.createArrayNode();
         var feature = featureConfig(request);
         var timestamp = java.time.Instant.now().getEpochSecond();
@@ -62,7 +63,7 @@ final class QwenRequestMapper {
                 message.put("parentId", ids.get(index - 1)).put("parent_id", ids.get(index - 1));
             }
             var children = message.putArray("childrenIds");
-            if (index + 1 < ids.size()) children.add(ids.get(index + 1));
+            children.add(index + 1 < ids.size() ? ids.get(index + 1) : responsePlaceholderId);
             message.set("files", mapper.valueToTree(source.files()));
             var models = message.putArray("models");
             if ("user".equals(role)) models.add(request.model());
@@ -75,6 +76,8 @@ final class QwenRequestMapper {
             .put("version", properties.getRequestVersion())
             .put("incremental_output", true)
             .put("model", request.model())
+            .put("chatId", chatId)
+            .put("parentId", "")
             .put("chat_id", chatId)
             .put("chat_mode", "normal")
             .putNull("parent_id")

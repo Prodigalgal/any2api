@@ -51,6 +51,33 @@ class QwenProtocolTest {
     }
 
     @Test
+    void transportMatchesCurrentQwenWebSurfaces() {
+        var risk = mock(QwenRiskHeaderClient.class);
+        var properties = new QwenProperties();
+        var body = "{\"stream\":true}";
+        var completionPath = "/api/v2/chat/completions?chat_id=chat-1";
+        when(risk.generate(properties.getBaseUrl() + completionPath, "POST", body))
+            .thenReturn(Mono.just(Map.of("bx-v", "2.5.37", "version", "0.2.81")));
+        when(risk.generate(properties.getBaseUrl() + "/api/v2/chats/new", "POST", body))
+            .thenReturn(Mono.just(Map.of("bx-v", "2.5.37", "version", "0.2.81")));
+        var transport = new QwenTransportRequests(properties, risk);
+
+        StepVerifier.create(transport.createNewChat("/api/v2/chats/new", body, 90))
+            .assertNext(request -> assertThat(request.headers())
+                .containsEntry("Accept", "application/json, text/plain, */*")
+                .containsEntry("Referer", "https://chat.qwen.ai/c/new-chat")
+                .doesNotContainKey("X-Accel-Buffering"))
+            .verifyComplete();
+        StepVerifier.create(transport.createCompletion(completionPath, body, 90, "chat-1"))
+            .assertNext(request -> assertThat(request.headers())
+                .containsEntry("Accept", "application/json")
+                .containsEntry("Referer", "https://chat.qwen.ai/c/chat-1")
+                .containsEntry("X-Accel-Buffering", "no")
+                .containsEntry("bx-v", "2.5.37"))
+            .verifyComplete();
+    }
+
+    @Test
     void normalizesAliOssRegionForV4Signing() {
         assertThat(QwenMediaUploader.normalizeSigningRegion("oss-ap-southeast-1"))
             .isEqualTo("ap-southeast-1");
@@ -92,11 +119,43 @@ class QwenProtocolTest {
         events.addAll(decoder.decode("{\"choices\":[{\"delta\":{\"phase\":\"answer\",\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}"));
 
         var feature = body.path("messages").get(0).path("feature_config");
+        assertThat(body.path("chatId").asText()).isEqualTo("chat-1");
+        assertThat(body.path("parentId").asText()).isEmpty();
+        assertThat(body.path("messages").get(0).path("childrenIds")).hasSize(1);
         assertThat(feature.path("thinking_enabled").asBoolean()).isTrue();
         assertThat(feature.path("auto_search").asBoolean()).isTrue();
         assertThat(events).anyMatch(CanonicalEvent.ReasoningDelta.class::isInstance)
             .anyMatch(CanonicalEvent.OutputTextDelta.class::isInstance)
             .anyMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
+    void decodesTheCurrentCapturedThinkingSummaryAndAnswerStream() {
+        var decoder = new QwenEventDecoder("capture");
+        var events = new java.util.ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode("""
+            {"response.created":{"chat_id":"chat","response_id":"response"}}
+            """));
+        events.addAll(decoder.decode("""
+            {"choices":[{"delta":{"role":"assistant","content":"",
+            "phase":"thinking_summary","status":"finished"}}]}
+            """));
+        events.addAll(decoder.decode("""
+            {"choices":[{"delta":{"role":"assistant","content":"CAPTURE_OK",
+            "phase":"answer","status":"typing"}}],"usage":{"input_tokens":1434,
+            "output_tokens":167,"prompt_tokens_details":{"cached_tokens":0}}}
+            """));
+        events.addAll(decoder.decode("""
+            {"choices":[{"delta":{"content":"","role":"assistant",
+            "status":"finished","phase":"answer"}}]}
+            """));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta text
+            && text.delta().equals("CAPTURE_OK"));
+        assertThat(events).anyMatch(CanonicalEvent.Usage.class::isInstance);
+        assertThat(events).anyMatch(CanonicalEvent.Completed.class::isInstance);
+        assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
     }
 
     @Test

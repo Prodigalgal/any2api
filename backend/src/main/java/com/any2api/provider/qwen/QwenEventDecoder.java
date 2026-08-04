@@ -78,7 +78,7 @@ final class QwenEventDecoder {
         var phase = delta.path("phase").asText("");
         var content = delta.path("content").asText(choice.path("text").asText(""));
         if (!content.isEmpty()) {
-            if (List.of("think", "thinking", "reason", "reasoning").contains(phase)) {
+            if (phase.startsWith("think") || List.of("reason", "reasoning").contains(phase)) {
                 start(output);
                 output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), content));
                 emittedOutput = true;

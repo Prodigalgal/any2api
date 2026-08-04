@@ -179,7 +179,7 @@ public final class QwenProvider implements InferenceProvider {
                         var bodyText = mapper.writeValueAsString(body);
                         var decoder = new QwenEventDecoder(request.requestId());
                         var sse = new SseDataDecoder();
-                        return requests.create("POST", path, bodyText, 300)
+                        return requests.createCompletion(path, bodyText, 300, chatId)
                             .flatMapMany(command -> transport.stream(session.id(), command))
                             .concatMapIterable(sse::decode)
                             .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
@@ -258,7 +258,7 @@ public final class QwenProvider implements InferenceProvider {
         body.putArray("models").add(model);
         var bodyText = mapper.writeValueAsString(body);
         var path = "/api/v2/chats/new";
-        return requests.create("POST", path, bodyText, 120)
+        return requests.createNewChat(path, bodyText, 120)
             .flatMap(command -> transport.request(session.id(), command))
             .flatMap(response -> {
                 var json = json(response);

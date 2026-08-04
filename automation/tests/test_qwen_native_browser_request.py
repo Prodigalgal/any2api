@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+from typing import ClassVar, Self
 from unittest.mock import AsyncMock
 
 import pytest
@@ -59,25 +61,24 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
         def is_closed(self) -> bool:
             return False
 
-        async def evaluate(self, script: str, payload: dict[str, object]) -> dict[str, object]:
-            assert "credentials: 'same-origin'" in script
-            assert payload["path"] == "/api/v2/chats/new"
-            assert str(payload["timezone"]).isascii()
-            assert str(payload["timezone"]).endswith("GMT+0800")
-            return {
-                "status": 200,
-                "contentType": "application/json",
-                "requestId": "request-id",
-                "retryAfter": "",
-                "bodyBase64": base64.b64encode(b'{"data":{"id":"chat"}}').decode(),
-            }
-
     transport = QwenNativeBrowserTransport()
     transport._page = FakePage()
     transport._activate_account = AsyncMock()
     transport._ensure_baxia_ready = AsyncMock()
     transport._frontend_version = "current"
     transport._prepare_authenticated_surface = AsyncMock()
+    transport._fetch_in_main_world = AsyncMock(
+        return_value=(
+            {
+                "status": 200,
+                "contentType": "application/json",
+                "requestId": "request-id",
+                "retryAfter": "",
+                "bodyBase64": base64.b64encode(b'{"data":{"id":"chat"}}').decode(),
+            },
+            b'{"data":{"id":"chat"}}',
+        )
+    )
 
     response = await transport.fetch(
         NativeBrowserRequest(
@@ -90,6 +91,94 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
     assert response["status"] == 200
     assert base64.b64decode(response["body_base64"]) == b'{"data":{"id":"chat"}}'
+    payload = transport._fetch_in_main_world.await_args.args[0]
+    assert payload["path"] == "/api/v2/chats/new"
+    assert str(payload["timezone"]).isascii()
+    assert str(payload["timezone"]).endswith("GMT+0800")
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_fetches_in_the_baxia_main_world() -> None:
+    body = b'{"data":{"id":"chat"}}'
+
+    class FakeRequest:
+        method = "POST"
+        headers: ClassVar = {"x-request-id": "request-id"}
+
+        async def all_headers(self) -> dict[str, str]:
+            return {
+                "x-request-id": "request-id",
+                "bx-ua": "uab",
+                "bx-umidtoken": "umid",
+                "bx-v": "2.5.37",
+            }
+
+    class FakeResponse:
+        url = "https://chat.qwen.ai/api/v2/chats/new"
+        status = 200
+        request = FakeRequest()
+
+        async def body(self) -> bytes:
+            return body
+
+        async def all_headers(self) -> dict[str, str]:
+            return {"content-type": "application/json", "x-request-id": "upstream-id"}
+
+    class FakeResponseInfo:
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        @property
+        def value(self):
+            async def resolve() -> FakeResponse:
+                return FakeResponse()
+
+            return resolve()
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.script = ""
+
+        def expect_response(self, predicate, **_kwargs: object) -> FakeResponseInfo:
+            assert predicate(FakeResponse())
+            return FakeResponseInfo()
+
+        async def add_script_tag(self, *, content: str) -> None:
+            self.script = content
+
+        async def evaluate(self, _script: str, _marker_id: str) -> None:
+            return None
+
+    page = FakePage()
+    transport = QwenNativeBrowserTransport()
+    transport._page = page
+    payload = {
+        "url": "https://chat.qwen.ai/api/v2/chats/new",
+        "path": "/api/v2/chats/new",
+        "method": "POST",
+        "body": "{}",
+        "bearerToken": "token-value-that-is-long-enough",
+        "useBearer": True,
+        "referrer": "https://chat.qwen.ai/c/new-chat",
+        "timeoutMs": 60_000,
+        "version": "current",
+        "requestId": "request-id",
+        "timezone": "Wed Aug 05 2026 12:00:00 GMT+0800",
+    }
+
+    result, actual_body = await transport._fetch_in_main_world(payload)
+
+    assert "fetch(request.url" in page.script
+    assert "token-value-that-is-long-enough" not in page.script
+    encoded_match = re.search(r"atob\('([^']+)'\)", page.script)
+    assert encoded_match is not None
+    encoded = encoded_match.group(1)
+    assert json.loads(base64.b64decode(encoded))["bearerToken"] == payload["bearerToken"]
+    assert result["requestId"] == "upstream-id"
+    assert actual_body == body
 
 
 @pytest.mark.asyncio
@@ -162,27 +251,37 @@ async def test_qwen_native_transport_solves_and_replays_one_punished_request() -
     completed = b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
 
     class FakePage:
-        def __init__(self) -> None:
-            self.calls = 0
-
         def is_closed(self) -> bool:
             return False
-
-        async def evaluate(self, _script: str, _payload: dict[str, object]) -> dict[str, object]:
-            self.calls += 1
-            body = punished if self.calls == 1 else completed
-            return {
-                "status": 200,
-                "contentType": "application/json" if self.calls == 1 else "text/event-stream",
-                "requestId": "request-id",
-                "retryAfter": "",
-                "bodyBase64": base64.b64encode(body).decode(),
-            }
 
     transport = QwenNativeBrowserTransport()
     transport._page = FakePage()
     transport._frontend_version = "current"
     transport._prepare_authenticated_surface = AsyncMock()
+    transport._fetch_in_main_world = AsyncMock(
+        side_effect=[
+            (
+                {
+                    "status": 200,
+                    "contentType": "application/json",
+                    "requestId": "request-id",
+                    "retryAfter": "",
+                    "bodyBase64": base64.b64encode(punished).decode(),
+                },
+                punished,
+            ),
+            (
+                {
+                    "status": 200,
+                    "contentType": "text/event-stream",
+                    "requestId": "request-id",
+                    "retryAfter": "",
+                    "bodyBase64": base64.b64encode(completed).decode(),
+                },
+                completed,
+            ),
+        ]
+    )
     transport._challenge_solver.solve = AsyncMock(
         return_value=type("Outcome", (), {"attempts": 1, "diagnostic": "ok"})()
     )
@@ -197,7 +296,7 @@ async def test_qwen_native_transport_solves_and_replays_one_punished_request() -
         )
     )
 
-    assert transport._page.calls == 2
+    assert transport._fetch_in_main_world.await_count == 2
     transport._challenge_solver.solve.assert_awaited_once_with(transport._page, punish_url)
     transport._load_page_runtime.assert_awaited_once()
     assert base64.b64decode(response["body_base64"]) == completed

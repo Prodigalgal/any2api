@@ -16,6 +16,7 @@ from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from patchright.async_api import TimeoutError as AsyncPlaywrightTimeoutError
 from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from pydantic import BaseModel, Field, model_validator
@@ -327,69 +328,99 @@ class QwenNativeBrowserTransport:
             "timeoutMs": request.timeout_seconds * 1000,
             "version": self._frontend_version,
             "requestId": str(uuid4()),
-            "maximumBytes": maximum,
             "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
         }
-        result = await self._page.evaluate(
-            r"""async (request) => {
-                  const controller = new AbortController();
-                  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
-                  try {
-                    const headers = {
-                      'Accept': request.path.includes('/chat/completions')
-                        ? 'application/json'
-                        : 'application/json, text/plain, */*',
-                      'Content-Type': 'application/json',
-                      'source': 'web',
-                      'Timezone': request.timezone,
-                      'X-Request-Id': request.requestId,
-                      'version': request.version
-                    };
-                    if (request.useBearer) {
-                      headers['Authorization'] = 'Bearer ' + request.bearerToken;
-                    }
-                    if (request.path.includes('/chat/completions')) {
-                      headers['X-Accel-Buffering'] = 'no';
-                    }
-                    const response = await fetch(request.url, {
-                      method: request.method,
-                      headers,
-                      body: request.method === 'GET' ? undefined : request.body,
-                      credentials: 'same-origin',
-                      cache: 'no-store',
-                      referrer: request.referrer,
-                      signal: controller.signal
-                    });
-                    const contentLength = Number(response.headers.get('content-length') || 0);
-                    if (contentLength > request.maximumBytes) {
-                      throw new Error('Qwen browser response exceeds the buffered byte limit');
-                    }
-                    const bytes = new Uint8Array(await response.arrayBuffer());
-                    if (bytes.length > request.maximumBytes) {
-                      throw new Error('Qwen browser response exceeds the buffered byte limit');
-                    }
-                    let binary = '';
-                    for (let offset = 0; offset < bytes.length; offset += 32768) {
-                      binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
-                    }
-                    return {
-                      status: response.status,
-                      contentType: response.headers.get('content-type') || 'application/octet-stream',
-                      requestId: response.headers.get('x-request-id') || request.requestId,
-                      retryAfter: response.headers.get('retry-after') || '',
-                      bodyBase64: btoa(binary)
-                    };
-                  } finally {
-                    clearTimeout(timeout);
-                  }
-                }""",
-            payload,
-        )
-        encoded = str(result.get("bodyBase64") or "")
-        body = base64.b64decode(encoded, validate=True)
+        result, body = await self._fetch_in_main_world(payload)
         if len(body) > maximum:
             raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
         return result, body
+
+    async def _fetch_in_main_world(
+        self,
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], bytes]:
+        encoded = base64.b64encode(
+            json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode()
+        ).decode()
+        marker_id = f"qwen-fetch-{payload['requestId']}"
+        script = f"""(() => {{
+          const bytes = Uint8Array.from(atob('{encoded}'), value => value.charCodeAt(0));
+          const request = JSON.parse(new TextDecoder().decode(bytes));
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+          const headers = {{
+            'Accept': request.path.includes('/chat/completions')
+              ? 'application/json'
+              : 'application/json, text/plain, */*',
+            'Content-Type': 'application/json',
+            'source': 'web',
+            'Timezone': request.timezone,
+            'X-Request-Id': request.requestId,
+            'version': request.version
+          }};
+          if (request.useBearer) headers['Authorization'] = 'Bearer ' + request.bearerToken;
+          if (request.path.includes('/chat/completions')) headers['X-Accel-Buffering'] = 'no';
+          fetch(request.url, {{
+            method: request.method,
+            headers,
+            body: request.method === 'GET' ? undefined : request.body,
+            credentials: 'same-origin',
+            cache: 'no-store',
+            referrer: request.referrer,
+            signal: controller.signal
+          }}).catch(error => {{
+            const marker = document.createElement('meta');
+            marker.id = '{marker_id}';
+            marker.dataset.error = error?.name || 'FetchError';
+            document.head.appendChild(marker);
+          }}).finally(() => clearTimeout(timeout));
+          if (document.currentScript) document.currentScript.remove();
+        }})();"""
+        # A script tag runs in Qwen's main world, where Baxia wraps fetch and adds bx-* headers.
+        target_url = str(payload["url"])
+        method = str(payload["method"])
+        request_id = str(payload["requestId"])
+        try:
+            async with self._page.expect_response(
+                lambda response: (
+                    response.url == target_url
+                    and response.request.method == method
+                    and response.request.headers.get("x-request-id") == request_id
+                ),
+                timeout=int(payload["timeoutMs"]) + 5_000,
+            ) as response_info:
+                await self._page.add_script_tag(content=script)
+            response = await response_info.value
+        except AsyncPlaywrightTimeoutError as error:
+            marker = self._page.locator(f"#{marker_id}")
+            failure = await marker.get_attribute("data-error") if await marker.count() else None
+            raise RuntimeError(
+                f"Qwen main-world fetch failed: {failure or 'response timeout'}"
+            ) from error
+        finally:
+            try:
+                await self._page.evaluate(
+                    "markerId => document.getElementById(markerId)?.remove()", marker_id
+                )
+            except Exception:
+                logger.debug("Qwen main-world fetch marker cleanup skipped", exc_info=True)
+        body = await response.body()
+        headers = await response.all_headers()
+        request_headers = await response.request.all_headers()
+        baxia_headers = {"bx-ua", "bx-umidtoken", "bx-v"}
+        if not baxia_headers.issubset(request_headers):
+            logger.warning(
+                "qwen_native_browser_baxia_headers_missing path=%s missing=%s",
+                payload["path"],
+                sorted(baxia_headers.difference(request_headers)),
+            )
+        return {
+            "status": response.status,
+            "contentType": headers.get("content-type", "application/octet-stream"),
+            "requestId": headers.get("x-request-id", request_id),
+            "retryAfter": headers.get("retry-after", ""),
+            "bodyBase64": base64.b64encode(body).decode(),
+        }, body
 
     async def _prepare_authenticated_surface(self, request: NativeBrowserRequest) -> None:
         base_url = settings().qwen_base_url.rstrip("/")

@@ -9,6 +9,7 @@ import com.any2api.account.AccountView;
 import com.any2api.account.AccountPageView;
 import com.any2api.account.AccountSearchQuery;
 import com.any2api.observability.OperationEventService;
+import com.any2api.lifecycle.AccountProbeService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -33,15 +34,18 @@ public class AdminAccountController {
     private final AccountManagementService accounts;
     private final AccountCommandService commands;
     private final OperationEventService events;
+    private final AccountProbeService probes;
 
     public AdminAccountController(
         AccountManagementService accounts,
         AccountCommandService commands,
-        OperationEventService events
+        OperationEventService events,
+        AccountProbeService probes
     ) {
         this.accounts = accounts;
         this.commands = commands;
         this.events = events;
+        this.probes = probes;
     }
 
     @GetMapping("/page")
@@ -93,13 +97,8 @@ public class AdminAccountController {
     }
 
     @PostMapping("/{accountId}/probe")
-    public AccountView probe(
-        @PathVariable UUID accountId,
-        @RequestBody(required = false) ProbeRequest request
-    ) {
-        var spreadSeconds = request == null || request.spreadSeconds() == null
-            ? 3600L : request.spreadSeconds();
-        return accounts.scheduleProbe(accountId, java.time.Duration.ofSeconds(spreadSeconds));
+    public Mono<AccountProbeService.Result> probe(@PathVariable UUID accountId) {
+        return probes.probe(accountId);
     }
 
     @GetMapping("/{accountId}/commands")
@@ -142,5 +141,4 @@ public class AdminAccountController {
     public record StateRequest(AccountStatus status, Boolean enabled) {
     }
 
-    public record ProbeRequest(Long spreadSeconds) {}
 }

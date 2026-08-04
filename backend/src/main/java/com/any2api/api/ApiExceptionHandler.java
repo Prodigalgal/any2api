@@ -1,5 +1,6 @@
 package com.any2api.api;
 
+import com.any2api.coordination.AccountCapacityException;
 import com.any2api.media.MediaCoordinator;
 import com.any2api.auth.ApiKeyScopeException;
 import com.any2api.protocol.OpenAiRequestException;
@@ -42,6 +43,14 @@ public class ApiExceptionHandler {
         detail.put("param", null);
         detail.put("code", "invalid_request_error");
         return Map.of("error", detail);
+    }
+
+    @ExceptionHandler(AccountCapacityException.class)
+    public ResponseEntity<Map<String, Object>> accountBusy(AccountCapacityException error) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", Map.of(
+            "type", "account_busy",
+            "message", "account is currently at its concurrency limit",
+            "code", "account_busy")));
     }
 
     @ExceptionHandler(MediaCoordinator.MediaProviderException.class)

@@ -58,7 +58,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
   const provider = catalog.data?.data.find(
     (item) => item.id === detail.data?.account.providerId,
   );
-  const probeSupported = provider?.lifecycleOperations.includes("keepalive") ?? false;
+  const probeSupported = provider?.configured ?? false;
   const reauthenticationSupported = provider?.lifecycleOperations.includes("reauthenticate") ?? false;
 
   const invalidate = async () => {
@@ -111,13 +111,8 @@ export function AccountDetails({ accountId }: { accountId: string }) {
   const value = detail.data;
   const account = value.account;
   const readiness = stringMetadata(account.metadata, "inference_probe_status") || "未探测";
-  const eventRunning = events.data?.some((event) => event.status === "RUNNING") ?? false;
-  const checking = probe.isPending || eventRunning;
-  const queued = account.status === "PENDING" && !checking;
-  const probeBlocked = checking || queued;
-  const displayedReadiness = readiness === "READY" && (checking || queued)
-    ? checking ? "CHECKING" : "QUEUED"
-    : readiness;
+  const checking = probe.isPending;
+  const displayedReadiness = checking ? "CHECKING" : readiness;
 
   return (
     <PageContainer maxWidth={1480}>
@@ -148,17 +143,15 @@ export function AccountDetails({ accountId }: { accountId: string }) {
                 </IconButton>
               </span>
             </Tooltip>
-            <Tooltip title={probeSupported ? "执行账号测活" : "该厂商不支持测活"}>
+            <Tooltip title={probeSupported ? "执行账号测活" : "该厂商当前不可用"}>
               <span>
                 <Button
                   variant="contained"
                   startIcon={checking ? <CircularProgress size={15} color="inherit" /> : <MonitorHeartOutlined />}
-                  disabled={!probeSupported || probeBlocked}
+                  disabled={!probeSupported || checking}
                   onClick={() => probe.mutate()}
                 >
-                  {checking ? "测活中" : queued
-                    ? readiness === "FAILED" ? "待复测" : "排队中"
-                    : "立即测活"}
+                  {checking ? "测活中" : "立即测活"}
                 </Button>
               </span>
             </Tooltip>
@@ -167,10 +160,14 @@ export function AccountDetails({ accountId }: { accountId: string }) {
       />
 
       {error ? <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert> : null}
-      {probe.isSuccess && readiness === "FAILED" ? (
-        <Alert severity="warning" sx={{ mb: 2 }}>本次测活未通过，账号已退出推理路由并进入自动复测队列。</Alert>
-      ) : probe.isSuccess && account.status === "PENDING" ? (
-        <Alert severity="info" sx={{ mb: 2 }}>测活任务已进入生命周期队列，结果将在本页自动更新。</Alert>
+      {probe.data?.ready ? (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          实时测活通过，模型 {probe.data.model} 已返回有效响应。
+        </Alert>
+      ) : probe.data ? (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          实时测活未通过：{probe.data.errorClass}。已记录结果，仅明确的账号故障会改变账号状态。
+        </Alert>
       ) : null}
 
       <DataSurface sx={{ mb: 2 }}>
@@ -211,7 +208,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
             <Switch
               size="small"
               checked={account.enabled}
-              disabled={update.isPending || probeBlocked}
+              disabled={update.isPending || checking}
               onChange={(_, enabled) => update.mutate(enabled)}
               slotProps={{ input: { "aria-label": "账号启用状态" } }}
             />
@@ -224,7 +221,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
               <Button
                 size="small"
                 startIcon={<LoginOutlined />}
-                disabled={reauthenticate.isPending || probeBlocked}
+                disabled={reauthenticate.isPending || checking}
                 onClick={() => reauthenticate.mutate()}
               >
                 重新认证

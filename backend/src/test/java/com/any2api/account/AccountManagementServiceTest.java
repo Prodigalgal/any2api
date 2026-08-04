@@ -128,27 +128,6 @@ class AccountManagementServiceTest {
     }
 
     @Test
-    void scheduledProbeKeepsAccountDisabledUntilLifecycleSucceeds() {
-        var repository = mock(AccountRepository.class);
-        var vault = mock(CredentialVault.class);
-        var schedules = mock(LifecycleScheduleService.class);
-        var account = AccountEntity.create("qwen", "upstream-account", "same@example.com",
-            null, Map.of());
-        account.updateState(AccountStatus.ACTIVE, true);
-        when(repository.findById(account.getId())).thenReturn(Optional.of(account));
-        when(repository.save(account)).thenReturn(account);
-        var service = new AccountManagementService(repository, vault,
-            new ProviderRegistry(List.of(provider("qwen"))), schedules, List.of());
-        var spread = java.time.Duration.ofMinutes(10);
-
-        var scheduled = service.scheduleProbe(account.getId(), spread);
-
-        assertThat(scheduled.status()).isEqualTo(AccountStatus.PENDING);
-        assertThat(scheduled.enabled()).isFalse();
-        verify(schedules).rescheduleProbe(account.getId(), "qwen", spread);
-    }
-
-    @Test
     void accountDetailIncludesOnlyTheCredentialSummary() {
         var repository = mock(AccountRepository.class);
         var vault = mock(CredentialVault.class);
@@ -173,30 +152,6 @@ class AccountManagementServiceTest {
         assertThat(detail.account().metadata()).containsEntry("inference_probe_status", "READY");
         assertThat(detail.credential()).isEqualTo(summary);
         verify(vault, never()).read(any(), any());
-    }
-
-    @Test
-    void scheduledProbeRejectsProvidersWithoutKeepaliveBeforeDisablingTheAccount() {
-        var repository = mock(AccountRepository.class);
-        var schedules = mock(LifecycleScheduleService.class);
-        var account = AccountEntity.create(
-            "alpha", "upstream-account", "same@example.com", null, Map.of());
-        when(repository.findById(account.getId())).thenReturn(Optional.of(account));
-        var service = new AccountManagementService(
-            repository,
-            mock(CredentialVault.class),
-            new ProviderRegistry(List.of(provider("alpha", false))),
-            schedules,
-            List.of());
-
-        assertThatThrownBy(() -> service.scheduleProbe(account.getId(), java.time.Duration.ofSeconds(1)))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("does not support account probing");
-
-        assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
-        assertThat(account.isEnabled()).isTrue();
-        verify(repository, never()).save(any());
-        verify(schedules, never()).rescheduleProbe(any(), any(), any());
     }
 
     @Test
@@ -284,19 +239,11 @@ class AccountManagementServiceTest {
     }
 
     private InferenceProvider provider(String id) {
-        return provider(id, true);
-    }
-
-    private InferenceProvider provider(String id, boolean keepalive) {
-        var capabilities = keepalive
-            ? Map.of(
+        var capabilities = Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE)
-            : Map.of(
-                ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-                ProviderCapability.RESPONSES, SupportLevel.NATIVE);
+                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE);
         return new InferenceProvider() {
             @Override public ProviderManifest manifest() {
                 return new ProviderManifest(

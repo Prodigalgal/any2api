@@ -48,6 +48,17 @@ class InferenceReadinessProbeTest {
         assertThat(result.errorClass()).isEqualTo("credential_rejected");
     }
 
+    @Test
+    void acceptsAnyNonBlankCompletedResponseForRealtimeAvailability() {
+        var probe = new InferenceReadinessProbe(
+            new ProviderRegistry(List.of(provider(true, "pong"))), mapper);
+
+        var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.ready()).isTrue();
+    }
+
     private AccountEntity account() {
         var account = AccountEntity.create("alpha", "external", null, null, Map.of());
         account.updateState(AccountStatus.PENDING, false);
@@ -55,6 +66,10 @@ class InferenceReadinessProbeTest {
     }
 
     private InferenceProvider provider(boolean ready) {
+        return provider(ready, "ANY2API_PROBE_OK");
+    }
+
+    private InferenceProvider provider(boolean ready, String output) {
         return new InferenceProvider() {
             @Override
             public ProviderManifest manifest() {
@@ -80,7 +95,7 @@ class InferenceReadinessProbeTest {
                     new CanonicalEvent.ResponseStarted(
                         1, request.requestId(), 0, "resp-probe"),
                     new CanonicalEvent.OutputTextDelta(
-                        1, request.requestId(), 1, "ANY2API_PROBE_OK"),
+                        1, request.requestId(), 1, output),
                     new CanonicalEvent.Completed(1, request.requestId(), 2, "stop"));
             }
 

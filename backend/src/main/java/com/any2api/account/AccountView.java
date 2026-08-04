@@ -28,7 +28,7 @@ public record AccountView(
     Instant createdAt,
     Instant updatedAt
 ) {
-    static AccountView from(AccountEntity account) {
+    public static AccountView from(AccountEntity account) {
         return new AccountView(
             account.getId(), account.getProviderId(), account.getExternalId(), account.getEmail(),
             account.getStatus(), account.isEnabled(), account.getMaxConcurrency(),

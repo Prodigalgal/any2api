@@ -100,6 +100,14 @@ export type AccountDetail = {
   };
 };
 
+export type AccountProbeResult = {
+  ready: boolean;
+  model: string;
+  errorClass: string;
+  completedAt: string;
+  account: Account;
+};
+
 export type AccountExpiryFilter = "ANY" | "VALID" | "EXPIRING_SOON" | "EXPIRED" | "NEVER";
 
 export type AccountPageQuery = {
@@ -331,9 +339,9 @@ export const api = {
   accountDetail: (id: string) => adminJson<AccountDetail>(
     `/api/admin/v1/accounts/${id}`,
   ),
-  probeAccount: (id: string, spreadSeconds = 1) => adminJson<Account>(
+  probeAccount: (id: string) => adminJson<AccountProbeResult>(
     `/api/admin/v1/accounts/${id}/probe`,
-    { method: "POST", body: JSON.stringify({ spreadSeconds }) },
+    { method: "POST" },
   ),
   deleteAccount: (id: string) => adminJson<void>(
     `/api/admin/v1/accounts/${id}`, { method: "DELETE" },

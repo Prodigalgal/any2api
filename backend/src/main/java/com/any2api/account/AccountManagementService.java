@@ -164,25 +164,6 @@ public class AccountManagementService {
         return AccountView.from(account);
     }
 
-    @Transactional
-    public AccountView scheduleProbe(UUID accountId, java.time.Duration spread) {
-        if (spread == null || spread.isNegative() || spread.isZero()
-            || spread.compareTo(java.time.Duration.ofDays(7)) > 0) {
-            throw new IllegalArgumentException("probe spread must be between 1 second and 7 days");
-        }
-        var account = require(accountId);
-        var provider = providers.require(account.getProviderId());
-        if (provider.manifest().capabilities().getOrDefault(
-            ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.UNSUPPORTED)
-            == SupportLevel.UNSUPPORTED) {
-            throw new IllegalArgumentException("provider does not support account probing");
-        }
-        account.updateState(AccountStatus.PENDING, false);
-        account = accounts.save(account);
-        schedules.rescheduleProbe(account.getId(), account.getProviderId(), spread);
-        return AccountView.from(account);
-    }
-
     private AccountEntity require(UUID accountId) {
         return accounts.findById(accountId)
             .orElseThrow(() -> new IllegalArgumentException("unknown account: " + accountId));

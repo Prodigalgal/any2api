@@ -6,6 +6,7 @@ import com.any2api.credential.CredentialVault;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Predicate;
 import com.any2api.provider.ProviderAccountProfile;
@@ -43,6 +44,14 @@ public class AccountSelectionService {
 
     public Mono<LeasedProviderAccount> acquire(String providerId) {
         return acquire(providerId, ignored -> true);
+    }
+
+    public Mono<LeasedProviderAccount> acquire(UUID accountId) {
+        return Mono.fromCallable(() -> accounts.findById(accountId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                    "unknown account: " + accountId)))
+            .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
+            .flatMap(account -> acquire(account, account.getProviderId()));
     }
 
     public Mono<LeasedProviderAccount> acquire(

@@ -94,7 +94,7 @@ export function Accounts() {
   const providerNames = useMemo(() => new Map(providers), [providers]);
   const probeProviders = useMemo(() => new Set(
     (catalog.data?.data ?? [])
-      .filter((item) => item.lifecycleOperations.includes("keepalive"))
+      .filter((item) => item.configured)
       .map((item) => item.id),
   ), [catalog.data]);
   const accounts = useQuery({
@@ -502,14 +502,12 @@ const AccountRow = memo(function AccountRow({
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title={!probeSupported
-            ? "该厂商不支持测活"
-            : account.status === "PENDING" ? "等待当前生命周期任务" : "立即测活"}>
+          <Tooltip title={probeSupported ? "立即测活" : "该厂商当前不可用"}>
             <span>
               <IconButton
                 size="small"
                 aria-label="立即测活"
-                disabled={probing || !probeSupported || account.status === "PENDING"}
+                disabled={probing || !probeSupported}
                 onClick={onProbe}
               >
                 <MonitorHeartOutlined sx={{ fontSize: 18 }} />

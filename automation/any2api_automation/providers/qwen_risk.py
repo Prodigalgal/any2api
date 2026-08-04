@@ -8,6 +8,7 @@ import queue
 import re
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
@@ -22,6 +23,7 @@ from ..security import require_internal_token
 from .qwen_settings import settings
 
 logger = logging.getLogger(__name__)
+QWEN_TIMEZONE = timezone(timedelta(hours=8))
 
 
 def _browser_major(profile: str) -> str:
@@ -299,6 +301,7 @@ class QwenNativeBrowserTransport:
                 "version": self._frontend_version,
                 "requestId": str(uuid4()),
                 "maximumBytes": maximum,
+                "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
             }
             result = await self._page.evaluate(
                 r"""async (request) => {
@@ -312,7 +315,7 @@ class QwenNativeBrowserTransport:
                       'Content-Type': 'application/json',
                       'Authorization': 'Bearer ' + request.bearerToken,
                       'source': 'web',
-                      'Timezone': new Date().toString(),
+                      'Timezone': request.timezone,
                       'X-Request-Id': request.requestId,
                       'version': request.version
                     };

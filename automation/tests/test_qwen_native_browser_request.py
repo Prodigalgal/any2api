@@ -49,6 +49,8 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
         async def evaluate(self, _script: str, payload: dict[str, object]) -> dict[str, object]:
             assert payload["path"] == "/api/v2/chats/new"
+            assert str(payload["timezone"]).isascii()
+            assert str(payload["timezone"]).endswith("GMT+0800")
             return {
                 "status": 200,
                 "contentType": "application/json",

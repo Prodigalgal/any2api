@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 public final class LayeredJsonCache {
     private static final Logger logger = LoggerFactory.getLogger(LayeredJsonCache.class);
@@ -60,13 +61,8 @@ public final class LayeredJsonCache {
             if (value.isEmpty()) return Mono.empty();
             var encoded = value.get();
             local.put(key, encoded);
-            return redis.opsForValue().set(redisKey(key), encoded, redisTtl)
-                .onErrorResume(error -> {
-                    logger.warn("L2 cache write failed namespace={} error_type={}",
-                        namespace, error.getClass().getSimpleName());
-                    return Mono.just(false);
-                })
-                .thenReturn(encoded);
+            writeRedis(key, encoded);
+            return Mono.just(encoded);
         });
         return redis.opsForValue().get(redisKey(key))
             .doOnNext(value -> local.put(key, value))
@@ -93,5 +89,17 @@ public final class LayeredJsonCache {
 
     private String redisKey(String key) {
         return namespace + key;
+    }
+
+    private void writeRedis(String key, String encoded) {
+        redis.opsForValue().set(redisKey(key), encoded, redisTtl)
+            .retryWhen(Retry.backoff(1, Duration.ofMillis(50))
+                .maxBackoff(Duration.ofMillis(250))
+                .jitter(0.5)
+                .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
+            .subscribe(
+                ignored -> {},
+                error -> logger.warn("L2 cache write failed namespace={} error_type={}",
+                    namespace, error.getClass().getSimpleName()));
     }
 }

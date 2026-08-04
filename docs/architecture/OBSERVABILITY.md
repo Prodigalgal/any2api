@@ -106,3 +106,8 @@ Inference telemetry writes run on the shared virtual-thread database executor af
 signal, so PostgreSQL latency cannot block the provider response event loop. Registration and
 lifecycle events remain synchronous with their durable scheduler transitions because losing those
 events would make recovery state ambiguous.
+
+Layered catalog and API-key cache reads use L1 Caffeine, L2 Redis, then L3 PostgreSQL. L3 results
+populate L1 synchronously and return immediately; the idempotent L2 write runs asynchronously with
+one bounded Reactor retry. Redis read failure falls back to PostgreSQL, while Redis write latency can
+never extend a client request.

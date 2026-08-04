@@ -95,4 +95,25 @@ class LayeredJsonCacheTest {
         assertThat(loads).hasValue(1);
         verify(values, times(1)).get("test:key");
     }
+
+    @Test
+    void databaseResultDoesNotWaitForTheBestEffortRedisWrite() {
+        var redis = mock(ReactiveStringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        ReactiveValueOperations<String, String> values = mock(ReactiveValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(values.get("test:key")).thenReturn(Mono.empty());
+        var write = Sinks.<Boolean>one();
+        when(values.set(eq("test:key"), eq("database"), any(Duration.class)))
+            .thenReturn(write.asMono());
+        var cache = new LayeredJsonCache(
+            redis, "test", Duration.ofMinutes(1), Duration.ofMinutes(5), 100);
+
+        var result = cache.get(
+            "key", () -> Mono.just(Optional.of("database"))).block(Duration.ofSeconds(1));
+
+        assertThat(result).contains("database");
+        verify(values).set(eq("test:key"), eq("database"), any(Duration.class));
+        write.tryEmitValue(true);
+    }
 }

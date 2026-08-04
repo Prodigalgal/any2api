@@ -32,7 +32,7 @@ import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout
 import { OperationEventsTable } from "@/components/operation-events-dialog";
 import { api } from "@/lib/api";
 
-const hiddenMetadataKey = /(authorization|cookie|credential|password|secret|session|sso|token)/i;
+const hiddenMetadataKey = /(authorization|cookie|credential|key|password|secret|session|sso|token)/i;
 
 export function AccountDetails({ accountId }: { accountId: string }) {
   const queryClient = useQueryClient();

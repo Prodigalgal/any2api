@@ -4,6 +4,8 @@ import com.any2api.coordination.AccountCapacityException;
 import com.any2api.media.MediaCoordinator;
 import com.any2api.auth.ApiKeyScopeException;
 import com.any2api.protocol.OpenAiRequestException;
+import com.any2api.protocol.CanonicalRequest;
+import com.any2api.protocol.CanonicalRequestParser;
 import com.any2api.observability.RequestIdWebFilter;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -33,10 +35,18 @@ public class ApiExceptionHandler {
         OpenAiRequestException error,
         ServerWebExchange exchange
     ) {
-        var extra = error.acceptedParameters().isEmpty() ? Map.<String, Object>of()
-            : Map.<String, Object>of("accepted_parameters", error.acceptedParameters());
+        var accepted = error.acceptedParameters().isEmpty()
+            ? CanonicalRequestParser.acceptedParameters(protocol(exchange))
+            : error.acceptedParameters();
+        var extra = Map.<String, Object>of("accepted_parameters", accepted);
         return response(error.type(), error.type(), error.getMessage(), error.parameter(),
             false, exchange, extra);
+    }
+
+    private CanonicalRequest.Protocol protocol(ServerWebExchange exchange) {
+        return exchange.getRequest().getPath().value().endsWith("/responses")
+            ? CanonicalRequest.Protocol.RESPONSES
+            : CanonicalRequest.Protocol.CHAT_COMPLETIONS;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

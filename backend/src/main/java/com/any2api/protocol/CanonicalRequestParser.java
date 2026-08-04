@@ -21,11 +21,30 @@ public class CanonicalRequestParser {
         "temperature", "top_p", "max_tokens", "max_completion_tokens", "max_output_tokens",
         "stop", "seed", "presence_penalty", "frequency_penalty", "parallel_tool_calls",
         "tool_choice", "stream_options");
+    private static final List<String> CHAT_ACCEPTED_PARAMETERS = List.of(
+        "frequency_penalty", "logprobs", "max_completion_tokens", "max_output_tokens",
+        "max_tokens", "messages", "metadata", "modalities", "model", "n",
+        "parallel_tool_calls", "presence_penalty", "provider_options", "reasoning",
+        "reasoning_effort", "response_format", "seed", "stop", "stream",
+        "stream_options", "temperature", "tool_choice", "tools", "top_logprobs",
+        "top_p", "user");
+    private static final List<String> RESPONSES_ACCEPTED_PARAMETERS = List.of(
+        "background", "include", "input", "instructions", "max_output_tokens",
+        "max_tool_calls", "metadata", "model", "parallel_tool_calls",
+        "previous_response_id", "prompt_cache_key", "provider_options", "reasoning",
+        "reasoning_effort", "safety_identifier", "service_tier", "store", "stream",
+        "stream_options", "temperature", "text", "tool_choice", "tools", "top_p",
+        "truncation", "user");
 
     private final ObjectMapper objectMapper;
 
     public CanonicalRequestParser(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+    }
+
+    public static List<String> acceptedParameters(CanonicalRequest.Protocol protocol) {
+        return protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
+            ? CHAT_ACCEPTED_PARAMETERS : RESPONSES_ACCEPTED_PARAMETERS;
     }
 
     public CanonicalRequest parse(

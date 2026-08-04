@@ -35,4 +35,19 @@ class ApiExceptionHandlerTest {
             .containsEntry("param", null)
             .containsEntry("code", "invalid_request_error");
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void addsProtocolAcceptedParametersWhenParsingFailsBeforeProviderResolution() {
+        var exchange = MockServerWebExchange.from(
+            MockServerHttpRequest.post("/v1/responses"));
+
+        var response = handler.openAiRequest(OpenAiRequestException.invalid(
+            "reasoning_effort", "unsupported effort"), exchange);
+        var error = (Map<String, Object>) response.get("error");
+
+        assertThat((java.util.List<String>) error.get("accepted_parameters"))
+            .contains("input", "reasoning", "reasoning_effort")
+            .doesNotContain("messages");
+    }
 }

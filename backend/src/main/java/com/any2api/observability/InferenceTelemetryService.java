@@ -120,7 +120,9 @@ public final class InferenceTelemetryService {
 
         public void finish(SignalType signal) {
             if (!finished.compareAndSet(false, true)) return;
-            if (signal == SignalType.CANCEL) errorCode.compareAndSet(null, "downstream_cancelled");
+            if (signal == SignalType.CANCEL && terminalNanos.get() == 0) {
+                errorCode.compareAndSet(null, "downstream_cancelled");
+            }
             var endedAt = Instant.now();
             var endedNanos = System.nanoTime();
             var durationMs = queueMs + elapsed(startedNanos, endedNanos);

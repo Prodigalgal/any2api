@@ -126,6 +126,33 @@ class InferenceCoordinatorTest {
     }
 
     @Test
+    void recordsAccountSuccessBeforeAStreamingClientCancelsAfterCompleted() {
+        var accounts = mock(AccountSelectionService.class);
+        var first = leased("alpha");
+        var second = leased("alpha");
+        when(accounts.acquire(eq("alpha"), eq("model"), any()))
+            .thenReturn(Mono.just(first), Mono.just(second));
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportModelCooldown(
+            first, "model", "empty", java.time.Duration.ofMinutes(5)))
+            .thenReturn(Mono.empty());
+        when(accounts.reportSuccess(second, "model")).thenReturn(Mono.empty());
+        var coordinator = coordinator(new RetryingProvider(), accounts);
+
+        StepVerifier.create(coordinator.execute(request("alpha", true))
+                .takeUntil(CanonicalEvent.Completed.class::isInstance))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Usage.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
+            .verifyComplete();
+
+        verify(accounts).reportSuccess(second, "model");
+        verify(accounts).release(second);
+    }
+
+    @Test
     void doesNotRetryAfterMeaningfulOutputWasVisible() {
         var accounts = mock(AccountSelectionService.class);
         var leased = leased("alpha");

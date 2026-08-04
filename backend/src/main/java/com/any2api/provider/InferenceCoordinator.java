@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -224,7 +223,6 @@ public class InferenceCoordinator {
                         request, provider.manifest(), provider.protocolContract());
                     provider.validate(request);
                 }
-                var failed = new AtomicBoolean();
                 var lastSequence = new AtomicLong();
                 var context = new ProviderExecutionContext(
                     request.requestId(),
@@ -243,7 +241,6 @@ public class InferenceCoordinator {
                     .concatMap(event -> {
                         lastSequence.accumulateAndGet(event.sequenceNumber(), Math::max);
                         if (event instanceof CanonicalEvent.Failed failure) {
-                            failed.set(true);
                             var providerFailure = new ProviderFailure(
                                 failure.errorType(), failure.message(), false, failure.detail());
                             return accounts.mergeCredentialPatch(
@@ -252,10 +249,16 @@ public class InferenceCoordinator {
                                 .then(failures.report(account, request.model(), providerFailure))
                                 .thenReturn(event);
                         }
+                        if (event instanceof CanonicalEvent.Completed) {
+                            return accounts.mergeCredentialPatch(
+                                    account, context.credentialPatch())
+                                .onErrorReturn(false)
+                                .then(accounts.reportSuccess(account, request.model()))
+                                .thenReturn(event);
+                        }
                         return reactor.core.publisher.Mono.just(event);
                     })
                     .onErrorResume(error -> {
-                        failed.set(true);
                         var failure = error instanceof CanonicalProtocolException protocolError
                             ? new ProviderFailure(
                                 "provider_protocol_violation",
@@ -275,14 +278,7 @@ public class InferenceCoordinator {
                             .onErrorReturn(false)
                             .then(failures.report(account, request.model(), failure))
                             .thenMany(Flux.just(event));
-                    })
-                    .concatWith(Flux.defer(() -> {
-                        return failed.get() ? Flux.empty()
-                            : accounts.mergeCredentialPatch(account, context.credentialPatch())
-                                .onErrorReturn(false)
-                                .then(accounts.reportSuccess(account, request.model()))
-                                .thenMany(Flux.empty());
-                    }));
+                    });
             },
             accounts::release,
             (account, ignored) -> accounts.release(account),

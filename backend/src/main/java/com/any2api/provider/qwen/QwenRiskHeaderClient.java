@@ -22,6 +22,7 @@ final class QwenRiskHeaderClient {
 
     QwenRiskHeaderClient(WebClient.Builder builder, Any2ApiProperties properties) {
         this.client = builder.clone()
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(20 << 20))
             .filter(RequestCorrelation.propagationFilter())
             .baseUrl(properties.getAutomation().getBaseUrl().toString())
             .build();

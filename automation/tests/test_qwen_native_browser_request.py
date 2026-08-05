@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
+from any2api_automation.providers.qwen_inference_challenge import (
+    _drag_slider_full_track,
+)
 from any2api_automation.providers.qwen_risk import (
     NativeBrowserRequest,
     QwenNativeBrowserTransport,
@@ -56,6 +59,44 @@ def test_qwen_native_browser_request_rejects_cookie_header_injection() -> None:
             bearer_token="token-value-that-is-long-enough",
             cookies={"session": "value\r\nX-Injected: true"},
         )
+
+
+@pytest.mark.asyncio
+async def test_qwen_full_track_drag_uses_bounded_mouse_commands_for_camoufox() -> None:
+    class Mouse:
+        def __init__(self) -> None:
+            self.moves: list[tuple[float, float, int | None]] = []
+            self.down_count = 0
+            self.up_count = 0
+
+        async def move(self, x: float, y: float, *, steps: int | None = None) -> None:
+            self.moves.append((x, y, steps))
+
+        async def down(self) -> None:
+            self.down_count += 1
+
+        async def up(self) -> None:
+            self.up_count += 1
+
+    class Page:
+        def __init__(self) -> None:
+            self.mouse = Mouse()
+
+        async def wait_for_timeout(self, _milliseconds: int) -> None:
+            return None
+
+    class Slider:
+        async def bounding_box(self) -> dict[str, float]:
+            return {"x": 10.0, "y": 20.0, "width": 42.0, "height": 42.0}
+
+    page = Page()
+
+    await _drag_slider_full_track(page, Slider(), 258.0)
+
+    assert len(page.mouse.moves) == 4
+    assert page.mouse.down_count == 1
+    assert page.mouse.up_count == 1
+    assert page.mouse.moves[-1][2] is not None
 
 
 @pytest.mark.asyncio

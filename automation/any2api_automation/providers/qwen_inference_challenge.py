@@ -215,23 +215,23 @@ async def _drag_slider_full_track(page: Any, slider: Any, max_travel: float) -> 
     start_x = box["x"] + box["width"] / 2.0
     start_y = box["y"] + box["height"] / 2.0
     target = start_x + max(1.0, float(max_travel)) - random.uniform(0.2, 1.2)
-    duration = random.uniform(0.78, 0.95)
-    steps = random.randint(34, 42)
+    steps = random.randint(28, 36)
     await page.mouse.move(start_x - random.uniform(8, 14), start_y)
-    await page.wait_for_timeout(random.randint(20, 45))
     await page.mouse.move(start_x, start_y)
-    await page.wait_for_timeout(random.randint(30, 60))
     await page.mouse.down()
     started = time.time()
-    for index in range(1, steps + 1):
-        ratio = index / steps
-        eased = ratio * ratio * (3 - 2 * ratio)
-        await page.mouse.move(
-            start_x + (target - start_x) * eased,
-            start_y + random.uniform(-0.35, 0.35),
-        )
-        await page.wait_for_timeout(max(5, int(duration * 1_000 / steps)))
-    await page.wait_for_timeout(random.randint(40, 90))
+    middle = start_x + (target - start_x) * random.uniform(0.58, 0.68)
+    await page.mouse.move(
+        middle,
+        start_y + random.uniform(-0.35, 0.35),
+        steps=max(10, steps // 2),
+    )
+    await page.mouse.move(
+        target,
+        start_y + random.uniform(-0.25, 0.25),
+        steps=max(10, steps - steps // 2),
+    )
+    await page.wait_for_timeout(random.randint(35, 70))
     await page.mouse.up()
     return time.time() - started
 
@@ -343,32 +343,24 @@ async def _drag_slider_to_piece_target(
     start_y = box["y"] + box["height"] / 2.0
     mouse_limit = start_x + travel + 8.0
     duration = max(0.65, min(float(duration), 1.0))
-    kick = max(8.0, min(_piece_target_to_drag(target * 0.5, travel), travel * 0.65))
+    initial_drag = max(8.0, min(_piece_target_to_drag(target, travel), travel))
 
     await page.mouse.move(start_x - random.uniform(8, 16), start_y)
-    await page.wait_for_timeout(8)
     await page.mouse.move(start_x, start_y)
-    await page.wait_for_timeout(8)
     await page.mouse.down()
-    await page.wait_for_timeout(10)
-
-    mouse_x = start_x
     started = time.time()
-    kick_steps = max(8, int(kick / 12))
-    per_step_ms = max(4, max(80, int(duration * 1_000 * 0.32)) // kick_steps)
-    for index in range(1, kick_steps + 1):
-        ratio = index / kick_steps
-        eased = ratio * ratio * (3 - 2 * ratio)
-        mouse_x = start_x + kick * eased
-        await page.mouse.move(mouse_x, start_y + random.uniform(-0.3, 0.3))
-        await page.wait_for_timeout(per_step_ms)
+    mouse_x = start_x + initial_drag
+    await page.mouse.move(
+        mouse_x,
+        start_y + random.uniform(-0.3, 0.3),
+        steps=max(18, min(36, int(initial_drag / 7 + duration * 4))),
+    )
 
     gain = 1.7
     last_piece = float(await _read_piece_left(page) or 0.0)
     last_mouse = mouse_x
-    correction_deadline = time.time() + duration
     samples = 0
-    while time.time() < correction_deadline:
+    for _ in range(8):
         observed_piece = await _read_piece_left(page)
         piece = float(last_piece if observed_piece is None else observed_piece)
         error = target - piece
@@ -381,22 +373,16 @@ async def _drag_slider_to_piece_target(
             observed_gain = max(0.95, min(abs(mouse_delta) / piece_delta, 3.8))
             gain = 0.6 * gain + 0.4 * observed_gain
         last_piece, last_mouse = piece, mouse_x
-        if abs(error) > 40:
-            step, sleep_ms = max(-22.0, min(22.0, error * gain * 0.55)), 5
-        elif abs(error) > 15:
-            step, sleep_ms = max(-12.0, min(12.0, error * gain * 0.42)), 6
-        elif abs(error) > 6:
-            step, sleep_ms = max(-6.0, min(6.0, error * gain * 0.35)), 6
-        else:
-            step, sleep_ms = max(-2.5, min(2.5, error * gain * 0.3)), 5
+        step = max(-28.0, min(28.0, error * gain * 0.5))
         if abs(step) < 0.6:
             step = 0.7 if error > 0 else -0.7
         mouse_x = max(start_x, min(mouse_limit, mouse_x + step))
-        await page.mouse.move(mouse_x, start_y + random.uniform(-0.25, 0.25))
-        await page.wait_for_timeout(sleep_ms)
+        await page.mouse.move(
+            mouse_x,
+            start_y + random.uniform(-0.25, 0.25),
+            steps=max(2, min(6, int(abs(step) / 4))),
+        )
         samples += 1
-        if samples > 60:
-            break
     await page.mouse.up()
     final = float(await _read_piece_left(page) or last_piece)
     return final, time.time() - started, samples

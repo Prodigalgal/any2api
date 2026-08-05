@@ -261,7 +261,7 @@ def _new_camoufox_fingerprint() -> dict[str, Any]:
         ff_version=major,
         i_know_what_im_doing=True,
         block_webrtc=True,
-        humanize=True,
+        humanize=0.35,
     )
     chunks = sorted(
         (int(name.rsplit("_", 1)[1]), value)

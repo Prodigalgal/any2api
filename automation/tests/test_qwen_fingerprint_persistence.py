@@ -61,6 +61,7 @@ def test_camoufox_generated_fingerprint_replays_every_persisted_field() -> None:
     assert restored_config == fingerprint["camoufox_config"]
     assert restored_config["canvas:seed"] == fingerprint["camoufox_config"]["canvas:seed"]
     assert restored_config["audio:seed"] == fingerprint["camoufox_config"]["audio:seed"]
+    assert restored_config["humanize:maxTime"] == 0.35
     for name, value in fingerprint["firefox_user_prefs"].items():
         assert prepared["firefox_user_prefs"][name] == value
 

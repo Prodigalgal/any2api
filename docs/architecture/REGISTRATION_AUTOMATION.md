@@ -48,9 +48,11 @@ Baxia/WAF cookies. Untrusted persisted input containing arbitrary origins or coo
 rejected at the internal API boundary; state captured from the owned browser filters unrelated
 third-party iframe entries before applying the same strict validation and encryption.
 Camoufox is the preferred Qwen backend and Patchright is the fallback. Registration dynamically
-selects a coherent account fingerprint. A Camoufox account stores and replays the complete generated
-config, Firefox preferences, font/voice selection, WebGL data, and canvas/audio/font seeds. A
-Patchright account stores the selected Chrome/TLS profile, UA/Client Hints, locale, timezone,
+selects a coherent account fingerprint after acquiring its provider proxy. Camoufox GeoIP generation
+derives the timezone from that exact lease; Patchright fallback uses the same derived timezone. A
+Camoufox account stores and replays the complete generated config, Firefox preferences, font/voice
+selection, WebGL data, and canvas/audio/font seeds. A Patchright account stores the selected
+Chrome/TLS profile, UA/Client Hints, locale, timezone,
 screen, viewport, color scheme, and CDP-controlled CPU count; non-overridable device memory and
 WebGL identity are captured as observed fields and checked for host drift. Cursor timing is an
 interaction policy rather than device identity: Qwen disables Camoufox's native `humanize` layer
@@ -68,10 +70,12 @@ loading Baxia, and normal requests or challenge recovery return updated storage 
 one credential patch. The legacy flat cookie map is migration-only and is not injected when a
 complete browser state is present.
 
-Qwen's inference proxy affinity key is the stable account ID. The Java transport session passes its
-binding to the native Qwen browser so page navigation, Baxia header generation, model discovery,
-upload-token acquisition, chat creation, completion, and the matching `curl_cffi` request use the
-same egress. Request IDs and catalog probes cannot create a second account identity.
+Qwen persists the successful registration identity's opaque proxy affinity key in its encrypted
+credential. When an operator enables a compatible `LIFECYCLE` or `INFERENCE` binding, Java prefers
+that key and falls back to the stable account ID only for older credentials. The transport session
+passes its binding to the native Qwen browser so page navigation, Baxia header generation, model
+discovery, upload-token acquisition, chat creation, completion, and the matching `curl_cffi`
+request use the same egress. Request IDs and catalog probes cannot create a second account identity.
 
 The lease is passed into provider code, not hidden behind global proxy environment variables. Therefore browser navigation and follow-up vendor HTTP exchanges share the same egress in one attempt: Qwen sign-in after email activation and Grok OAuth token exchange cannot accidentally fall back to the host network. A failed node fails that attempt; only the durable Java retry starts a new flow and leases another node.
 

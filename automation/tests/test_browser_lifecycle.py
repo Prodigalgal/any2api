@@ -3,7 +3,13 @@ from contextlib import contextmanager
 import pytest
 
 from any2api_automation.lifecycle import browser as browser_lifecycle
-from any2api_automation.lifecycle.browser import BrowserResult, launch_browser, run_browser_flow
+from any2api_automation.lifecycle.browser import (
+    BrowserContextProfile,
+    BrowserLaunchProfile,
+    BrowserResult,
+    launch_browser,
+    run_browser_flow,
+)
 
 
 def test_browser_flow_bounds_context_cleanup_timeout(monkeypatch) -> None:
@@ -22,24 +28,37 @@ def test_browser_flow_bounds_context_cleanup_timeout(monkeypatch) -> None:
             self.closed = True
 
     context = Context()
+    context_options: dict[str, object] = {}
+    launch_options: dict[str, object] = {}
 
     class Browser:
         def new_context(self, **options: object) -> Context:
-            del options
+            context_options.update(options)
             return context
 
     @contextmanager
     def proxy(**options: object):
         del options
-        yield ""
+        yield "http://proxy.internal:8080"
 
     @contextmanager
     def launch(*args: object, **kwargs: object):
-        del args, kwargs
+        del args
+        launch_options.update(kwargs)
         yield "camoufox", Browser()
 
     monkeypatch.setattr(browser_lifecycle, "proxy_lease", proxy)
     monkeypatch.setattr(browser_lifecycle, "launch_browser", launch)
+
+    resolved_profile = BrowserLaunchProfile(headless=False, camoufox_os="windows")
+    resolved_context = BrowserContextProfile(timezone_id="Asia/Singapore")
+    resolved_proxies: list[str] = []
+
+    def resolve(
+        proxy_url: str,
+    ) -> tuple[BrowserContextProfile, BrowserLaunchProfile]:
+        resolved_proxies.append(proxy_url)
+        return resolved_context, resolved_profile
 
     result = run_browser_flow(
         lambda page, current, backend, proxy_url: BrowserResult(
@@ -50,11 +69,15 @@ def test_browser_flow_bounds_context_cleanup_timeout(monkeypatch) -> None:
         preferred="camoufox",
         fallback=None,
         payload={},
+        profile_resolver=resolve,
     )
 
     assert result.external_id == "account-id"
     assert context.timeouts[-1] == 5_000
     assert context.closed is True
+    assert resolved_proxies == ["http://proxy.internal:8080"]
+    assert launch_options["profile"] is resolved_profile
+    assert context_options["timezone_id"] == "Asia/Singapore"
 
 
 def test_browser_launcher_cleans_partially_started_camoufox(monkeypatch) -> None:

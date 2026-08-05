@@ -289,6 +289,8 @@ def run_browser_flow(
     payload: dict[str, Any],
     context_profile: BrowserContextProfile | None = None,
     launch_profile: BrowserLaunchProfile | None = None,
+    profile_resolver: Callable[[str], tuple[BrowserContextProfile, BrowserLaunchProfile]]
+    | None = None,
     fingerprint_policy: BrowserFingerprintPolicy | None = None,
 ) -> BrowserResult:
     config = settings()
@@ -306,42 +308,44 @@ def run_browser_flow(
     )
     reject_hosts = tuple(str(value) for value in payload.get("proxy_reject_redirect_hosts", ()))
     headless = effective_launch_profile.resolve_headless(payload, config.registration_headless)
-    with (
-        proxy_lease(
-            check_url=proxy_check_url,
-            reject_redirect_hosts=reject_hosts,
-            **proxy_parameters(payload),
-        ) as leased_proxy,
-        launch_browser(
+    with proxy_lease(
+        check_url=proxy_check_url,
+        reject_redirect_hosts=reject_hosts,
+        **proxy_parameters(payload),
+    ) as leased_proxy:
+        resolved_context_profile = effective_context_profile
+        resolved_launch_profile = effective_launch_profile
+        if profile_resolver is not None:
+            resolved_context_profile, resolved_launch_profile = profile_resolver(leased_proxy)
+        with launch_browser(
             preferred,
             fallback,
             headless=headless,
             proxy_url=leased_proxy,
-            profile=effective_launch_profile,
-        ) as launched,
-    ):
-        backend, browser = launched
-        context = browser.new_context(**effective_context_profile.options(backend))
-        context.set_default_timeout(config.registration_timeout_seconds * 1000)
-        page = context.new_page()
-        try:
-            result = flow(page, context, backend, leased_proxy)
-            return replace(
-                result,
-                metadata={
-                    **result.metadata,
-                    "fingerprint_variant": fingerprint_variant,
-                },
-            )
-        finally:
+            profile=resolved_launch_profile,
+        ) as launched:
+            backend, browser = launched
+            context = browser.new_context(**resolved_context_profile.options(backend))
+            context.set_default_timeout(config.registration_timeout_seconds * 1000)
+            page = context.new_page()
             try:
-                close_browser_context(context, page, label=f"{backend} context cleanup")
-            except Exception as error:  # noqa: BLE001 - browser process cleanup follows
-                logger.warning(
-                    "browser context cleanup failed backend=%s error_type=%s",
-                    backend,
-                    type(error).__name__,
+                result = flow(page, context, backend, leased_proxy)
+                return replace(
+                    result,
+                    metadata={
+                        **result.metadata,
+                        "fingerprint_variant": fingerprint_variant,
+                    },
                 )
+            finally:
+                try:
+                    close_browser_context(context, page, label=f"{backend} context cleanup")
+                except Exception as error:  # noqa: BLE001 - browser process cleanup follows
+                    logger.warning(
+                        "browser context cleanup failed backend=%s error_type=%s",
+                        backend,
+                        type(error).__name__,
+                    )
 
 
 @contextmanager

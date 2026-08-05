@@ -13,7 +13,8 @@ record QwenCredential(
     String browserProfile,
     Map<String, String> cookies,
     JsonNode browserState,
-    JsonNode browserFingerprint
+    JsonNode browserFingerprint,
+    String proxyAffinityKey
 ) {
     QwenCredential {
         cookies = cookies == null ? Map.of() : Map.copyOf(cookies);
@@ -21,11 +22,12 @@ record QwenCredential(
             ? JsonNodeFactory.instance.objectNode() : browserState.deepCopy();
         browserFingerprint = browserFingerprint == null || !browserFingerprint.isObject()
             ? JsonNodeFactory.instance.objectNode() : browserFingerprint.deepCopy();
+        proxyAffinityKey = proxyAffinityKey == null ? "" : proxyAffinityKey.trim();
     }
 
     QwenCredential(String token, String userId) {
         this(token, userId, "", "chrome146", Map.of(),
-            JsonNodeFactory.instance.objectNode(), JsonNodeFactory.instance.objectNode());
+            JsonNodeFactory.instance.objectNode(), JsonNodeFactory.instance.objectNode(), "");
     }
 
     QwenCredential(
@@ -37,7 +39,20 @@ record QwenCredential(
         JsonNode browserState
     ) {
         this(token, userId, userAgent, browserProfile, cookies, browserState,
-            JsonNodeFactory.instance.objectNode());
+            JsonNodeFactory.instance.objectNode(), "");
+    }
+
+    QwenCredential(
+        String token,
+        String userId,
+        String userAgent,
+        String browserProfile,
+        Map<String, String> cookies,
+        JsonNode browserState,
+        JsonNode browserFingerprint
+    ) {
+        this(token, userId, userAgent, browserProfile, cookies, browserState,
+            browserFingerprint, "");
     }
 
     @Override public JsonNode browserState() { return browserState.deepCopy(); }
@@ -54,7 +69,8 @@ record QwenCredential(
                     value.path("user_agent").asText("").trim(),
                     value.path("browser_profile").asText("chrome146").trim(),
                     cookies(value), value.path("browser_state"),
-                    value.path("browser_fingerprint"));
+                    value.path("browser_fingerprint"),
+                    value.path("proxy_affinity_key").asText("").trim());
             }
         }
         throw new IllegalStateException("Qwen account credential requires token");

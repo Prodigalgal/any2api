@@ -36,18 +36,24 @@ class QwenFingerprintPlan:
         raise ValueError(f"unsupported Qwen browser backend: {backend}")
 
 
-def new_qwen_fingerprint(backend: str) -> dict[str, Any]:
+def new_qwen_fingerprint(backend: str, *, proxy_url: str = "") -> dict[str, Any]:
     if backend == "patchright":
         return _new_patchright_fingerprint()
     if backend == "camoufox":
-        return _new_camoufox_fingerprint()
+        return _new_camoufox_fingerprint(proxy_url)
     raise ValueError(f"unsupported Qwen browser backend: {backend}")
 
 
-def new_qwen_fingerprint_plan() -> QwenFingerprintPlan:
+def new_qwen_fingerprint_plan(*, camoufox_proxy_url: str = "") -> QwenFingerprintPlan:
+    patchright = new_qwen_fingerprint("patchright")
+    camoufox = new_qwen_fingerprint("camoufox", proxy_url=camoufox_proxy_url)
+    if camoufox_proxy_url:
+        patchright = normalize_qwen_fingerprint(
+            {**patchright, "timezone_id": camoufox["timezone_id"]}
+        )
     return QwenFingerprintPlan(
-        patchright=new_qwen_fingerprint("patchright"),
-        camoufox=new_qwen_fingerprint("camoufox"),
+        patchright=patchright,
+        camoufox=camoufox,
     )
 
 
@@ -264,7 +270,7 @@ def _new_patchright_fingerprint() -> dict[str, Any]:
     return normalize_qwen_fingerprint(value)
 
 
-def _new_camoufox_fingerprint() -> dict[str, Any]:
+def _new_camoufox_fingerprint(proxy_url: str) -> dict[str, Any]:
     from camoufox.utils import launch_options
 
     profile = secrets.choice(CAMOUFOX_PROFILES)
@@ -272,15 +278,25 @@ def _new_camoufox_fingerprint() -> dict[str, Any]:
     last_error: ValueError | None = None
     for _ in range(CAMOUFOX_GENERATION_ATTEMPTS):
         try:
+            options: dict[str, Any] = {
+                "os": "windows",
+                "locale": "zh-CN",
+                "headless": True,
+                "fingerprint_preset": True,
+                "ff_version": major,
+                "i_know_what_im_doing": True,
+                "block_webrtc": True,
+                "humanize": False,
+            }
+            if proxy_url:
+                options.update(
+                    {
+                        "geoip": True,
+                        "proxy": {"server": proxy_url},
+                    }
+                )
             prepared = launch_options(
-                os="windows",
-                locale="zh-CN",
-                headless=True,
-                fingerprint_preset=True,
-                ff_version=major,
-                i_know_what_im_doing=True,
-                block_webrtc=True,
-                humanize=False,
+                **options,
             )
             break
         except ValueError as error:
@@ -300,7 +316,9 @@ def _new_camoufox_fingerprint() -> dict[str, Any]:
         raise RuntimeError("Camoufox did not emit a generated fingerprint config")
     config = json.loads("".join(str(value) for _, value in chunks))
     config.pop("addons", None)
-    config["timezone"] = "Asia/Shanghai"
+    if not str(config.get("timezone") or "").strip():
+        config["timezone"] = "Asia/Shanghai"
+    timezone_id = str(config["timezone"])
     value = {
         "schema_version": QWEN_FINGERPRINT_SCHEMA_VERSION,
         "backend": "camoufox",
@@ -309,7 +327,7 @@ def _new_camoufox_fingerprint() -> dict[str, Any]:
         "user_agent": str(config.get("navigator.userAgent") or ""),
         "os": "windows",
         "locale": "zh-CN",
-        "timezone_id": "Asia/Shanghai",
+        "timezone_id": timezone_id,
         "accept_language": "zh-CN,zh;q=0.9,en;q=0.8",
         "camoufox_config": config,
         "firefox_user_prefs": dict(prepared.get("firefox_user_prefs") or {}),

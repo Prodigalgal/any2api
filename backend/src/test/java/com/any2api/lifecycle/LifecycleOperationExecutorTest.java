@@ -23,7 +23,9 @@ class LifecycleOperationExecutorTest {
         var registry = mock(ProviderLifecycleRegistry.class);
         var automation = mock(LifecycleAutomationClient.class);
         var mapper = new ObjectMapper();
-        var credential = mapper.createObjectNode().put("service_token", "secret");
+        var credential = mapper.createObjectNode()
+            .put("service_token", "secret")
+            .put("proxy_affinity_key", "persisted-affinity");
         var metadata = Map.<String, Object>of(
             "inference_probe_status", "FAILED",
             "inference_probe_error", "credential_rejected");
@@ -48,6 +50,8 @@ class LifecycleOperationExecutorTest {
         assertThat(payload.getValue())
             .containsEntry("credential", credential)
             .containsEntry("metadata", metadata)
-            .containsEntry("proxy_pool", proxyPool);
+            .containsEntry("proxy_pool", proxyPool)
+            .containsEntry("proxy_affinity_key", "persisted-affinity")
+            .containsEntry("strict_proxy_affinity", true);
     }
 }

@@ -6,10 +6,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from any2api_automation.providers.qwen import _launch_profile_for_fingerprint
+from any2api_automation.providers.qwen import (
+    _launch_profile_for_fingerprint,
+    _qwen_proxy_affinity,
+)
 from any2api_automation.providers.qwen_fingerprint import (
     camoufox_launch_options,
     new_qwen_fingerprint,
+    new_qwen_fingerprint_plan,
     normalize_qwen_fingerprint,
     patchright_cdp_commands,
 )
@@ -71,6 +75,52 @@ def test_camoufox_generated_fingerprint_replays_every_persisted_field() -> None:
     registration_profile = _launch_profile_for_fingerprint(fingerprint)
     assert registration_profile.humanize is False
     assert registration_profile.camoufox_config == fingerprint["camoufox_config"]
+
+
+def test_camoufox_proxy_fingerprint_uses_geoip_timezone_and_remains_persistable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import re
+
+    import camoufox.utils
+
+    baseline = new_qwen_fingerprint("camoufox")
+    captured: dict[str, object] = {}
+
+    def geoip_launch_options(**options: object) -> dict[str, object]:
+        captured.update(options)
+        config = deepcopy(baseline["camoufox_config"])
+        major = str(options["ff_version"])
+        config["navigator.userAgent"] = re.sub(
+            r"Firefox/\d+\.", f"Firefox/{major}.", str(config["navigator.userAgent"])
+        )
+        config["timezone"] = "Asia/Singapore"
+        return {
+            "env": camoufox.utils.get_env_vars(config, camoufox.utils.get_target_os(config)),
+            "firefox_user_prefs": deepcopy(baseline["firefox_user_prefs"]),
+        }
+
+    monkeypatch.setattr(camoufox.utils, "launch_options", geoip_launch_options)
+
+    plan = new_qwen_fingerprint_plan(camoufox_proxy_url="http://proxy.internal:8080")
+    fingerprint = plan.camoufox
+
+    assert captured["geoip"] is True
+    assert captured["proxy"] == {"server": "http://proxy.internal:8080"}
+    assert fingerprint["timezone_id"] == "Asia/Singapore"
+    assert fingerprint["camoufox_config"]["timezone"] == "Asia/Singapore"
+    assert plan.patchright["timezone_id"] == "Asia/Singapore"
+    assert normalize_qwen_fingerprint(fingerprint) == fingerprint
+
+
+def test_qwen_proxy_affinity_is_normalized_stable_and_attempt_scoped() -> None:
+    first = _qwen_proxy_affinity(" User@Example.COM ", 1)
+
+    assert first == _qwen_proxy_affinity("user@example.com", 1)
+    assert first.startswith("qwen-")
+    assert first != _qwen_proxy_affinity("user@example.com", 2)
+    with pytest.raises(ValueError, match="positive"):
+        _qwen_proxy_affinity("user@example.com", 0)
 
 
 def test_camoufox_legacy_fingerprint_migrates_without_rotating_device_identity() -> None:

@@ -61,6 +61,11 @@ class QwenAutomationProvider(AutomationProvider):
                 trace.mark(RegistrationStage.MAILBOX_CREATED)
                 await asyncio.sleep(random.uniform(2.0, 4.0))
                 flow_payload = {**payload}
+                affinity_key = str(flow_payload.get("proxy_affinity_key") or "").strip()
+                if not affinity_key:
+                    affinity_key = _qwen_proxy_affinity(mailbox.address, attempt)
+                flow_payload["proxy_affinity_key"] = affinity_key
+                flow_payload["strict_proxy_affinity"] = True
                 flow_payload.setdefault(
                     "proxy_check_url", f"{settings().qwen_base_url.rstrip('/')}/auth?mode=register"
                 )
@@ -296,16 +301,46 @@ def _qwen_api_browser(
 def _register_with_fingerprint(
     payload: dict[str, Any], mail, mailbox, password: str, trace: RegistrationTrace
 ) -> BrowserResult:
-    plan = new_qwen_fingerprint_plan()
+    plan: QwenFingerprintPlan | None = None
+
+    def resolve_profiles(
+        proxy_url: str,
+    ) -> tuple[BrowserContextProfile, BrowserLaunchProfile]:
+        nonlocal plan
+        plan = new_qwen_fingerprint_plan(camoufox_proxy_url=proxy_url)
+        return (
+            _context_profile_for_fingerprint(plan.patchright, {}),
+            _launch_profile_for_fingerprint(plan.camoufox),
+        )
+
+    def register(page, context, backend: str, proxy_url: str) -> BrowserResult:
+        if plan is None:
+            raise RuntimeError("Qwen registration fingerprint plan was not initialized")
+        return _register_browser(
+            page,
+            context,
+            backend,
+            proxy_url,
+            mail,
+            mailbox,
+            password,
+            trace,
+            plan,
+            str(payload.get("proxy_affinity_key") or ""),
+        )
+
     return run_browser_flow(
-        lambda page, context, backend, proxy_url: _register_browser(
-            page, context, backend, proxy_url, mail, mailbox, password, trace, plan
-        ),
+        register,
         preferred="camoufox",
         fallback="patchright",
         payload=payload,
-        context_profile=_context_profile_for_fingerprint(plan.patchright, {}),
-        launch_profile=_launch_profile_for_fingerprint(plan.camoufox),
+        launch_profile=BrowserLaunchProfile(
+            headless=False,
+            humanize=False,
+            camoufox_os="windows",
+            block_webrtc=True,
+        ),
+        profile_resolver=resolve_profiles,
     )
 
 
@@ -319,6 +354,7 @@ def _register_browser(
     password,
     trace: RegistrationTrace,
     fingerprint_plan: QwenFingerprintPlan,
+    proxy_affinity_key: str,
 ) -> BrowserResult:
     config = settings()
     fingerprint = fingerprint_plan.for_backend(backend)
@@ -419,6 +455,8 @@ def _register_browser(
     page.evaluate("token => localStorage.setItem('token', token)", token)
     credential_value["token"] = token
     credential_value.update(_qwen_session_patch(context, page, config.qwen_base_url, fingerprint))
+    if proxy_url and proxy_affinity_key:
+        credential_value["proxy_affinity_key"] = proxy_affinity_key
     if challenge.user_id:
         credential_value["user_id"] = challenge.user_id
     trace.mark(RegistrationStage.ACTIVATED)
@@ -429,6 +467,16 @@ def _register_browser(
         credential_value,
         metadata={**trace.metadata(), **challenge.diagnostics()},
     )
+
+
+def _qwen_proxy_affinity(email: str, attempt: int) -> str:
+    if attempt < 1:
+        raise ValueError("Qwen proxy affinity attempt must be positive")
+    normalized = email.strip().lower()
+    if not normalized:
+        raise ValueError("Qwen proxy affinity requires an email address")
+    digest = hashlib.sha256(f"{normalized}\0{attempt}".encode()).hexdigest()[:32]
+    return f"qwen-{digest}"
 
 
 def _restore_qwen_browser_state(context, current: dict[str, Any], base_url: str) -> None:

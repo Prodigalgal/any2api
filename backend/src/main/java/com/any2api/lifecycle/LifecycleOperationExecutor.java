@@ -56,6 +56,11 @@ final class LifecycleOperationExecutor {
                 payload.put("metadata", accountMetadata == null ? Map.of() : accountMetadata);
                 if (proxyPool != null && !proxyPool.isEmpty()) {
                     payload.put("proxy_pool", proxyPool);
+                    var affinityKey = credential.path("proxy_affinity_key").asText("").trim();
+                    if (!affinityKey.isBlank()) {
+                        payload.put("proxy_affinity_key", affinityKey);
+                        payload.put("strict_proxy_affinity", true);
+                    }
                 }
                 runtimeSettings.applyMailSettings(payload, null);
                 return automation.execute(

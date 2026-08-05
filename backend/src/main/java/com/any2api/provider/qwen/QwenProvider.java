@@ -329,7 +329,7 @@ public final class QwenProvider implements InferenceProvider {
 
     private BrowserTransportClient.OpenCommand sessionCommand(
         QwenCredential credential,
-        String affinityKey
+        String fallbackAffinityKey
     ) {
         var origin = URI.create(properties.getBaseUrl());
         var proxyPool = proxyPools.runtimeForProvider(
@@ -338,6 +338,8 @@ public final class QwenProvider implements InferenceProvider {
             ? properties.getUserAgent() : credential.userAgent();
         var browserProfile = credential.browserProfile().isBlank()
             ? "chrome146" : credential.browserProfile();
+        var affinityKey = credential.proxyAffinityKey().isBlank()
+            ? fallbackAffinityKey : credential.proxyAffinityKey();
         return new BrowserTransportClient.OpenCommand(
             origin, Map.of(), List.of("." + origin.getHost()), userAgent,
             browserProfile, "v2", proxyPool, 300, List.of(), affinityKey,

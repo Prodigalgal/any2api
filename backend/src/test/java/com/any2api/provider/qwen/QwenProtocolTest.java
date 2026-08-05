@@ -1,19 +1,26 @@
 package com.any2api.provider.qwen;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.proxy.ProxyPoolService;
+import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.BrowserTransportClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -36,6 +43,7 @@ class QwenProtocolTest {
     void preservesProviderCookiesForTheNativeBrowserSession() {
         var payload = new ObjectMapper().readTree("""
             {"token":"account-token","user_id":"user-1",
+             "proxy_affinity_key":"persisted-affinity",
              "cookies":{"session":"cookie-value","empty":""},
              "browser_state":{"schema_version":1,"storage_state":{
                "cookies":[],"origins":[]}}}
@@ -49,6 +57,52 @@ class QwenProtocolTest {
         assertThat(credential.cookies())
             .containsExactly(Map.entry("session", "cookie-value"));
         assertThat(credential.browserState().path("schema_version").asInt()).isEqualTo(1);
+        assertThat(credential.proxyAffinityKey()).isEqualTo("persisted-affinity");
+    }
+
+    @Test
+    void reusesPersistedProxyAffinityForInferenceBrowserSessions() {
+        var mapper = new ObjectMapper();
+        var transport = mock(BrowserTransportClient.class);
+        var proxyPools = mock(ProxyPoolService.class);
+        var requests = mock(QwenTransportRequests.class);
+        var accountId = UUID.randomUUID();
+        var proxyPool = Map.<String, Object>of(
+            "mode", "NODE_LIST", "nodes", List.of("http://proxy.internal:8080"));
+        var payload = mapper.readTree("""
+            {"token":"account-token-value-that-is-long-enough",
+             "proxy_affinity_key":"persisted-affinity"}
+            """);
+        var account = new com.any2api.account.LeasedProviderAccount(
+            accountId, "qwen", "external", "user@example.com", 1,
+            null, payload, Map.of(), null);
+        var response = new QwenRiskHeaderClient.BrowserResponse(
+            200, "application/json", "{\"data\":[]}".getBytes(StandardCharsets.UTF_8),
+            mapper.createObjectNode(), "native_browser_buffered");
+        when(proxyPools.runtimeForProvider("qwen", ProxyTrafficScope.INFERENCE))
+            .thenReturn(Optional.of(proxyPool));
+        when(transport.open(any(BrowserTransportClient.OpenCommand.class)))
+            .thenReturn(Mono.just(new BrowserTransportClient.Session(
+                "session-id", "user-agent", "chrome146", "binding-id")));
+        when(requests.browserFetch(
+            eq("GET"), eq("/api/v2/models/"), eq(""), any(QwenCredential.class),
+            eq(accountId.toString()), eq("session-id"), eq("/"), eq(120)))
+            .thenReturn(Mono.just(response));
+        when(transport.close("session-id")).thenReturn(Mono.just(
+            new BrowserTransportClient.CloseResult(mapper.createObjectNode())));
+        var provider = new QwenProvider(
+            transport, proxyPools, new QwenProperties(), mock(QwenRequestMapper.class),
+            requests, mock(QwenMediaUploader.class), mapper);
+
+        StepVerifier.create(provider.discoverModels(account))
+            .assertNext(models -> assertThat(models).isEmpty())
+            .verifyComplete();
+
+        var command = ArgumentCaptor.forClass(BrowserTransportClient.OpenCommand.class);
+        verify(transport).open(command.capture());
+        assertThat(command.getValue().proxyAffinityKey()).isEqualTo("persisted-affinity");
+        assertThat(command.getValue().strictProxyAffinity()).isTrue();
+        assertThat(command.getValue().proxyPool()).isEqualTo(proxyPool);
     }
 
     @Test

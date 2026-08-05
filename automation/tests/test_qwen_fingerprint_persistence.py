@@ -92,6 +92,29 @@ def test_camoufox_legacy_fingerprint_migrates_without_rotating_device_identity()
     assert "humanize:maxTime" not in migrated["camoufox_config"]
 
 
+def test_camoufox_fingerprint_retries_incoherent_webgl_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import camoufox.utils
+
+    original = camoufox.utils.launch_options
+    attempts = 0
+
+    def flaky_launch_options(**options: object) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ValueError('No WebGL data found for vendor "invalid" and renderer "invalid"')
+        return original(**options)
+
+    monkeypatch.setattr(camoufox.utils, "launch_options", flaky_launch_options)
+
+    fingerprint = new_qwen_fingerprint("camoufox")
+
+    assert attempts >= 3
+    assert fingerprint["backend"] == "camoufox"
+
+
 def test_qwen_fingerprint_rejects_profile_user_agent_drift() -> None:
     fingerprint = new_qwen_fingerprint("patchright")
     fingerprint["browser_profile"] = "chrome142"

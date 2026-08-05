@@ -13,6 +13,7 @@ QWEN_LEGACY_FINGERPRINT_SCHEMA_VERSION = 1
 QWEN_FINGERPRINT_MAX_BYTES = 256 << 10
 PATCHRIGHT_PROFILES = ("chrome142", "chrome145", "chrome146")
 CAMOUFOX_PROFILES = ("firefox144", "firefox147")
+CAMOUFOX_GENERATION_ATTEMPTS = 8
 
 _PATCHRIGHT_PERSONAS = (
     (1366, 768, 1366, 657, 4),
@@ -268,16 +269,28 @@ def _new_camoufox_fingerprint() -> dict[str, Any]:
 
     profile = secrets.choice(CAMOUFOX_PROFILES)
     major = int(browser_major(profile))
-    prepared = launch_options(
-        os="windows",
-        locale="zh-CN",
-        headless=True,
-        fingerprint_preset=True,
-        ff_version=major,
-        i_know_what_im_doing=True,
-        block_webrtc=True,
-        humanize=False,
-    )
+    last_error: ValueError | None = None
+    for _ in range(CAMOUFOX_GENERATION_ATTEMPTS):
+        try:
+            prepared = launch_options(
+                os="windows",
+                locale="zh-CN",
+                headless=True,
+                fingerprint_preset=True,
+                ff_version=major,
+                i_know_what_im_doing=True,
+                block_webrtc=True,
+                humanize=False,
+            )
+            break
+        except ValueError as error:
+            if "No WebGL data found for vendor" not in str(error):
+                raise
+            last_error = error
+    else:
+        raise RuntimeError(
+            "Camoufox could not generate a coherent WebGL fingerprint"
+        ) from last_error
     chunks = sorted(
         (int(name.rsplit("_", 1)[1]), value)
         for name, value in dict(prepared.get("env") or {}).items()

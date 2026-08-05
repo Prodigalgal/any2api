@@ -543,7 +543,20 @@ class QwenNativeBrowserTransport:
         current = urlparse(session.page.url)
         desired = urlparse(target)
         if current.path != desired.path:
-            await session.page.goto(target, wait_until="domcontentloaded", timeout=60_000)
+            try:
+                await session.page.goto(target, wait_until="domcontentloaded", timeout=60_000)
+            except Exception as error:
+                if "NS_BINDING_ABORTED" not in str(error):
+                    raise
+                await session.page.wait_for_url(
+                    target,
+                    wait_until="domcontentloaded",
+                    timeout=10_000,
+                )
+                logger.info(
+                    "qwen_native_browser_navigation_superseded target_path=%s",
+                    desired.path,
+                )
             await session.page.wait_for_function(
                 "() => localStorage.getItem('token') && document.readyState !== 'loading'",
                 timeout=30_000,

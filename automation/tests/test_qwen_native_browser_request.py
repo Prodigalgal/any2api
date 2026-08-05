@@ -419,6 +419,79 @@ async def test_qwen_native_transport_hydrates_login_state_on_the_real_chat_route
     assert session.page.visited == "https://chat.qwen.ai/c/new-chat"
 
 
+@pytest.mark.asyncio
+async def test_qwen_native_transport_accepts_a_superseding_spa_navigation() -> None:
+    class FakeContext:
+        async def add_cookies(self, _cookies: list[dict[str, str]]) -> None:
+            return None
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://chat.qwen.ai/c/new-chat"
+            self.token = ""
+            self.superseded_target = ""
+
+        async def evaluate(self, _script: str, token: str) -> None:
+            self.token = token
+
+        async def goto(self, url: str, **_kwargs: object) -> None:
+            self.url = url
+            raise RuntimeError("Page.goto: NS_BINDING_ABORTED")
+
+        async def wait_for_url(self, url: str, **_kwargs: object) -> None:
+            assert self.url == url
+            self.superseded_target = url
+
+        async def wait_for_function(self, _script: str, **_kwargs: object) -> None:
+            return None
+
+        async def wait_for_timeout(self, _timeout: int) -> None:
+            return None
+
+    transport = QwenNativeBrowserTransport()
+    transport._ensure_baxia_ready = AsyncMock()
+    session = _AccountBrowserSession("account", FakeContext(), FakePage(), "current")
+    request = NativeBrowserRequest(
+        path="/api/v2/chat/completions?chat_id=chat-1",
+        body="{}",
+        bearer_token="token-value-that-is-long-enough",
+        referer_path="/c/chat-1",
+    )
+
+    await transport._prepare_authenticated_surface(session, request)
+
+    assert session.page.token == request.bearer_token
+    assert session.page.superseded_target == "https://chat.qwen.ai/c/chat-1"
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_rejects_an_unrelated_navigation_error() -> None:
+    class FakeContext:
+        async def add_cookies(self, _cookies: list[dict[str, str]]) -> None:
+            return None
+
+    class FakePage:
+        url = "https://chat.qwen.ai/c/new-chat"
+
+        async def evaluate(self, _script: str, _token: str) -> None:
+            return None
+
+        async def goto(self, _url: str, **_kwargs: object) -> None:
+            raise RuntimeError("Page.goto: NS_ERROR_CONNECTION_REFUSED")
+
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", FakeContext(), FakePage(), "current")
+    request = NativeBrowserRequest(
+        path="/api/v2/chat/completions?chat_id=chat-1",
+        body="{}",
+        bearer_token="token-value-that-is-long-enough",
+        referer_path="/c/chat-1",
+    )
+
+    with pytest.raises(RuntimeError, match="NS_ERROR_CONNECTION_REFUSED"):
+        await transport._prepare_authenticated_surface(session, request)
+
+
 def test_qwen_punish_url_accepts_only_the_configured_qwen_origin() -> None:
     valid = json.dumps(
         {

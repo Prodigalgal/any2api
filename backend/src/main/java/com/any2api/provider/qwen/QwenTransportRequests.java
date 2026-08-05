@@ -1,6 +1,7 @@
 package com.any2api.provider.qwen;
 
 import com.any2api.transport.BrowserTransportClient;
+import com.any2api.provider.ProviderExecutionContext;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -51,13 +52,35 @@ final class QwenTransportRequests {
     }
 
     Mono<QwenRiskHeaderClient.BrowserResponse> browserFetch(
+        String method,
         String path,
         String body,
         QwenCredential credential,
+        ProviderExecutionContext context,
+        String transportSessionId,
         String refererPath,
         int timeout
     ) {
         return riskHeaders.browserFetch(
-            "POST", path, body, credential.token(), credential.cookies(), refererPath, timeout);
+                method, path, body, credential.token(), context.accountId().toString(),
+                credential.cookies(), credential.browserState(), credential.browserFingerprint(),
+                transportSessionId, refererPath, timeout)
+            .doOnNext(response -> context.acceptCredentialPatch(response.credentialPatch()));
+    }
+
+    Mono<QwenRiskHeaderClient.BrowserResponse> browserFetch(
+        String method,
+        String path,
+        String body,
+        QwenCredential credential,
+        String accountId,
+        String transportSessionId,
+        String refererPath,
+        int timeout
+    ) {
+        return riskHeaders.browserFetch(
+            method, path, body, credential.token(), accountId, credential.cookies(),
+            credential.browserState(), credential.browserFingerprint(), transportSessionId,
+            refererPath, timeout);
     }
 }

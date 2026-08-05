@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from contextlib import asynccontextmanager
 from typing import ClassVar, Self
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 from any2api_automation.providers.qwen_risk import (
     NativeBrowserRequest,
     QwenNativeBrowserTransport,
+    _AccountBrowserSession,
     _qwen_punish_url,
     _qwen_sse_finished,
 )
@@ -59,15 +61,17 @@ def test_qwen_native_browser_request_rejects_cookie_header_injection() -> None:
 @pytest.mark.asyncio
 async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> None:
     class FakePage:
-        def is_closed(self) -> bool:
-            return False
+        pass
+
+    class FakeContext:
+        pass
 
     transport = QwenNativeBrowserTransport()
-    transport._page = FakePage()
-    transport._activate_account = AsyncMock()
-    transport._ensure_baxia_ready = AsyncMock()
-    transport._frontend_version = "current"
+    session = _AccountBrowserSession("account", FakeContext(), FakePage(), "current")
+    transport._ensure_ready = AsyncMock()
+    transport._session_for = AsyncMock(return_value=session)
     transport._prepare_authenticated_surface = AsyncMock()
+    transport._credential_patch = AsyncMock(return_value={})
     transport._fetch_in_main_world = AsyncMock(
         return_value=(
             {
@@ -92,10 +96,59 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
     assert response["status"] == 200
     assert base64.b64decode(response["body_base64"]) == b'{"data":{"id":"chat"}}'
-    payload = transport._fetch_in_main_world.await_args.args[0]
+    payload = transport._fetch_in_main_world.await_args.args[1]
     assert payload["path"] == "/api/v2/chats/new"
     assert str(payload["timezone"]).isascii()
     assert str(payload["timezone"]).endswith("GMT+0800")
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_holds_the_proxy_lease_through_the_request() -> None:
+    lease_held = False
+
+    @asynccontextmanager
+    async def proxy_lease(_session_id: str):
+        nonlocal lease_held
+        lease_held = True
+        try:
+            yield ("http://proxy.internal:8080", "binding-1")
+        finally:
+            lease_held = False
+
+    session = _AccountBrowserSession("account", object(), object(), "current")
+    transport = QwenNativeBrowserTransport()
+    transport._transport_proxy_lease = proxy_lease
+    transport._session_for = AsyncMock(return_value=session)
+    transport._credential_patch = AsyncMock(return_value={})
+
+    async def evaluate(_session, _request):
+        assert lease_held is True
+        return (
+            {
+                "status": 200,
+                "contentType": "application/json",
+                "requestId": "request-id",
+                "retryAfter": "",
+                "bodyBase64": base64.b64encode(b"{}").decode(),
+            },
+            b"{}",
+        )
+
+    transport._evaluate = evaluate
+
+    await transport.fetch(
+        NativeBrowserRequest(
+            path="/api/v2/chats/new",
+            bearer_token="token-value-that-is-long-enough",
+            transport_session_id="a" * 32,
+        )
+    )
+
+    assert lease_held is False
+    transport._session_for.assert_awaited_once_with(
+        transport._session_for.await_args.args[0],
+        ("http://proxy.internal:8080", "binding-1"),
+    )
 
 
 @pytest.mark.asyncio
@@ -175,8 +228,8 @@ async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
             await self.route_handler(self.fake_route)
 
     page = FakePage()
+    session = _AccountBrowserSession("account", object(), page, "current")
     transport = QwenNativeBrowserTransport()
-    transport._page = page
     payload = {
         "url": "https://chat.qwen.ai/api/v2/chats/new",
         "path": "/api/v2/chats/new",
@@ -192,7 +245,7 @@ async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
         "timezone": "Wed Aug 05 2026 12:00:00 GMT+0800",
     }
 
-    result, actual_body = await transport._fetch_in_main_world(payload)
+    result, actual_body = await transport._fetch_in_main_world(session, payload)
 
     assert "fetch(request.url" in page.script
     assert page.routed is True
@@ -229,6 +282,10 @@ def test_qwen_thinking_summary_does_not_finish_the_stream() -> None:
 
 @pytest.mark.asyncio
 async def test_qwen_native_transport_hydrates_login_state_on_the_real_chat_route() -> None:
+    class FakeContext:
+        async def add_cookies(self, _cookies: list[dict[str, str]]) -> None:
+            return None
+
     class FakePage:
         def __init__(self) -> None:
             self.url = "https://chat.qwen.ai/"
@@ -249,9 +306,8 @@ async def test_qwen_native_transport_hydrates_login_state_on_the_real_chat_route
             return None
 
     transport = QwenNativeBrowserTransport()
-    transport._page = FakePage()
-    transport._activate_account = AsyncMock()
     transport._ensure_baxia_ready = AsyncMock()
+    session = _AccountBrowserSession("account", FakeContext(), FakePage(), "current")
     request = NativeBrowserRequest(
         path="/api/v2/chats/new",
         body="{}",
@@ -259,10 +315,10 @@ async def test_qwen_native_transport_hydrates_login_state_on_the_real_chat_route
         referer_path="/c/new-chat",
     )
 
-    await transport._prepare_authenticated_surface(request)
+    await transport._prepare_authenticated_surface(session, request)
 
-    assert transport._page.token == request.bearer_token
-    assert transport._page.visited == "https://chat.qwen.ai/c/new-chat"
+    assert session.page.token == request.bearer_token
+    assert session.page.visited == "https://chat.qwen.ai/c/new-chat"
 
 
 def test_qwen_punish_url_accepts_only_the_configured_qwen_origin() -> None:
@@ -297,13 +353,17 @@ async def test_qwen_native_transport_solves_and_replays_one_punished_request() -
     completed = b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
 
     class FakePage:
-        def is_closed(self) -> bool:
-            return False
+        pass
+
+    class FakeContext:
+        pass
 
     transport = QwenNativeBrowserTransport()
-    transport._page = FakePage()
-    transport._frontend_version = "current"
+    session = _AccountBrowserSession("account", FakeContext(), FakePage(), "current")
+    transport._ensure_ready = AsyncMock()
+    transport._session_for = AsyncMock(return_value=session)
     transport._prepare_authenticated_surface = AsyncMock()
+    transport._credential_patch = AsyncMock(return_value={})
     transport._fetch_in_main_world = AsyncMock(
         side_effect=[
             (
@@ -343,6 +403,6 @@ async def test_qwen_native_transport_solves_and_replays_one_punished_request() -
     )
 
     assert transport._fetch_in_main_world.await_count == 2
-    transport._challenge_solver.solve.assert_awaited_once_with(transport._page, punish_url)
-    transport._load_page_runtime.assert_awaited_once()
+    transport._challenge_solver.solve.assert_awaited_once_with(session.page, punish_url)
+    transport._load_page_runtime.assert_awaited_once_with(session)
     assert base64.b64decode(response["body_base64"]) == completed

@@ -90,7 +90,7 @@ class BrowserSessionOpenRequest(BaseModel):
     cookies: dict[str, str] = Field(default_factory=dict)
     cookie_domains: list[str] = Field(default_factory=list, max_length=8)
     user_agent: str = Field(default="", max_length=512)
-    browser_profile: str = Field(default="chrome136", pattern=r"^chrome[0-9]{2,3}$")
+    browser_profile: str = Field(default="chrome136", pattern=r"^(?:chrome|firefox)[0-9]{2,3}$")
     http_version: Literal["v1", "v2"] = "v2"
     proxy_pool: dict[str, Any] | None = None
     proxy_url: str = Field(default="", max_length=2048)

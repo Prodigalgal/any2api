@@ -1,5 +1,7 @@
 from functools import lru_cache
 
+from pydantic import Field
+
 from .provider_config import AutomationProviderSettings
 
 
@@ -7,6 +9,7 @@ class QwenSettings(AutomationProviderSettings):
     qwen_base_url: str = "https://chat.qwen.ai"
     qwen_risk_headless: bool = False
     qwen_risk_browser_profile: str = "chrome146"
+    qwen_risk_session_cache_size: int = Field(default=16, ge=1, le=64)
     qwen_risk_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "

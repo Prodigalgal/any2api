@@ -86,7 +86,7 @@ class QwenSignupChallenge(ChallengeStrategy):
             )
             if result.present and not result.solved:
                 raise RuntimeError(
-                    "Qwen signup challenge exhausted all attempts "
+                    "Qwen authentication challenge exhausted all attempts "
                     f"({result.diagnostic}, responses={self._response_summary()})"
                 )
 
@@ -101,7 +101,7 @@ class QwenSignupChallenge(ChallengeStrategy):
         if self.succeeded() or self._verification_hint(page):
             return
         raise RuntimeError(
-            "Qwen signup challenge exhausted all attempts "
+            "Qwen authentication challenge exhausted all attempts "
             f"({self.last_diagnostic}, responses={self._response_summary()})"
         )
 
@@ -154,7 +154,16 @@ class QwenSignupChallenge(ChallengeStrategy):
         try:
             url = response.url
             lowered = url.lower()
-            if "/api/v1/auths/signup" in lowered and response.request.method == "POST":
+            auth_endpoint = any(
+                endpoint in lowered
+                for endpoint in (
+                    "/api/v1/auths/signup",
+                    "/api/v2/auths/signup",
+                    "/api/v1/auths/signin",
+                    "/api/v2/auths/signin",
+                )
+            )
+            if auth_endpoint and response.request.method == "POST":
                 content_type = response.headers.get("content-type", "")
                 entry: dict[str, Any] = {
                     "status": response.status,
@@ -266,6 +275,14 @@ class QwenSignupChallenge(ChallengeStrategy):
         )
 
     def _verification_hint(self, page) -> bool:
+        try:
+            token = page.evaluate(
+                "() => localStorage.getItem('token') || localStorage.getItem('access_token')"
+            )
+            if token:
+                return True
+        except Exception:  # noqa: BLE001,S110 - navigation can replace the context
+            pass
         try:
             body = page.locator("body").inner_text(timeout=1_000).lower()
         except Exception:  # noqa: BLE001 - page can navigate during the probe

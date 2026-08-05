@@ -41,6 +41,27 @@ control and streaming calls. Without an `INFERENCE` binding the identical path i
 uses its provider-specific fingerprint transport with the same scoped policy. One-time
 object-storage uploads use the provider-issued signed URL and never receive account cookies.
 
+Qwen additionally persists versioned `browser_state` and `browser_fingerprint` objects inside the
+AES-GCM provider credential.
+The state retains Qwen origin storage plus explicitly allowlisted `qwen.ai` and `alibaba.com`
+Baxia/WAF cookies; arbitrary origins and cookie domains are rejected at the internal API boundary.
+Camoufox is the preferred Qwen backend and Patchright is the fallback. Registration dynamically
+selects a coherent account fingerprint. A Camoufox account stores and replays the complete generated
+config, Firefox preferences, font/voice selection, WebGL data, and canvas/audio/font seeds. A
+Patchright account stores the selected Chrome/TLS profile, UA/Client Hints, locale, timezone,
+screen, viewport, color scheme, and CDP-controlled CPU count; non-overridable device memory and
+WebGL identity are captured as observed fields and checked for host drift. The automation process
+owns one isolated context/page per account; Camoufox accounts own their exact browser runtime while
+Patchright accounts share only the Chromium process. A cold process restores account state before
+loading Baxia, and normal requests or challenge recovery return updated storage and fingerprint as
+one credential patch. The legacy flat cookie map is migration-only and is not injected when a
+complete browser state is present.
+
+Qwen's inference proxy affinity key is the stable account ID. The Java transport session passes its
+binding to the native Qwen browser so page navigation, Baxia header generation, model discovery,
+upload-token acquisition, chat creation, completion, and the matching `curl_cffi` request use the
+same egress. Request IDs and catalog probes cannot create a second account identity.
+
 The lease is passed into provider code, not hidden behind global proxy environment variables. Therefore browser navigation and follow-up vendor HTTP exchanges share the same egress in one attempt: Qwen sign-in after email activation and Grok OAuth token exchange cannot accidentally fall back to the host network. A failed node fails that attempt; only the durable Java retry starts a new flow and leases another node.
 
 MiMo uses its proven Xiaomi HTTP registration protocol rather than a guessed browser form. It fetches and solves the image captcha, encrypts the registration fields, verifies the mailbox ticket, exchanges `passToken` for MiMo service cookies, and validates the result through one provider proxy lease. The RSA public key is discovered from the current official registration assets. The asset contains preview and production keys in a host-dependent conditional, so the parser selects the branch for the configured account host and rejects ambiguous multi-key assets; `ANY2API_AUTOMATION_MIMO_REGISTRATION_PUBLIC_KEY_DER` is only an operator-controlled fallback. MiMo also owns its Xiaomi-compatible password policy instead of inheriting the generic provider password length.

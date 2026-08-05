@@ -31,6 +31,12 @@ _DEFAULT_USER_AGENTS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/131.0.0.0 Safari/537.36"
     ),
+    "firefox144": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0"
+    ),
+    "firefox147": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0"
+    ),
 }
 
 
@@ -72,15 +78,19 @@ class BrowserSession:
         if proxy_url:
             kwargs["proxies"] = {"http": proxy_url, "https": proxy_url}
         self.client = requests.Session(**kwargs)
-        self.client.headers.update(
-            {
-                "User-Agent": self.user_agent,
-                "Accept-Language": "en-US,en;q=0.9",
-                "sec-ch-ua": _client_hint(self.profile.impersonate),
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Windows"',
-            }
-        )
+        fingerprint_headers = {
+            "User-Agent": self.user_agent,
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        if self.profile.impersonate.startswith("chrome"):
+            fingerprint_headers.update(
+                {
+                    "sec-ch-ua": _client_hint(self.profile.impersonate),
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                }
+            )
+        self.client.headers.update(fingerprint_headers)
         if bearer_token:
             if "\r" in bearer_token or "\n" in bearer_token:
                 raise ValueError("browser session bearer token is invalid")

@@ -58,7 +58,11 @@ final class QwenRiskHeaderClient {
         String path,
         String body,
         String bearerToken,
+        String accountId,
         Map<String, String> cookies,
+        JsonNode browserState,
+        JsonNode browserFingerprint,
+        String transportSessionId,
         String refererPath,
         int timeoutSeconds
     ) {
@@ -67,7 +71,11 @@ final class QwenRiskHeaderClient {
         request.put("path", path);
         request.put("body", body == null ? "" : body);
         request.put("bearer_token", bearerToken);
+        request.put("account_id", accountId);
         request.put("cookies", cookies);
+        request.put("browser_state", browserState);
+        request.put("browser_fingerprint", browserFingerprint);
+        request.put("transport_session_id", transportSessionId);
         request.put("referer_path", refererPath);
         request.put("timeout_seconds", timeoutSeconds);
         return client.post()
@@ -85,6 +93,7 @@ final class QwenRiskHeaderClient {
                         response.path("status").asInt(502),
                         response.path("content_type").asText("application/octet-stream"),
                         Base64.getDecoder().decode(response.path("body_base64").asText("")),
+                        response.path("credential_patch"),
                         response.path("transport_mode").asText("native_browser_buffered"));
                 } catch (IllegalArgumentException error) {
                     throw new IllegalStateException(
@@ -93,9 +102,20 @@ final class QwenRiskHeaderClient {
             });
     }
 
-    record BrowserResponse(int status, String contentType, byte[] body, String transportMode) {
-        BrowserResponse { body = body.clone(); }
+    record BrowserResponse(
+        int status,
+        String contentType,
+        byte[] body,
+        JsonNode credentialPatch,
+        String transportMode
+    ) {
+        BrowserResponse {
+            body = body.clone();
+            credentialPatch = credentialPatch.deepCopy();
+        }
+        @Override public JsonNode credentialPatch() { return credentialPatch.deepCopy(); }
         boolean successful() { return status >= 200 && status < 300; }
         String text() { return new String(body, java.nio.charset.StandardCharsets.UTF_8); }
     }
+
 }

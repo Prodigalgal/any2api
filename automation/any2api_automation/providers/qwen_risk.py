@@ -9,6 +9,7 @@ import queue
 import re
 import threading
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -21,9 +22,25 @@ from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from pydantic import BaseModel, Field, model_validator
 
+from ..browser_transport import manager as browser_session_manager
 from ..config import settings as global_settings
 from ..security import require_internal_token
+from .qwen_fingerprint import (
+    camoufox_launch_options,
+    finalize_patchright_fingerprint,
+    new_qwen_fingerprint,
+    normalize_qwen_fingerprint,
+    patchright_cdp_commands,
+    patchright_client_hints,
+    qwen_fingerprint_digest,
+)
 from .qwen_inference_challenge import QwenInferenceChallengeSolver
+from .qwen_session import (
+    browser_state_cookie_map,
+    browser_state_digest,
+    normalize_browser_state,
+    playwright_storage_state,
+)
 from .qwen_settings import settings
 
 logger = logging.getLogger(__name__)
@@ -75,10 +92,18 @@ def _fingerprint_script(profile: str) -> str:
           wow64: false
         }})
       }};
-      Object.defineProperty(Navigator.prototype, 'platform', {{get: () => 'Win32'}});
-      Object.defineProperty(Navigator.prototype, 'userAgentData', {{
-        get: () => userAgentData
-      }});
+      for (const target of [Navigator.prototype, navigator]) {{
+        try {{
+          Object.defineProperty(target, 'platform', {{
+            configurable: true,
+            get: () => 'Win32'
+          }});
+          Object.defineProperty(target, 'userAgentData', {{
+            configurable: true,
+            get: () => userAgentData
+          }});
+        }} catch (_) {{}}
+      }}
     }})();
     """
 
@@ -94,7 +119,11 @@ class NativeBrowserRequest(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
     body: str = Field(default="", max_length=2 << 20)
     bearer_token: str = Field(min_length=20, max_length=16_384)
+    account_id: str = Field(default="", max_length=64)
     cookies: dict[str, str] = Field(default_factory=dict)
+    browser_state: dict[str, Any] = Field(default_factory=dict)
+    browser_fingerprint: dict[str, Any] = Field(default_factory=dict)
+    transport_session_id: str = Field(default="", max_length=32)
     referer_path: str = Field(default="/", min_length=1, max_length=2048)
     timeout_seconds: int = Field(default=300, ge=1, le=300)
 
@@ -106,6 +135,16 @@ class NativeBrowserRequest(BaseModel):
             raise ValueError("Qwen browser transport referer is not allowed")
         if len(self.cookies) > 128:
             raise ValueError("Qwen browser transport received too many cookies")
+        if self.account_id and not re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+            r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+            self.account_id,
+        ):
+            raise ValueError("Qwen browser transport received an invalid account id")
+        if self.transport_session_id and not re.fullmatch(
+            r"[0-9a-f]{32}", self.transport_session_id
+        ):
+            raise ValueError("Qwen browser transport received an invalid transport session id")
         if any(
             not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}", name)
             or len(value) > 8_192
@@ -114,6 +153,13 @@ class NativeBrowserRequest(BaseModel):
             for name, value in self.cookies.items()
         ):
             raise ValueError("Qwen browser transport received an invalid cookie")
+        try:
+            self.browser_state = normalize_browser_state(
+                self.browser_state, settings().qwen_base_url
+            )
+            self.browser_fingerprint = normalize_qwen_fingerprint(self.browser_fingerprint)
+        except TypeError as error:
+            raise ValueError(str(error)) from error
         return self
 
 
@@ -181,8 +227,15 @@ class QwenRiskHeaderProvider:
                         **_client_hints(config.qwen_risk_browser_profile),
                     },
                 )
-                context.add_init_script(_fingerprint_script(config.qwen_risk_browser_profile))
+                fingerprint_script = _fingerprint_script(config.qwen_risk_browser_profile)
+                context.add_init_script(fingerprint_script)
                 page = context.new_page()
+                page.add_init_script(fingerprint_script)
+                cdp = context.new_cdp_session(page)
+                cdp.send(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": fingerprint_script},
+                )
                 page.set_default_timeout(45_000)
                 self._load(page)
                 self._serve(page, context, browser)
@@ -289,33 +342,58 @@ class QwenRiskHeaderProvider:
             task.event.set()
 
 
+@dataclass
+class _AccountBrowserSession:
+    key: str
+    context: Any
+    page: Any
+    frontend_version: str = ""
+    input_digest: str = ""
+    state_digest: str = ""
+    cdp_session: Any | None = None
+    backend: str = "patchright"
+    browser_profile: str = ""
+    user_agent: str = ""
+    browser_fingerprint: dict[str, Any] = field(default_factory=dict)
+    fingerprint_digest: str = ""
+    proxy_url: str = ""
+    proxy_binding_id: str = ""
+    browser_manager: Any | None = None
+
+
 class QwenNativeBrowserTransport:
-    """Executes authenticated Qwen fetches in the real browser network stack."""
+    """Executes protected Qwen requests with one isolated context per account."""
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._request_lock = asyncio.Lock()
         self._playwright: Any | None = None
         self._browser: Any | None = None
-        self._context: Any | None = None
-        self._page: Any | None = None
-        self._frontend_version = ""
+        self._browser_profile = ""
+        self._user_agent = ""
         self._challenge_solver = QwenInferenceChallengeSolver()
-        self._active_account_key = ""
-        self._cookie_jars: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+        self._sessions: OrderedDict[str, _AccountBrowserSession] = OrderedDict()
 
     async def fetch(self, request: NativeBrowserRequest) -> dict[str, Any]:
-        await self._ensure_ready()
-        async with self._request_lock:
-            result, body = await self._evaluate(request)
+        async with (
+            self._request_lock,
+            self._transport_proxy_lease(request.transport_session_id) as proxy_binding,
+        ):
+            session = await self._session_for(request, proxy_binding)
+            result, body = await self._evaluate(session, request)
             punish_url = _qwen_punish_url(body)
             if punish_url:
-                await self._recover_from_challenge(punish_url)
-                result, body = await self._evaluate(request)
-            return self._response(request, result, body)
+                await self._recover_from_challenge(session, punish_url)
+                result, body = await self._evaluate(session, request)
+            credential_patch = await self._credential_patch(session, request)
+            return self._response(request, result, body, credential_patch)
 
-    async def _evaluate(self, request: NativeBrowserRequest) -> tuple[dict[str, Any], bytes]:
-        await self._prepare_authenticated_surface(request)
+    async def _evaluate(
+        self,
+        session: _AccountBrowserSession,
+        request: NativeBrowserRequest,
+    ) -> tuple[dict[str, Any], bytes]:
+        await self._prepare_authenticated_surface(session, request)
         maximum = global_settings().browser_transport_max_buffered_bytes
         payload = {
             "url": settings().qwen_base_url.rstrip("/") + request.path,
@@ -323,21 +401,24 @@ class QwenNativeBrowserTransport:
             "method": request.method,
             "body": request.body,
             "bearerToken": request.bearer_token,
-            "useBearer": not bool(request.cookies),
+            "useBearer": True,
             "referrer": settings().qwen_base_url.rstrip("/") + request.referer_path,
             "timeoutMs": request.timeout_seconds * 1000,
-            "version": self._frontend_version,
+            "version": session.frontend_version,
             "requestId": str(uuid4()),
             "maximumBytes": maximum,
             "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
+            "browserProfile": session.browser_profile,
+            "proxyUrl": session.proxy_url,
         }
-        result, body = await self._fetch_in_main_world(payload)
+        result, body = await self._fetch_in_main_world(session, payload)
         if len(body) > maximum:
             raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
         return result, body
 
     async def _fetch_in_main_world(
         self,
+        session: _AccountBrowserSession,
         payload: dict[str, Any],
     ) -> tuple[dict[str, Any], bytes]:
         encoded = base64.b64encode(
@@ -381,9 +462,9 @@ class QwenNativeBrowserTransport:
             finally:
                 probe_aborted.set()
 
-        await self._page.route(target_url, abort_probe, times=1)
+        await session.page.route(target_url, abort_probe, times=1)
         try:
-            async with self._page.expect_request(
+            async with session.page.expect_request(
                 lambda request: (
                     request.url == target_url
                     and request.method == method
@@ -391,11 +472,11 @@ class QwenNativeBrowserTransport:
                 ),
                 timeout=30_000,
             ) as request_info:
-                await self._page.add_script_tag(content=script)
+                await session.page.add_script_tag(content=script)
             browser_request = await request_info.value
             await asyncio.wait_for(probe_aborted.wait(), timeout=10)
         finally:
-            await self._page.unroute(target_url)
+            await session.page.unroute(target_url)
         request_headers = await browser_request.all_headers()
         baxia_headers = {"bx-ua", "bx-umidtoken", "bx-v"}
         if not baxia_headers.issubset(request_headers):
@@ -404,64 +485,43 @@ class QwenNativeBrowserTransport:
                 payload["path"],
                 sorted(baxia_headers.difference(request_headers)),
             )
-        return await asyncio.to_thread(
-            _send_qwen_request,
-            payload,
-            request_headers,
-        )
+        return await asyncio.to_thread(_send_qwen_request, payload, request_headers)
 
-    async def _prepare_authenticated_surface(self, request: NativeBrowserRequest) -> None:
+    async def _prepare_authenticated_surface(
+        self,
+        session: _AccountBrowserSession,
+        request: NativeBrowserRequest,
+    ) -> None:
         base_url = settings().qwen_base_url.rstrip("/")
-        await self._activate_account(request)
+        credential_cookies = [
+            {"name": name, "value": value, "url": base_url}
+            for name, value in request.cookies.items()
+        ]
+        if credential_cookies and not request.browser_state:
+            await session.context.add_cookies(credential_cookies)
         logger.info(
             "qwen_native_browser_surface path=%s auth_mode=%s credential_cookies=%s",
             request.referer_path,
             "cookie" if request.cookies else "bearer_fallback",
             len(request.cookies),
         )
-        await self._page.evaluate(
-            "token => localStorage.setItem('token', token)",
-            request.bearer_token,
+        await session.page.evaluate(
+            "token => localStorage.setItem('token', token)", request.bearer_token
         )
         target = base_url + request.referer_path
-        current = urlparse(self._page.url)
+        current = urlparse(session.page.url)
         desired = urlparse(target)
         if current.path != desired.path:
-            await self._page.goto(target, wait_until="domcontentloaded", timeout=60_000)
-            await self._page.wait_for_function(
+            await session.page.goto(target, wait_until="domcontentloaded", timeout=60_000)
+            await session.page.wait_for_function(
                 "() => localStorage.getItem('token') && document.readyState !== 'loading'",
                 timeout=30_000,
             )
-            await self._page.wait_for_timeout(750)
-        await self._ensure_baxia_ready()
+            await session.page.wait_for_timeout(750)
+        await self._ensure_baxia_ready(session)
 
-    async def _activate_account(self, request: NativeBrowserRequest) -> None:
-        account_key = hashlib.sha256(request.bearer_token.encode()).hexdigest()
-        base_url = settings().qwen_base_url.rstrip("/")
-        credential_cookies = [
-            {"name": name, "value": value, "url": base_url}
-            for name, value in request.cookies.items()
-        ]
-        if self._active_account_key == account_key:
-            if credential_cookies:
-                await self._context.add_cookies(credential_cookies)
-            return
-        if self._active_account_key:
-            self._cookie_jars[self._active_account_key] = await self._context.cookies()
-            self._cookie_jars.move_to_end(self._active_account_key)
-        await self._context.clear_cookies()
-        jar = self._cookie_jars.pop(account_key, [])
-        if jar:
-            await self._context.add_cookies(jar)
-        if credential_cookies:
-            await self._context.add_cookies(credential_cookies)
-        self._cookie_jars[account_key] = []
-        self._active_account_key = account_key
-        while len(self._cookie_jars) > 64:
-            self._cookie_jars.popitem(last=False)
-
-    async def _ensure_baxia_ready(self) -> None:
-        await self._page.evaluate(
+    async def _ensure_baxia_ready(self, session: _AccountBrowserSession) -> None:
+        await session.page.evaluate(
             r"""() => {
               const baxia = window.__baxia__;
               if (window.baxiaCommon && baxia?.baxiaPromptInit && !window.baxiaInitialized) {
@@ -483,7 +543,7 @@ class QwenNativeBrowserTransport:
               }
             }"""
         )
-        await self._page.wait_for_function(
+        await session.page.wait_for_function(
             r"""() => {
               const module = window.__baxia__?.getFYModule;
               return Boolean(
@@ -494,11 +554,38 @@ class QwenNativeBrowserTransport:
             timeout=30_000,
         )
 
+    async def _credential_patch(
+        self,
+        session: _AccountBrowserSession,
+        request: NativeBrowserRequest,
+    ) -> dict[str, Any]:
+        base_url = settings().qwen_base_url.rstrip("/")
+        state = normalize_browser_state(
+            await session.context.storage_state(indexed_db=True), base_url
+        )
+        digest = browser_state_digest(state, base_url)
+        session.state_digest = digest
+        if (
+            digest == browser_state_digest(request.browser_state, base_url)
+            and qwen_fingerprint_digest(request.browser_fingerprint) == session.fingerprint_digest
+        ):
+            return {}
+        cookies = browser_state_cookie_map(state, base_url)
+        return {
+            "browser_state": state,
+            "cookies": cookies,
+            "cookie": "; ".join(f"{name}={value}" for name, value in cookies.items()),
+            "user_agent": session.user_agent or self._user_agent,
+            "browser_profile": session.browser_profile or self._browser_profile,
+            "browser_fingerprint": normalize_qwen_fingerprint(session.browser_fingerprint),
+        }
+
     def _response(
         self,
         request: NativeBrowserRequest,
         result: dict[str, Any],
         body: bytes,
+        credential_patch: dict[str, Any],
     ) -> dict[str, Any]:
         content_type = str(result.get("contentType") or "application/octet-stream")
         logger.info(
@@ -519,31 +606,237 @@ class QwenNativeBrowserTransport:
                 "retry-after": str(result.get("retryAfter") or ""),
             },
             "body_base64": str(result.get("bodyBase64") or ""),
+            "credential_patch": credential_patch,
             "transport_mode": "native_browser_buffered",
         }
 
-    async def _recover_from_challenge(self, punish_url: str) -> None:
+    async def _recover_from_challenge(
+        self,
+        session: _AccountBrowserSession,
+        punish_url: str,
+    ) -> None:
         try:
-            outcome = await self._challenge_solver.solve(self._page, punish_url)
+            outcome = await self._challenge_solver.solve(session.page, punish_url)
             logger.info(
                 "qwen_native_browser_challenge_cleared attempts=%s diagnostic=%s",
                 outcome.attempts,
                 outcome.diagnostic,
             )
         finally:
-            await self._load_page_runtime()
+            await self._load_page_runtime(session)
+
+    async def _session_for(
+        self,
+        request: NativeBrowserRequest,
+        proxy_binding: tuple[str, str] | None = None,
+    ) -> _AccountBrowserSession:
+        account_key = (
+            request.account_id or hashlib.sha256(request.bearer_token.encode()).hexdigest()
+        )
+        incoming_digest = browser_state_digest(request.browser_state, settings().qwen_base_url)
+        session = self._sessions.get(account_key)
+        fingerprint = request.browser_fingerprint or (
+            session.browser_fingerprint
+            if session is not None and session.browser_fingerprint
+            else new_qwen_fingerprint("camoufox")
+        )
+        incoming_fingerprint_digest = qwen_fingerprint_digest(fingerprint)
+        proxy_url, proxy_binding_id = (
+            proxy_binding
+            if proxy_binding is not None
+            else await self._proxy_binding(request.transport_session_id)
+        )
+        is_closed = getattr(session.page, "is_closed", None) if session is not None else None
+        page_closed = session is not None and callable(is_closed) and is_closed()
+        if session is not None and page_closed:
+            await self._close_session(session)
+            self._sessions.pop(account_key, None)
+            session = None
+        known_digests = (
+            {session.input_digest, session.state_digest} if session is not None else set()
+        )
+        if session is not None and incoming_digest and incoming_digest not in known_digests:
+            await self._close_session(session)
+            self._sessions.pop(account_key, None)
+            session = None
+        if session is not None and (
+            session.fingerprint_digest != incoming_fingerprint_digest
+            or session.proxy_binding_id != proxy_binding_id
+        ):
+            await self._close_session(session)
+            self._sessions.pop(account_key, None)
+            session = None
+        if session is None:
+            session = await self._new_session(
+                account_key,
+                request,
+                incoming_digest,
+                fingerprint,
+                proxy_url,
+                proxy_binding_id,
+            )
+            self._sessions[account_key] = session
+        elif incoming_digest:
+            session.input_digest = incoming_digest
+        self._sessions.move_to_end(account_key)
+        while len(self._sessions) > settings().qwen_risk_session_cache_size:
+            _, expired = self._sessions.popitem(last=False)
+            await self._close_session(expired)
+        return session
+
+    async def _new_session(
+        self,
+        account_key: str,
+        request: NativeBrowserRequest,
+        state_digest: str,
+        fingerprint: dict[str, Any],
+        proxy_url: str,
+        proxy_binding_id: str,
+    ) -> _AccountBrowserSession:
+        base_url = settings().qwen_base_url.rstrip("/")
+        normalized_fingerprint = normalize_qwen_fingerprint(fingerprint)
+        backend = str(normalized_fingerprint["backend"])
+        options: dict[str, Any] = {"service_workers": "block"}
+        storage_state = playwright_storage_state(request.browser_state, base_url)
+        if storage_state:
+            options["storage_state"] = storage_state
+        browser_manager = None
+        browser = None
+        if backend == "patchright":
+            await self._ensure_ready()
+            browser = self._browser
+            viewport = normalized_fingerprint["viewport"]
+            screen = normalized_fingerprint["screen"]
+            options.update(
+                {
+                    "locale": str(normalized_fingerprint["locale"]),
+                    "timezone_id": str(normalized_fingerprint["timezone_id"]),
+                    "viewport": {
+                        "width": int(viewport["width"]),
+                        "height": int(viewport["height"]),
+                    },
+                    "screen": {
+                        "width": int(screen["width"]),
+                        "height": int(screen["height"]),
+                    },
+                    "device_scale_factor": float(normalized_fingerprint["device_scale_factor"]),
+                    "color_scheme": str(normalized_fingerprint["color_scheme"]),
+                    "user_agent": str(normalized_fingerprint["user_agent"]),
+                    "extra_http_headers": {
+                        "Accept-Language": str(normalized_fingerprint["accept_language"]),
+                        **patchright_client_hints(normalized_fingerprint),
+                    },
+                }
+            )
+            if proxy_url:
+                options["proxy"] = {"server": proxy_url}
+        else:
+            from camoufox.async_api import AsyncCamoufox
+
+            prepared = await asyncio.to_thread(
+                camoufox_launch_options,
+                normalized_fingerprint,
+                headless=settings().qwen_risk_headless,
+                humanize=True,
+                proxy_url=proxy_url,
+            )
+            browser_manager = AsyncCamoufox(from_options=prepared)
+            browser = await browser_manager.__aenter__()
+        if browser is None:
+            raise RuntimeError("Qwen browser runtime is unavailable")
+        context = None
+        try:
+            context = await browser.new_context(**options)
+            credential_cookies = [
+                {"name": name, "value": value, "url": base_url}
+                for name, value in request.cookies.items()
+            ]
+            if credential_cookies and not request.browser_state:
+                await context.add_cookies(credential_cookies)
+            page = await context.new_page()
+            cdp = None
+            if backend == "patchright":
+                cdp = await context.new_cdp_session(page)
+                for method, parameters in patchright_cdp_commands(normalized_fingerprint):
+                    await cdp.send(method, parameters)
+            session = _AccountBrowserSession(
+                account_key,
+                context,
+                page,
+                input_digest=state_digest,
+                state_digest=state_digest,
+                cdp_session=cdp,
+                backend=backend,
+                browser_profile=str(normalized_fingerprint["browser_profile"]),
+                user_agent=str(normalized_fingerprint["user_agent"]),
+                browser_fingerprint=normalized_fingerprint,
+                fingerprint_digest=qwen_fingerprint_digest(normalized_fingerprint),
+                proxy_url=proxy_url,
+                proxy_binding_id=proxy_binding_id,
+                browser_manager=browser_manager,
+            )
+            await self._load_page_runtime(session)
+            return session
+        except Exception:
+            if context is not None:
+                await context.close()
+            if browser_manager is not None:
+                await browser_manager.__aexit__(None, None, None)
+            raise
+
+    async def _proxy_binding(self, transport_session_id: str) -> tuple[str, str]:
+        if not transport_session_id:
+            return "", ""
+
+        def resolve() -> tuple[str, str]:
+            with browser_session_manager.lease(transport_session_id) as entry:
+                return entry.proxy_url, entry.binding_id
+
+        try:
+            return await asyncio.to_thread(resolve)
+        except KeyError as error:
+            raise RuntimeError("Qwen transport proxy session is unavailable") from error
+
+    @asynccontextmanager
+    async def _transport_proxy_lease(self, transport_session_id: str):
+        if not transport_session_id:
+            yield ("", "")
+            return
+        lease = browser_session_manager.lease(transport_session_id)
+        try:
+            entry = await asyncio.to_thread(lease.__enter__)
+        except KeyError as error:
+            raise RuntimeError("Qwen transport proxy session is unavailable") from error
+        try:
+            yield (entry.proxy_url, entry.binding_id)
+        finally:
+            await asyncio.to_thread(lease.__exit__, None, None, None)
 
     async def close(self) -> None:
         async with self._lock:
             await self._close_unlocked()
 
+    async def _close_session(self, session: _AccountBrowserSession) -> None:
+        try:
+            await session.context.close()
+        except Exception:
+            logger.exception("Qwen account browser context cleanup failed")
+        if session.browser_manager is not None:
+            try:
+                await session.browser_manager.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Qwen Camoufox runtime cleanup failed")
+
     async def _close_unlocked(self) -> None:
-        for value in (self._context, self._browser):
-            if value is not None:
-                try:
-                    await value.close()
-                except Exception:
-                    logger.exception("Qwen native browser cleanup failed")
+        sessions = list(self._sessions.values())
+        self._sessions.clear()
+        for session in sessions:
+            await self._close_session(session)
+        if self._browser is not None:
+            try:
+                await self._browser.close()
+            except Exception:
+                logger.exception("Qwen native browser cleanup failed")
         if self._playwright is not None:
             try:
                 await self._playwright.stop()
@@ -551,71 +844,47 @@ class QwenNativeBrowserTransport:
                 logger.exception("Qwen native Playwright cleanup failed")
         self._playwright = None
         self._browser = None
-        self._context = None
-        self._page = None
-        self._frontend_version = ""
-        self._active_account_key = ""
-        self._cookie_jars.clear()
+        self._browser_profile = ""
+        self._user_agent = ""
 
     async def _ensure_ready(self) -> None:
-        if self._page is not None and not self._page.is_closed():
+        if self._browser is not None and self._browser.is_connected():
             return
         async with self._lock:
-            if self._page is not None and not self._page.is_closed():
+            if self._browser is not None and self._browser.is_connected():
                 return
             config = settings()
             try:
+                if self._browser is not None or self._playwright is not None or self._sessions:
+                    await self._close_unlocked()
                 self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
                     headless=config.qwen_risk_headless
                 )
-                browser_version = str(self._browser.version)
-                browser_major = browser_version.split(".", 1)[0]
-                browser_profile = f"chrome{browser_major}"
-                user_agent = re.sub(
-                    r"Chrome/[\d.]+",
-                    f"Chrome/{browser_version}",
-                    config.qwen_risk_user_agent,
-                )
-                self._context = await self._browser.new_context(
-                    locale="zh-CN",
-                    timezone_id="Asia/Shanghai",
-                    viewport={"width": 1440, "height": 900},
-                    user_agent=user_agent,
-                    service_workers="block",
-                    extra_http_headers={
-                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                        **_client_hints(browser_profile),
-                    },
-                )
-                await self._context.add_init_script(_fingerprint_script(browser_profile))
-                self._page = await self._context.new_page()
                 logger.info(
-                    "qwen_native_browser_started profile=%s user_agent=%s",
-                    browser_profile,
-                    user_agent,
+                    "qwen_native_browser_started engine_version=%s",
+                    self._browser.version,
                 )
-                await self._load_page_runtime()
             except Exception:
                 await self._close_unlocked()
                 raise
 
-    async def _load_page_runtime(self) -> None:
+    async def _load_page_runtime(self, session: _AccountBrowserSession) -> None:
         config = settings()
-        self._page.set_default_timeout(60_000)
-        await self._page.goto(
+        session.page.set_default_timeout(60_000)
+        await session.page.goto(
             config.qwen_base_url,
             wait_until="domcontentloaded",
             timeout=60_000,
         )
-        await self._page.wait_for_function(
+        await session.page.wait_for_function(
             r"""() => performance.getEntriesByType('resource').some(
               entry => /\/sd\/baxia\/[\d.]+\/baxiaCommon\.js/.test(entry.name)
             )""",
             timeout=45_000,
         )
-        await self._page.wait_for_timeout(2_000)
-        self._frontend_version = await self._page.evaluate(
+        await session.page.wait_for_timeout(2_000)
+        session.frontend_version = await session.page.evaluate(
             r"""() => {
               for (const entry of performance.getEntriesByType('resource')) {
                 const match = entry.name.match(/qwen-chat-fe\/([^/]+)\/js\/main\.js/);
@@ -624,8 +893,28 @@ class QwenNativeBrowserTransport:
               return '';
             }"""
         )
-        if not self._frontend_version:
+        if not session.frontend_version:
             raise RuntimeError("could not derive the current Qwen frontend version")
+        runtime = await session.page.evaluate(
+            """() => {
+              const gl = document.createElement('canvas').getContext('webgl');
+              const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+              return {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                device_memory: navigator.deviceMemory,
+                webgl_vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : '',
+                webgl_renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : ''
+              };
+            }"""
+        )
+        if str(runtime.get("userAgent") or "") != session.user_agent:
+            raise RuntimeError("Qwen browser fingerprint User-Agent was not restored")
+        if session.backend == "patchright":
+            session.browser_fingerprint = finalize_patchright_fingerprint(
+                session.browser_fingerprint, runtime
+            )
+            session.fingerprint_digest = qwen_fingerprint_digest(session.browser_fingerprint)
 
 
 def _send_qwen_request(
@@ -639,10 +928,11 @@ def _send_qwen_request(
         if name.lower() not in {"content-length", "host", "connection"}
     }
     with curl_requests.Session(
-        impersonate=settings().qwen_risk_browser_profile,
+        impersonate=str(payload["browserProfile"]),
         http_version="v2",
         default_headers=False,
     ) as client:
+        proxy_url = str(payload.get("proxyUrl") or "")
         response = client.request(
             str(payload["method"]),
             str(payload["url"]),
@@ -651,6 +941,7 @@ def _send_qwen_request(
             timeout=int(payload["timeoutMs"]) / 1000,
             allow_redirects=False,
             stream=True,
+            proxy=proxy_url or None,
         )
         try:
             body_buffer = bytearray()

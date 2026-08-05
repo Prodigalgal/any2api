@@ -46,4 +46,8 @@ public final class ProviderExecutionContext {
     }
 
     public JsonNode credentialPatch() { return credentialPatch.get().deepCopy(); }
+
+    public JsonNode takeCredentialPatch() {
+        return credentialPatch.getAndSet(MissingNode.getInstance()).deepCopy();
+    }
 }

@@ -110,6 +110,13 @@ class _SignupResponse:
         return {"token": "fixture-token", "id": "fixture-user"}
 
 
+class _SigninResponse(_SignupResponse):
+    url = "https://chat.qwen.ai/api/v2/auths/signin"
+
+    def json(self) -> dict[str, dict[str, str]]:
+        return {"data": {"token": "refreshed-token", "id": "fixture-user"}}
+
+
 def test_qwen_strategy_uses_signup_response_as_success_oracle() -> None:
     strategy = QwenSignupChallenge()
     strategy._observe_response(_SignupResponse())
@@ -117,6 +124,14 @@ def test_qwen_strategy_uses_signup_response_as_success_oracle() -> None:
     assert strategy.succeeded() is True
     assert strategy.token == "fixture-token"
     assert strategy.user_id == "fixture-user"
+
+
+def test_qwen_strategy_uses_signin_response_as_reauthentication_oracle() -> None:
+    strategy = QwenSignupChallenge()
+    strategy._observe_response(_SigninResponse())
+
+    assert strategy.succeeded() is True
+    assert strategy.token == "refreshed-token"
 
 
 def test_qwen_fusion_reproduces_verified_success_sample() -> None:
@@ -260,6 +275,8 @@ def test_provider_launch_profiles_reproduce_verified_browser_baselines() -> None
     qwen = QwenAutomationProvider()
     longcat = LongcatAutomationProvider()
 
+    assert qwen.manifest.browser_backend == "camoufox"
+    assert qwen.manifest.fallback_backend == "patchright"
     assert qwen.browser_launch_profile().headless is False
     assert longcat.manifest.browser_backend == "patchright"
     assert longcat.browser_launch_profile().headless is True

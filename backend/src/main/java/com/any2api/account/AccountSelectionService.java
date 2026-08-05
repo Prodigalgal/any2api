@@ -146,6 +146,18 @@ public class AccountSelectionService {
             .then();
     }
 
+    public Mono<Void> reportAuthenticationFailure(
+        LeasedProviderAccount account,
+        String error
+    ) {
+        var summary = error == null ? "provider credential rejected"
+            : error.substring(0, Math.min(4000, error.length()));
+        return Mono.fromRunnable(() -> accounts.markAuthenticationFailure(
+                account.accountId(), Instant.now(), summary))
+            .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
+            .then();
+    }
+
     private Mono<LeasedProviderAccount> acquire(AccountEntity account, String providerId) {
         return leases.acquire(providerId, account.getId(), account.getMaxConcurrency(), DEFAULT_LEASE_TTL)
             .flatMap(lease -> Mono.fromCallable(() -> {

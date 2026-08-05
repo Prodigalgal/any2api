@@ -173,12 +173,13 @@ public final class QwenProvider implements InferenceProvider {
         LeasedProviderAccount account
     ) {
         var credential = QwenCredential.from(account);
-        var affinityKey = account.accountId() + ":" + request.requestId();
+        var affinityKey = account.accountId().toString();
         return Flux.usingWhen(
             transport.open(sessionCommand(credential, affinityKey)),
-            session -> mediaUploader.prepare(session, request.messages(), credential)
+            session -> mediaUploader.prepare(
+                    session, request.messages(), credential, context)
                 .flatMapMany(preparedMessages -> createChat(
-                        credential, request.model())
+                        credential, request.model(), context, session.id())
                     .flatMapMany(chatId -> {
                         var body = requestMapper.prepare(request, chatId, preparedMessages);
                         var path = "/api/v2/chat/completions?chat_id=" + chatId;
@@ -186,7 +187,8 @@ public final class QwenProvider implements InferenceProvider {
                         var decoder = new QwenEventDecoder(request.requestId());
                         var sse = new SseDataDecoder();
                         return requests.browserFetch(
-                                path, bodyText, credential, "/c/" + chatId, 300)
+                                "POST", path, bodyText, credential, context,
+                                session.id(), "/c/" + chatId, 300)
                             .flatMapMany(response -> browserResponse(response))
                             .concatMapIterable(sse::decode)
                             .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
@@ -203,11 +205,12 @@ public final class QwenProvider implements InferenceProvider {
         var credential = QwenCredential.from(account);
         var path = "/api/v2/models/";
         return Mono.usingWhen(
-            transport.open(sessionCommand(credential, account.accountId() + ":catalog")),
-            session -> requests.create("GET", path, "", 120)
-                .flatMap(command -> transport.request(session.id(), command))
+            transport.open(sessionCommand(credential, account.accountId().toString())),
+            session -> requests.browserFetch(
+                    "GET", path, "", credential, account.accountId().toString(),
+                    session.id(), "/", 120)
                 .flatMap(response -> response.successful()
-                    ? Mono.just(parseModels(json(response)))
+                    ? Mono.just(parseModels(json(response.text())))
                     : Mono.error(new QwenUpstreamException(response.status(),
                         summarize(response.status(), response.text())))),
             this::close,
@@ -255,7 +258,12 @@ public final class QwenProvider implements InferenceProvider {
         return "";
     }
 
-    private Mono<String> createChat(QwenCredential credential, String model) {
+    private Mono<String> createChat(
+        QwenCredential credential,
+        String model,
+        ProviderExecutionContext context,
+        String transportSessionId
+    ) {
         var body = mapper.createObjectNode()
             .put("chatId", "")
             .put("project_id", "")
@@ -265,7 +273,9 @@ public final class QwenProvider implements InferenceProvider {
         body.putArray("models").add(model);
         var bodyText = mapper.writeValueAsString(body);
         var path = "/api/v2/chats/new";
-        return requests.browserFetch(path, bodyText, credential, "/c/new-chat", 120)
+        return requests.browserFetch(
+                "POST", path, bodyText, credential, context,
+                transportSessionId, "/c/new-chat", 120)
             .flatMap(response -> {
                 if (!response.successful()) {
                     return Mono.error(new QwenUpstreamException(response.status(),
@@ -337,9 +347,12 @@ public final class QwenProvider implements InferenceProvider {
     @Override
     public ProviderFailure classify(Throwable error) {
         if (error instanceof QwenUpstreamException upstream) {
-            var retryable = upstream.status() >= 500
+            var antiBot = upstream.status() == 403 && (
+                upstream.getMessage().contains("anti-bot challenge")
+                    || upstream.getMessage().contains("FAIL_SYS_USER_VALIDATE"));
+            var retryable = antiBot || upstream.status() >= 500
                 || List.of(408, 409, 425, 429).contains(upstream.status());
-            var type = switch (upstream.status()) {
+            var type = antiBot ? "anti_bot_rejected" : switch (upstream.status()) {
                 case 401, 403 -> "credential_rejected";
                 case 429 -> "rate_limited";
                 default -> "provider_upstream_error";

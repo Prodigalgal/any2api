@@ -8,6 +8,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -167,22 +168,37 @@ class BrowserContextProfile:
     accept_language: str | None = None
     color_scheme: str | None = None
     patchright_user_agent: str | None = None
+    screen_width: int | None = None
+    screen_height: int | None = None
+    device_scale_factor: float | None = None
+    storage_state: dict[str, Any] | None = None
+    camoufox_managed_fingerprint: bool = False
 
     def options(self, backend: str) -> dict[str, Any]:
         result: dict[str, Any] = {"ignore_https_errors": self.ignore_https_errors}
-        if self.locale:
+        managed_by_camoufox = backend == "camoufox" and self.camoufox_managed_fingerprint
+        if self.locale and not managed_by_camoufox:
             result["locale"] = self.locale
-        if self.timezone_id:
+        if self.timezone_id and not managed_by_camoufox:
             result["timezone_id"] = self.timezone_id
-        if self.viewport_width and self.viewport_height:
+        if self.viewport_width and self.viewport_height and not managed_by_camoufox:
             result["viewport"] = {
                 "width": self.viewport_width,
                 "height": self.viewport_height,
             }
-        if self.accept_language:
+        if self.accept_language and not managed_by_camoufox:
             result["extra_http_headers"] = {"Accept-Language": self.accept_language}
-        if self.color_scheme:
+        if self.color_scheme and not managed_by_camoufox:
             result["color_scheme"] = self.color_scheme
+        if self.screen_width and self.screen_height and not managed_by_camoufox:
+            result["screen"] = {
+                "width": self.screen_width,
+                "height": self.screen_height,
+            }
+        if self.device_scale_factor and not managed_by_camoufox:
+            result["device_scale_factor"] = self.device_scale_factor
+        if self.storage_state:
+            result["storage_state"] = deepcopy(self.storage_state)
         if backend == "patchright" and self.patchright_user_agent:
             result["user_agent"] = self.patchright_user_agent
         return result
@@ -247,6 +263,8 @@ class BrowserLaunchProfile:
     patchright_args: tuple[str, ...] = ()
     patchright_ignore_default_args: tuple[str, ...] = ()
     launch_timeout_ms: int | None = None
+    camoufox_config: dict[str, Any] | None = None
+    camoufox_firefox_user_prefs: dict[str, Any] | None = None
 
     def resolve_headless(self, payload: dict[str, Any], fallback: bool) -> bool:
         if "headless" in payload:
@@ -343,11 +361,12 @@ def launch_browser(
             manager = None
             try:
                 from camoufox.sync_api import Camoufox
+                from camoufox.utils import get_env_vars, get_target_os, launch_options
 
                 manager_options: dict[str, Any] = {
                     "headless": headless,
                     "humanize": effective_profile.humanize,
-                    "geoip": bool(proxy_url),
+                    "geoip": bool(proxy_url) and not effective_profile.camoufox_config,
                     "proxy": {"server": proxy_url} if proxy_url else None,
                     "env": {**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
                     "firefox_user_prefs": {
@@ -368,7 +387,23 @@ def launch_browser(
                     manager_options["fingerprint_preset"] = (
                         effective_profile.camoufox_fingerprint_preset
                     )
-                manager = Camoufox(**manager_options)
+                if effective_profile.camoufox_config:
+                    exact_config = deepcopy(effective_profile.camoufox_config)
+                    prepared = launch_options(config=deepcopy(exact_config), **manager_options)
+                    prepared_env = dict(prepared.get("env") or {})
+                    for name in tuple(prepared_env):
+                        if name.startswith("CAMOU_CONFIG_"):
+                            prepared_env.pop(name)
+                    prepared_env.update(get_env_vars(exact_config, get_target_os(exact_config)))
+                    prepared["env"] = prepared_env
+                    if effective_profile.camoufox_firefox_user_prefs:
+                        prepared["firefox_user_prefs"] = {
+                            **dict(prepared.get("firefox_user_prefs") or {}),
+                            **deepcopy(effective_profile.camoufox_firefox_user_prefs),
+                        }
+                    manager = Camoufox(from_options=prepared)
+                else:
+                    manager = Camoufox(**manager_options)
                 browser = manager.__enter__()
             except Exception as exc:  # noqa: BLE001 - optional third-party backend
                 if manager is not None:

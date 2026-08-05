@@ -5,6 +5,7 @@ import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
 import com.aliyun.oss.common.comm.SignVersion;
 import com.any2api.media.MediaInputValidation;
+import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.transport.BrowserTransportClient;
 import java.io.ByteArrayInputStream;
 import java.time.Instant;
@@ -42,17 +43,19 @@ final class QwenMediaUploader {
     Mono<List<QwenPreparedMessage>> prepare(
         BrowserTransportClient.Session session,
         List<JsonNode> messages,
-        QwenCredential credential
+        QwenCredential credential,
+        ProviderExecutionContext context
     ) {
         return Flux.fromIterable(messages)
-            .concatMap(message -> prepareMessage(session, message, credential))
+            .concatMap(message -> prepareMessage(session, message, credential, context))
             .collectList();
     }
 
     private Mono<QwenPreparedMessage> prepareMessage(
         BrowserTransportClient.Session session,
         JsonNode message,
-        QwenCredential credential
+        QwenCredential credential,
+        ProviderExecutionContext context
     ) {
         var parsed = parseContent(message.path("content"));
         var text = parsed.text();
@@ -62,7 +65,7 @@ final class QwenMediaUploader {
         }
         var resolvedText = text;
         return Flux.fromIterable(parsed.images())
-            .concatMap(image -> upload(session, image, credential))
+            .concatMap(image -> upload(session, image, credential, context))
             .collectList()
             .map(files -> new QwenPreparedMessage(
                 message.path("role").asText("user"), resolvedText, files));
@@ -71,13 +74,15 @@ final class QwenMediaUploader {
     private Mono<ObjectNode> upload(
         BrowserTransportClient.Session session,
         InlineImage image,
-        QwenCredential credential
+        QwenCredential credential,
+        ProviderExecutionContext context
     ) {
         var body = mapper.createObjectNode()
             .put("filename", image.filename())
             .put("filesize", Integer.toString(image.content().length))
             .put("filetype", "image");
-        return requestJson(session, "/api/v2/files/getstsToken", body)
+        return requestJson(
+                session, "/api/v2/files/getstsToken", body, credential, context)
             .flatMap(response -> {
                 var sts = response.path("data");
                 var values = StsUpload.from(sts);
@@ -90,12 +95,14 @@ final class QwenMediaUploader {
     private Mono<JsonNode> requestJson(
         BrowserTransportClient.Session session,
         String path,
-        ObjectNode body
+        ObjectNode body,
+        QwenCredential credential,
+        ProviderExecutionContext context
     ) {
         var bodyText = mapper.writeValueAsString(body);
-        return requests.create("POST", path, bodyText, 120)
-            .flatMap(command -> transport.request(session.id(), command)
-                .flatMap(response -> {
+        return requests.browserFetch(
+                "POST", path, bodyText, credential, context, session.id(), "/", 120)
+            .flatMap(response -> {
                     JsonNode value;
                     try {
                         value = mapper.readTree(response.text());
@@ -109,7 +116,7 @@ final class QwenMediaUploader {
                             "Qwen media upload token request was rejected"));
                     }
                     return Mono.just(value);
-                }));
+                });
     }
 
     private Void putObject(StsUpload sts, byte[] content) {

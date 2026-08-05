@@ -214,8 +214,16 @@ public class InferenceCoordinator {
         InferenceTelemetryService.Started observed
     ) {
         return Flux.usingWhen(
-            lease,
-            account -> {
+            lease.map(account -> new ExecutionLease(account, new ProviderExecutionContext(
+                request.requestId(),
+                account.accountId(),
+                Long.toString(account.credentialVersion()),
+                account.lease().ownerToken(),
+                account.lease().fencingToken(),
+                Instant.now().plus(REQUEST_DEADLINE)))),
+            execution -> {
+                var account = execution.account();
+                var context = execution.context();
                 observed.account(account.accountId());
                 observed.accountAcquired();
                 if (validateInsideLease) {
@@ -224,13 +232,6 @@ public class InferenceCoordinator {
                     provider.validate(request);
                 }
                 var lastSequence = new AtomicLong();
-                var context = new ProviderExecutionContext(
-                    request.requestId(),
-                    account.accountId(),
-                    Long.toString(account.credentialVersion()),
-                    account.lease().ownerToken(),
-                    account.lease().fencingToken(),
-                    Instant.now().plus(REQUEST_DEADLINE));
                 return withLeaseRenewal(
                     CanonicalEventStream.enforce(
                         request,
@@ -244,14 +245,14 @@ public class InferenceCoordinator {
                             var providerFailure = new ProviderFailure(
                                 failure.errorType(), failure.message(), false, failure.detail());
                             return accounts.mergeCredentialPatch(
-                                    account, context.credentialPatch())
+                                    account, context.takeCredentialPatch())
                                 .onErrorReturn(false)
                                 .then(failures.report(account, request.model(), providerFailure))
                                 .thenReturn(event);
                         }
                         if (event instanceof CanonicalEvent.Completed) {
                             return accounts.mergeCredentialPatch(
-                                    account, context.credentialPatch())
+                                    account, context.takeCredentialPatch())
                                 .onErrorReturn(false)
                                 .then(accounts.reportSuccess(account, request.model()))
                                 .thenReturn(event);
@@ -274,15 +275,25 @@ public class InferenceCoordinator {
                             failure.message(),
                             failure.detail() == null ? Map.of() : failure.detail());
                         return accounts.mergeCredentialPatch(
-                                account, context.credentialPatch())
+                                account, context.takeCredentialPatch())
                             .onErrorReturn(false)
                             .then(failures.report(account, request.model(), failure))
                             .thenMany(Flux.just(event));
                     });
             },
-            accounts::release,
-            (account, ignored) -> accounts.release(account),
-            accounts::release);
+            this::settleAndRelease,
+            (execution, ignored) -> settleAndRelease(execution),
+            this::settleAndRelease);
+    }
+
+    private reactor.core.publisher.Mono<Void> settleAndRelease(ExecutionLease execution) {
+        var patch = execution.context().takeCredentialPatch();
+        var persistence = patch.isObject() && !patch.isEmpty()
+            ? accounts.mergeCredentialPatch(execution.account(), patch).onErrorReturn(false)
+            : reactor.core.publisher.Mono.just(false);
+        return persistence
+            .then(accounts.release(execution.account()))
+            .then();
     }
 
     private Flux<CanonicalEvent> withLeaseRenewal(
@@ -301,4 +312,9 @@ public class InferenceCoordinator {
             return Flux.merge(shared, renewalGuard);
         });
     }
+
+    private record ExecutionLease(
+        com.any2api.account.LeasedProviderAccount account,
+        ProviderExecutionContext context
+    ) {}
 }

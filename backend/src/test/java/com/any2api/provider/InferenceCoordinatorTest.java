@@ -203,6 +203,25 @@ class InferenceCoordinatorTest {
         verify(accounts).release(second);
     }
 
+    @Test
+    void persistsCredentialPatchBeforeReleasingACancelledStream() {
+        var accounts = mock(AccountSelectionService.class);
+        var leased = leased("alpha");
+        var patch = JsonNodeFactory.instance.objectNode().put("session", "rotated");
+        when(accounts.release(leased)).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(leased, patch)).thenReturn(Mono.just(true));
+        var coordinator = coordinator(new CancellingProvider(patch), accounts);
+
+        StepVerifier.create(coordinator.execute(request("alpha", true), leased))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .thenCancel()
+            .verify();
+
+        verify(accounts).mergeCredentialPatch(leased, patch);
+        verify(accounts).release(leased);
+    }
+
     private CanonicalRequest request(String providerId) {
         return request(providerId, false);
     }
@@ -236,7 +255,8 @@ class InferenceCoordinatorTest {
         return new InferenceCoordinator(
             new ProviderRegistry(List.of(provider)),
             accounts,
-            new ProviderFailureDisposition(accounts),
+            new ProviderFailureDisposition(
+                accounts, mock(com.any2api.lifecycle.LifecycleScheduleService.class)),
             telemetry,
             new ModelRuntimeGuard(
                 new Any2ApiProperties(),
@@ -387,6 +407,46 @@ class InferenceCoordinatorTest {
                     1, request.requestId(), 1, "ok"),
                 new CanonicalEvent.Completed(
                     1, request.requestId(), 2, "stop"));
+        }
+
+        @Override
+        public ProviderFailure classify(Throwable error) {
+            return new ProviderFailure("test", error.getMessage(), false, Map.of());
+        }
+    }
+
+    private static final class CancellingProvider implements InferenceProvider {
+        private final tools.jackson.databind.JsonNode patch;
+
+        private CancellingProvider(tools.jackson.databind.JsonNode patch) {
+            this.patch = patch;
+        }
+
+        @Override
+        public ProviderManifest manifest() {
+            return new ProviderManifest(
+                "alpha", "Alpha", "test", "1", List.of(),
+                Map.of(
+                    ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                    ProviderCapability.RESPONSES, SupportLevel.NATIVE,
+                    ProviderCapability.STREAMING, SupportLevel.NATIVE),
+                true);
+        }
+
+        @Override
+        public Flux<CanonicalEvent> generate(
+            CanonicalRequest request,
+            ProviderExecutionContext context,
+            LeasedProviderAccount account
+        ) {
+            context.acceptCredentialPatch(patch);
+            return Flux.concat(
+                Flux.just(
+                    new CanonicalEvent.ResponseStarted(
+                        1, request.requestId(), 0, "response-id"),
+                    new CanonicalEvent.OutputTextDelta(
+                        1, request.requestId(), 1, "partial")),
+                Flux.never());
         }
 
         @Override

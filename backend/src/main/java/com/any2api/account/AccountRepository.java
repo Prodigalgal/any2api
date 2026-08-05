@@ -95,4 +95,22 @@ public interface AccountRepository extends JpaRepository<AccountEntity, UUID>,
         @Param("error") String error,
         @Param("cooldownUntil") Instant cooldownUntil
     );
+
+    @Modifying
+    @Transactional
+    @Query("""
+        UPDATE AccountEntity account
+        SET account.failureCount = account.failureCount + 1,
+            account.lastFailureAt = :now,
+            account.lastError = :error,
+            account.cooldownUntil = NULL,
+            account.status = com.any2api.account.AccountStatus.EXPIRED,
+            account.enabled = false
+        WHERE account.id = :accountId
+        """)
+    int markAuthenticationFailure(
+        @Param("accountId") UUID accountId,
+        @Param("now") Instant now,
+        @Param("error") String error
+    );
 }

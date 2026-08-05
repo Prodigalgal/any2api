@@ -10,6 +10,7 @@ import com.any2api.provider.RandomModelRole;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.BrowserTransportClient;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,7 +35,9 @@ class QwenProtocolTest {
     void preservesProviderCookiesForTheNativeBrowserSession() {
         var payload = new ObjectMapper().readTree("""
             {"token":"account-token","user_id":"user-1",
-             "cookies":{"session":"cookie-value","empty":""}}
+             "cookies":{"session":"cookie-value","empty":""},
+             "browser_state":{"schema_version":1,"storage_state":{
+               "cookies":[],"origins":[]}}}
             """);
         var account = new com.any2api.account.LeasedProviderAccount(
             UUID.randomUUID(), "qwen", "external", "user@example.com", 1,
@@ -44,6 +47,43 @@ class QwenProtocolTest {
 
         assertThat(credential.cookies())
             .containsExactly(Map.entry("session", "cookie-value"));
+        assertThat(credential.browserState().path("schema_version").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void nativeBrowserCredentialPatchIsForwardedToTheExecutionContext() {
+        var mapper = new ObjectMapper();
+        var risk = mock(QwenRiskHeaderClient.class);
+        var accountId = UUID.randomUUID();
+        var state = mapper.readTree("""
+            {"schema_version":1,"storage_state":{"cookies":[],"origins":[]}}
+            """);
+        var fingerprint = mapper.readTree("""
+            {"schema_version":1,"backend":"patchright","variant_id":"variant",
+             "browser_profile":"chrome146","user_agent":"fixture-agent"}
+            """);
+        var patch = mapper.createObjectNode().set("browser_state", state);
+        var credential = new QwenCredential(
+            "account-token-value-that-is-long-enough", "user-1", "", "chrome146",
+            Map.of("session", "cookie-value"), state, fingerprint);
+        var context = new com.any2api.provider.ProviderExecutionContext(
+            "request", accountId, "1", "owner", 1, Instant.now().plusSeconds(60));
+        when(risk.browserFetch(
+            "POST", "/api/v2/chats/new", "{}", credential.token(), accountId.toString(),
+            credential.cookies(), credential.browserState(), credential.browserFingerprint(),
+            "transport-session", "/c/new-chat", 120))
+            .thenReturn(Mono.just(new QwenRiskHeaderClient.BrowserResponse(
+                200, "application/json", "{}".getBytes(), patch,
+                "native_browser_buffered")));
+
+        StepVerifier.create(new QwenTransportRequests(new QwenProperties(), risk)
+                .browserFetch(
+                    "POST", "/api/v2/chats/new", "{}", credential, context,
+                    "transport-session", "/c/new-chat", 120))
+            .expectNextCount(1)
+            .verifyComplete();
+
+        assertThat(context.credentialPatch()).isEqualTo(patch);
     }
 
     @Test
@@ -57,6 +97,21 @@ class QwenProtocolTest {
         assertThat(provider.manifest().randomModelPreferences())
             .containsKey(RandomModelRole.TOP_TEXT)
             .doesNotContainKey(RandomModelRole.TOP_MULTIMODAL);
+    }
+
+    @Test
+    void classifiesAnHtmlChallengeSeparatelyFromCredentialExpiry() {
+        var provider = new QwenProvider(
+            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
+            new QwenProperties(), mock(QwenRequestMapper.class),
+            mock(QwenTransportRequests.class), mock(QwenMediaUploader.class),
+            new ObjectMapper());
+
+        var failure = provider.classify(new QwenUpstreamException(
+            403, "Qwen native browser was redirected to an anti-bot challenge"));
+
+        assertThat(failure.type()).isEqualTo("anti_bot_rejected");
+        assertThat(failure.retryable()).isTrue();
     }
 
     @Test

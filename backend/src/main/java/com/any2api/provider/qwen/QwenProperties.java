@@ -11,7 +11,7 @@ public class QwenProperties {
     private String source = "web";
     private String requestVersion = "2.1";
     private int maxUploadBytes = 20 * 1024 * 1024;
-    private Duration modelProbeTimeout = Duration.ofSeconds(120);
+    private Duration modelProbeTimeout = Duration.ofSeconds(240);
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = trim(baseUrl); }

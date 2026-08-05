@@ -55,6 +55,7 @@ public final class QwenProvider implements InferenceProvider {
     private final QwenTransportRequests requests;
     private final QwenMediaUploader mediaUploader;
     private final ObjectMapper mapper;
+    private final QwenExecutionGate executionGate = new QwenExecutionGate();
 
     public QwenProvider(
         BrowserTransportClient transport,
@@ -177,6 +178,14 @@ public final class QwenProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
+        return executionGate.flux(() -> generateSerialized(request, context, account));
+    }
+
+    private Flux<CanonicalEvent> generateSerialized(
+        CanonicalRequest request,
+        ProviderExecutionContext context,
+        LeasedProviderAccount account
+    ) {
         var credential = QwenCredential.from(account);
         var affinityKey = account.accountId().toString();
         return Flux.usingWhen(
@@ -207,6 +216,12 @@ public final class QwenProvider implements InferenceProvider {
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
+        return executionGate.mono(() -> discoverModelsSerialized(account));
+    }
+
+    private Mono<List<DiscoveredModel>> discoverModelsSerialized(
+        LeasedProviderAccount account
+    ) {
         var credential = QwenCredential.from(account);
         var path = "/api/v2/models/";
         return Mono.usingWhen(

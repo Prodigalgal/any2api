@@ -61,6 +61,8 @@ owns one isolated context/page per account; Camoufox accounts own their exact br
 Patchright accounts share only the Chromium process. The automation worker retains at most one
 Camoufox Qwen runtime at a time under its 3 GiB memory limit; switching accounts closes the previous
 runtime while preserving its encrypted state, preventing concurrent probes from causing an OOM.
+The Qwen Java adapter also serializes each complete browser workflow with a fair reactive gate, so
+another account cannot evict the active Camoufox runtime between chat creation and completion.
 A cold process restores account state before
 loading Baxia, and normal requests or challenge recovery return updated storage and fingerprint as
 one credential patch. The legacy flat cookie map is migration-only and is not injected when a

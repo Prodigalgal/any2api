@@ -28,8 +28,8 @@ class QwenProtocolTest {
             mock(QwenTransportRequests.class), mock(QwenMediaUploader.class),
             new ObjectMapper());
 
-        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
-        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
+        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
     }
 
     @Test

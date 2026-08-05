@@ -482,7 +482,7 @@ def _launch_profile_for_fingerprint(
         return BrowserLaunchProfile(headless=False)
     return BrowserLaunchProfile(
         headless=False,
-        humanize=True,
+        humanize=False,
         camoufox_os=str(normalized["os"]),
         block_webrtc=True,
         camoufox_config=normalized["camoufox_config"],

@@ -45,7 +45,8 @@ reauthentication plus inference-readiness probe succeeds.
 1. Registration produces an encrypted credential containing a versioned, origin-restricted Qwen
    browser storage state and backend-specific device fingerprint. Camoufox includes its complete
    generated config and noise seeds; Patchright includes CDP-controlled fields plus validated
-   runtime-observed fields.
+   runtime-observed fields. Cursor timing is excluded from the persisted device identity, and a
+   legacy manifest migration preserves all device/noise values while disabling nested humanization.
 2. Two Qwen accounts never share cookies, local storage, IndexedDB, page state, or challenge state.
 3. A fresh automation process can restore the persisted state before the first protected request.
 4. Cookies or storage changed by normal requests or captcha recovery are returned to Java and merged

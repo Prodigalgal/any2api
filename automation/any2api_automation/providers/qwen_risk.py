@@ -20,7 +20,7 @@ from curl_cffi import requests as curl_requests
 from fastapi import APIRouter, Depends, HTTPException
 from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from ..browser_transport import manager as browser_session_manager
 from ..config import settings as global_settings
@@ -115,6 +115,8 @@ class RiskHeadersRequest(BaseModel):
 
 
 class NativeBrowserRequest(BaseModel):
+    _browser_fingerprint_requires_persistence: bool = PrivateAttr(default=False)
+
     method: Literal["GET", "POST"] = "POST"
     path: str = Field(min_length=1, max_length=2048)
     body: str = Field(default="", max_length=2 << 20)
@@ -157,7 +159,12 @@ class NativeBrowserRequest(BaseModel):
             self.browser_state = normalize_browser_state(
                 self.browser_state, settings().qwen_base_url
             )
-            self.browser_fingerprint = normalize_qwen_fingerprint(self.browser_fingerprint)
+            raw_fingerprint = self.browser_fingerprint
+            normalized_fingerprint = normalize_qwen_fingerprint(raw_fingerprint)
+            self._browser_fingerprint_requires_persistence = (
+                bool(raw_fingerprint) and raw_fingerprint != normalized_fingerprint
+            )
+            self.browser_fingerprint = normalized_fingerprint
         except TypeError as error:
             raise ValueError(str(error)) from error
         return self
@@ -591,6 +598,7 @@ class QwenNativeBrowserTransport:
         if (
             digest == browser_state_digest(request.browser_state, base_url)
             and qwen_fingerprint_digest(request.browser_fingerprint) == session.fingerprint_digest
+            and not request._browser_fingerprint_requires_persistence
         ):
             return {}
         cookies = browser_state_cookie_map(state, base_url)
@@ -760,7 +768,6 @@ class QwenNativeBrowserTransport:
                 camoufox_launch_options,
                 normalized_fingerprint,
                 headless=settings().qwen_risk_headless,
-                humanize=True,
                 proxy_url=proxy_url,
             )
             browser_manager = AsyncCamoufox(from_options=prepared)

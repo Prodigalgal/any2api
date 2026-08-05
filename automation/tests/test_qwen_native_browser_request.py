@@ -4,12 +4,17 @@ import base64
 import json
 import re
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from typing import ClassVar, Self
 from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
+from any2api_automation.providers.qwen_fingerprint import (
+    new_qwen_fingerprint,
+    qwen_fingerprint_digest,
+)
 from any2api_automation.providers.qwen_inference_challenge import (
     _drag_slider_full_track,
 )
@@ -32,6 +37,41 @@ def test_qwen_native_browser_request_accepts_provider_scoped_paths() -> None:
 
     assert request.path.endswith("chat_id=chat-1")
     assert request.referer_path == "/c/chat-1"
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_request_persists_a_migrated_legacy_fingerprint() -> None:
+    legacy = deepcopy(new_qwen_fingerprint("camoufox"))
+    legacy["schema_version"] = 1
+    legacy.pop("interaction_profile")
+    legacy["camoufox_config"]["humanize"] = True
+    legacy["camoufox_config"]["humanize:maxTime"] = 1.5
+    request = NativeBrowserRequest(
+        path="/api/v2/chats/new",
+        bearer_token="token-value-that-is-long-enough",
+        browser_fingerprint=legacy,
+    )
+
+    class Context:
+        async def storage_state(self, *, indexed_db: bool) -> dict[str, object]:
+            assert indexed_db is True
+            return {"cookies": [], "origins": []}
+
+    session = _AccountBrowserSession(
+        "account",
+        Context(),
+        object(),
+        "",
+        browser_fingerprint=request.browser_fingerprint,
+        fingerprint_digest=qwen_fingerprint_digest(request.browser_fingerprint),
+    )
+
+    patch = await QwenNativeBrowserTransport()._credential_patch(session, request)
+
+    assert request._browser_fingerprint_requires_persistence is True
+    assert patch["browser_fingerprint"]["schema_version"] == 2
+    assert "humanize" not in patch["browser_fingerprint"]["camoufox_config"]
+    assert "humanize:maxTime" not in patch["browser_fingerprint"]["camoufox_config"]
 
 
 @pytest.mark.parametrize(

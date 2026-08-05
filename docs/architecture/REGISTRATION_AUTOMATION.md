@@ -50,7 +50,11 @@ selects a coherent account fingerprint. A Camoufox account stores and replays th
 config, Firefox preferences, font/voice selection, WebGL data, and canvas/audio/font seeds. A
 Patchright account stores the selected Chrome/TLS profile, UA/Client Hints, locale, timezone,
 screen, viewport, color scheme, and CDP-controlled CPU count; non-overridable device memory and
-WebGL identity are captured as observed fields and checked for host drift. The automation process
+WebGL identity are captured as observed fields and checked for host drift. Cursor timing is an
+interaction policy rather than device identity: Qwen disables Camoufox's native `humanize` layer
+and applies only its bounded slider trajectory. Fingerprint schema v1 is migrated to v2 by removing
+the legacy cursor controls while preserving the registered device fields and noise seeds, then the
+migrated manifest is returned in the next encrypted credential patch. The automation process
 owns one isolated context/page per account; Camoufox accounts own their exact browser runtime while
 Patchright accounts share only the Chromium process. A cold process restores account state before
 loading Baxia, and normal requests or challenge recovery return updated storage and fingerprint as

@@ -8,7 +8,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-QWEN_FINGERPRINT_SCHEMA_VERSION = 1
+QWEN_FINGERPRINT_SCHEMA_VERSION = 2
+QWEN_LEGACY_FINGERPRINT_SCHEMA_VERSION = 1
 QWEN_FINGERPRINT_MAX_BYTES = 256 << 10
 PATCHRIGHT_PROFILES = ("chrome142", "chrome145", "chrome146")
 CAMOUFOX_PROFILES = ("firefox144", "firefox147")
@@ -61,7 +62,10 @@ def normalize_qwen_fingerprint(value: Any) -> dict[str, Any]:
     if len(encoded.encode("utf-8")) > QWEN_FINGERPRINT_MAX_BYTES:
         raise ValueError("Qwen browser fingerprint exceeds the persisted size limit")
     normalized = json.loads(encoded)
-    if normalized.get("schema_version") != QWEN_FINGERPRINT_SCHEMA_VERSION:
+    schema_version = normalized.get("schema_version")
+    if schema_version == QWEN_LEGACY_FINGERPRINT_SCHEMA_VERSION:
+        normalized = _migrate_legacy_fingerprint(normalized)
+    elif schema_version != QWEN_FINGERPRINT_SCHEMA_VERSION:
         raise ValueError("unsupported Qwen browser fingerprint schema")
     backend = str(normalized.get("backend") or "")
     profile = str(normalized.get("browser_profile") or "").lower()
@@ -86,6 +90,14 @@ def normalize_qwen_fingerprint(value: Any) -> dict[str, Any]:
             raise ValueError("Camoufox fingerprint requires Firefox preferences")
         if str(config.get("navigator.userAgent") or "") != user_agent:
             raise ValueError("Camoufox config User-Agent does not match its manifest")
+        if "humanize" in config or "humanize:maxTime" in config:
+            raise ValueError("Camoufox fingerprint must not persist cursor timing controls")
+    interaction_profile = normalized.get("interaction_profile")
+    if interaction_profile != {
+        "mode": "qwen_slider_v1",
+        "camoufox_native_humanize": False,
+    }:
+        raise ValueError("unsupported Qwen browser interaction profile")
     normalized["browser_profile"] = profile
     return normalized
 
@@ -186,7 +198,6 @@ def camoufox_launch_options(
     fingerprint: dict[str, Any],
     *,
     headless: bool,
-    humanize: bool,
     proxy_url: str,
 ) -> dict[str, Any]:
     from camoufox.utils import get_env_vars, get_target_os, launch_options
@@ -198,7 +209,7 @@ def camoufox_launch_options(
     options: dict[str, Any] = {
         "config": deepcopy(exact_config),
         "headless": headless,
-        "humanize": humanize,
+        "humanize": False,
         "i_know_what_im_doing": True,
         "firefox_user_prefs": deepcopy(normalized["firefox_user_prefs"]),
         "block_webrtc": True,
@@ -244,6 +255,10 @@ def _new_patchright_fingerprint() -> dict[str, Any]:
         "viewport": {"width": viewport_width, "height": viewport_height},
         "device_scale_factor": 1,
         "hardware_concurrency": cores,
+        "interaction_profile": {
+            "mode": "qwen_slider_v1",
+            "camoufox_native_humanize": False,
+        },
     }
     return normalize_qwen_fingerprint(value)
 
@@ -261,7 +276,7 @@ def _new_camoufox_fingerprint() -> dict[str, Any]:
         ff_version=major,
         i_know_what_im_doing=True,
         block_webrtc=True,
-        humanize=0.35,
+        humanize=False,
     )
     chunks = sorted(
         (int(name.rsplit("_", 1)[1]), value)
@@ -285,8 +300,26 @@ def _new_camoufox_fingerprint() -> dict[str, Any]:
         "accept_language": "zh-CN,zh;q=0.9,en;q=0.8",
         "camoufox_config": config,
         "firefox_user_prefs": dict(prepared.get("firefox_user_prefs") or {}),
+        "interaction_profile": {
+            "mode": "qwen_slider_v1",
+            "camoufox_native_humanize": False,
+        },
     }
     return normalize_qwen_fingerprint(value)
+
+
+def _migrate_legacy_fingerprint(value: dict[str, Any]) -> dict[str, Any]:
+    migrated = deepcopy(value)
+    migrated["schema_version"] = QWEN_FINGERPRINT_SCHEMA_VERSION
+    migrated["interaction_profile"] = {
+        "mode": "qwen_slider_v1",
+        "camoufox_native_humanize": False,
+    }
+    config = migrated.get("camoufox_config")
+    if isinstance(config, dict):
+        config.pop("humanize", None)
+        config.pop("humanize:maxTime", None)
+    return migrated
 
 
 def _validate_patchright_fingerprint(value: dict[str, Any]) -> None:

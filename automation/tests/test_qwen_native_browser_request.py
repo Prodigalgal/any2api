@@ -334,8 +334,6 @@ async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
         "path": "/api/v2/chats/new",
         "method": "POST",
         "body": "{}",
-        "bearerToken": "token-value-that-is-long-enough",
-        "useBearer": True,
         "referrer": "https://chat.qwen.ai/c/new-chat",
         "timeoutMs": 60_000,
         "maximumBytes": 1024,
@@ -351,10 +349,11 @@ async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
     assert page.unrouted is True
     assert page.fake_route.aborted is True
     assert "token-value-that-is-long-enough" not in page.script
+    assert "Authorization" not in page.script
     encoded_match = re.search(r"atob\('([^']+)'\)", page.script)
     assert encoded_match is not None
     encoded = encoded_match.group(1)
-    assert json.loads(base64.b64decode(encoded))["bearerToken"] == payload["bearerToken"]
+    assert "bearerToken" not in json.loads(base64.b64decode(encoded))
     assert captured_headers["bx-v"] == "2.5.37"
     assert result["requestId"] == "upstream-id"
     assert actual_body == body

@@ -436,8 +436,6 @@ class QwenNativeBrowserTransport:
             "path": request.path,
             "method": request.method,
             "body": request.body,
-            "bearerToken": request.bearer_token,
-            "useBearer": True,
             "referrer": settings().qwen_base_url.rstrip("/") + request.referer_path,
             "timeoutMs": request.timeout_seconds * 1000,
             "version": session.frontend_version,
@@ -473,7 +471,6 @@ class QwenNativeBrowserTransport:
             'X-Request-Id': request.requestId,
             'version': request.version
           }};
-          if (request.useBearer) headers['Authorization'] = 'Bearer ' + request.bearerToken;
           if (request.path.includes('/chat/completions')) headers['X-Accel-Buffering'] = 'no';
           fetch(request.url, {{
             method: request.method,

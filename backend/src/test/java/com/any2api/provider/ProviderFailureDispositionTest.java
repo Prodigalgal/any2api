@@ -35,20 +35,22 @@ class ProviderFailureDispositionTest {
     }
 
     @Test
-    void ambiguousAntiBotFailureDoesNotPenalizeTheAccount() {
+    void antiBotFailureTemporarilyCoolsTheAccountWithoutExpiringIt() {
         var accounts = mock(AccountSelectionService.class);
         var schedules = mock(LifecycleScheduleService.class);
         var account = mock(LeasedProviderAccount.class);
+        when(accounts.reportFailure(account, "code 7", Duration.ofMinutes(5)))
+            .thenReturn(Mono.empty());
 
         new ProviderFailureDisposition(accounts, schedules).report(
             account, "model-a",
             new ProviderFailure("anti_bot_rejected", "code 7", true, Map.of())).block();
 
-        verify(accounts, never()).reportFailure(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+        verify(accounts).reportFailure(account, "code 7", Duration.ofMinutes(5));
         verify(accounts, never()).reportModelCooldown(
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(accounts, never()).reportAuthenticationFailure(
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 

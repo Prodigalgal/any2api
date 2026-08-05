@@ -38,6 +38,8 @@ public final class ProviderFailureDisposition {
                     .subscribeOn(Schedulers.boundedElastic()));
             case "account_blocked" -> accounts.reportFailure(
                 account, failure.message(), Duration.ofHours(6));
+            case "anti_bot_rejected" -> accounts.reportFailure(
+                account, failure.message(), Duration.ofMinutes(5));
             default -> Mono.empty();
         };
     }

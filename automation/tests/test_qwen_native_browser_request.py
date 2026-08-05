@@ -406,3 +406,49 @@ async def test_qwen_native_transport_solves_and_replays_one_punished_request() -
     transport._challenge_solver.solve.assert_awaited_once_with(session.page, punish_url)
     transport._load_page_runtime.assert_awaited_once_with(session)
     assert base64.b64decode(response["body_base64"]) == completed
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_returns_a_retryable_challenge_with_state_patch() -> None:
+    punished = json.dumps(
+        {
+            "ret": ["FAIL_SYS_USER_VALIDATE"],
+            "data": {
+                "url": (
+                    "https://chat.qwen.ai/api/v2/chat/completions/"
+                    "_____tmd_____/punish?x5step=2&action=captcha"
+                )
+            },
+        }
+    ).encode()
+    session = _AccountBrowserSession("account", object(), object(), "current")
+    transport = QwenNativeBrowserTransport()
+    transport._session_for = AsyncMock(return_value=session)
+    transport._evaluate = AsyncMock(
+        return_value=(
+            {
+                "status": 200,
+                "contentType": "application/json",
+                "requestId": "request-id",
+                "retryAfter": "",
+                "bodyBase64": base64.b64encode(punished).decode(),
+            },
+            punished,
+        )
+    )
+    transport._recover_from_challenge = AsyncMock(side_effect=RuntimeError("slider exhausted"))
+    transport._credential_patch = AsyncMock(return_value={"browser_state": {"schema_version": 1}})
+
+    response = await transport.fetch(
+        NativeBrowserRequest(
+            path="/api/v2/chat/completions?chat_id=chat",
+            body="{}",
+            bearer_token="token-value-that-is-long-enough",
+            referer_path="/c/chat",
+        )
+    )
+
+    body = base64.b64decode(response["body_base64"])
+    assert response["status"] == 403
+    assert b"FAIL_SYS_USER_VALIDATE" in body
+    assert response["credential_patch"]["browser_state"]["schema_version"] == 1

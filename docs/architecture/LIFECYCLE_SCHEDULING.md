@@ -25,7 +25,8 @@ Each stage has independent global, provider, action, egress, and mailbox-domain 
 - Keepalive authentication failure transforms the same action into delayed reauthentication.
 - An explicit public-inference `credential_rejected` result immediately marks the account
   `EXPIRED`, disables selection, and coalesces a reauthentication action. Provider-classified
-  anti-bot challenges remain separate and do not expire the account.
+  anti-bot challenges remain separate, cool the affected account for five minutes so retries can
+  select another identity, and do not expire the account.
 - Reauthentication and recovery of a pending or expired account must pass a real inference probe;
   a successful profile/config request alone cannot promote the account.
 - Qwen reauthentication reuses the persisted browser identity by default. Only a confirmed

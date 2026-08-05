@@ -48,14 +48,20 @@ class QwenInferenceChallengeSolver:
             await page.goto(punish_url, wait_until="domcontentloaded", timeout=60_000)
             await page.wait_for_timeout(1_500)
             diagnostics: list[str] = []
-            for attempt in range(1, max(1, settings().qwen_signup_attempts) + 1):
+            maximum_attempts = min(3, max(1, settings().qwen_signup_attempts))
+            for attempt in range(1, maximum_attempts + 1):
                 slider = await _first_visible(page, SLIDER_SELECTORS, 8_000)
                 if slider is None:
                     if await _challenge_cleared(page):
                         return QwenInferenceChallengeResult(
                             attempt, "challenge_cleared_without_drag"
                         )
-                    raise RuntimeError("Qwen inference slider handle is unavailable")
+                    diagnostics.append(f"attempt={attempt}, handle=unavailable")
+                    if attempt < maximum_attempts:
+                        await page.reload(wait_until="domcontentloaded", timeout=30_000)
+                        await page.wait_for_timeout(1_000)
+                        continue
+                    break
 
                 background = await _first_visible(page, BACKGROUND_SELECTORS, 1_500)
                 piece = await _first_visible(page, PIECE_SELECTORS, 1_500)
@@ -118,6 +124,7 @@ class QwenInferenceChallengeSolver:
                         f"elapsed={elapsed:.2f}, surface={surface}"
                     )
                 diagnostics.append(diagnostic)
+                logger.info("qwen_inference_slider_attempt %s", diagnostic)
                 if await _wait_until_cleared(page, 6_000):
                     return QwenInferenceChallengeResult(attempt, diagnostic)
                 await _refresh(page)
@@ -164,15 +171,21 @@ async def _max_slider_travel(
     candidate = await slider.evaluate(
         """element => {
           const handle = element.getBoundingClientRect();
+          const explicit = element.closest(
+            '#aliyunCaptcha-sliding-body, .nc_scale, .nc_wrapper, .nc-container'
+          );
+          if (explicit) {
+            const rect = explicit.getBoundingClientRect();
+            if (rect.width > handle.width) return rect.width - handle.width;
+          }
           let current = element.parentElement;
-          let best = 0;
           for (let depth = 0; current && depth < 6; depth += 1, current = current.parentElement) {
             const rect = current.getBoundingClientRect();
-            if (rect.width >= 180 && rect.width <= 640 && rect.height <= 240) {
-              best = Math.max(best, rect.width - handle.width);
+            if (rect.width >= 180 && rect.width <= 640 && rect.height <= 120) {
+              return rect.width - handle.width;
             }
           }
-          return best;
+          return 0;
         }"""
     )
     return max(1.0, min(float(candidate or 260.0), 600.0))

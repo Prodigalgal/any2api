@@ -383,7 +383,30 @@ class QwenNativeBrowserTransport:
             result, body = await self._evaluate(session, request)
             punish_url = _qwen_punish_url(body)
             if punish_url:
-                await self._recover_from_challenge(session, punish_url)
+                try:
+                    await self._recover_from_challenge(session, punish_url)
+                except RuntimeError as error:
+                    logger.warning(
+                        "qwen_native_browser_challenge_unresolved error_type=%s",
+                        type(error).__name__,
+                    )
+                    credential_patch = await self._credential_patch(session, request)
+                    challenge_body = json.dumps(
+                        {
+                            "ret": ["FAIL_SYS_USER_VALIDATE"],
+                            "message": "Qwen anti-bot challenge could not be cleared",
+                        },
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ).encode()
+                    result = {
+                        "status": 403,
+                        "contentType": "application/json",
+                        "requestId": str(uuid4()),
+                        "retryAfter": "300",
+                        "bodyBase64": base64.b64encode(challenge_body).decode(),
+                    }
+                    return self._response(request, result, challenge_body, credential_patch)
                 result, body = await self._evaluate(session, request)
             credential_patch = await self._credential_patch(session, request)
             return self._response(request, result, body, credential_patch)

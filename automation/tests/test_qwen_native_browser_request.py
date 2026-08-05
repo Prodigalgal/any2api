@@ -492,6 +492,70 @@ async def test_qwen_native_transport_rejects_an_unrelated_navigation_error() -> 
         await transport._prepare_authenticated_surface(session, request)
 
 
+@pytest.mark.asyncio
+async def test_qwen_native_transport_retries_baxia_after_a_navigation() -> None:
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://chat.qwen.ai/c/chat-1"
+            self.evaluate_calls = 0
+            self.load_state_calls = 0
+
+        async def evaluate(self, _script: str) -> None:
+            self.evaluate_calls += 1
+            if self.evaluate_calls == 1:
+                raise RuntimeError(
+                    "Page.evaluate: Execution context was destroyed, "
+                    "most likely because of a navigation"
+                )
+
+        async def wait_for_load_state(self, _state: str, **_kwargs: object) -> None:
+            self.load_state_calls += 1
+
+        async def wait_for_function(self, _script: str, **_kwargs: object) -> None:
+            return None
+
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", object(), FakePage(), "current")
+
+    await transport._ensure_baxia_ready(session)
+
+    assert session.page.evaluate_calls == 2
+    assert session.page.load_state_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_rejects_a_baxia_retry_on_a_foreign_origin() -> None:
+    class FakePage:
+        url = "https://example.com/c/chat-1"
+
+        async def evaluate(self, _script: str) -> None:
+            raise RuntimeError("Page.evaluate: Execution context was destroyed")
+
+        async def wait_for_load_state(self, _state: str, **_kwargs: object) -> None:
+            return None
+
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", object(), FakePage(), "current")
+
+    with pytest.raises(RuntimeError, match="left the configured origin"):
+        await transport._ensure_baxia_ready(session)
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_rejects_an_unrelated_baxia_error() -> None:
+    class FakePage:
+        url = "https://chat.qwen.ai/c/chat-1"
+
+        async def evaluate(self, _script: str) -> None:
+            raise RuntimeError("Page.evaluate: JavaScript syntax error")
+
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", object(), FakePage(), "current")
+
+    with pytest.raises(RuntimeError, match="JavaScript syntax error"):
+        await transport._ensure_baxia_ready(session)
+
+
 def test_qwen_punish_url_accepts_only_the_configured_qwen_origin() -> None:
     valid = json.dumps(
         {

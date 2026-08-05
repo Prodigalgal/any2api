@@ -565,38 +565,62 @@ class QwenNativeBrowserTransport:
         await self._ensure_baxia_ready(session)
 
     async def _ensure_baxia_ready(self, session: _AccountBrowserSession) -> None:
-        await session.page.evaluate(
-            r"""() => {
-              const baxia = window.__baxia__;
-              if (window.baxiaCommon && baxia?.baxiaPromptInit && !window.baxiaInitialized) {
-                const protectedPaths = [
-                  '/api/chat/completions', '/api/chats/new', '/api/v2/chats',
-                  '/api/v2/chat/completions', '/api/v2/files/getstsToken',
-                  '/api/v2/files/getfilelink', '/api/v2/files/parse'
-                ];
-                window.baxiaCommon.init({
-                  appendTo: 'header',
-                  uabOptions: {location: 'sea'},
-                  checkApiPath: path => protectedPaths.some(value => path.includes(value)),
-                  showCallback: () => {},
-                  hideCallback: () => {},
-                  paramstype: ['uab', 'umid'],
-                  autoSize: true
-                });
-                window.baxiaInitialized = true;
-              }
-            }"""
-        )
-        await session.page.wait_for_function(
-            r"""() => {
-              const module = window.__baxia__?.getFYModule;
-              return Boolean(
-                window.baxiaCommon && window.__baxia__?.baxiaPromptInit &&
-                window.baxiaInitialized && module?.getUidToken?.call(module)
-              );
-            }""",
-            timeout=30_000,
-        )
+        expected = urlparse(settings().qwen_base_url)
+        for attempt in range(1, 4):
+            try:
+                await session.page.evaluate(
+                    r"""() => {
+                      const baxia = window.__baxia__;
+                      if (
+                        window.baxiaCommon && baxia?.baxiaPromptInit &&
+                        !window.baxiaInitialized
+                      ) {
+                        const protectedPaths = [
+                          '/api/chat/completions', '/api/chats/new', '/api/v2/chats',
+                          '/api/v2/chat/completions', '/api/v2/files/getstsToken',
+                          '/api/v2/files/getfilelink', '/api/v2/files/parse'
+                        ];
+                        window.baxiaCommon.init({
+                          appendTo: 'header',
+                          uabOptions: {location: 'sea'},
+                          checkApiPath: path => protectedPaths.some(value => path.includes(value)),
+                          showCallback: () => {},
+                          hideCallback: () => {},
+                          paramstype: ['uab', 'umid'],
+                          autoSize: true
+                        });
+                        window.baxiaInitialized = true;
+                      }
+                    }"""
+                )
+                await session.page.wait_for_function(
+                    r"""() => {
+                      const module = window.__baxia__?.getFYModule;
+                      return Boolean(
+                        window.baxiaCommon && window.__baxia__?.baxiaPromptInit &&
+                        window.baxiaInitialized && module?.getUidToken?.call(module)
+                      );
+                    }""",
+                    timeout=30_000,
+                )
+                return
+            except Exception as error:
+                if "Execution context was destroyed" not in str(error) or attempt == 3:
+                    raise
+                await session.page.wait_for_load_state(
+                    "domcontentloaded",
+                    timeout=10_000,
+                )
+                current = urlparse(session.page.url)
+                if current.scheme != expected.scheme or current.netloc != expected.netloc:
+                    raise RuntimeError(
+                        "Qwen authenticated surface left the configured origin"
+                    ) from error
+                logger.info(
+                    "qwen_native_browser_baxia_navigation_retry attempt=%s current_path=%s",
+                    attempt,
+                    current.path,
+                )
 
     async def _credential_patch(
         self,

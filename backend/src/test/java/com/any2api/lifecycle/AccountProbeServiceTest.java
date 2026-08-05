@@ -88,19 +88,45 @@ class AccountProbeServiceTest {
         }
     }
 
+    @Test
+    void probeUsesTheProviderDeclaredRecoveryTimeout() {
+        try (var fixture = fixture(
+                AccountStatus.ACTIVE, true, "extended", Duration.ofSeconds(90))) {
+            when(fixture.readiness().probe(
+                    eq(fixture.leased()), eq(Duration.ofSeconds(90))))
+                .thenReturn(Mono.just(InferenceReadinessProbe.Result.ready("extended-top")));
+
+            var result = fixture.service().probe(fixture.account().getId()).block();
+
+            assertThat(result).isNotNull();
+            assertThat(result.ready()).isTrue();
+            verify(fixture.readiness()).probe(
+                fixture.leased(), Duration.ofSeconds(90));
+        }
+    }
+
     private Fixture fixture(AccountStatus status, boolean enabled) {
+        return fixture(status, enabled, "alpha", Duration.ofSeconds(30));
+    }
+
+    private Fixture fixture(
+        AccountStatus status,
+        boolean enabled,
+        String providerId,
+        Duration accountProbeTimeout
+    ) {
         var repository = mock(AccountRepository.class);
         var accounts = mock(AccountSelectionService.class);
         var failures = mock(ProviderFailureDisposition.class);
         var readiness = mock(InferenceReadinessProbe.class);
         var observability = mock(OperationEventService.class);
         var account = AccountEntity.create(
-            "alpha", "external", "same@example.com", null, Map.of());
+            providerId, "external", "same@example.com", null, Map.of());
         account.updateState(status, enabled);
         var lease = new AccountLease(
-            "alpha", account.getId(), "owner", 1, Instant.now().plusSeconds(60));
+            providerId, account.getId(), "owner", 1, Instant.now().plusSeconds(60));
         var leased = new LeasedProviderAccount(
-            account.getId(), "alpha", "external", "same@example.com", 1, null,
+            account.getId(), providerId, "external", "same@example.com", 1, null,
             mapper.createObjectNode(), Map.of(), lease);
         when(repository.findById(account.getId())).thenReturn(Optional.of(account));
         when(repository.save(account)).thenReturn(account);
@@ -108,9 +134,9 @@ class AccountProbeServiceTest {
         when(accounts.release(leased)).thenReturn(Mono.just(true));
         when(accounts.mergeCredentialPatch(eq(leased), any())).thenReturn(Mono.just(false));
         var started = new OperationEventService.Started(
-            java.util.UUID.randomUUID(), "correlation", "LIFECYCLE", "alpha", "probe",
+            java.util.UUID.randomUUID(), "correlation", "LIFECYCLE", providerId, "probe",
             "ACCOUNT", account.getId().toString(), 1, Instant.now());
-        when(observability.start(eq("LIFECYCLE"), eq("alpha"), eq("probe"), any()))
+        when(observability.start(eq("LIFECYCLE"), eq(providerId), eq("probe"), any()))
             .thenReturn(started);
         var transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any()))
@@ -119,7 +145,7 @@ class AccountProbeServiceTest {
         var service = new AccountProbeService(
             repository,
             accounts,
-            new ProviderRegistry(List.of(provider())),
+            new ProviderRegistry(List.of(provider(providerId, accountProbeTimeout))),
             failures,
             readiness,
             observability,
@@ -130,16 +156,17 @@ class AccountProbeServiceTest {
             account, leased, executor);
     }
 
-    private InferenceProvider provider() {
+    private InferenceProvider provider(String providerId, Duration accountProbeTimeout) {
         var provider = mock(InferenceProvider.class);
         when(provider.manifest()).thenReturn(new ProviderManifest(
-            "alpha", "Alpha", "test", "1", List.of("alpha-top"),
+            providerId, providerId, "test", "1", List.of(providerId + "-top"),
             Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE),
             true));
         when(provider.protocolContract())
             .thenCallRealMethod();
+        when(provider.accountProbeTimeout()).thenReturn(accountProbeTimeout);
         return provider;
     }
 

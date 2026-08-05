@@ -56,7 +56,9 @@ reauthentication plus inference-readiness probe succeeds.
 6. An explicit `credential_rejected` result marks the account `EXPIRED`, disables it, and coalesces a
    reauthentication action.
 7. Reauthentication cannot reactivate an account until the existing account-specific inference
-   readiness probe succeeds.
+   readiness probe succeeds. The Qwen adapter applies its configured 120-second model probe window
+   to account readiness as well, so browser recovery and one bounded captcha attempt are not
+   misclassified by the core provider default timeout.
 8. Existing Qwen stream/non-stream behavior, protocol mapping, uploads, and other providers do not
    regress.
 9. Qwen model discovery, upload setup, chat creation, and completion reuse the same account proxy

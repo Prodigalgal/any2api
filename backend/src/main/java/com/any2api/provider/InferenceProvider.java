@@ -34,6 +34,10 @@ public interface InferenceProvider {
         return Duration.ofSeconds(45);
     }
 
+    default Duration accountProbeTimeout() {
+        return Duration.ofSeconds(30);
+    }
+
     default ModelCapabilityContract modelContract(DiscoveredModel model) {
         return ModelCapabilityContract.from(manifest(), protocolContract(), model);
     }

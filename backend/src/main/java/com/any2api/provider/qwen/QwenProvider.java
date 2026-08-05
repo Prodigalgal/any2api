@@ -101,6 +101,11 @@ public final class QwenProvider implements InferenceProvider {
     }
 
     @Override
+    public Duration accountProbeTimeout() {
+        return properties.getModelProbeTimeout();
+    }
+
+    @Override
     public void validate(CanonicalRequest request) {
         ProviderRequestValidation.requireStringParameters(request, "thinking_mode");
         ProviderRequestValidation.requireBooleanParameters(

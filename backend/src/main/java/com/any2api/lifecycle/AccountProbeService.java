@@ -11,7 +11,6 @@ import com.any2api.observability.RequestCorrelation;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderFailureDisposition;
 import com.any2api.provider.ProviderRegistry;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -25,8 +24,6 @@ import reactor.core.scheduler.Schedulers;
 
 @Service
 public final class AccountProbeService {
-    private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(30);
-
     private final AccountRepository repository;
     private final AccountSelectionService accounts;
     private final ProviderRegistry providers;
@@ -76,7 +73,8 @@ public final class AccountProbeService {
         observability.linkAccount(observed, accountId);
         return Mono.usingWhen(
                 accounts.acquire(accountId),
-                account -> Mono.defer(() -> readiness.probe(account, PROBE_TIMEOUT))
+                account -> Mono.defer(() -> readiness.probe(
+                        account, providers.require(providerId).accountProbeTimeout()))
                     .flatMap(result -> accounts.mergeCredentialPatch(
                             account, result.credentialPatch())
                         .onErrorReturn(false)

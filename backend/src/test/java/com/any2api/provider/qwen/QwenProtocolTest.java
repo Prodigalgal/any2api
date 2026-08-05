@@ -29,6 +29,7 @@ class QwenProtocolTest {
             new ObjectMapper());
 
         assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
     }
 
     @Test

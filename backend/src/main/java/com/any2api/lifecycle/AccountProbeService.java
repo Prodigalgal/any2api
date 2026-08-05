@@ -92,6 +92,11 @@ public final class AccountProbeService {
                 }
             })
             .doOnError(error -> observability.fail(observed, error))
+            .doOnCancel(() -> observability.fail(
+                observed,
+                "request_cancelled",
+                "client_cancelled",
+                "account probe request was cancelled"))
             .contextWrite(RequestCorrelation.context(context.correlationId()));
     }
 

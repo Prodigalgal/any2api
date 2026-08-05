@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,7 +26,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
@@ -102,6 +105,27 @@ class AccountProbeServiceTest {
             assertThat(result.ready()).isTrue();
             verify(fixture.readiness()).probe(
                 fixture.leased(), Duration.ofSeconds(90));
+        }
+    }
+
+    @Test
+    void cancelledRealtimeProbeClosesItsRunningOperationEvent() throws Exception {
+        try (var fixture = fixture(AccountStatus.ACTIVE, true)) {
+            var subscribed = new CountDownLatch(1);
+            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class)))
+                .thenReturn(Mono.<InferenceReadinessProbe.Result>never()
+                    .doOnSubscribe(ignored -> subscribed.countDown()));
+
+            var subscription = fixture.service().probe(fixture.account().getId()).subscribe();
+            assertThat(subscribed.await(2, TimeUnit.SECONDS)).isTrue();
+            subscription.dispose();
+
+            verify(fixture.observability(), timeout(1_000)).fail(
+                any(OperationEventService.Started.class),
+                eq("request_cancelled"),
+                eq("client_cancelled"),
+                eq("account probe request was cancelled"));
+            verify(fixture.accounts(), timeout(1_000)).release(fixture.leased());
         }
     }
 

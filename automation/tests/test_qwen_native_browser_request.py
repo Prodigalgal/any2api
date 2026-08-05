@@ -5,6 +5,7 @@ import json
 import re
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import ClassVar, Self
 from unittest.mock import AsyncMock
 
@@ -687,3 +688,30 @@ async def test_qwen_native_transport_returns_a_retryable_challenge_with_state_pa
     assert response["status"] == 403
     assert b"FAIL_SYS_USER_VALIDATE" in body
     assert response["credential_patch"]["browser_state"]["schema_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_challenge_diagnostics_hash_account_and_hide_proxy(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport = QwenNativeBrowserTransport()
+    transport._challenge_solver.solve = AsyncMock(
+        return_value=SimpleNamespace(attempts=1, diagnostic="cleared")
+    )
+    transport._load_page_runtime = AsyncMock()
+    session = _AccountBrowserSession(
+        "sensitive-account-id",
+        object(),
+        object(),
+        proxy_url="http://proxy-user:proxy-password@example.com:8080",
+        request_count=2,
+    )
+
+    with caplog.at_level("INFO"):
+        await transport._recover_from_challenge(session, "https://chat.qwen.ai/punish")
+
+    assert "sensitive-account-id" not in caplog.text
+    assert "proxy-password" not in caplog.text
+    assert "account_key_hash=18c50dd9aac6" in caplog.text
+    assert "request_seq=2" in caplog.text
+    assert "proxy_bound=True" in caplog.text

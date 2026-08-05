@@ -367,6 +367,7 @@ class _AccountBrowserSession:
     proxy_url: str = ""
     proxy_binding_id: str = ""
     browser_manager: Any | None = None
+    request_count: int = 0
 
 
 class QwenNativeBrowserTransport:
@@ -395,7 +396,11 @@ class QwenNativeBrowserTransport:
                     await self._recover_from_challenge(session, punish_url)
                 except RuntimeError as error:
                     logger.warning(
-                        "qwen_native_browser_challenge_unresolved error_type=%s",
+                        "qwen_native_browser_challenge_unresolved "
+                        "account_key_hash=%s request_seq=%s proxy_bound=%s error_type=%s",
+                        _short_hash(session.key),
+                        session.request_count,
+                        bool(session.proxy_url),
                         type(error).__name__,
                     )
                     credential_patch = await self._credential_patch(session, request)
@@ -687,7 +692,11 @@ class QwenNativeBrowserTransport:
         try:
             outcome = await self._challenge_solver.solve(session.page, punish_url)
             logger.info(
-                "qwen_native_browser_challenge_cleared attempts=%s diagnostic=%s",
+                "qwen_native_browser_challenge_cleared "
+                "account_key_hash=%s request_seq=%s proxy_bound=%s attempts=%s diagnostic=%s",
+                _short_hash(session.key),
+                session.request_count,
+                bool(session.proxy_url),
                 outcome.attempts,
                 outcome.diagnostic,
             )
@@ -699,11 +708,10 @@ class QwenNativeBrowserTransport:
         request: NativeBrowserRequest,
         proxy_binding: tuple[str, str] | None = None,
     ) -> _AccountBrowserSession:
-        account_key = (
-            request.account_id or hashlib.sha256(request.bearer_token.encode()).hexdigest()
-        )
+        account_key = _request_account_key(request)
         incoming_digest = browser_state_digest(request.browser_state, settings().qwen_base_url)
         session = self._sessions.get(account_key)
+        session_lifecycle = "reused"
         fingerprint = request.browser_fingerprint or (
             session.browser_fingerprint
             if session is not None and session.browser_fingerprint
@@ -737,6 +745,7 @@ class QwenNativeBrowserTransport:
             self._sessions.pop(account_key, None)
             session = None
         if session is None:
+            session_lifecycle = "created"
             if normalized_fingerprint["backend"] == "camoufox":
                 await self._evict_other_camoufox_sessions(account_key)
             session = await self._new_session(
@@ -754,6 +763,27 @@ class QwenNativeBrowserTransport:
         while len(self._sessions) > settings().qwen_risk_session_cache_size:
             _, expired = self._sessions.popitem(last=False)
             await self._close_session(expired)
+        session.request_count += 1
+        cookie_count, origin_count, indexed_db_count = _browser_state_shape(request.browser_state)
+        request_kind = "completion" if "/chat/completions" in request.path else "control"
+        logger.info(
+            "qwen_native_browser_session account_key_hash=%s lifecycle=%s "
+            "request_seq=%s request_kind=%s backend=%s fingerprint_hash=%s "
+            "state_mode=%s cookie_count=%s origin_count=%s indexeddb_count=%s "
+            "proxy_bound=%s proxy_binding_hash=%s",
+            _short_hash(account_key),
+            session_lifecycle,
+            session.request_count,
+            request_kind,
+            session.backend,
+            session.fingerprint_digest[:12],
+            "durable" if request.browser_state else "legacy",
+            cookie_count,
+            origin_count,
+            indexed_db_count,
+            bool(session.proxy_url),
+            _short_hash(session.proxy_binding_id),
+        )
         return session
 
     async def _evict_other_camoufox_sessions(self, account_key: str) -> None:
@@ -1121,6 +1151,26 @@ def _qwen_punish_url(body: bytes) -> str:
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
         return ""
     return ""
+
+
+def _request_account_key(request: NativeBrowserRequest) -> str:
+    return request.account_id or hashlib.sha256(request.bearer_token.encode()).hexdigest()
+
+
+def _short_hash(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()[:12] if value else ""
+
+
+def _browser_state_shape(value: Any) -> tuple[int, int, int]:
+    state = playwright_storage_state(value, settings().qwen_base_url) or {}
+    cookies = state.get("cookies", [])
+    origins = state.get("origins", [])
+    indexed_db_count = sum(
+        len(origin.get("indexedDB", []))
+        for origin in origins
+        if isinstance(origin, dict) and isinstance(origin.get("indexedDB", []), list)
+    )
+    return len(cookies), len(origins), indexed_db_count
 
 
 provider = QwenRiskHeaderProvider()

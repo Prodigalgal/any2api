@@ -32,7 +32,7 @@ from .qwen_fingerprint import (
 )
 from .qwen_session import (
     browser_state_cookie_map,
-    normalize_browser_state,
+    capture_browser_state,
     playwright_storage_state,
 )
 from .qwen_settings import settings
@@ -513,7 +513,7 @@ def _qwen_session_patch(
         raw_state = context.storage_state(indexed_db=True)
     except TypeError:
         raw_state = context.storage_state()
-    browser_state = normalize_browser_state(raw_state, base_url)
+    browser_state = capture_browser_state(raw_state, base_url)
     cookies = browser_state_cookie_map(browser_state, base_url)
     user_agent = str(page.evaluate("() => navigator.userAgent") or "")
     normalized_fingerprint = normalize_qwen_fingerprint(fingerprint)

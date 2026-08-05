@@ -38,6 +38,7 @@ from .qwen_inference_challenge import QwenInferenceChallengeSolver
 from .qwen_session import (
     browser_state_cookie_map,
     browser_state_digest,
+    capture_browser_state,
     normalize_browser_state,
     playwright_storage_state,
 )
@@ -590,7 +591,7 @@ class QwenNativeBrowserTransport:
         request: NativeBrowserRequest,
     ) -> dict[str, Any]:
         base_url = settings().qwen_base_url.rstrip("/")
-        state = normalize_browser_state(
+        state = capture_browser_state(
             await session.context.storage_state(indexed_db=True), base_url
         )
         digest = browser_state_digest(state, base_url)

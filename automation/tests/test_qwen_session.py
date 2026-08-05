@@ -13,6 +13,7 @@ from any2api_automation.providers.qwen_risk import (
 )
 from any2api_automation.providers.qwen_session import (
     browser_state_digest,
+    capture_browser_state,
     normalize_browser_state,
 )
 
@@ -83,6 +84,36 @@ def test_qwen_browser_state_rejects_untrusted_cookie_domains() -> None:
 
     with pytest.raises(ValueError, match="cross-origin cookie"):
         normalize_browser_state(state, BASE_URL)
+
+
+def test_qwen_browser_capture_filters_third_party_iframe_state() -> None:
+    state = _state()
+    state["cookies"].append(
+        {
+            "name": "third_party",
+            "value": "discarded",
+            "domain": ".example.com",
+            "path": "/",
+            "expires": -1,
+            "httpOnly": False,
+            "secure": True,
+            "sameSite": "None",
+        }
+    )
+    state["origins"].append(
+        {
+            "origin": "https://iframe.example.com",
+            "localStorage": [{"name": "foreign", "value": "discarded"}],
+        }
+    )
+
+    captured = capture_browser_state(state, BASE_URL)
+
+    assert {cookie["name"] for cookie in captured["storage_state"]["cookies"]} == {
+        "cna",
+        "cbc",
+    }
+    assert [origin["origin"] for origin in captured["storage_state"]["origins"]] == [BASE_URL]
 
 
 def test_qwen_native_request_rejects_untrusted_persisted_state() -> None:

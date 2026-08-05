@@ -44,7 +44,9 @@ object-storage uploads use the provider-issued signed URL and never receive acco
 Qwen additionally persists versioned `browser_state` and `browser_fingerprint` objects inside the
 AES-GCM provider credential.
 The state retains Qwen origin storage plus explicitly allowlisted `qwen.ai` and `alibaba.com`
-Baxia/WAF cookies; arbitrary origins and cookie domains are rejected at the internal API boundary.
+Baxia/WAF cookies. Untrusted persisted input containing arbitrary origins or cookie domains is
+rejected at the internal API boundary; state captured from the owned browser filters unrelated
+third-party iframe entries before applying the same strict validation and encryption.
 Camoufox is the preferred Qwen backend and Patchright is the fallback. Registration dynamically
 selects a coherent account fingerprint. A Camoufox account stores and replays the complete generated
 config, Firefox preferences, font/voice selection, WebGL data, and canvas/audio/font seeds. A

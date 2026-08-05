@@ -54,6 +54,34 @@ def normalize_browser_state(value: Any, base_url: str) -> dict[str, Any]:
     return normalized
 
 
+def capture_browser_state(value: Any, base_url: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TypeError("Qwen browser storage state must be an object")
+    raw_cookies = value.get("cookies", [])
+    raw_origins = value.get("origins", [])
+    if not isinstance(raw_cookies, list) or not isinstance(raw_origins, list):
+        raise TypeError("Qwen browser storage collections must be arrays")
+    expected = urlparse(base_url)
+    if expected.scheme != "https" or not expected.hostname:
+        raise ValueError("Qwen browser state requires an HTTPS provider origin")
+    expected_origin = f"{expected.scheme}://{expected.netloc}"
+    allowed_domains = {_registrable_domain(expected.hostname), "alibaba.com"}
+    cookies: list[Any] = []
+    for cookie in raw_cookies:
+        if not isinstance(cookie, dict):
+            raise TypeError("Qwen browser state cookie must be an object")
+        domain = str(cookie.get("domain") or "").strip().lower().lstrip(".")
+        if any(domain == allowed or domain.endswith("." + allowed) for allowed in allowed_domains):
+            cookies.append(cookie)
+    origins: list[Any] = []
+    for origin in raw_origins:
+        if not isinstance(origin, dict):
+            raise TypeError("Qwen browser storage origin must be an object")
+        if str(origin.get("origin") or "") == expected_origin:
+            origins.append(origin)
+    return normalize_browser_state({"cookies": cookies, "origins": origins}, base_url)
+
+
 def playwright_storage_state(value: Any, base_url: str) -> dict[str, Any] | None:
     normalized = normalize_browser_state(value, base_url)
     return normalized.get("storage_state") if normalized else None

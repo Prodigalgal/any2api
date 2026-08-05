@@ -393,13 +393,29 @@ def launch_browser(
                     )
                 if effective_profile.camoufox_config:
                     exact_config = deepcopy(effective_profile.camoufox_config)
-                    prepared = launch_options(config=deepcopy(exact_config), **manager_options)
+                    if proxy_url and not (
+                        str(exact_config.get("timezone") or "").strip()
+                        and "geolocation:latitude" in exact_config
+                        and "geolocation:longitude" in exact_config
+                    ):
+                        logger.warning("persisted Camoufox config lacks proxy-aligned GeoIP fields")
+                    prepared = launch_options(
+                        config=deepcopy(exact_config),
+                        **{
+                            **manager_options,
+                            "geoip": False,
+                            "proxy": None,
+                            "i_know_what_im_doing": True,
+                        },
+                    )
                     prepared_env = dict(prepared.get("env") or {})
                     for name in tuple(prepared_env):
                         if name.startswith("CAMOU_CONFIG_"):
                             prepared_env.pop(name)
                     prepared_env.update(get_env_vars(exact_config, get_target_os(exact_config)))
                     prepared["env"] = prepared_env
+                    if proxy_url:
+                        prepared["proxy"] = {"server": proxy_url}
                     if effective_profile.camoufox_firefox_user_prefs:
                         prepared["firefox_user_prefs"] = {
                             **dict(prepared.get("firefox_user_prefs") or {}),

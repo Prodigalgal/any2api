@@ -144,11 +144,38 @@ that exact lease. The generated timezone and full Camoufox config are persisted 
 Patchright remains the fallback backend and receives the same GeoIP-derived timezone, avoiding a
 known proxy/timezone contradiction during fallback.
 
+Camoufox `0.5.4` emits `proxy_without_geoip` while replaying an exact config because its warning
+checks for a direct `geolocation` key while its own generator stores `geolocation:latitude` and
+`geolocation:longitude`. Exact replay now validates timezone plus both coordinate fields locally,
+packs the persisted config without asking Camoufox to regenerate GeoIP, and attaches the same proxy
+to the final Playwright launch options. This removes the false warning without rotating account
+coordinates, timezone, or noise seeds.
+
 Each registration identity also receives a non-secret `proxy_affinity_key`. Rendezvous hashing maps
 that key to one pool node, strict affinity prevents silently falling through to a different node,
 and the successful key is persisted in the encrypted credential. If `LIFECYCLE` or `INFERENCE` is
 later bound to a compatible pool, Java forwards the same key. With no binding for those scopes, the
 current direct behavior is unchanged.
+
+### Production Registration Validation
+
+One production registration was executed after deployment with `target=1`, `concurrency=1`,
+`REQUIRED_POOL`, Camoufox preferred, and external AI captcha disabled.
+
+| Stage | Result |
+| --- | --- |
+| Registration attempt | 1/1 succeeded in 75.973 s |
+| Registration challenge | One slider; local fused estimate cleared it on attempt 1 |
+| Activation | Mail link received, account activated, credential captured |
+| Persisted browser | Camoufox `firefox147`, `Asia/Tokyo`, `zh-CN` |
+| Persisted state | 18 cookies, one origin, one IndexedDB database, latitude and longitude present |
+| Proxy identity | Opaque affinity present, valid `qwen-` prefix, 37 characters |
+| Inference readiness | `chats/new` 200 and `chat/completions` 200, no slider or challenge |
+| Account admission | `ACTIVE`, enabled, model `qwen3.7-plus`, credential version advanced to 2 |
+
+The registration form challenge and the post-registration inference result are separate outcomes:
+the registration slider was solved once, while the newly restored account's real chat request did
+not present a slider.
 
 ## Response Envelope Limit
 

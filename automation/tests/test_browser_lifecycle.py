@@ -1,3 +1,4 @@
+import json
 from contextlib import contextmanager
 
 import pytest
@@ -104,6 +105,65 @@ def test_browser_launcher_cleans_partially_started_camoufox(monkeypatch) -> None
         raise AssertionError("failed launcher must not yield")
 
     assert manager.exited is True
+
+
+def test_browser_launcher_replays_geo_aligned_camoufox_config_without_regeneration(
+    monkeypatch,
+) -> None:
+    import camoufox.sync_api
+    import camoufox.utils
+
+    generated_config = {
+        "navigator.userAgent": "fixture-agent",
+        "timezone": "Asia/Tokyo",
+        "geolocation:latitude": 35.0,
+        "geolocation:longitude": 139.0,
+    }
+    launch_input: dict[str, object] = {}
+    runtime_options: dict[str, object] = {}
+
+    def prepare(**options: object) -> dict[str, object]:
+        launch_input.update(options)
+        return {"env": {"CAMOU_CONFIG_1": "stale"}, "firefox_user_prefs": {}}
+
+    class Manager:
+        def __init__(self, **options: object) -> None:
+            runtime_options.update(options["from_options"])
+
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(self, *args: object) -> None:
+            del args
+
+    monkeypatch.setattr(camoufox.utils, "launch_options", prepare)
+    monkeypatch.setattr(
+        camoufox.utils,
+        "get_env_vars",
+        lambda config, target: {"CAMOU_CONFIG_1": json.dumps(config, sort_keys=True)},
+    )
+    monkeypatch.setattr(camoufox.utils, "get_target_os", lambda config: "win")
+    monkeypatch.setattr(camoufox.sync_api, "Camoufox", Manager)
+
+    profile = BrowserLaunchProfile(
+        camoufox_config=generated_config,
+        camoufox_firefox_user_prefs={"fixture.pref": True},
+    )
+    with launch_browser(
+        "camoufox",
+        None,
+        headless=False,
+        proxy_url="http://proxy.internal:8080",
+        profile=profile,
+    ):
+        pass
+
+    assert launch_input["geoip"] is False
+    assert launch_input["proxy"] is None
+    assert launch_input["i_know_what_im_doing"] is True
+    assert runtime_options["proxy"] == {"server": "http://proxy.internal:8080"}
+    assert json.loads(runtime_options["env"]["CAMOU_CONFIG_1"]) == generated_config
+    assert runtime_options["firefox_user_prefs"]["fixture.pref"] is True
 
 
 def test_browser_launcher_reaps_processes_when_runtime_close_fails(monkeypatch) -> None:

@@ -74,6 +74,23 @@ async def test_qwen_native_request_persists_a_migrated_legacy_fingerprint() -> N
     assert "humanize:maxTime" not in patch["browser_fingerprint"]["camoufox_config"]
 
 
+@pytest.mark.asyncio
+async def test_qwen_transport_keeps_only_one_camoufox_runtime() -> None:
+    transport = QwenNativeBrowserTransport()
+    first_camoufox = _AccountBrowserSession(
+        "first-camoufox", object(), object(), backend="camoufox"
+    )
+    patchright = _AccountBrowserSession("patchright", object(), object(), backend="patchright")
+    transport._sessions[first_camoufox.key] = first_camoufox
+    transport._sessions[patchright.key] = patchright
+    transport._close_session = AsyncMock()
+
+    await transport._evict_other_camoufox_sessions("next-camoufox")
+
+    assert list(transport._sessions) == [patchright.key]
+    transport._close_session.assert_awaited_once_with(first_camoufox)
+
+
 @pytest.mark.parametrize(
     ("path", "referer"),
     [

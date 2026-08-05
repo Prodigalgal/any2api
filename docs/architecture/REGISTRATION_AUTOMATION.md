@@ -58,7 +58,10 @@ and applies only its bounded slider trajectory. Fingerprint schema v1 is migrate
 the legacy cursor controls while preserving the registered device fields and noise seeds, then the
 migrated manifest is returned in the next encrypted credential patch. The automation process
 owns one isolated context/page per account; Camoufox accounts own their exact browser runtime while
-Patchright accounts share only the Chromium process. A cold process restores account state before
+Patchright accounts share only the Chromium process. The automation worker retains at most one
+Camoufox Qwen runtime at a time under its 3 GiB memory limit; switching accounts closes the previous
+runtime while preserving its encrypted state, preventing concurrent probes from causing an OOM.
+A cold process restores account state before
 loading Baxia, and normal requests or challenge recovery return updated storage and fingerprint as
 one credential patch. The legacy flat cookie map is migration-only and is not injected when a
 complete browser state is present.

@@ -672,7 +672,8 @@ class QwenNativeBrowserTransport:
             if session is not None and session.browser_fingerprint
             else new_qwen_fingerprint("camoufox")
         )
-        incoming_fingerprint_digest = qwen_fingerprint_digest(fingerprint)
+        normalized_fingerprint = normalize_qwen_fingerprint(fingerprint)
+        incoming_fingerprint_digest = qwen_fingerprint_digest(normalized_fingerprint)
         proxy_url, proxy_binding_id = (
             proxy_binding
             if proxy_binding is not None
@@ -699,11 +700,13 @@ class QwenNativeBrowserTransport:
             self._sessions.pop(account_key, None)
             session = None
         if session is None:
+            if normalized_fingerprint["backend"] == "camoufox":
+                await self._evict_other_camoufox_sessions(account_key)
             session = await self._new_session(
                 account_key,
                 request,
                 incoming_digest,
-                fingerprint,
+                normalized_fingerprint,
                 proxy_url,
                 proxy_binding_id,
             )
@@ -715,6 +718,15 @@ class QwenNativeBrowserTransport:
             _, expired = self._sessions.popitem(last=False)
             await self._close_session(expired)
         return session
+
+    async def _evict_other_camoufox_sessions(self, account_key: str) -> None:
+        for key, candidate in tuple(self._sessions.items()):
+            if key == account_key or candidate.backend != "camoufox":
+                continue
+            self._sessions.pop(key, None)
+            await self._close_session(candidate)
+            key_hash = hashlib.sha256(key.encode()).hexdigest()[:12]
+            logger.info("qwen_native_browser_camoufox_evicted account_key_hash=%s", key_hash)
 
     async def _new_session(
         self,

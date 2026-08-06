@@ -25,6 +25,9 @@
 | Legacy `mimo2api-direct` endpoint | `404 Not Found` | Retired endpoint and stale key |
 | Any2API `/mimo/v1` endpoint | `400 unsupported_parameter` | MiMo Code always adds `max_tokens` |
 | Direct Any2API request without `max_tokens` | `200`, usable output | None |
+| Deployed Any2API request with `max_tokens=128000` | `200`, usable output | None |
+| MiMo Code from an empty directory | `200`, `MIMOCODE_EMPTY_READY` | None |
+| MiMo Code from this repository | `200`, upstream input-too-long reply | Project context raises input from 25,738 to 28,529 tokens |
 
 ## Decision
 
@@ -40,5 +43,10 @@ update point when official model metadata changes.
 ## Verification
 
 - Unit coverage proves `max_tokens=128000` is accepted and `max_tokens=1024` is rejected.
-- Production MiMo Code verification must be repeated after the backend image containing this
-  policy is deployed.
+- Production image `server-sha-e1c69b07d06d7d86e943f03111aa04d9d557cce4` accepts the
+  MiMo Code token ceiling and returns a completed response instead of `404` or
+  `unsupported_parameter`.
+- MiMo Code `0.1.7` produced `MIMOCODE_EMPTY_READY` through Any2API from an empty directory.
+- Running MiMo Code from this repository still exceeds the MiMo Web practical input boundary
+  because the client includes additional repository context. This is a context-size limitation,
+  not an endpoint or request-parameter failure.

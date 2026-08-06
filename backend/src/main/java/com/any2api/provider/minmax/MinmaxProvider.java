@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -74,6 +75,11 @@ public final class MinmaxProvider implements InferenceProvider {
     @Override
     public ProviderProtocolContract protocolContract() {
         return PROTOCOL;
+    }
+
+    @Override
+    public ProviderRetryPolicy retryPolicy() {
+        return ProviderRetryPolicy.standardWith(3, "quota_exhausted");
     }
 
     @Override

@@ -27,6 +27,7 @@ class MinmaxProtocolTest {
         assertThat(provider.manifest().randomModelPreferences())
             .containsKey(RandomModelRole.TOP_TEXT)
             .doesNotContainKey(RandomModelRole.TOP_MULTIMODAL);
+        assertThat(provider.retryPolicy().shouldRetry("quota_exhausted", 1)).isTrue();
     }
 
     @Test
@@ -158,6 +159,28 @@ class MinmaxProtocolTest {
         assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
             && failed.errorType().equals("empty_model_response"));
         assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
+    void mapsTokenPlanLimitMessagesToQuotaFailures() {
+        var decoder = new MinmaxEventDecoder("quota");
+        var events = new java.util.ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode("""
+            {"type":2,"agent_message":{"role":"assistant","msg_content":
+            "42212:Token Plan usage limit reached: Upgrade your Token Plan. (2056)"}}
+            """));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anySatisfy(event -> {
+            assertThat(event).isInstanceOf(CanonicalEvent.Failed.class);
+            var failure = (CanonicalEvent.Failed) event;
+            assertThat(failure.errorType()).isEqualTo("quota_exhausted");
+            assertThat(failure.detail())
+                .containsEntry("upstream_code", "42212")
+                .containsEntry("reason_code", "2056");
+        });
+        assertThat(events).noneMatch(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .noneMatch(CanonicalEvent.Completed.class::isInstance);
     }
 
     private void assertOfficialSignature(

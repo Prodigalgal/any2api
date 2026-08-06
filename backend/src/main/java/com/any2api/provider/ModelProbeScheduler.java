@@ -40,7 +40,7 @@ public final class ModelProbeScheduler {
         initialDelayString = "${any2api.model-runtime.probe-initial-delay:2m}",
         fixedDelayString = "${any2api.model-runtime.probe-interval:15m}"
     )
-    public void probeStaleTopModels() {
+    public void probeStaleModels() {
         candidates().flatMapMany(Flux::fromIterable)
             .concatMap(candidate -> probes.probe(candidate.providerId(), candidate.modelId())
                 .doOnNext(result -> log.info(
@@ -67,7 +67,6 @@ public final class ModelProbeScheduler {
                 WHERE model.enabled = TRUE
                   AND provider.enabled = TRUE
                   AND provider.installed = TRUE
-                  AND cardinality(model.random_roles) > 0
                   AND (probe.probed_at IS NULL
                     OR probe.probed_at < :staleBefore)
                 ORDER BY probe.probed_at NULLS FIRST, model.provider_id, model.upstream_id

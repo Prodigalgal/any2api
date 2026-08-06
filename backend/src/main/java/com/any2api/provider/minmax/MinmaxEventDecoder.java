@@ -4,10 +4,15 @@ import com.any2api.protocol.CanonicalEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 final class MinmaxEventDecoder {
+    private static final Pattern TOKEN_PLAN_LIMIT = Pattern.compile(
+        "^\\s*(42212)\\s*:\\s*(Token Plan usage limit reached.*?)"
+            + "(?:\\s+\\((\\d+)\\))?\\s*$",
+        Pattern.CASE_INSENSITIVE);
     private final String requestId;
     private final ObjectMapper mapper = new ObjectMapper();
     private long sequence;
@@ -18,6 +23,7 @@ final class MinmaxEventDecoder {
     MinmaxEventDecoder(String requestId) { this.requestId = requestId; }
 
     List<CanonicalEvent> decode(String data) {
+        if (completed) return List.of();
         var output = start();
         if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) return output;
         try {
@@ -59,7 +65,7 @@ final class MinmaxEventDecoder {
             output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), reasoning));
         }
         var text = firstText(chunk, "content", "text", "msg_content");
-        if (!text.isBlank()) {
+        if (!text.isBlank() && !decodeSemanticFailure(text, output)) {
             emittedText = true;
             output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), text));
         }
@@ -68,10 +74,22 @@ final class MinmaxEventDecoder {
     private void decodeMessage(JsonNode message, List<CanonicalEvent> output) {
         if (!"assistant".equalsIgnoreCase(message.path("role").asText(""))) return;
         var text = text(message.path("msg_content"));
-        if (!text.isBlank() && !emittedText) {
+        if (!text.isBlank() && !emittedText && !decodeSemanticFailure(text, output)) {
             emittedText = true;
             output.add(new CanonicalEvent.OutputTextDelta(1, requestId, next(), text));
         }
+    }
+
+    private boolean decodeSemanticFailure(String text, List<CanonicalEvent> output) {
+        var match = TOKEN_PLAN_LIMIT.matcher(text);
+        if (!match.matches()) return false;
+        var detail = new java.util.LinkedHashMap<String, Object>();
+        detail.put("upstream_code", match.group(1));
+        if (match.group(3) != null) detail.put("reason_code", match.group(3));
+        output.add(new CanonicalEvent.Failed(1, requestId, next(),
+            "quota_exhausted", text.trim(), Map.copyOf(detail)));
+        completed = true;
+        return true;
     }
 
     private String firstText(JsonNode value, String... fields) {

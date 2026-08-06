@@ -123,6 +123,7 @@ any2api:
       image-asset-origins: ${ANY2API_PROVIDER_GROK_WEB_IMAGE_ASSET_ORIGINS:https://assets.grok.com,https://imagine-public.x.ai,https://imgen.x.ai}
     mimo:
       base-url: ${ANY2API_PROVIDER_MIMO_BASE_URL:https://aistudio.xiaomimimo.com}
+      web-output-token-ceiling: ${ANY2API_PROVIDER_MIMO_WEB_OUTPUT_TOKEN_CEILING:65536}
     qwen:
       base-url: ${ANY2API_PROVIDER_QWEN_BASE_URL:https://chat.qwen.ai}
       source: ${ANY2API_PROVIDER_QWEN_SOURCE:web}

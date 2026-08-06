@@ -1,5 +1,6 @@
 package com.any2api.provider;
 
+import java.util.HashSet;
 import java.util.Set;
 
 public record ProviderRetryPolicy(
@@ -32,6 +33,15 @@ public record ProviderRetryPolicy(
 
     public static ProviderRetryPolicy standard(int maxAttempts) {
         return new ProviderRetryPolicy(maxAttempts, STANDARD_FAILURES);
+    }
+
+    public static ProviderRetryPolicy standardWith(
+        int maxAttempts,
+        String... additionalFailures
+    ) {
+        var failures = new HashSet<>(STANDARD_FAILURES);
+        java.util.Collections.addAll(failures, additionalFailures);
+        return new ProviderRetryPolicy(maxAttempts, failures);
     }
 
     public boolean shouldRetry(String failureType, int completedAttempts) {

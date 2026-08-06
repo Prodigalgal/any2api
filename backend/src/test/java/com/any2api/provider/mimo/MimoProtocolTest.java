@@ -1,9 +1,15 @@
 package com.any2api.provider.mimo;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.protocol.OpenAiRequestException;
+import com.any2api.proxy.ProxyPoolService;
+import com.any2api.transport.BrowserTransportClient;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -115,5 +121,28 @@ class MimoProtocolTest {
         assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
             && failed.errorType().equals("empty_model_response"));
         assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
+    void acceptsOnlyOutputLimitsThatCannotConstrainTheOfficialWebModel() {
+        var provider = new MimoProvider(
+            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
+            new MimoProperties(), mock(MimoRequestMapper.class),
+            mock(MimoMediaUploader.class), mapper);
+        var raw = mapper.createObjectNode().put("model", "mimo/mimo-v2.5-pro");
+        var nonBinding = new CanonicalRequest(
+            "mimo-code", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "mimo", "mimo-v2.5-pro", true, List.of(), Map.of("max_tokens", 128_000),
+            Map.of(), List.of(), Map.of(), raw);
+        var binding = new CanonicalRequest(
+            "binding", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "mimo", "mimo-v2.5-pro", true, List.of(), Map.of("max_tokens", 1_024),
+            Map.of(), List.of(), Map.of(), raw);
+
+        assertThat(provider.protocolContract().chatParameters()).contains("max_tokens");
+        assertThatCode(() -> provider.validate(nonBinding)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> provider.validate(binding))
+            .isInstanceOf(OpenAiRequestException.class)
+            .hasMessageContaining("below its 65536 token output ceiling");
     }
 }

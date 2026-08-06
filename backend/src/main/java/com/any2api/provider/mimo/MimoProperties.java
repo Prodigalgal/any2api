@@ -9,6 +9,7 @@ public class MimoProperties {
     private String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         + "AppleWebKit/537.36 Chrome/143 Safari/537.36";
     private int maxUploadBytes = 25 * 1024 * 1024;
+    private long webOutputTokenCeiling = 65_536;
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = trim(baseUrl); }
@@ -20,6 +21,12 @@ public class MimoProperties {
     public void setMaxUploadBytes(int maxUploadBytes) {
         if (maxUploadBytes < 1) throw new IllegalArgumentException("maxUploadBytes must be positive");
         this.maxUploadBytes = maxUploadBytes;
+    }
+    public long getWebOutputTokenCeiling() { return webOutputTokenCeiling; }
+    public void setWebOutputTokenCeiling(long value) {
+        if (value < 1) throw new IllegalArgumentException(
+            "webOutputTokenCeiling must be positive");
+        webOutputTokenCeiling = value;
     }
 
     private static String trim(String value) {

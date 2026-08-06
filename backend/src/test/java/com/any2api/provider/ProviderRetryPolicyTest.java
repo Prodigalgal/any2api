@@ -19,4 +19,13 @@ class ProviderRetryPolicyTest {
         assertThat(policy.shouldRetry("provider_protocol_violation", 1)).isFalse();
         assertThat(policy.shouldRetry("rate_limited", 3)).isFalse();
     }
+
+    @Test
+    void providerSpecificPolicyAddsFailuresWithoutChangingTheStandardPolicy() {
+        var providerPolicy = ProviderRetryPolicy.standardWith(3, "quota_exhausted");
+
+        assertThat(providerPolicy.shouldRetry("quota_exhausted", 1)).isTrue();
+        assertThat(ProviderRetryPolicy.standard(3)
+            .shouldRetry("quota_exhausted", 1)).isFalse();
+    }
 }

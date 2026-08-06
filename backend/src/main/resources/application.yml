@@ -138,6 +138,7 @@ any2api:
       base-url: ${ANY2API_PROVIDER_LONGCAT_BASE_URL:https://longcat.chat}
       app-key: ${ANY2API_PROVIDER_LONGCAT_APP_KEY:fe_com.sankuai.friday.fe.longcat}
       requested-with: ${ANY2API_PROVIDER_LONGCAT_REQUESTED_WITH:XMLHttpRequest}
+      model-probe-timeout: ${ANY2API_PROVIDER_LONGCAT_MODEL_PROBE_TIMEOUT:240s}
     minmax:
       base-url: ${ANY2API_PROVIDER_MINMAX_BASE_URL:https://agent.minimax.io}
       stream-base-url: ${ANY2API_PROVIDER_MINMAX_STREAM_BASE_URL:https://agent-stream.minimax.io}

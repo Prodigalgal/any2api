@@ -1,15 +1,36 @@
 package com.any2api.provider.longcat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.proxy.ProxyPoolService;
+import com.any2api.transport.BrowserTransportClient;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 class LongcatProtocolTest {
+    @Test
+    void allowsLongRunningReasoningProbesWithoutRemovingTheDeadline() {
+        var mapper = new ObjectMapper();
+        var toolProtocol = new LongcatToolProtocol(mapper);
+        var properties = new LongcatProperties();
+        var provider = new LongcatProvider(
+            mock(BrowserTransportClient.class), mock(ProxyPoolService.class), properties,
+            new LongcatRequestMapper(mapper, toolProtocol), toolProtocol, mapper);
+
+        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThatThrownBy(() -> properties.setModelProbeTimeout(Duration.ZERO))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("must be positive");
+    }
+
     @Test
     void seedsProviderCookiesIntoTheOpaqueTransportJar() {
         assertThat(new LongcatCredential(

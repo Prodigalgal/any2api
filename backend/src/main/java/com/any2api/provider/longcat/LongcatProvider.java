@@ -17,6 +17,7 @@ import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.SseDataDecoder;
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
@@ -82,6 +83,16 @@ public final class LongcatProvider implements InferenceProvider {
     @Override
     public ProviderProtocolContract protocolContract() {
         return PROTOCOL;
+    }
+
+    @Override
+    public Duration modelProbeTimeout() {
+        return properties.getModelProbeTimeout();
+    }
+
+    @Override
+    public Duration accountProbeTimeout() {
+        return properties.getModelProbeTimeout();
     }
 
     @Override

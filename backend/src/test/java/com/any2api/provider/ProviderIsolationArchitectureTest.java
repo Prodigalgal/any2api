@@ -14,6 +14,11 @@ class ProviderIsolationArchitectureTest {
     private static final Path PROVIDER_ROOT = JAVA_ROOT.resolve("com/any2api/provider");
 
     @Test
+    void providerRegistryKeepsASingleSpringInjectionConstructor() {
+        assertThat(ProviderRegistry.class.getDeclaredConstructors()).hasSize(1);
+    }
+
+    @Test
     void providerIdsDoNotLeakIntoCoreJavaCode() throws IOException {
         try (var directories = Files.list(PROVIDER_ROOT)) {
             for (var providerDirectory : directories.filter(Files::isDirectory).toList()) {

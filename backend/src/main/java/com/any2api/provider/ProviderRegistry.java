@@ -4,8 +4,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -19,18 +19,7 @@ public class ProviderRegistry {
         List<InferenceProvider> discoveredProviders,
         ProviderInstallationCatalog installations
     ) {
-        this(discoveredProviders, installations::isEnabled);
-    }
-
-    public static ProviderRegistry allEnabled(List<InferenceProvider> discoveredProviders) {
-        return new ProviderRegistry(discoveredProviders, ignored -> true);
-    }
-
-    private ProviderRegistry(
-        List<InferenceProvider> discoveredProviders,
-        Predicate<String> enabled
-    ) {
-        this.enabled = enabled;
+        this.enabled = installations::isEnabled;
         providers = new LinkedHashMap<>();
         for (var provider : discoveredProviders.stream()
             .sorted(Comparator.comparing(item -> item.manifest().id())).toList()) {
@@ -45,6 +34,25 @@ public class ProviderRegistry {
             requireProtocolFamily(provider.manifest(), ProviderCapability.RESPONSES);
             requireProtocolContract(provider);
         }
+    }
+
+    public static ProviderRegistry allEnabled(List<InferenceProvider> discoveredProviders) {
+        return new ProviderRegistry(discoveredProviders, new ProviderInstallationCatalog() {
+            @Override
+            public void requireInstalled(String providerId) {
+                // Every discovered provider is installed in this isolated registry.
+            }
+
+            @Override
+            public boolean isEnabled(String providerId) {
+                return true;
+            }
+
+            @Override
+            public void refresh() {
+                // The isolated registry has no external installation state to refresh.
+            }
+        });
     }
 
     public List<ProviderManifest> list() {

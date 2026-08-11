@@ -85,13 +85,7 @@ public class ModelsController {
         result.put("max_context_tokens", nullable(model.capabilities(), "max_context_tokens"));
         result.put("max_input_tokens", nullable(model.capabilities(), "max_input_tokens"));
         result.put("max_output_tokens", nullable(model.capabilities(), "max_output_tokens"));
-        result.put("token_limits", Map.of(
-            "max_context_tokens", nullableOrUnknown(model.capabilities(), "max_context_tokens"),
-            "max_input_tokens", nullableOrUnknown(model.capabilities(), "max_input_tokens"),
-            "max_output_tokens", nullableOrUnknown(model.capabilities(), "max_output_tokens"),
-            "source", model.catalogSource(),
-            "confidence", "OFFICIAL".equalsIgnoreCase(model.catalogSource())
-                ? "HIGH" : "BEST_EFFORT"));
+        result.put("token_limits", tokenLimits(model));
         result.put("reasoning", model.capabilities().path("reasoning"));
         result.put("tools", model.capabilities().path("tools"));
         result.put("streaming", model.capabilities().path("streaming").asBoolean(false));
@@ -138,6 +132,44 @@ public class ModelsController {
     private Object nullableOrUnknown(tools.jackson.databind.JsonNode node, String field) {
         var value = nullable(node, field);
         return value == null ? "UNKNOWN" : value;
+    }
+
+    private Map<String, Object> tokenLimits(ModelCatalogCache.Entry model) {
+        var limits = new LinkedHashMap<String, Object>();
+        limits.put("max_context_tokens",
+            nullableOrUnknown(model.capabilities(), "max_context_tokens"));
+        limits.put("max_input_tokens",
+            nullableOrUnknown(model.capabilities(), "max_input_tokens"));
+        limits.put("max_output_tokens",
+            nullableOrUnknown(model.capabilities(), "max_output_tokens"));
+        limits.put("discovered", limitValues(model.discoveredCapabilities()));
+        limits.put("overrides", overrideValues(model));
+        limits.put("source", hasOverrides(model) ? "ADMIN_OVERRIDE" : model.catalogSource());
+        limits.put("confidence", hasOverrides(model)
+            || "OFFICIAL".equalsIgnoreCase(model.catalogSource()) ? "HIGH" : "BEST_EFFORT");
+        return limits;
+    }
+
+    private Map<String, Object> limitValues(tools.jackson.databind.JsonNode capabilities) {
+        var values = new LinkedHashMap<String, Object>();
+        values.put("max_context_tokens", nullable(capabilities, "max_context_tokens"));
+        values.put("max_input_tokens", nullable(capabilities, "max_input_tokens"));
+        values.put("max_output_tokens", nullable(capabilities, "max_output_tokens"));
+        return values;
+    }
+
+    private Map<String, Object> overrideValues(ModelCatalogCache.Entry model) {
+        var values = new LinkedHashMap<String, Object>();
+        values.put("max_context_tokens", model.maxContextTokensOverride());
+        values.put("max_input_tokens", model.maxInputTokensOverride());
+        values.put("max_output_tokens", model.maxOutputTokensOverride());
+        return values;
+    }
+
+    private boolean hasOverrides(ModelCatalogCache.Entry model) {
+        return model.maxContextTokensOverride() != null
+            || model.maxInputTokensOverride() != null
+            || model.maxOutputTokensOverride() != null;
     }
 
 }

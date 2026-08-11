@@ -30,7 +30,8 @@ class ProviderCatalogControllerTest {
 
     @Test
     void returnsInstalledPluginsWithoutDependingOnDiscoveredModels() {
-        var registry = new ProviderRegistry(List.of(provider("zeta"), provider("alpha")));
+        var registry = ProviderRegistry.allEnabled(
+            List.of(provider("zeta"), provider("alpha")));
         var automation = mock(AutomationProviderCatalog.class);
         when(automation.operationsFor("alpha")).thenReturn(Set.of(AutomationOperation.REGISTER));
         when(automation.operationsFor("zeta")).thenReturn(Set.of());

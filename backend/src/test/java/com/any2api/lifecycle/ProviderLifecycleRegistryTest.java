@@ -22,7 +22,8 @@ import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
 
 class ProviderLifecycleRegistryTest {
-    private final ProviderRegistry providers = new ProviderRegistry(List.of(provider("alpha")));
+    private final ProviderRegistry providers =
+        ProviderRegistry.allEnabled(List.of(provider("alpha")));
 
     @Test
     void indexesLocalOperationsWithoutProviderBranches() {

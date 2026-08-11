@@ -252,8 +252,11 @@ class InferenceCoordinatorTest {
         when(telemetry.start(
             any(InferenceTelemetryService.InferenceTrace.class), anyInt(), anyLong()))
             .thenReturn(started);
+        var catalog = mock(ModelCatalogCache.class);
+        when(catalog.find(anyString(), anyString()))
+            .thenReturn(Mono.just(java.util.Optional.empty()));
         return new InferenceCoordinator(
-            new ProviderRegistry(List.of(provider)),
+            ProviderRegistry.allEnabled(List.of(provider)),
             accounts,
             new ProviderFailureDisposition(
                 accounts, mock(com.any2api.lifecycle.LifecycleScheduleService.class)),
@@ -261,7 +264,8 @@ class InferenceCoordinatorTest {
             new ModelRuntimeGuard(
                 new Any2ApiProperties(),
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
-            new UsageNormalizer(), callableAvailability());
+            new UsageNormalizer(), callableAvailability(), catalog,
+            new ModelRequestLimitGuard());
     }
 
     private ModelAvailabilityGuard callableAvailability() {

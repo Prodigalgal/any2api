@@ -53,12 +53,22 @@ final class InferenceReadinessProbe {
     }
 
     Mono<Result> probe(LeasedProviderAccount account, Duration timeout) {
+        return probe(account, timeout, null);
+    }
+
+    Mono<Result> probe(
+        LeasedProviderAccount account,
+        Duration timeout,
+        String requestedModel
+    ) {
         if (timeout == null || timeout.isNegative() || timeout.isZero()) {
             return Mono.error(new IllegalArgumentException("probe timeout must be positive"));
         }
         var provider = providers.require(account.providerId());
-        var model = probeModel(provider.manifest());
+        var model = requestedModel == null || requestedModel.isBlank()
+            ? probeModel(provider.manifest()) : requestedModel.trim();
         var requestId = "probe-" + UUID.randomUUID();
+        var startedAt = System.nanoTime();
         var message = mapper.createObjectNode()
             .put("role", "user")
             .put("content", "Reply briefly with " + MARKER);
@@ -82,7 +92,8 @@ final class InferenceReadinessProbe {
             })
             .timeout(timeout)
             .collectList()
-            .map(events -> result(model, events, context.credentialPatch()))
+            .map(events -> result(
+                model, events, elapsedMillis(startedAt), context.credentialPatch()))
             .onErrorResume(error -> {
                 var failure = provider.classify(error);
                 LOGGER.warn(
@@ -90,28 +101,33 @@ final class InferenceReadinessProbe {
                     account.providerId(), error.getClass().getSimpleName(), failure.type(),
                     safeDetail(error));
                 return Mono.just(Result.failed(
-                    model, failure.type(), context.credentialPatch()));
+                    model, failure.type(), "", elapsedMillis(startedAt),
+                    context.credentialPatch()));
             });
     }
 
     private Result result(
         String model,
         List<CanonicalEvent> events,
+        long durationMs,
         JsonNode credentialPatch
     ) {
         var failed = events.stream().filter(CanonicalEvent.Failed.class::isInstance)
             .map(CanonicalEvent.Failed.class::cast).findFirst();
         if (failed.isPresent()) {
-            return Result.failed(model, failed.get().errorType(), credentialPatch);
+            return Result.failed(
+                model, failed.get().errorType(), "", durationMs, credentialPatch);
         }
         var completed = events.stream().anyMatch(CanonicalEvent.Completed.class::isInstance);
         var output = events.stream().filter(CanonicalEvent.OutputTextDelta.class::isInstance)
             .map(CanonicalEvent.OutputTextDelta.class::cast)
             .map(CanonicalEvent.OutputTextDelta::delta)
             .reduce("", String::concat);
-        return completed && !output.isBlank()
-            ? Result.ready(model, credentialPatch)
-            : Result.failed(model, "InferenceProbeIncomplete", credentialPatch);
+        var safeOutput = truncate(output, 8_000);
+        return completed && !safeOutput.isBlank()
+            ? Result.ready(model, safeOutput, durationMs, credentialPatch)
+            : Result.failed(
+                model, "InferenceProbeIncomplete", safeOutput, durationMs, credentialPatch);
     }
 
     private static String probeModel(com.any2api.provider.ProviderManifest manifest) {
@@ -133,29 +149,66 @@ final class InferenceReadinessProbe {
         return redacted.substring(0, Math.min(500, redacted.length()));
     }
 
-    record Result(boolean ready, String model, String errorClass, JsonNode credentialPatch) {
+    private static long elapsedMillis(long startedAt) {
+        return Math.max(0, (System.nanoTime() - startedAt) / 1_000_000L);
+    }
+
+    private static String truncate(String value, int maximumLength) {
+        if (value == null || value.isBlank()) return "";
+        return value.length() <= maximumLength
+            ? value : value.substring(0, maximumLength - 3) + "...";
+    }
+
+    record Result(
+        boolean ready,
+        String model,
+        String errorClass,
+        String output,
+        long durationMs,
+        JsonNode credentialPatch
+    ) {
         Result {
+            output = output == null ? "" : output;
+            durationMs = Math.max(0, durationMs);
             credentialPatch = credentialPatch == null
                 ? tools.jackson.databind.node.JsonNodeFactory.instance.objectNode()
                 : credentialPatch.deepCopy();
         }
         static Result ready(String model) {
-            return ready(model, tools.jackson.databind.node.JsonNodeFactory.instance.objectNode());
+            return ready(model, "probe output", 0,
+                tools.jackson.databind.node.JsonNodeFactory.instance.objectNode());
         }
         static Result ready(String model, JsonNode credentialPatch) {
-            return new Result(true, model, "", credentialPatch);
+            return ready(model, "probe output", 0, credentialPatch);
+        }
+        static Result ready(
+            String model,
+            String output,
+            long durationMs,
+            JsonNode credentialPatch
+        ) {
+            return new Result(true, model, "", output, durationMs, credentialPatch);
         }
         static Result failed(String model, String errorClass) {
             return failed(model, errorClass,
                 tools.jackson.databind.node.JsonNodeFactory.instance.objectNode());
         }
         static Result failed(String model, String errorClass, JsonNode credentialPatch) {
+            return failed(model, errorClass, "", 0, credentialPatch);
+        }
+        static Result failed(
+            String model,
+            String errorClass,
+            String output,
+            long durationMs,
+            JsonNode credentialPatch
+        ) {
             var normalized = errorClass == null || errorClass.isBlank()
                 ? "InferenceProbeFailed" : errorClass;
-            return new Result(false, model, normalized, credentialPatch);
+            return new Result(false, model, normalized, output, durationMs, credentialPatch);
         }
         static Result notRequired() {
-            return new Result(true, "", "",
+            return new Result(true, "", "", "", 0,
                 tools.jackson.databind.node.JsonNodeFactory.instance.objectNode());
         }
     }

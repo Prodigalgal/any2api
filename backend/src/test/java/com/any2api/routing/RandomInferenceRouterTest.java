@@ -66,7 +66,7 @@ class RandomInferenceRouterTest {
             .thenReturn(Mono.error(new AccountUnavailableException("beta")));
         var router = new RandomInferenceRouter(
             catalog,
-            new ProviderRegistry(List.of(provider("alpha"), provider("beta"))),
+            ProviderRegistry.allEnabled(List.of(provider("alpha"), provider("beta"))),
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
             executor,
@@ -93,7 +93,7 @@ class RandomInferenceRouterTest {
     void rejectsAConcreteModelOnTheRandomEndpoint() {
         var router = new RandomInferenceRouter(
             mock(RandomRouteCatalog.class),
-            new ProviderRegistry(List.of(provider("alpha"))),
+            ProviderRegistry.allEnabled(List.of(provider("alpha"))),
             mock(AccountSelectionService.class),
             new CanonicalRequestParser(new ObjectMapper()),
             executor,
@@ -119,7 +119,7 @@ class RandomInferenceRouterTest {
             Mono.just(leased(invocation.getArgument(0))));
         var router = new RandomInferenceRouter(
             catalog,
-            new ProviderRegistry(List.of(
+            ProviderRegistry.allEnabled(List.of(
                 provider("alpha"), provider("beta"), provider("gamma"))),
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
@@ -153,7 +153,7 @@ class RandomInferenceRouterTest {
             .thenReturn(Mono.just(leased("alpha")));
         var router = new RandomInferenceRouter(
             catalog,
-            new ProviderRegistry(List.of(provider("alpha"), provider("beta"))),
+            ProviderRegistry.allEnabled(List.of(provider("alpha"), provider("beta"))),
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
             executor,

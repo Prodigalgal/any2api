@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.function.Predicate;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -16,7 +15,6 @@ public class ProviderRegistry {
     private final Map<String, InferenceProvider> providers;
     private final Predicate<String> enabled;
 
-    @Autowired
     public ProviderRegistry(
         List<InferenceProvider> discoveredProviders,
         ProviderInstallationCatalog installations
@@ -24,8 +22,8 @@ public class ProviderRegistry {
         this(discoveredProviders, installations::isEnabled);
     }
 
-    public ProviderRegistry(List<InferenceProvider> discoveredProviders) {
-        this(discoveredProviders, ignored -> true);
+    public static ProviderRegistry allEnabled(List<InferenceProvider> discoveredProviders) {
+        return new ProviderRegistry(discoveredProviders, ignored -> true);
     }
 
     private ProviderRegistry(

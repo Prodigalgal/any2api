@@ -28,7 +28,7 @@ class ProviderRouteResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new ProviderRouteResolver(new ProviderRegistry(List.of(
+        resolver = new ProviderRouteResolver(ProviderRegistry.allEnabled(List.of(
             provider("alpha"),
             provider("beta"))));
     }
@@ -63,7 +63,8 @@ class ProviderRouteResolverTest {
 
     @Test
     void newlyConfiguredProviderNeedsNoRoutingCodeChange() {
-        var dynamicResolver = new ProviderRouteResolver(new ProviderRegistry(List.of(provider("acme"))));
+        var dynamicResolver = new ProviderRouteResolver(
+            ProviderRegistry.allEnabled(List.of(provider("acme"))));
 
         assertThat(dynamicResolver.resolve("/acme/v1/responses", "acme-ultra"))
             .isEqualTo(new ResolvedRoute("acme", "acme-ultra"));
@@ -73,7 +74,8 @@ class ProviderRouteResolverTest {
 
     @Test
     void duplicateProviderPluginIdsFailAtStartup() {
-        assertThatThrownBy(() -> new ProviderRegistry(List.of(provider("acme"), provider("acme"))))
+        assertThatThrownBy(() -> ProviderRegistry.allEnabled(
+            List.of(provider("acme"), provider("acme"))))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("duplicate provider id");
     }

@@ -36,11 +36,11 @@ function TempMailForm({ initial }: { initial: TempMailSettings }) {
     <Box sx={{ p: 2.5 }}>
       {save.error ? <Alert severity="error" sx={{ mb: 2 }}>{save.error.message}</Alert> : null}
       {save.isSuccess ? <Alert severity="success" sx={{ mb: 2 }}>Temp Mail 设置已生效</Alert> : null}
-      <Box sx={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1.4fr 1fr", xl: "1.4fr 1fr 1fr" }, gap: 2 }}>
         <TextField label="API URL" value={value.apiBase} onChange={(event) => setValue({ ...value, apiBase: event.target.value })} />
         <TextField label="管理员密码" value={value.adminPassword} onChange={(event) => setValue({ ...value, adminPassword: event.target.value })} />
         <TextField label="站点访问密码" value={value.sitePassword} onChange={(event) => setValue({ ...value, sitePassword: event.target.value })} />
-        <TextField multiline minRows={4} label="可用邮箱域名（每行一个）" value={domains} onChange={(event) => setDomains(event.target.value)} sx={{ gridColumn: "span 2" }} />
+        <TextField multiline minRows={4} label="可用邮箱域名（每行一个）" value={domains} onChange={(event) => setDomains(event.target.value)} sx={{ gridColumn: { md: "span 2" } }} />
         <Stack spacing={2}>
           <TextField label="轮询间隔（秒）" type="number" value={value.pollSeconds} onChange={(event) => setValue({ ...value, pollSeconds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 60, step: 0.5 } }} />
           <TextField label="邮件等待上限（秒）" type="number" value={value.messageTimeoutSeconds} onChange={(event) => setValue({ ...value, messageTimeoutSeconds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 30, max: 1800 } }} />
@@ -60,7 +60,7 @@ function RegistrationDefaultsForm({ initial }: { initial: RegistrationDefaults }
     <Box sx={{ p: 2.5 }}>
       {save.error ? <Alert severity="error" sx={{ mb: 2 }}>{save.error.message}</Alert> : null}
       {save.isSuccess ? <Alert severity="success" sx={{ mb: 2 }}>注册默认参数已生效</Alert> : null}
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "repeat(4, minmax(0, 1fr))" }, gap: 2 }}>
         <NumberField label="目标成功数" value={value.target} min={1} max={1000} onChange={(target) => setValue({ ...value, target })} />
         <NumberField label="最大邮箱任务数" value={value.maxAttempts} min={value.target} max={value.target * 10} onChange={(maxAttempts) => setValue({ ...value, maxAttempts })} />
         <NumberField label="并发数" value={value.concurrency} min={1} max={8} onChange={(concurrency) => setValue({ ...value, concurrency })} />
@@ -79,4 +79,4 @@ function RegistrationDefaultsForm({ initial }: { initial: RegistrationDefaults }
 }
 
 function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) { return <TextField label={label} type="number" value={value} onChange={(event) => onChange(Number(event.target.value))} slotProps={{ htmlInput: { min, max } }} />; }
-function SectionHeader({ title, description, action }: { title: string; description: string; action: React.ReactNode }) { return <Box sx={{ minHeight: 62, px: 2.5, py: 1.25, borderBottom: 1, borderColor: "divider", display: "flex", alignItems: "center" }}><Box><Typography sx={{ fontSize: 13.5, fontWeight: 750 }}>{title}</Typography><Typography color="text.secondary" sx={{ fontSize: 11.5 }}>{description}</Typography></Box><Box sx={{ flex: 1 }} />{action}</Box>; }
+function SectionHeader({ title, description, action }: { title: string; description: string; action: React.ReactNode }) { return <Box sx={{ minHeight: 62, px: { xs: 2, sm: 2.5 }, py: 1.25, borderBottom: 1, borderColor: "divider", display: "flex", flexWrap: "wrap", gap: 1.25, alignItems: "center" }}><Box sx={{ minWidth: 220 }}><Typography sx={{ fontSize: 13.5, fontWeight: 750 }}>{title}</Typography><Typography color="text.secondary" sx={{ fontSize: 11.5 }}>{description}</Typography></Box><Box sx={{ flex: 1 }} />{action}</Box>; }

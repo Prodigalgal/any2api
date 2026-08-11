@@ -166,15 +166,18 @@ class AccountProbeServiceTest {
         when(transactionManager.getTransaction(any()))
             .thenReturn(mock(TransactionStatus.class));
         var executor = Executors.newVirtualThreadPerTaskExecutor();
+        var modelCatalog = mock(com.any2api.provider.ModelCatalogCache.class);
         var service = new AccountProbeService(
             repository,
             accounts,
-            new ProviderRegistry(List.of(provider(providerId, accountProbeTimeout))),
+            ProviderRegistry.allEnabled(
+                List.of(provider(providerId, accountProbeTimeout))),
             failures,
             readiness,
             observability,
             transactionManager,
-            executor);
+            executor,
+            modelCatalog);
         return new Fixture(
             service, repository, accounts, failures, readiness, observability,
             account, leased, executor);

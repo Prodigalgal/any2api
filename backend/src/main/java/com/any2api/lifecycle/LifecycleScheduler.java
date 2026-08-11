@@ -10,6 +10,7 @@ import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.observability.OperationContext;
 import com.any2api.observability.OperationEventService;
 import com.any2api.observability.RequestCorrelation;
+import com.any2api.settings.RuntimeSettingsService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -43,6 +44,7 @@ public class LifecycleScheduler {
     private final InferenceReadinessProbe readiness;
     private final ObjectMapper mapper;
     private final OperationEventService observability;
+    private final RuntimeSettingsService runtimeSettings;
 
     public LifecycleScheduler(
         JdbcClient jdbc,
@@ -54,7 +56,8 @@ public class LifecycleScheduler {
         LifecycleOperationExecutor lifecycle,
         InferenceReadinessProbe readiness,
         ObjectMapper mapper,
-        OperationEventService observability
+        OperationEventService observability,
+        RuntimeSettingsService runtimeSettings
     ) {
         this.jdbc = jdbc;
         this.transactions = transactions;
@@ -66,6 +69,7 @@ public class LifecycleScheduler {
         this.readiness = readiness;
         this.mapper = mapper;
         this.observability = observability;
+        this.runtimeSettings = runtimeSettings;
     }
 
     @Scheduled(fixedDelayString = "${any2api.lifecycle.poll-interval:10s}")
@@ -280,11 +284,14 @@ public class LifecycleScheduler {
                 .update();
         }
         var reauthenticationRequired = authExpired || inferenceCredentialRejected;
-        var interval = healthy ? healthyInterval(credentialExpiresAt, completedAt)
+        var keepalivePolicy = runtimeSettings.keepalivePolicy(action.providerId());
+        var interval = healthy ? healthyInterval(
+                credentialExpiresAt, completedAt,
+                Duration.ofMinutes(keepalivePolicy.intervalMinutes()))
             : reauthenticationRequired ? Duration.ofMinutes(15)
             : retryDelay(action.attempts() + 1);
-        var jitterWindow = healthy && credentialExpiresAt != null
-            ? Duration.ofMinutes(10) : Duration.ofMinutes(20);
+        var jitterWindow = healthy
+            ? Duration.ofMinutes(keepalivePolicy.jitterMinutes()) : Duration.ofMinutes(20);
         var dueAt = completedAt.plus(interval).plus(LifecycleScheduleService.deterministicJitter(
             task.account().getId(), nextGeneration, jitterWindow));
         var updated = jdbc.sql("""
@@ -357,14 +364,22 @@ public class LifecycleScheduler {
     }
 
     static Duration healthyInterval(Instant credentialExpiresAt, Instant now) {
-        if (credentialExpiresAt == null) return HEALTHY_INTERVAL;
+        return healthyInterval(credentialExpiresAt, now, HEALTHY_INTERVAL);
+    }
+
+    static Duration healthyInterval(
+        Instant credentialExpiresAt,
+        Instant now,
+        Duration maximumInterval
+    ) {
+        if (credentialExpiresAt == null) return maximumInterval;
         var untilRefreshWindow = Duration.between(
             now, credentialExpiresAt.minus(Duration.ofMinutes(20)));
         if (untilRefreshWindow.compareTo(Duration.ofMinutes(5)) < 0) {
             return Duration.ofMinutes(5);
         }
-        return untilRefreshWindow.compareTo(HEALTHY_INTERVAL) > 0
-            ? HEALTHY_INTERVAL : untilRefreshWindow;
+        return untilRefreshWindow.compareTo(maximumInterval) > 0
+            ? maximumInterval : untilRefreshWindow;
     }
 
     static boolean requiresReadinessProbe(

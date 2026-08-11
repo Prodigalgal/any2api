@@ -33,6 +33,14 @@ class LifecycleSchedulerTest {
     }
 
     @Test
+    void appliesTheProviderSpecificHealthyIntervalCeiling() {
+        assertEquals(
+            Duration.ofMinutes(90),
+            LifecycleScheduler.healthyInterval(
+                NOW.plus(Duration.ofDays(1)), NOW, Duration.ofMinutes(90)));
+    }
+
+    @Test
     void reauthenticatesWhenKeepalivePassesButInferenceRejectsTheCredential() {
         assertEquals("reauthenticate", LifecycleScheduler.nextAction(
             "keepalive", true, false, true));

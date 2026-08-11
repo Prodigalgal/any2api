@@ -15,10 +15,10 @@ export function PageContainer({
       sx={{
         width: "100%",
         maxWidth,
-        minWidth: 1040,
+        minWidth: 0,
         mx: "auto",
-        px: 3,
-        py: 3,
+        px: { xs: 2, sm: 2.5, xl: 3.5 },
+        py: { xs: 2, sm: 2.5, xl: 3 },
       }}
     >
       {children}
@@ -37,13 +37,13 @@ export function PageHeader({
 }) {
   return (
     <Stack
-      direction="row"
+      direction={{ xs: "column", sm: "row" }}
       sx={{
-        minHeight: 56,
-        mb: 2.5,
+        minHeight: 52,
+        mb: { xs: 2, sm: 2.5 },
         alignItems: "flex-start",
         justifyContent: "space-between",
-        gap: 3,
+        gap: { xs: 1.5, sm: 3 },
       }}
     >
       <Box>
@@ -53,7 +53,7 @@ export function PageHeader({
         </Typography>
       </Box>
       {actions ? (
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center", minHeight: 36 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center", minHeight: 36, flexWrap: "wrap" }}>
           {actions}
         </Stack>
       ) : null}
@@ -66,7 +66,7 @@ export function ToolbarSurface({ children }: { children: ReactNode }) {
     <Paper
       component="section"
       variant="outlined"
-      sx={{ mb: 2, p: 1.5, bgcolor: "background.paper" }}
+      sx={{ mb: 2, p: { xs: 1.25, sm: 1.5 }, bgcolor: "background.paper", overflow: "hidden" }}
     >
       {children}
     </Paper>

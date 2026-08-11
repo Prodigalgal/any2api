@@ -66,7 +66,7 @@ function RequestDetailDialog({ request, onClose }: { request: UsageEvent; onClos
   const detail = useQuery({ queryKey: ["request-log-detail", request.requestId, request.attempt], queryFn: () => api.requestLogDetail(request.requestId, request.attempt) });
   return <Dialog open onClose={onClose} maxWidth="xl" fullWidth>
     <DialogTitle sx={{ display: "flex", alignItems: "center", py: 1.5 }}><Box sx={{ minWidth: 0 }}><Typography sx={{ fontSize: 14, fontWeight: 750 }}>请求内容</Typography><Typography noWrap color="text.secondary" sx={mono}>{request.requestId} · attempt {request.attempt}</Typography></Box><Box sx={{ flex: 1 }} /><IconButton onClick={onClose}><CloseOutlined /></IconButton></DialogTitle>
-    <DialogContent dividers sx={{ p: 0 }}>{detail.isLoading ? <LinearProgress /> : null}{detail.error ? <Alert severity="error" sx={{ m: 2 }}>{detail.error.message}</Alert> : null}{detail.data ? <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", minHeight: 620 }}><JsonPane title="INPUT" value={detail.data.input} /><JsonPane title="OUTPUT" value={detail.data.output} border /></Box> : null}</DialogContent>
+    <DialogContent dividers sx={{ p: 0 }}>{detail.isLoading ? <LinearProgress /> : null}{detail.error ? <Alert severity="error" sx={{ m: 2 }}>{detail.error.message}</Alert> : null}{detail.data ? <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, minHeight: 620 }}><JsonPane title="INPUT" value={detail.data.input} /><JsonPane title="OUTPUT" value={detail.data.output} border /></Box> : null}</DialogContent>
   </Dialog>;
 }
 

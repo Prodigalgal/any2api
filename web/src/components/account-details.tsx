@@ -14,7 +14,6 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   Divider,
   IconButton,
   Menu,
@@ -31,12 +30,14 @@ import { useMemo, useState, type MouseEvent } from "react";
 import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout";
 import { OperationEventsTable } from "@/components/operation-events-dialog";
 import { api } from "@/lib/api";
+import { AccountProbeDialog } from "@/components/account-probe-dialog";
 
 const hiddenMetadataKey = /(authorization|cookie|credential|key|password|secret|session|sso|token)/i;
 
 export function AccountDetails({ accountId }: { accountId: string }) {
   const queryClient = useQueryClient();
   const [commandAnchor, setCommandAnchor] = useState<HTMLElement | null>(null);
+  const [probeOpen, setProbeOpen] = useState(false);
   const detail = useQuery({
     queryKey: ["account-detail", accountId],
     queryFn: () => api.accountDetail(accountId),
@@ -69,10 +70,6 @@ export function AccountDetails({ accountId }: { accountId: string }) {
       queryClient.invalidateQueries({ queryKey: ["admin-providers"] }),
     ]);
   };
-  const probe = useMutation({
-    mutationFn: () => api.probeAccount(accountId),
-    onSuccess: invalidate,
-  });
   const reauthenticate = useMutation({
     mutationFn: () => api.reauthenticateAccount(accountId),
     onSuccess: invalidate,
@@ -93,7 +90,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
   });
 
   const error = detail.error ?? catalog.error ?? commands.error ?? events.error
-    ?? probe.error ?? reauthenticate.error ?? update.error ?? executeCommand.error;
+    ?? reauthenticate.error ?? update.error ?? executeCommand.error;
   const metadata = useMemo(
     () => metadataEntries(detail.data?.account.metadata ?? {}),
     [detail.data?.account.metadata],
@@ -111,8 +108,6 @@ export function AccountDetails({ accountId }: { accountId: string }) {
   const value = detail.data;
   const account = value.account;
   const readiness = stringMetadata(account.metadata, "inference_probe_status") || "未探测";
-  const checking = probe.isPending;
-  const displayedReadiness = checking ? "CHECKING" : readiness;
 
   return (
     <PageContainer maxWidth={1480}>
@@ -147,11 +142,11 @@ export function AccountDetails({ accountId }: { accountId: string }) {
               <span>
                 <Button
                   variant="contained"
-                  startIcon={checking ? <CircularProgress size={15} color="inherit" /> : <MonitorHeartOutlined />}
-                  disabled={!probeSupported || checking}
-                  onClick={() => probe.mutate()}
+                  startIcon={<MonitorHeartOutlined />}
+                  disabled={!probeSupported}
+                  onClick={() => setProbeOpen(true)}
                 >
-                  {checking ? "测活中" : "立即测活"}
+                  发起探测
                 </Button>
               </span>
             </Tooltip>
@@ -160,38 +155,32 @@ export function AccountDetails({ accountId }: { accountId: string }) {
       />
 
       {error ? <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert> : null}
-      {probe.data?.ready ? (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          实时测活通过，模型 {probe.data.model} 已返回有效响应。
-        </Alert>
-      ) : probe.data ? (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          实时测活未通过：{probe.data.errorClass}。已记录结果，仅明确的账号故障会改变账号状态。
-        </Alert>
-      ) : null}
-
       <DataSurface sx={{ mb: 2 }}>
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: "minmax(280px, 1.4fr) repeat(4, minmax(130px, 0.8fr))",
+            gridTemplateColumns: {
+              xs: "1fr",
+              sm: "repeat(2, minmax(0, 1fr))",
+              xl: "minmax(280px, 1.4fr) repeat(4, minmax(130px, 0.8fr))",
+            },
             minHeight: 96,
           }}
         >
           <SummaryCell label="账号状态">
             <StatusValue status={account.status} error={account.lastError} />
           </SummaryCell>
-          <SummaryCell label="推理就绪"><ReadinessValue value={displayedReadiness} /></SummaryCell>
+          <SummaryCell label="推理就绪"><ReadinessValue value={readiness} /></SummaryCell>
           <SummaryCell label="累计请求" value={formatNumber(account.requestCount)} />
           <SummaryCell label="成功请求" value={formatNumber(account.successCount)} tone="success.main" />
           <SummaryCell label="连续失败" value={formatNumber(account.failureCount)} tone={account.failureCount ? "error.main" : undefined} />
         </Box>
       </DataSurface>
 
-      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(380px, 0.85fr)", gap: 2, mb: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "minmax(0, 1.15fr) minmax(380px, 0.85fr)" }, gap: 2, mb: 2 }}>
         <DataSurface>
           <SectionHeader title="账号信息" />
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" } }}>
             <DetailField label="账号 ID" value={account.id} mono />
             <DetailField label="上游账号" value={account.externalId} mono />
             <DetailField label="厂商" value={provider?.displayName ?? account.providerId} />
@@ -208,7 +197,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
             <Switch
               size="small"
               checked={account.enabled}
-              disabled={update.isPending || checking}
+              disabled={update.isPending}
               onChange={(_, enabled) => update.mutate(enabled)}
               slotProps={{ input: { "aria-label": "账号启用状态" } }}
             />
@@ -221,7 +210,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
               <Button
                 size="small"
                 startIcon={<LoginOutlined />}
-                disabled={reauthenticate.isPending || checking}
+                disabled={reauthenticate.isPending}
                 onClick={() => reauthenticate.mutate()}
               >
                 重新认证
@@ -240,7 +229,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
 
         <DataSurface>
           <SectionHeader title="凭据与探针" />
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" } }}>
             <DetailField label="凭据状态" value={value.credential.configured ? "已配置" : "未配置"} />
             <DetailField label="凭据版本" value={value.credential.configured ? `v${value.credential.version}` : "-"} mono />
             <DetailField label="凭据类型" value={value.credential.type || "-"} mono />
@@ -259,7 +248,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
 
       <DataSurface sx={{ mb: 2 }}>
         <SectionHeader title="账号元数据" count={metadata.length} />
-        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" } }}>
           {metadata.map(([key, entry]) => (
             <DetailField key={key} label={key} value={entry} mono />
           ))}
@@ -290,6 +279,13 @@ export function AccountDetails({ accountId }: { accountId: string }) {
           </MenuItem>
         ))}
       </Menu>
+      {probeOpen ? (
+        <AccountProbeDialog
+          account={account}
+          providerName={provider?.displayName ?? account.providerId}
+          onClose={() => setProbeOpen(false)}
+        />
+      ) : null}
     </PageContainer>
   );
 }
@@ -300,7 +296,7 @@ function AccountDetailsSkeleton() {
       <Skeleton width={320} height={48} />
       <Skeleton width={220} height={24} sx={{ mb: 2 }} />
       <Skeleton variant="rectangular" height={96} sx={{ mb: 2 }} />
-      <Box sx={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "1.15fr 0.85fr" }, gap: 2 }}>
         <Skeleton variant="rectangular" height={360} />
         <Skeleton variant="rectangular" height={360} />
       </Box>

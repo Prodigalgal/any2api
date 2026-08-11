@@ -15,7 +15,8 @@ class ModelAvailabilityGuardTest {
         var catalog = mock(ModelCatalogCache.class);
         var entry = new ModelCatalogCache.Entry(
             "qwen-plus", "Qwen Plus", "qwen", "Qwen",
-            JsonNodeFactory.instance.objectNode(), "OFFICIAL",
+            JsonNodeFactory.instance.objectNode(), JsonNodeFactory.instance.objectNode(),
+            null, null, null, "OFFICIAL",
             JsonNodeFactory.instance.objectNode(), List.of(), 1, false, "UNAVAILABLE",
             1, 0, 0, 3, 3, 0, 0, 0,
             null, null, "FAILED", "credential_rejected", null);

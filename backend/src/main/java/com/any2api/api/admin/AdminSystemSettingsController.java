@@ -34,4 +34,11 @@ public class AdminSystemSettingsController {
     ) {
         return settings.updateRegistrationDefaults(request);
     }
+
+    @PutMapping("/provider-keepalive")
+    public RuntimeSettingsService.ProviderKeepaliveSettings updateProviderKeepalive(
+        @RequestBody RuntimeSettingsService.ProviderKeepaliveSettings request
+    ) {
+        return settings.updateProviderKeepalive(request);
+    }
 }

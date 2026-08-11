@@ -22,7 +22,11 @@ import tools.jackson.databind.ObjectMapper;
 public class ModelCatalogCache {
     private static final String MODEL_QUERY = """
         SELECT m.upstream_id, m.display_name, m.provider_id,
-               p.display_name AS provider_name, m.capabilities::text,
+               p.display_name AS provider_name,
+               m.capabilities::text AS discovered_capabilities,
+               m.max_context_tokens_override,
+               m.max_input_tokens_override,
+               m.max_output_tokens_override,
                m.catalog_source, m.metadata::text, m.random_roles, m.fetched_at,
                account_runtime.eligible_accounts,
                account_runtime.available_accounts,
@@ -140,7 +144,7 @@ public class ModelCatalogCache {
         this.mapper = mapper;
         var policy = properties.getCache().getModelCatalog();
         this.cache = new LayeredJsonCache(
-            redis, "any2api:cache:model-catalog:v2", policy.getLocalTtl(),
+            redis, "any2api:cache:model-catalog:v3", policy.getLocalTtl(),
             policy.getRedisTtl(), policy.getMaximumEntries());
         this.healthWindow = properties.getModelRuntime().getHealthWindow();
         this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
@@ -153,6 +157,12 @@ public class ModelCatalogCache {
                 mapper.writeValueAsString(load())))
             .subscribeOn(Schedulers.boundedElastic()))
             .map(value -> value.map(this::decode).orElseGet(List::of));
+    }
+
+    public Mono<Optional<Entry>> find(String providerId, String modelId) {
+        return list().map(entries -> entries.stream()
+            .filter(entry -> entry.providerId().equals(providerId) && entry.id().equals(modelId))
+            .findFirst());
     }
 
     public Mono<Void> invalidate() {
@@ -191,12 +201,24 @@ public class ModelCatalogCache {
 
     private Entry row(ResultSet result, int rowNumber) throws SQLException {
         var fetchedAt = result.getObject("fetched_at", java.time.OffsetDateTime.class);
+        var discoveredCapabilities = readJson(result.getString("discovered_capabilities"));
+        var maxContextTokensOverride = nullableLong(result, "max_context_tokens_override");
+        var maxInputTokensOverride = nullableLong(result, "max_input_tokens_override");
+        var maxOutputTokensOverride = nullableLong(result, "max_output_tokens_override");
         return new Entry(
             result.getString("upstream_id"),
             result.getString("display_name"),
             result.getString("provider_id"),
             result.getString("provider_name"),
-            readJson(result.getString("capabilities")),
+            effectiveCapabilities(
+                discoveredCapabilities,
+                maxContextTokensOverride,
+                maxInputTokensOverride,
+                maxOutputTokensOverride),
+            discoveredCapabilities,
+            maxContextTokensOverride,
+            maxInputTokensOverride,
+            maxOutputTokensOverride,
             result.getString("catalog_source"),
             readJson(result.getString("metadata")),
             List.of((String[]) result.getArray("random_roles").getArray()),
@@ -224,12 +246,44 @@ public class ModelCatalogCache {
             : mapper.readTree(value);
     }
 
+    private Long nullableLong(ResultSet result, String field) throws SQLException {
+        var value = result.getObject(field);
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    private JsonNode effectiveCapabilities(
+        JsonNode discovered,
+        Long maxContextTokens,
+        Long maxInputTokens,
+        Long maxOutputTokens
+    ) {
+        var effective = discovered != null && discovered.isObject()
+            ? (tools.jackson.databind.node.ObjectNode) discovered.deepCopy()
+            : tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        putOverride(effective, "max_context_tokens", maxContextTokens);
+        putOverride(effective, "max_input_tokens", maxInputTokens);
+        putOverride(effective, "max_output_tokens", maxOutputTokens);
+        return effective;
+    }
+
+    private void putOverride(
+        tools.jackson.databind.node.ObjectNode capabilities,
+        String field,
+        Long value
+    ) {
+        if (value != null) capabilities.put(field, value);
+    }
+
     public record Entry(
         String id,
         String displayName,
         String providerId,
         String providerName,
         JsonNode capabilities,
+        JsonNode discoveredCapabilities,
+        Long maxContextTokensOverride,
+        Long maxInputTokensOverride,
+        Long maxOutputTokensOverride,
         String catalogSource,
         JsonNode metadata,
         List<String> randomRoles,

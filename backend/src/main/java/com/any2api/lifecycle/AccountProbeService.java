@@ -11,6 +11,7 @@ import com.any2api.observability.RequestCorrelation;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderFailureDisposition;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.ModelCatalogCache;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -32,6 +33,7 @@ public final class AccountProbeService {
     private final OperationEventService observability;
     private final TransactionTemplate transactions;
     private final ExecutorService databaseExecutor;
+    private final ModelCatalogCache modelCatalog;
 
     public AccountProbeService(
         AccountRepository repository,
@@ -41,7 +43,8 @@ public final class AccountProbeService {
         InferenceReadinessProbe readiness,
         OperationEventService observability,
         PlatformTransactionManager transactionManager,
-        ExecutorService databaseExecutor
+        ExecutorService databaseExecutor,
+        ModelCatalogCache modelCatalog
     ) {
         this.repository = repository;
         this.accounts = accounts;
@@ -51,9 +54,14 @@ public final class AccountProbeService {
         this.observability = observability;
         this.transactions = new TransactionTemplate(transactionManager);
         this.databaseExecutor = databaseExecutor;
+        this.modelCatalog = modelCatalog;
     }
 
     public Mono<Result> probe(UUID accountId) {
+        return probe(accountId, null);
+    }
+
+    public Mono<Result> probe(UUID accountId, String requestedModel) {
         return Mono.fromCallable(() -> Objects.requireNonNull(transactions.execute(ignored -> {
                 var account = require(accountId);
                 var provider = providers.require(account.getProviderId());
@@ -63,18 +71,37 @@ public final class AccountProbeService {
                 return account.getProviderId();
             })))
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
-            .flatMap(providerId -> execute(accountId, providerId));
+            .flatMap(providerId -> resolveModel(providerId, requestedModel)
+                .flatMap(model -> execute(accountId, providerId, model.orElse(null))));
     }
 
-    private Mono<Result> execute(UUID accountId, String providerId) {
+    private Mono<java.util.Optional<String>> resolveModel(
+        String providerId,
+        String requestedModel
+    ) {
+        var model = requestedModel == null ? "" : requestedModel.trim();
+        if (model.isBlank()) return Mono.just(java.util.Optional.empty());
+        return modelCatalog.find(providerId, model).map(entry -> {
+            if (entry.isEmpty()) {
+                throw new IllegalArgumentException(
+                    "model is not enabled for provider " + providerId + ": " + model);
+            }
+            return java.util.Optional.of(model);
+        });
+    }
+
+    private Mono<Result> execute(UUID accountId, String providerId, String model) {
         var context = new OperationContext(
             UUID.randomUUID().toString(), "ACCOUNT", accountId.toString(), 1);
         var observed = observability.start("LIFECYCLE", providerId, "probe", context);
         observability.linkAccount(observed, accountId);
         return Mono.usingWhen(
                 accounts.acquire(accountId),
-                account -> Mono.defer(() -> readiness.probe(
-                        account, providers.require(providerId).accountProbeTimeout()))
+                account -> Mono.defer(() -> model == null
+                        ? readiness.probe(
+                            account, providers.require(providerId).accountProbeTimeout())
+                        : readiness.probe(
+                            account, providers.require(providerId).accountProbeTimeout(), model))
                     .flatMap(result -> accounts.mergeCredentialPatch(
                             account, result.credentialPatch())
                         .onErrorReturn(false)
@@ -125,7 +152,8 @@ public final class AccountProbeService {
                 }
                 account = repository.save(account);
                 return new Result(
-                    result.ready(), result.model(), result.errorClass(), completedAt,
+                    result.ready(), result.model(), result.errorClass(), result.output(),
+                    result.durationMs(), completedAt,
                     AccountView.from(account));
             })))
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor));
@@ -140,6 +168,8 @@ public final class AccountProbeService {
         boolean ready,
         String model,
         String errorClass,
+        String output,
+        long durationMs,
         Instant completedAt,
         AccountView account
     ) {

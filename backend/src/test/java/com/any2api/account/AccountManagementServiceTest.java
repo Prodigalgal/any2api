@@ -58,7 +58,8 @@ class AccountManagementServiceTest {
         when(vault.store(any(), any(), any(), any())).thenAnswer(invocation ->
             new DecryptedCredential("provider-session", 1, invocation.getArgument(3),
                 invocation.getArgument(2)));
-        var providers = new ProviderRegistry(List.of(provider("alpha"), provider("beta")));
+        var providers = ProviderRegistry.allEnabled(
+            List.of(provider("alpha"), provider("beta")));
         var schedules = mock(LifecycleScheduleService.class);
         var service = new AccountManagementService(repository, vault, providers, schedules, List.of());
         var credential = mapper.createObjectNode().put("token", "secret");
@@ -88,7 +89,7 @@ class AccountManagementServiceTest {
         var service = new AccountManagementService(
             repository,
             vault,
-            new ProviderRegistry(List.of(provider("alpha"))),
+            ProviderRegistry.allEnabled(List.of(provider("alpha"))),
             mock(LifecycleScheduleService.class),
             List.of());
 
@@ -112,7 +113,8 @@ class AccountManagementServiceTest {
                 invocation.getArgument(2)));
         var schedules = mock(LifecycleScheduleService.class);
         var service = new AccountManagementService(
-            repository, vault, new ProviderRegistry(List.of(provider("grok"))), schedules, List.of());
+            repository, vault, ProviderRegistry.allEnabled(List.of(provider("grok"))),
+            schedules, List.of());
         var credential = mapper.createObjectNode()
             .put("sso", "session-only")
             .put("auth_stage", "registered_pending_auth");
@@ -142,7 +144,7 @@ class AccountManagementServiceTest {
         var service = new AccountManagementService(
             repository,
             vault,
-            new ProviderRegistry(List.of(provider("qwen"))),
+            ProviderRegistry.allEnabled(List.of(provider("qwen"))),
             mock(LifecycleScheduleService.class),
             List.of());
 
@@ -169,7 +171,7 @@ class AccountManagementServiceTest {
         when(vault.store(any(), any(), any(), any())).thenAnswer(invocation ->
             new DecryptedCredential("provider-session", 1, invocation.getArgument(3),
                 invocation.getArgument(2)));
-        var providers = new ProviderRegistry(List.of(
+        var providers = ProviderRegistry.allEnabled(List.of(
             provider("grok"), provider("grok_web"), provider("grok_console")));
         var service = new AccountManagementService(repository, vault, providers,
             mock(LifecycleScheduleService.class),
@@ -200,7 +202,7 @@ class AccountManagementServiceTest {
         var service = new AccountManagementService(
             repository,
             mock(CredentialVault.class),
-            new ProviderRegistry(List.of(provider("alpha"))),
+            ProviderRegistry.allEnabled(List.of(provider("alpha"))),
             mock(LifecycleScheduleService.class),
             List.of());
 

@@ -62,6 +62,8 @@ final class LifecycleOperationExecutor {
                         payload.put("strict_proxy_affinity", true);
                     }
                 }
+                runtimeSettings.applyLifecycleParameters(
+                    payload, providerId, externalOperation);
                 runtimeSettings.applyMailSettings(payload, null);
                 return automation.execute(
                         providerId, externalOperation, Map.copyOf(payload), context)

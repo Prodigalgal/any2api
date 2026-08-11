@@ -2,9 +2,8 @@
 
 import {
   CheckCircleOutlined,
-  ErrorOutlined,
   RefreshOutlined,
-  ScheduleOutlined
+  HubOutlined
 } from "@mui/icons-material";
 import {
   Alert,
@@ -36,6 +35,8 @@ export function Overview() {
   const runtime = useQuery({ queryKey: ["admin-providers"], queryFn: api.adminProviders });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const rows = groupProviders(runtime.data ?? [], catalog.data?.data ?? [], models.data?.data ?? []);
+  const modelRows = models.data?.data ?? [];
+  const enabledAccounts = rows.reduce((total, row) => total + row.enabledAccountCount, 0);
   const toggle = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateProvider(id, enabled),
     onSuccess: async () => {
@@ -73,7 +74,7 @@ export function Overview() {
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, border: 1, borderColor: "divider", bgcolor: "background.paper", mb: 2.5 }}>
         <StatusMetric label="控制面" value={health.data?.status ?? "未连接"} healthy={health.data?.status === "UP"} />
         <StatusMetric label="已接入厂商" value={`${rows.filter((row) => row.enabled).length} / ${rows.length}`} healthy={rows.some((row) => row.available)} />
-        <StatusMetric label="生命周期积压" value="尚未采集" icon="schedule" />
+        <StatusMetric label="可路由模型" value={`${modelRows.filter((model) => model.available).length} / ${modelRows.length}`} healthy={modelRows.some((model) => model.available)} />
       </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "minmax(0, 2fr) minmax(300px, 1fr)" }, gap: 2.5 }}>
@@ -118,12 +119,12 @@ export function Overview() {
 
         <Stack spacing={2.5}>
           <Paper variant="outlined">
-            <Box sx={{ px: 2, py: 1.75 }}><Typography variant="h6">自动化资源</Typography></Box>
+            <Box sx={{ px: 2, py: 1.75 }}><Typography variant="h6">运行面摘要</Typography></Box>
             <Divider />
             <Stack divider={<Divider flexItem />}>
-              <ResourceRow name="实时浏览器 lane" detail="高优先级风控状态" status="等待连接" />
-              <ResourceRow name="批处理浏览器 lane" detail="注册与重新登录" status="等待连接" />
-              <ResourceRow name="本地打码" detail="OCR、滑块、点选、连线" status="等待连接" />
+              <ResourceRow name="启用账号" detail="当前参与推理路由" status={enabledAccounts.toLocaleString("zh-CN")} />
+              <ResourceRow name="已编目模型" detail="所有已接入厂商" status={modelRows.length.toLocaleString("zh-CN")} />
+              <ResourceRow name="运行时不可用" detail="目录或探针已判定不可用" status={modelRows.filter((model) => model.runtime.status === "UNAVAILABLE").length.toLocaleString("zh-CN")} />
             </Stack>
           </Paper>
           <Paper variant="outlined">
@@ -144,8 +145,8 @@ export function Overview() {
   );
 }
 
-function StatusMetric({ label, value, healthy, icon }: { label: string; value: string; healthy?: boolean; icon?: string }) {
-  const Icon = icon === "schedule" ? ScheduleOutlined : healthy ? CheckCircleOutlined : ErrorOutlined;
+function StatusMetric({ label, value, healthy }: { label: string; value: string; healthy?: boolean }) {
+  const Icon = healthy ? CheckCircleOutlined : HubOutlined;
   return (
     <Box sx={{ px: 2.25, py: 2, minHeight: 86, display: "flex", alignItems: "center", gap: 1.5, borderRight: { sm: 1 }, borderBottom: { xs: 1, sm: 0 }, borderColor: "divider", "&:last-child": { borderRight: 0, borderBottom: 0 } }}>
       <Box sx={{ width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: 1, bgcolor: healthy ? "#e5f4ee" : "#eef1f2", color: healthy ? "success.main" : "text.secondary" }}><Icon sx={{ fontSize: 20 }} /></Box>

@@ -133,8 +133,27 @@ export type AccountProbeResult = {
   ready: boolean;
   model: string;
   errorClass: string;
+  output: string;
+  durationMs: number;
   completedAt: string;
   account: Account;
+};
+
+export type TokenLimits = {
+  maxContextTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+};
+
+export type ModelLimitPolicy = {
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  displayName: string;
+  catalogSource: string;
+  discovered: TokenLimits;
+  overrides: TokenLimits;
+  effective: TokenLimits;
 };
 
 export type AccountExpiryFilter = "ANY" | "VALID" | "EXPIRING_SOON" | "EXPIRED" | "NEVER";
@@ -370,6 +389,17 @@ export type RegistrationDefaults = {
 export type SystemSettings = {
   tempMail: TempMailSettings;
   registrationDefaults: RegistrationDefaults;
+  providerKeepalive: ProviderKeepaliveSettings;
+};
+
+export type ProviderKeepalivePolicy = {
+  intervalMinutes: number;
+  jitterMinutes: number;
+  parameters: Record<string, unknown>;
+};
+
+export type ProviderKeepaliveSettings = {
+  providers: Record<string, ProviderKeepalivePolicy>;
 };
 
 async function getJson<T>(url: string): Promise<T> {
@@ -450,10 +480,19 @@ export const api = {
   accountDetail: (id: string) => adminJson<AccountDetail>(
     `/api/admin/v1/accounts/${id}`,
   ),
-  probeAccount: (id: string) => adminJson<AccountProbeResult>(
-    `/api/admin/v1/accounts/${id}/probe`,
-    { method: "POST" },
-  ),
+  probeAccount: (id: string, modelId?: string) => modelId
+    ? adminJson<AccountProbeResult>(
+      "/api/admin/v1/account-probes",
+      {
+        method: "POST",
+        body: JSON.stringify({ accountId: id, modelId }),
+        signal: AbortSignal.timeout(300_000),
+      },
+    )
+    : adminJson<AccountProbeResult>(
+      `/api/admin/v1/accounts/${id}/probe`,
+      { method: "POST", signal: AbortSignal.timeout(300_000) },
+    ),
   deleteAccount: (id: string) => adminJson<void>(
     `/api/admin/v1/accounts/${id}`, { method: "DELETE" },
   ),
@@ -528,4 +567,22 @@ export const api = {
     "/api/admin/v1/settings/registration-defaults",
     { method: "PUT", body: JSON.stringify(body) },
   ),
+  modelLimitPolicies: () => adminJson<ModelLimitPolicy[]>(
+    "/api/admin/v1/models/limits",
+  ),
+  updateModelLimitPolicy: (body: {
+    providerId: string;
+    modelId: string;
+    maxContextTokens: number | null;
+    maxInputTokens: number | null;
+    maxOutputTokens: number | null;
+  }) => adminJson<ModelLimitPolicy>(
+    "/api/admin/v1/models/limits",
+    { method: "PUT", body: JSON.stringify(body) },
+  ),
+  updateProviderKeepalive: (body: ProviderKeepaliveSettings) =>
+    adminJson<ProviderKeepaliveSettings>(
+      "/api/admin/v1/settings/provider-keepalive",
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
 };

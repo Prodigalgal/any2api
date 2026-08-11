@@ -48,6 +48,23 @@ Each model publishes a machine-readable contract and runtime snapshot:
   "max_context_tokens": 131072,
   "max_input_tokens": 114688,
   "max_output_tokens": 16384,
+  "token_limits": {
+    "max_context_tokens": 100000,
+    "max_input_tokens": 90000,
+    "max_output_tokens": 10000,
+    "discovered": {
+      "max_context_tokens": 131072,
+      "max_input_tokens": 114688,
+      "max_output_tokens": 16384
+    },
+    "overrides": {
+      "max_context_tokens": 100000,
+      "max_input_tokens": 90000,
+      "max_output_tokens": 10000
+    },
+    "source": "ADMIN_OVERRIDE",
+    "confidence": "HIGH"
+  },
   "reasoning": {"supported": true, "levels": ["low", "medium", "high"]},
   "tools": {"supported": true, "types": ["function"], "parallel": true},
   "streaming": true,
@@ -67,11 +84,18 @@ Each model publishes a machine-readable contract and runtime snapshot:
 }
 ```
 
-Unknown official token limits remain JSON `null`; the gateway does not invent limits. The
-`token_limits` object also returns the catalog source and `HIGH` or `BEST_EFFORT` confidence. Model
-metadata and provider protocol declarations are merged at catalog synchronization. A provider may
-override `InferenceProvider.modelContract` when the official catalog exposes a provider-specific
-capability shape.
+Unknown official token limits remain JSON `null`; the gateway does not invent limits. Administrators
+may configure lower safety ceilings per provider and model. `token_limits` returns the effective
+values, discovered values, nullable overrides, source, and confidence. Overrides cannot exceed a
+known discovered value. Model metadata and provider protocol declarations are merged at catalog
+synchronization. A provider may override `InferenceProvider.modelContract` when the official catalog
+exposes a provider-specific capability shape.
+
+Before queue admission or account acquisition, the gateway rejects an explicit output budget above
+the effective output limit. Input is conservatively estimated from UTF-8 request bytes; the gateway
+also rejects estimated input above the effective input limit and estimated input plus explicit output
+budget above the effective context limit. It returns `invalid_request_error` and never silently
+truncates a requested limit.
 
 Common fields enter `CanonicalRequest`; native differences enter:
 
@@ -186,6 +210,9 @@ POST /api/admin/v1/registration-jobs
 GET  /api/admin/v1/registration-jobs/{jobId}
 POST /api/admin/v1/registration-jobs/{jobId}/cancel
 POST /api/admin/v1/accounts/{accountId}/reauthenticate
+POST /api/admin/v1/account-probes
+GET  /api/admin/v1/models/limits
+PUT  /api/admin/v1/models/limits
 ```
 
 Registration job responses contain counters, status, timestamps, error class, and created account IDs. They never contain provider credentials or mailbox/proxy secrets.
@@ -193,9 +220,16 @@ Creation also accepts per-identity flow retries, attempt timeout, consecutive fa
 proxy policy, browser headless mode, and an optional configured mail domain. One Java attempt owns
 one mailbox; provider-local browser retries reuse it.
 
+`POST /api/admin/v1/account-probes` accepts `accountId` and an enabled provider-owned `modelId`, then
+returns readiness, model, bounded upstream text output, duration, completion time, and refreshed
+account state. The legacy account-relative probe endpoint remains compatible and selects the provider
+default model.
+
 System settings are administered through `GET /api/admin/v1/settings` and typed `PUT` endpoints for
-Temp Mail and registration defaults. Settings are AES-GCM encrypted in PostgreSQL and are injected
-into new automation attempts without restarting Java or Python.
+Temp Mail, registration defaults, and `/settings/provider-keepalive`. Settings are AES-GCM encrypted
+in PostgreSQL and are injected into new automation attempts without restarting Java or Python.
+Provider keepalive policies contain the interval, deterministic jitter window, and remote automation
+parameters; reserved credential, metadata, proxy, mail, and affinity fields cannot be overridden.
 
 ## Proxy pool administration
 

@@ -15,6 +15,7 @@ import {
   Alert,
   Box,
   Button,
+  ButtonBase,
   Chip,
   Dialog,
   DialogActions,
@@ -41,7 +42,6 @@ import {
 } from "@mui/material";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useMemo, useState, type MouseEvent } from "react";
-import Link from "next/link";
 import {
   api,
   providerOptions,
@@ -56,6 +56,8 @@ import {
   ToolbarSurface,
 } from "@/components/page-layout";
 import { OperationEventsDialog } from "@/components/operation-events-dialog";
+import { AccountDetailDialog } from "@/components/account-detail-dialog";
+import { AccountProbeDialog } from "@/components/account-probe-dialog";
 
 const pageSizes = [25, 50, 100];
 const statusOptions = [
@@ -87,6 +89,8 @@ export function Accounts() {
   const [commandAccount, setCommandAccount] = useState<Account | null>(null);
   const [commandAnchor, setCommandAnchor] = useState<HTMLElement | null>(null);
   const [traceAccount, setTraceAccount] = useState<Account | null>(null);
+  const [detailAccount, setDetailAccount] = useState<Account | null>(null);
+  const [probeAccount, setProbeAccount] = useState<Account | null>(null);
   const debouncedSearch = useDebouncedValue(search.trim(), 300);
 
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
@@ -95,6 +99,11 @@ export function Accounts() {
   const probeProviders = useMemo(() => new Set(
     (catalog.data?.data ?? [])
       .filter((item) => item.configured)
+      .map((item) => item.id),
+  ), [catalog.data]);
+  const reauthenticationProviders = useMemo(() => new Set(
+    (catalog.data?.data ?? [])
+      .filter((item) => item.lifecycleOperations.includes("reauthenticate"))
       .map((item) => item.id),
   ), [catalog.data]);
   const accounts = useQuery({
@@ -136,10 +145,6 @@ export function Accounts() {
     mutationFn: (id: string) => api.reauthenticateAccount(id),
     onSuccess: invalidateAccounts,
   });
-  const probe = useMutation({
-    mutationFn: (id: string) => api.probeAccount(id),
-    onSuccess: invalidateAccounts,
-  });
   const commands = useQuery({
     queryKey: ["account-commands", commandAccount?.id],
     queryFn: () => api.accountCommands(commandAccount!.id),
@@ -161,7 +166,7 @@ export function Accounts() {
   };
   const filtersActive = Boolean(provider || status || enabled || expiry !== "ANY" || search);
   const error = accounts.error ?? commands.error ?? executeCommand.error
-    ?? update.error ?? remove.error ?? reauthenticate.error ?? probe.error;
+    ?? update.error ?? remove.error ?? reauthenticate.error;
 
   return (
     <PageContainer>
@@ -193,7 +198,11 @@ export function Accounts() {
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: "minmax(240px, 1.6fr) repeat(4, minmax(150px, 0.8fr)) 40px",
+            gridTemplateColumns: {
+              xs: "1fr",
+              sm: "minmax(260px, 1.5fr) repeat(2, minmax(150px, 0.8fr)) 40px",
+              xl: "minmax(240px, 1.6fr) repeat(4, minmax(150px, 0.8fr)) 40px",
+            },
             gap: 1.25,
             alignItems: "center",
           }}
@@ -303,7 +312,7 @@ export function Accounts() {
             {accounts.data ? `${accounts.data.totalElements.toLocaleString("zh-CN")} 个结果` : "正在读取"}
           </Typography>
         </Box>
-        <TableContainer sx={{ height: "calc(100vh - 386px)", minHeight: 340, maxHeight: 690 }}>
+        <TableContainer sx={{ height: { xs: "auto", md: "calc(100vh - 386px)" }, minHeight: 340, maxHeight: { xs: 560, xl: 690 } }}>
           <Table stickyHeader size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
             <TableHead>
               <TableRow>
@@ -327,12 +336,12 @@ export function Accounts() {
                   updating={update.isPending && update.variables?.account.id === account.id}
                   removing={remove.isPending && remove.variables === account.id}
                   reauthenticating={reauthenticate.isPending && reauthenticate.variables === account.id}
-                  probing={probe.isPending && probe.variables === account.id}
                   probeSupported={probeProviders.has(account.providerId)}
+                  onOpenDetails={() => setDetailAccount(account)}
                   onToggle={(nextEnabled) => update.mutate({ account, nextEnabled })}
                   onCommands={(event) => openCommands(event, account)}
                   onReauthenticate={() => reauthenticate.mutate(account.id)}
-                  onProbe={() => probe.mutate(account.id)}
+                  onProbe={() => setProbeAccount(account)}
                   onEvents={() => setTraceAccount(account)}
                   onDelete={() => {
                     if (window.confirm(`删除 ${account.providerId}/${account.externalId}？`)) {
@@ -413,6 +422,22 @@ export function Accounts() {
           onClose={() => setTraceAccount(null)}
         />
       ) : null}
+      {detailAccount ? (
+        <AccountDetailDialog
+          account={detailAccount}
+          providerName={providerNames.get(detailAccount.providerId) ?? detailAccount.providerId}
+          reauthenticationSupported={reauthenticationProviders.has(detailAccount.providerId)}
+          onClose={() => setDetailAccount(null)}
+          onProbe={() => setProbeAccount(detailAccount)}
+        />
+      ) : null}
+      {probeAccount ? (
+        <AccountProbeDialog
+          account={probeAccount}
+          providerName={providerNames.get(probeAccount.providerId) ?? probeAccount.providerId}
+          onClose={() => setProbeAccount(null)}
+        />
+      ) : null}
     </PageContainer>
   );
 }
@@ -423,8 +448,8 @@ const AccountRow = memo(function AccountRow({
   updating,
   removing,
   reauthenticating,
-  probing,
   probeSupported,
+  onOpenDetails,
   onToggle,
   onCommands,
   onReauthenticate,
@@ -437,8 +462,8 @@ const AccountRow = memo(function AccountRow({
   updating: boolean;
   removing: boolean;
   reauthenticating: boolean;
-  probing: boolean;
   probeSupported: boolean;
+  onOpenDetails: () => void;
   onToggle: (enabled: boolean) => void;
   onCommands: (event: MouseEvent<HTMLElement>) => void;
   onReauthenticate: () => void;
@@ -457,15 +482,13 @@ const AccountRow = memo(function AccountRow({
         ) : null}
       </TableCell>
       <TableCell>
-        <Typography
-          component={Link}
-          href={`/accounts/${encodeURIComponent(account.id)}`}
-          noWrap
+        <ButtonBase
+          onClick={onOpenDetails}
           title={account.externalId}
-          sx={{ display: "block", color: "text.primary", fontFamily: "ui-monospace, monospace", fontSize: 11.5, textDecoration: "none", "&:hover": { color: "primary.main", textDecoration: "underline" } }}
+          sx={{ maxWidth: "100%", justifyContent: "flex-start", color: "text.primary", fontFamily: "ui-monospace, monospace", fontSize: 11.5, borderRadius: 0.5, "&:hover": { color: "primary.main", textDecoration: "underline" } }}
         >
-          {account.externalId}
-        </Typography>
+          <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.externalId}</Box>
+        </ButtonBase>
       </TableCell>
       <TableCell>
         <Typography noWrap title={account.email ?? ""} sx={{ fontSize: 12.5 }}>
@@ -507,7 +530,7 @@ const AccountRow = memo(function AccountRow({
               <IconButton
                 size="small"
                 aria-label="立即测活"
-                disabled={probing || !probeSupported}
+                disabled={!probeSupported}
                 onClick={onProbe}
               >
                 <MonitorHeartOutlined sx={{ fontSize: 18 }} />

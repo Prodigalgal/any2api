@@ -8,6 +8,8 @@ import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +19,12 @@ import tools.jackson.databind.ObjectMapper;
 public class RuntimeSettingsService {
     private static final String TEMP_MAIL = "TEMP_MAIL";
     private static final String REGISTRATION_DEFAULTS = "REGISTRATION_DEFAULTS";
+    private static final String PROVIDER_KEEPALIVE = "PROVIDER_KEEPALIVE";
+    private static final Pattern PROVIDER_ID = Pattern.compile("^[a-z][a-z0-9_-]{1,31}$");
+    private static final Pattern PARAMETER_NAME = Pattern.compile("^[A-Za-z][A-Za-z0-9_.-]{0,79}$");
+    private static final Set<String> RESERVED_LIFECYCLE_PARAMETERS = Set.of(
+        "credential", "metadata", "proxy_pool", "proxyPool", "mail",
+        "proxy_affinity_key", "strict_proxy_affinity");
 
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
@@ -37,7 +45,7 @@ public class RuntimeSettingsService {
 
     @Transactional(readOnly = true)
     public SettingsView get() {
-        return new SettingsView(tempMail(), registrationDefaults());
+        return new SettingsView(tempMail(), registrationDefaults(), providerKeepalive());
     }
 
     @Transactional(readOnly = true)
@@ -69,6 +77,36 @@ public class RuntimeSettingsService {
         var value = request.normalized();
         save(REGISTRATION_DEFAULTS, value);
         return value;
+    }
+
+    @Transactional(readOnly = true)
+    public ProviderKeepaliveSettings providerKeepalive() {
+        var configured = load(PROVIDER_KEEPALIVE, ProviderKeepaliveSettings.class);
+        return (configured == null ? ProviderKeepaliveSettings.standard() : configured).normalized();
+    }
+
+    @Transactional
+    public ProviderKeepaliveSettings updateProviderKeepalive(ProviderKeepaliveSettings request) {
+        var value = request.normalized();
+        if (mapper.writeValueAsBytes(value).length > 32_768) {
+            throw new IllegalArgumentException("provider keepalive settings exceed 32 KiB");
+        }
+        save(PROVIDER_KEEPALIVE, value);
+        return value;
+    }
+
+    public ProviderKeepalivePolicy keepalivePolicy(String providerId) {
+        return providerKeepalive().providers().getOrDefault(
+            providerId, ProviderKeepalivePolicy.standard());
+    }
+
+    public void applyLifecycleParameters(
+        Map<String, Object> payload,
+        String providerId,
+        String operation
+    ) {
+        if (!"keepalive".equals(operation)) return;
+        payload.putAll(keepalivePolicy(providerId).parameters());
     }
 
     public void applyMailSettings(Map<String, Object> payload, String domainOverride) {
@@ -122,8 +160,51 @@ public class RuntimeSettingsService {
 
     public record SettingsView(
         TempMailSettings tempMail,
-        RegistrationDefaults registrationDefaults
+        RegistrationDefaults registrationDefaults,
+        ProviderKeepaliveSettings providerKeepalive
     ) {}
+
+    public record ProviderKeepaliveSettings(
+        Map<String, ProviderKeepalivePolicy> providers
+    ) {
+        public static ProviderKeepaliveSettings standard() {
+            return new ProviderKeepaliveSettings(Map.of());
+        }
+
+        public ProviderKeepaliveSettings normalized() {
+            var normalized = new LinkedHashMap<String, ProviderKeepalivePolicy>();
+            for (var entry : (providers == null
+                ? Map.<String, ProviderKeepalivePolicy>of() : providers).entrySet()) {
+                var providerId = entry.getKey() == null ? "" : entry.getKey().trim();
+                if (!PROVIDER_ID.matcher(providerId).matches()) {
+                    throw new IllegalArgumentException("invalid provider id in keepalive settings");
+                }
+                if (entry.getValue() == null) {
+                    throw new IllegalArgumentException(
+                        "keepalive policy is required for provider " + providerId);
+                }
+                normalized.put(providerId, entry.getValue().normalized());
+            }
+            return new ProviderKeepaliveSettings(Map.copyOf(normalized));
+        }
+    }
+
+    public record ProviderKeepalivePolicy(
+        int intervalMinutes,
+        int jitterMinutes,
+        Map<String, Object> parameters
+    ) {
+        public static ProviderKeepalivePolicy standard() {
+            return new ProviderKeepalivePolicy(360, 20, Map.of());
+        }
+
+        public ProviderKeepalivePolicy normalized() {
+            requireRange(intervalMinutes, 5, 10_080, "keepalive interval");
+            requireRange(jitterMinutes, 0, intervalMinutes, "keepalive jitter");
+            return new ProviderKeepalivePolicy(
+                intervalMinutes, jitterMinutes, normalizeParameters(parameters));
+        }
+    }
 
     public record TempMailSettings(
         String apiBase,
@@ -203,10 +284,64 @@ public class RuntimeSettingsService {
                 aiCaptchaMode == null ? RegistrationCaptchaPolicy.AiMode.INTERNAL : aiCaptchaMode);
         }
 
-        private static void requireRange(int value, int minimum, int maximum, String name) {
-            if (value < minimum || value > maximum) {
-                throw new IllegalArgumentException(name + " is outside allowed range");
-            }
+    }
+
+    private static void requireRange(int value, int minimum, int maximum, String name) {
+        if (value < minimum || value > maximum) {
+            throw new IllegalArgumentException(name + " is outside allowed range");
         }
+    }
+
+    private static Map<String, Object> normalizeParameters(Map<String, Object> parameters) {
+        if (parameters == null || parameters.isEmpty()) return Map.of();
+        if (parameters.size() > 32) {
+            throw new IllegalArgumentException("keepalive parameters cannot exceed 32 entries");
+        }
+        var normalized = new LinkedHashMap<String, Object>();
+        for (var entry : parameters.entrySet()) {
+            var key = entry.getKey() == null ? "" : entry.getKey().trim();
+            if (!PARAMETER_NAME.matcher(key).matches()) {
+                throw new IllegalArgumentException("invalid keepalive parameter name: " + key);
+            }
+            if (RESERVED_LIFECYCLE_PARAMETERS.contains(key)) {
+                throw new IllegalArgumentException(
+                    "keepalive parameter is reserved and cannot be overridden: " + key);
+            }
+            normalized.put(key, normalizeParameterValue(entry.getValue(), 0));
+        }
+        return Map.copyOf(normalized);
+    }
+
+    private static Object normalizeParameterValue(Object value, int depth) {
+        if (value == null) {
+            throw new IllegalArgumentException("keepalive parameter values cannot be null");
+        }
+        if (value instanceof String || value instanceof Number
+            || value instanceof Boolean) return value;
+        if (depth >= 4) {
+            throw new IllegalArgumentException("keepalive parameter nesting exceeds 4 levels");
+        }
+        if (value instanceof List<?> list) {
+            if (list.size() > 64) {
+                throw new IllegalArgumentException("keepalive parameter array is too large");
+            }
+            return list.stream().map(item -> normalizeParameterValue(item, depth + 1)).toList();
+        }
+        if (value instanceof Map<?, ?> map) {
+            if (map.size() > 64) {
+                throw new IllegalArgumentException("keepalive parameter object is too large");
+            }
+            var normalized = new LinkedHashMap<String, Object>();
+            for (var entry : map.entrySet()) {
+                if (!(entry.getKey() instanceof String key) || key.isBlank()) {
+                    throw new IllegalArgumentException(
+                        "keepalive parameter object keys must be non-blank strings");
+                }
+                normalized.put(key, normalizeParameterValue(entry.getValue(), depth + 1));
+            }
+            return Map.copyOf(normalized);
+        }
+        throw new IllegalArgumentException(
+            "unsupported keepalive parameter type: " + value.getClass().getSimpleName());
     }
 }

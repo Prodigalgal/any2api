@@ -27,19 +27,20 @@ class InferenceReadinessProbeTest {
     @Test
     void requiresMarkerOutputAndCompletionFromTheSpecificAccount() {
         var probe = new InferenceReadinessProbe(
-            new ProviderRegistry(List.of(provider(true))), mapper);
+            ProviderRegistry.allEnabled(List.of(provider(true))), mapper);
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
         assertThat(result).isNotNull();
         assertThat(result.ready()).isTrue();
         assertThat(result.model()).isEqualTo("alpha-top");
+        assertThat(result.output()).isEqualTo("ANY2API_PROBE_OK");
     }
 
     @Test
     void preservesProviderFailureTypeWhenTheProbeCannotInfer() {
         var probe = new InferenceReadinessProbe(
-            new ProviderRegistry(List.of(provider(false))), mapper);
+            ProviderRegistry.allEnabled(List.of(provider(false))), mapper);
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -51,12 +52,31 @@ class InferenceReadinessProbeTest {
     @Test
     void acceptsAnyNonBlankCompletedResponseForRealtimeAvailability() {
         var probe = new InferenceReadinessProbe(
-            new ProviderRegistry(List.of(provider(true, "pong"))), mapper);
+            ProviderRegistry.allEnabled(List.of(provider(true, "pong"))), mapper);
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
         assertThat(result).isNotNull();
         assertThat(result.ready()).isTrue();
+    }
+
+    @Test
+    void probesTheExplicitlySelectedModel() {
+        var probe = new InferenceReadinessProbe(
+            ProviderRegistry.allEnabled(List.of(provider(true))), mapper);
+
+        var result = probe.probe(
+            new LeasedProviderAccount(
+                account().getId(), "alpha", "external", null, 1, null,
+                mapper.createObjectNode(), Map.of(),
+                new com.any2api.coordination.AccountLease(
+                    "alpha", account().getId(), "owner", 1,
+                    java.time.Instant.now().plusSeconds(60))),
+            java.time.Duration.ofSeconds(10),
+            "alpha-explicit").block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.model()).isEqualTo("alpha-explicit");
     }
 
     private AccountEntity account() {

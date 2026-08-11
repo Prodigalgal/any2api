@@ -33,3 +33,5 @@ databaseChangeLog:
       file: db/changelog/releases/016-model-runtime.sql
   - include:
       file: db/changelog/releases/017-admin-console.sql
+  - include:
+      file: db/changelog/releases/018-governance-policies.sql

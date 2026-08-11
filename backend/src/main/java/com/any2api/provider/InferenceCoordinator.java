@@ -30,6 +30,8 @@ public class InferenceCoordinator {
     private final ModelRuntimeGuard runtime;
     private final UsageNormalizer usage;
     private final ModelAvailabilityGuard availability;
+    private final ModelCatalogCache catalog;
+    private final ModelRequestLimitGuard requestLimits;
 
     public InferenceCoordinator(
         ProviderRegistry providers,
@@ -38,7 +40,9 @@ public class InferenceCoordinator {
         InferenceTelemetryService telemetry,
         ModelRuntimeGuard runtime,
         UsageNormalizer usage,
-        ModelAvailabilityGuard availability
+        ModelAvailabilityGuard availability,
+        ModelCatalogCache catalog,
+        ModelRequestLimitGuard requestLimits
     ) {
         this.providers = providers;
         this.accounts = accounts;
@@ -47,6 +51,8 @@ public class InferenceCoordinator {
         this.runtime = runtime;
         this.usage = usage;
         this.availability = availability;
+        this.catalog = catalog;
+        this.requestLimits = requestLimits;
     }
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request) {
@@ -67,13 +73,17 @@ public class InferenceCoordinator {
         String requestKind
     ) {
         var provider = providers.require(request.providerId());
-        validateRequest(request, provider);
-        var execution = runtime.execute(request, admission -> executeWithRetries(
-            request, provider, accountLease(request, provider), false, 1, apiKeyId,
-            requestKind, admission.queueMs()));
-        return "PROBE".equals(requestKind) ? execution
-            : availability.requireCallable(request.providerId(), request.model())
-                .thenMany(execution);
+        return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
+            validateRequest(request, provider);
+            model.ifPresent(entry -> requestLimits.requireWithinLimits(
+                request, entry.capabilities()));
+            var execution = runtime.execute(request, admission -> executeWithRetries(
+                request, provider, accountLease(request, provider), false, 1, apiKeyId,
+                requestKind, admission.queueMs()));
+            return "PROBE".equals(requestKind) ? execution
+                : availability.requireCallable(request.providerId(), request.model())
+                    .thenMany(execution);
+        });
     }
 
     public Flux<CanonicalEvent> execute(
@@ -110,16 +120,20 @@ public class InferenceCoordinator {
                     "random route account provider does not match the request")));
         }
         var provider = providers.require(request.providerId());
-        var execution = runtime.execute(request, admission ->
-                executeWithRetries(request, provider, reactor.core.publisher.Mono.just(account),
-                    true, 1, apiKeyId, requestKind, admission.queueMs()))
-            .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
-                error -> accounts.release(account).thenMany(Flux.error(error)));
-        if ("PROBE".equals(requestKind)) return execution;
-        return availability.requireCallable(request.providerId(), request.model())
-            .thenMany(execution)
-            .onErrorResume(ModelAvailabilityGuard.ModelUnavailableException.class,
-                error -> accounts.release(account).thenMany(Flux.error(error)));
+        return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
+            model.ifPresent(entry -> requestLimits.requireWithinLimits(
+                request, entry.capabilities()));
+            var execution = runtime.execute(request, admission ->
+                    executeWithRetries(request, provider, reactor.core.publisher.Mono.just(account),
+                        true, 1, apiKeyId, requestKind, admission.queueMs()))
+                .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
+                    error -> accounts.release(account).thenMany(Flux.error(error)));
+            if ("PROBE".equals(requestKind)) return execution;
+            return availability.requireCallable(request.providerId(), request.model())
+                .thenMany(execution)
+                .onErrorResume(ModelAvailabilityGuard.ModelUnavailableException.class,
+                    error -> accounts.release(account).thenMany(Flux.error(error)));
+        });
     }
 
     private reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> accountLease(

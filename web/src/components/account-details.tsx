@@ -343,9 +343,10 @@ function DetailField({ label, value, mono = false }: { label: string; value: str
 
 function StatusValue({ status, error }: { status: string; error: string | null }) {
   const color = status === "ACTIVE" ? "success" : status === "PENDING" ? "warning" : status === "DEGRADED" ? "error" : "default";
+  const label = ({ ACTIVE: "正常", PENDING: "待就绪", DEGRADED: "异常", BANNED: "封禁", DISABLED: "停用", EXPIRED: "过期" } as Record<string, string>)[status] ?? "未知";
   return (
     <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-      <Chip size="small" color={color} variant="outlined" label={status} />
+      <Chip size="small" color={color} variant="outlined" label={label} />
       <Typography noWrap title={error ?? ""} color="text.secondary" sx={{ maxWidth: 220, fontSize: 11.5 }}>{error || "运行状态已同步"}</Typography>
     </Stack>
   );
@@ -353,10 +354,11 @@ function StatusValue({ status, error }: { status: string; error: string | null }
 
 function ReadinessValue({ value }: { value: string }) {
   const ready = value === "READY";
+  const label = value === "READY" ? "已就绪" : value === "FAILED" ? "失败" : "等待探测";
   return (
     <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", color: ready ? "success.main" : value === "FAILED" ? "error.main" : "text.secondary" }}>
       {ready ? <CheckCircleOutlined sx={{ fontSize: 19 }} /> : <ErrorOutlineOutlined sx={{ fontSize: 19 }} />}
-      <Typography sx={{ color: "inherit", fontSize: 14, fontWeight: 750 }}>{value}</Typography>
+      <Typography sx={{ color: "inherit", fontSize: 14, fontWeight: 750 }}>{label}</Typography>
     </Stack>
   );
 }

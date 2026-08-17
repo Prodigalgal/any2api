@@ -1,24 +1,26 @@
 "use client";
 
 import { alpha, createTheme } from "@mui/material/styles";
+import { zhCN } from "@mui/material/locale";
 
 const colors = {
-  graphite: "#182126",
-  graphiteDeep: "#10171b",
-  teal: "#007f7b",
-  tealDark: "#00635f",
-  cobalt: "#3157c8",
-  canvas: "#f5f7f8",
-  border: "#dce3e6",
-  text: "#172126",
-  muted: "#5c6970",
+  navy: "#0b1733",
+  navyDeep: "#071126",
+  blue: "#146ef5",
+  blueDark: "#0b5ed7",
+  steel: "#405c86",
+  canvas: "#f4f7fb",
+  border: "#d7e0ec",
+  grid: "#e3e9f2",
+  text: "#14213d",
+  muted: "#5f6f86",
 };
 
 export const theme = createTheme({
   palette: {
     mode: "light",
-    primary: { main: colors.teal, dark: colors.tealDark, light: "#d9f2ef" },
-    secondary: { main: colors.cobalt, dark: "#2342a1", light: "#e7ecff" },
+    primary: { main: colors.blue, dark: colors.blueDark, light: "#e8f1ff" },
+    secondary: { main: colors.steel, dark: "#30486d", light: "#e9eef6" },
     success: { main: "#16825d", light: "#e4f3ec" },
     warning: { main: "#b66300", light: "#fff0da" },
     error: { main: "#c43c36", light: "#fbe6e4" },
@@ -53,7 +55,7 @@ export const theme = createTheme({
           textRendering: "optimizeLegibility",
         },
         "*": { boxSizing: "border-box" },
-        "*:focus-visible": { outline: `2px solid ${alpha(colors.teal, 0.45)}`, outlineOffset: 2 },
+        "*:focus-visible": { outline: `2px solid ${alpha(colors.blue, 0.45)}`, outlineOffset: 2 },
         "@media (prefers-reduced-motion: reduce)": {
           "*, *::before, *::after": {
             animationDuration: "0.01ms !important",
@@ -88,7 +90,7 @@ export const theme = createTheme({
           width: 34,
           height: 34,
           borderRadius: 6,
-          "&:hover": { backgroundColor: alpha(colors.teal, 0.07) },
+          "&:hover": { backgroundColor: alpha(colors.blue, 0.07) },
         },
       },
     },
@@ -126,23 +128,30 @@ export const theme = createTheme({
     },
     MuiTableCell: {
       styleOverrides: {
-        root: { height: 48, borderColor: "#e5eaec", padding: "8px 14px", fontSize: "0.78125rem" },
+        root: {
+          height: 48,
+          borderColor: colors.grid,
+          borderRight: `1px solid ${colors.grid}`,
+          padding: "8px 14px",
+          fontSize: "0.78125rem",
+          "&:last-child": { borderRight: 0 },
+        },
         head: {
           height: 42,
           color: "#526068",
           fontSize: "0.71875rem",
           fontWeight: 740,
-          backgroundColor: "#f8fafb",
+          backgroundColor: "#f7f9fc",
           whiteSpace: "nowrap",
         },
       },
     },
     MuiTableRow: {
-      styleOverrides: { root: { "&.MuiTableRow-hover:hover": { backgroundColor: "#f3f9f8" } } },
+      styleOverrides: { root: { "&.MuiTableRow-hover:hover": { backgroundColor: "#f3f7fe" } } },
     },
     MuiTablePagination: {
       styleOverrides: {
-        toolbar: { minHeight: 52, paddingInline: 14 },
+        toolbar: { minHeight: 52, paddingInline: 14, borderTop: `1px solid ${colors.grid}` },
         selectLabel: { fontSize: 12 },
         displayedRows: { fontSize: 12 },
       },
@@ -161,4 +170,4 @@ export const theme = createTheme({
     },
     MuiLinearProgress: { styleOverrides: { root: { height: 2 } } },
   },
-});
+}, zhCN);

@@ -52,9 +52,9 @@ import {
 import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout";
 
 const protocolOptions: Array<[ApiKeyProtocol, string]> = [
-  ["CHAT_COMPLETIONS", "Chat Completions"],
-  ["RESPONSES", "Responses"],
-  ["IMAGES", "Images"],
+  ["CHAT_COMPLETIONS", "聊天补全（Chat Completions）"],
+  ["RESPONSES", "响应（Responses）"],
+  ["IMAGES", "图像（Images）"],
 ];
 
 const featureOptions: Array<[ApiKeyFeature, string]> = [
@@ -378,7 +378,7 @@ function CreateApiKeyDialog({
                       py: 1,
                       borderBottom: index === providers.length - 1 ? 0 : 1,
                       borderColor: "divider",
-                      bgcolor: selected ? "#f8fbfb" : "background.paper",
+                      bgcolor: selected ? "#f3f7fe" : "background.paper",
                     }}
                   >
                     <FormControlLabel

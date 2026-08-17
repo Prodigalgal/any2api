@@ -38,8 +38,8 @@ export function OperationRecords() {
       <TableContainer sx={{ minHeight: 420, maxHeight: "calc(100vh - 300px)" }}><Table stickyHeader size="small" sx={{ minWidth: 1200 }}>
         <TableHead><TableRow><TableCell>状态</TableCell><TableCell>厂商 / 操作</TableCell><TableCell>阶段</TableCell><TableCell>关联 ID</TableCell><TableCell>聚合对象</TableCell><TableCell>账号</TableCell><TableCell>错误</TableCell><TableCell align="right">耗时</TableCell><TableCell>时间</TableCell></TableRow></TableHead>
         <TableBody>{(operations.data?.items ?? []).map((item) => <TableRow key={item.id} hover>
-          <TableCell><Chip size="small" variant="outlined" color={item.status === "SUCCEEDED" ? "success" : item.status === "FAILED" ? "error" : "primary"} label={item.status} /></TableCell>
-          <TableCell><Typography sx={{ fontSize: 12, fontWeight: 700 }}>{item.providerId}</Typography><Typography color="text.secondary" sx={mono}>{item.domain} · {item.operation}</Typography></TableCell>
+          <TableCell><Chip size="small" variant="outlined" color={item.status === "SUCCEEDED" ? "success" : item.status === "FAILED" ? "error" : "primary"} label={statusLabel(item.status)} /></TableCell>
+          <TableCell><Typography sx={{ fontSize: 12, fontWeight: 700 }}>{item.providerId}</Typography><Typography color="text.secondary" sx={mono}>{domainLabel(item.domain)} · {operationLabel(item.operation)}</Typography></TableCell>
           <TableCell sx={mono}>{item.stage}</TableCell><TableCell><Identifier value={item.correlationId} /></TableCell>
           <TableCell><Typography sx={mono}>{item.aggregateType}</Typography><Identifier value={item.aggregateId} /></TableCell><TableCell><Identifier value={item.accountId} /></TableCell>
           <TableCell><Tooltip title={item.errorDetail || ""}><Typography noWrap sx={{ ...mono, maxWidth: 260, color: item.errorCode ? "error.main" : "text.secondary" }}>{item.errorCode || item.errorDetail || "-"}</Typography></Tooltip></TableCell>
@@ -55,3 +55,6 @@ const mono = { fontFamily: "ui-monospace, monospace", fontSize: 11.5 } as const;
 function Identifier({ value }: { value: string | null }) { return <Tooltip title={value || "-"}><Typography noWrap sx={{ ...mono, maxWidth: 170 }}>{value ? value.slice(0, 14) : "-"}</Typography></Tooltip>; }
 function duration(value: number) { return value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`; }
 function formatTime(value: string) { return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
+function statusLabel(value: string) { return ({ RUNNING: "执行中", SUCCEEDED: "成功", FAILED: "失败", CANCELLED: "已取消" } as Record<string, string>)[value] ?? "未知"; }
+function domainLabel(value: string) { return ({ REGISTRATION: "注册", LIFECYCLE: "生命周期", INFERENCE: "推理" } as Record<string, string>)[value] ?? "其他"; }
+function operationLabel(value: string) { return ({ register: "注册", keepalive: "保活", reauthenticate: "重新认证", probe: "测活" } as Record<string, string>)[value] ?? value; }

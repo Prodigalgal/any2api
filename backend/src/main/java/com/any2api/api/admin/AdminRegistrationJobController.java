@@ -1,6 +1,7 @@
 package com.any2api.api.admin;
 
 import com.any2api.lifecycle.RegistrationJobService;
+import com.any2api.lifecycle.RegistrationJobPageView;
 import com.any2api.lifecycle.RegistrationJobView;
 import com.any2api.observability.OperationEventService;
 import java.util.List;
@@ -34,6 +35,16 @@ public class AdminRegistrationJobController {
         return jobs.list(provider);
     }
 
+    @GetMapping("/page")
+    public RegistrationJobPageView page(
+        @RequestParam(name = "provider", required = false) String provider,
+        @RequestParam(name = "status", required = false) String status,
+        @RequestParam(name = "page", defaultValue = "0") int page,
+        @RequestParam(name = "size", defaultValue = "20") int size
+    ) {
+        return jobs.page(provider, status, page, size);
+    }
+
     @GetMapping("/{jobId}")
     public RegistrationJobView get(@PathVariable UUID jobId) { return jobs.get(jobId); }
 
@@ -44,28 +55,10 @@ public class AdminRegistrationJobController {
     }
 
     @PostMapping
-    public RegistrationJobView create(@RequestBody CreateRequest request) {
-        return jobs.create(new RegistrationJobService.CreateCommand(
-            request.providerId(), request.target(), request.maxAttempts(),
-            request.concurrency(), request.attemptIntervalSeconds(),
-            request.roundIntervalSeconds(), request.attemptTimeoutSeconds(),
-            request.flowMaxAttempts(), request.maxConsecutiveFailureBatches(),
-            request.proxyPolicy(), request.headless(), request.mailDomain(),
-            request.aiCaptchaEnabled(),
-            request.aiCaptchaMode(), request.idempotencyKey()));
+    public RegistrationJobView create(@RequestBody RegistrationJobRequest request) {
+        return jobs.create(request.toCommand(null));
     }
 
     @PostMapping("/{jobId}/cancel")
     public RegistrationJobView cancel(@PathVariable UUID jobId) { return jobs.cancel(jobId); }
-
-    public record CreateRequest(
-        String providerId, Integer target, Integer maxAttempts,
-        Integer concurrency, Integer attemptIntervalSeconds,
-        Integer roundIntervalSeconds, Integer attemptTimeoutSeconds,
-        Integer flowMaxAttempts, Integer maxConsecutiveFailureBatches,
-        com.any2api.lifecycle.RegistrationProxyPolicy proxyPolicy,
-        Boolean headless, String mailDomain, Boolean aiCaptchaEnabled,
-        com.any2api.lifecycle.RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
-        String idempotencyKey
-    ) {}
 }

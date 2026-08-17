@@ -32,10 +32,10 @@ function TempMailForm({ initial }: { initial: TempMailSettings }) {
     },
   });
   return <DataSurface>
-    <SectionHeader title="Temp Mail" description="注册任务会从可用域名中按邮箱任务随机选择；任务可单独覆盖固定域名" action={<Button variant="contained" startIcon={<SaveOutlined />} disabled={save.isPending} onClick={() => save.mutate()}>保存邮箱设置</Button>} />
+    <SectionHeader title="临时邮箱" description="注册任务会从可用域名中按邮箱任务随机选择；任务可单独覆盖固定域名" action={<Button variant="contained" startIcon={<SaveOutlined />} disabled={save.isPending} onClick={() => save.mutate()}>保存邮箱设置</Button>} />
     <Box sx={{ p: 2.5 }}>
       {save.error ? <Alert severity="error" sx={{ mb: 2 }}>{save.error.message}</Alert> : null}
-      {save.isSuccess ? <Alert severity="success" sx={{ mb: 2 }}>Temp Mail 设置已生效</Alert> : null}
+      {save.isSuccess ? <Alert severity="success" sx={{ mb: 2 }}>临时邮箱设置已生效</Alert> : null}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1.4fr 1fr", xl: "1.4fr 1fr 1fr" }, gap: 2 }}>
         <TextField label="API URL" value={value.apiBase} onChange={(event) => setValue({ ...value, apiBase: event.target.value })} />
         <TextField label="管理员密码" value={value.adminPassword} onChange={(event) => setValue({ ...value, adminPassword: event.target.value })} />

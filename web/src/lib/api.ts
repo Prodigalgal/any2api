@@ -226,6 +226,58 @@ export type RegistrationJob = {
   finishedAt: string | null;
 };
 
+export type RegistrationJobPage = {
+  items: RegistrationJob[];
+  totalElements: number;
+  page: number;
+  size: number;
+  totalPages: number;
+};
+
+export type RegistrationScheduleType = "ONCE" | "INTERVAL";
+
+export type RegistrationSchedule = {
+  id: string;
+  name: string;
+  providerId: string;
+  scheduleType: RegistrationScheduleType;
+  intervalMinutes: number | null;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastJobId: string | null;
+  job: Omit<RegistrationJobFormValue, "idempotencyKey"> & { idempotencyKey?: string | null };
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RegistrationSchedulePage = {
+  items: RegistrationSchedule[];
+  totalElements: number;
+  page: number;
+  size: number;
+  totalPages: number;
+};
+
+export type RegistrationJobFormValue = {
+  providerId: string;
+  target: number;
+  maxAttempts: number;
+  concurrency: number;
+  attemptIntervalSeconds: number;
+  roundIntervalSeconds: number;
+  attemptTimeoutSeconds: number;
+  flowMaxAttempts: number;
+  maxConsecutiveFailureBatches: number;
+  proxyPolicy: RegistrationProxyPolicy;
+  headless: boolean;
+  mailDomain: string | null;
+  aiCaptchaEnabled: boolean;
+  aiCaptchaMode: CaptchaAiMode;
+  idempotencyKey?: string | null;
+};
+
 export type CaptchaAiMode = "AUTO" | "INTERNAL" | "EXTERNAL";
 export type RegistrationProxyPolicy = "PROVIDER_DEFAULT" | "DIRECT" | "REQUIRED_POOL";
 
@@ -404,7 +456,7 @@ export type ProviderKeepaliveSettings = {
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(5_000) });
-  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  if (!response.ok) throw new Error(`${url} 返回 HTTP ${response.status}`);
   return response.json() as Promise<T>;
 }
 
@@ -434,7 +486,7 @@ async function adminJson<T>(
       throw new Error("登录验证失败，请检查管理员密码和当前数学验证码");
     }
     const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-    throw new Error(payload?.error?.message ?? `${url} returned ${response.status}`);
+    throw new Error(payload?.error?.message ?? `${url} 返回 HTTP ${response.status}`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -508,9 +560,16 @@ export const api = {
   executeAccountCommand: (id: string, command: string) => adminJson<{ account: Account }>(
     `/api/admin/v1/accounts/${id}/commands/${encodeURIComponent(command)}`, { method: "POST" },
   ),
-  registrationJobs: (provider?: string) => adminJson<RegistrationJob[]>(
-    `/api/admin/v1/registration-jobs${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
-  ),
+  registrationJobPage: (query: {
+    provider?: string; status?: string; page: number; size: number;
+  }) => {
+    const params = new URLSearchParams({ page: String(query.page), size: String(query.size) });
+    if (query.provider) params.set("provider", query.provider);
+    if (query.status) params.set("status", query.status);
+    return adminJson<RegistrationJobPage>(
+      `/api/admin/v1/registration-jobs/page?${params.toString()}`,
+    );
+  },
   createRegistrationJob: (body: Record<string, unknown>) => adminJson<RegistrationJob>(
     "/api/admin/v1/registration-jobs", { method: "POST", body: JSON.stringify(body) },
   ),
@@ -519,6 +578,30 @@ export const api = {
   ),
   registrationJobEvents: (id: string) => adminJson<OperationEvent[]>(
     `/api/admin/v1/registration-jobs/${id}/events`,
+  ),
+  registrationSchedulePage: (query: {
+    provider?: string; enabled?: boolean; page: number; size: number;
+  }) => {
+    const params = new URLSearchParams({ page: String(query.page), size: String(query.size) });
+    if (query.provider) params.set("provider", query.provider);
+    if (query.enabled !== undefined) params.set("enabled", String(query.enabled));
+    return adminJson<RegistrationSchedulePage>(
+      `/api/admin/v1/registration-schedules/page?${params.toString()}`,
+    );
+  },
+  createRegistrationSchedule: (body: Record<string, unknown>) => adminJson<RegistrationSchedule>(
+    "/api/admin/v1/registration-schedules", { method: "POST", body: JSON.stringify(body) },
+  ),
+  updateRegistrationSchedule: (id: string, body: Record<string, unknown>) => adminJson<RegistrationSchedule>(
+    `/api/admin/v1/registration-schedules/${id}`,
+    { method: "PUT", body: JSON.stringify(body) },
+  ),
+  setRegistrationScheduleEnabled: (id: string, enabled: boolean) => adminJson<RegistrationSchedule>(
+    `/api/admin/v1/registration-schedules/${id}/enabled`,
+    { method: "PATCH", body: JSON.stringify({ enabled }) },
+  ),
+  deleteRegistrationSchedule: (id: string) => adminJson<void>(
+    `/api/admin/v1/registration-schedules/${id}`, { method: "DELETE" },
   ),
   requestLogs: (query: Record<string, string | number>) => {
     const params = new URLSearchParams();

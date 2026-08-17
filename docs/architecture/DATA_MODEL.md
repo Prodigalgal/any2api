@@ -55,6 +55,7 @@ provider routes and random routes apply the same authorization object before pro
 | `sessions` | Sticky account and provider conversation state |
 | `responses` | Durable Responses objects and input context |
 | `registration_jobs` | Java-owned automation state |
+| `registration_schedules` | One-time or fixed-interval registration plans with durable dispatch leases |
 | `scheduled_actions` | Durable due-time scheduler |
 | `outbox_events` | Transactional publication to Redis Streams |
 | `usage_events` | Idempotent request telemetry |
@@ -83,6 +84,12 @@ Each `registration_jobs` row owns its target success count, attempt budget, conc
 within-round attempt start interval, and between-round interval. A fully failed round still uses the
 larger of the configured interval and the scheduler's exponential backoff, so operator tuning cannot
 disable retry-storm protection accidentally.
+
+`registration_schedules` claims due plans with `FOR UPDATE SKIP LOCKED` and a bounded lease. The
+dispatcher derives a stable idempotency key from the schedule ID and original due time, so lease
+expiry or replica failover cannot create duplicate registration jobs. Successful interval plans
+advance from the scheduled time while skipping missed windows; a successful one-time plan disables
+itself. Dispatch failures retain the same due window and become eligible for bounded retry.
 
 Each inference retry writes a separate `usage_events` row while retaining the same client-visible
 request correlation. The row identifies the distribution key, actual provider, leased account,

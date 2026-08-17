@@ -84,7 +84,7 @@ export function LoginScreen() {
           <div className={styles.visualMark}><span /><span /></div>
           <div>
             <Typography component="p">Any2API</Typography>
-            <Typography component="span">OPERATIONS</Typography>
+            <Typography component="span">运行中心</Typography>
           </div>
         </div>
 
@@ -109,7 +109,7 @@ export function LoginScreen() {
             <div className={styles.hubMark}><span /><span /></div>
             <div>
               <Typography component="p">ANY2API</Typography>
-              <Typography component="span">ROUTER ACTIVE</Typography>
+              <Typography component="span">路由已启用</Typography>
             </div>
           </div>
           <div className={styles.scanLine} />
@@ -117,11 +117,11 @@ export function LoginScreen() {
 
         <div className={styles.visualCopy}>
           <Typography component="h2">统一模型运行控制台</Typography>
-          <Typography component="p">Any2API Control Plane</Typography>
+          <Typography component="p">Any2API 控制平台</Typography>
         </div>
         <div className={styles.visualStatus}>
-          <span><i /> CONTROL PLANE</span>
-          <b>ONLINE</b>
+          <span><i /> 控制平台</span>
+          <b>在线</b>
         </div>
       </section>
 
@@ -195,7 +195,7 @@ export function LoginScreen() {
             <div className={styles.powState}>
               {(session.isLoading || challenge.isFetching) ? <CircularProgress size={15} thickness={5} /> : <i />}
               <span>{session.isLoading ? "正在验证现有会话" : challenge.isFetching ? "正在建立计算证明" : challenge.data ? "计算证明已就绪" : "等待认证挑战"}</span>
-              {challenge.data && <b>{challenge.data.value.difficulty} BIT</b>}
+              {challenge.data && <b>{challenge.data.value.difficulty} 位难度</b>}
             </div>
             <Button
               type="submit"
@@ -203,12 +203,12 @@ export function LoginScreen() {
               size="large"
               endIcon={<ArrowForwardOutlined />}
               disabled={!ready || login.isPending || session.isLoading}
-              sx={{ mt: "8px !important", height: 48, borderRadius: 1, bgcolor: "#087f8c", color: "#fff", boxShadow: "0 10px 24px rgba(8, 127, 140, 0.16)", transition: "background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease", "&:hover": { bgcolor: "#075f69", boxShadow: "0 13px 28px rgba(8, 127, 140, 0.22)", transform: "translateY(-1px)" }, "&.Mui-disabled": { bgcolor: "#e5eaec", color: "#8b989d", border: "1px solid #d6dde0", boxShadow: "none" } }}
+              sx={{ mt: "8px !important", height: 48, borderRadius: 1, bgcolor: "#146ef5", color: "#fff", boxShadow: "0 10px 24px rgba(20, 110, 245, 0.18)", transition: "background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease", "&:hover": { bgcolor: "#0b5ed7", boxShadow: "0 13px 28px rgba(20, 110, 245, 0.24)", transform: "translateY(-1px)" }, "&.Mui-disabled": { bgcolor: "#e5eaf2", color: "#8794a8", border: "1px solid #d7e0ec", boxShadow: "none" } }}
             >
               {login.isPending ? "正在验证" : "安全登录"}
             </Button>
           </Stack>
-          <Typography className={styles.footer}>ARM64 · JAVA · POSTGRESQL · REDIS</Typography>
+          <Typography className={styles.footer}>ARM64 · Java · PostgreSQL · Redis</Typography>
         </div>
       </section>
     </main>
@@ -256,10 +256,10 @@ function DarkField({
         "& .MuiOutlinedInput-root": { height: 54, color: "#172126", bgcolor: "#fff", borderRadius: 1 },
         "& .MuiOutlinedInput-notchedOutline": { borderColor: "#cfd8dc" },
         "& .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline": { borderColor: "#829197" },
-        "& .MuiOutlinedInput-root.Mui-focused": { boxShadow: "0 0 0 4px rgba(8, 127, 140, 0.07)" },
-        "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#087f8c" },
+        "& .MuiOutlinedInput-root.Mui-focused": { boxShadow: "0 0 0 4px rgba(20, 110, 245, 0.08)" },
+        "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#146ef5" },
         "& .MuiInputLabel-root": { color: "#68767c" },
-        "& .MuiInputLabel-root.Mui-focused": { color: "#087f8c" },
+        "& .MuiInputLabel-root.Mui-focused": { color: "#146ef5" },
         "& .MuiInputAdornment-root": { color: "#718086" },
         "& .MuiSvgIcon-root": { fontSize: 19 },
       }}

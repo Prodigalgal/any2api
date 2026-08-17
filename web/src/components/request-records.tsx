@@ -45,7 +45,7 @@ export function RequestRecords() {
       <TableContainer sx={{ minHeight: 420, maxHeight: "calc(100vh - 300px)" }}><Table stickyHeader size="small" sx={{ minWidth: 1250 }}>
         <TableHead><TableRow><TableCell>状态</TableCell><TableCell>厂商</TableCell><TableCell>模型 / 协议</TableCell><TableCell>Request ID</TableCell><TableCell>账号 / 密钥</TableCell><TableCell align="right">Token</TableCell><TableCell align="right">阶段耗时</TableCell><TableCell>时间</TableCell><TableCell align="right">详情</TableCell></TableRow></TableHead>
         <TableBody>{(requests.data?.items ?? []).map((item) => <TableRow key={`${item.requestId}:${item.attempt}`} hover onDoubleClick={() => setSelected(item)}>
-          <TableCell><Chip size="small" variant="outlined" color={item.success ? "success" : "error"} label={item.success ? "SUCCEEDED" : item.errorClass || "FAILED"} /></TableCell>
+          <TableCell><Chip size="small" variant="outlined" color={item.success ? "success" : "error"} label={item.success ? "成功" : item.errorClass || "失败"} /></TableCell>
           <TableCell><Chip size="small" variant="outlined" label={item.providerId} /></TableCell>
           <TableCell><Typography noWrap sx={mono}>{item.modelId}</Typography><Typography color="text.secondary" sx={subtle}>{item.protocol} · {item.requestKind} · attempt {item.attempt}</Typography></TableCell>
           <TableCell><Identifier value={item.requestId} /></TableCell>
@@ -66,7 +66,7 @@ function RequestDetailDialog({ request, onClose }: { request: UsageEvent; onClos
   const detail = useQuery({ queryKey: ["request-log-detail", request.requestId, request.attempt], queryFn: () => api.requestLogDetail(request.requestId, request.attempt) });
   return <Dialog open onClose={onClose} maxWidth="xl" fullWidth>
     <DialogTitle sx={{ display: "flex", alignItems: "center", py: 1.5 }}><Box sx={{ minWidth: 0 }}><Typography sx={{ fontSize: 14, fontWeight: 750 }}>请求内容</Typography><Typography noWrap color="text.secondary" sx={mono}>{request.requestId} · attempt {request.attempt}</Typography></Box><Box sx={{ flex: 1 }} /><IconButton onClick={onClose}><CloseOutlined /></IconButton></DialogTitle>
-    <DialogContent dividers sx={{ p: 0 }}>{detail.isLoading ? <LinearProgress /> : null}{detail.error ? <Alert severity="error" sx={{ m: 2 }}>{detail.error.message}</Alert> : null}{detail.data ? <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, minHeight: 620 }}><JsonPane title="INPUT" value={detail.data.input} /><JsonPane title="OUTPUT" value={detail.data.output} border /></Box> : null}</DialogContent>
+    <DialogContent dividers sx={{ p: 0 }}>{detail.isLoading ? <LinearProgress /> : null}{detail.error ? <Alert severity="error" sx={{ m: 2 }}>{detail.error.message}</Alert> : null}{detail.data ? <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, minHeight: 620 }}><JsonPane title="输入" value={detail.data.input} /><JsonPane title="输出" value={detail.data.output} border /></Box> : null}</DialogContent>
   </Dialog>;
 }
 

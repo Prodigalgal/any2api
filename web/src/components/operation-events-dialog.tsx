@@ -139,7 +139,8 @@ function EventStatus({ status }: { status: OperationEvent["status"] }) {
     : status === "FAILED" ? "error"
       : status === "RUNNING" ? "primary"
         : "default";
-  return <Chip size="small" variant="outlined" color={color} label={status} />;
+  const label = ({ RUNNING: "执行中", SUCCEEDED: "成功", FAILED: "失败", CANCELLED: "已取消" } as Record<string, string>)[status] ?? "未知";
+  return <Chip size="small" variant="outlined" color={color} label={label} />;
 }
 
 function formatDuration(value: number) {

@@ -69,6 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const activeNavigation = navigation.find(([, , href]) => (
     href === "/" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`)
   ));
+  const appBarTitle = activeNavigation?.[2] === "/lifecycle" ? "注册与生命周期" : activeNavigation?.[0] ?? "Any2API";
 
   useEffect(() => {
     if (session.isError || session.data?.authenticated === false) router.replace("/login");
@@ -77,14 +78,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (session.isLoading || session.isError || !session.data?.authenticated) return <SessionGate />;
 
   const drawer = (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#121b20", color: "#d8e2e5" }}>
-      <Box sx={{ px: 2, height: 64, display: "flex", alignItems: "center", borderBottom: "1px solid #2b373d" }}>
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#0b1733", color: "#dce8f8" }}>
+      <Box sx={{ px: 2, height: 64, display: "flex", alignItems: "center", borderBottom: "1px solid #1b2d4d" }}>
         <Box sx={{ width: 30, height: 30, borderRadius: 1, bgcolor: "primary.main", display: "grid", placeItems: "center", mr: 1.25 }}>
           <ApiOutlined sx={{ fontSize: 19, color: "white" }} />
         </Box>
         <Box sx={{ minWidth: 0 }}>
           <Typography noWrap sx={{ color: "white", fontWeight: 760, fontSize: 15 }}>Any2API</Typography>
-          <Typography noWrap sx={{ color: "#92a2a9", fontSize: 10.5 }}>MODEL OPERATIONS</Typography>
+          <Typography noWrap sx={{ color: "#91a5c1", fontSize: 10.5 }}>模型运维</Typography>
         </Box>
       </Box>
       <List aria-label="主导航" sx={{ px: 1.25, py: 1.5 }}>
@@ -101,17 +102,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 minHeight: 40,
                 mb: 0.5,
                 borderRadius: 1,
-                color: "#bbc8cc",
+                color: "#b9c8dc",
                 position: "relative",
                 "& .MuiListItemIcon-root": { color: "inherit" },
                 "&.Mui-selected": {
-                  bgcolor: "#20353a",
-                  color: "#8ce0da",
+                  bgcolor: "#12346b",
+                  color: "#c6ddff",
                   "&:before": {
                     content: '\"\"', position: "absolute", left: 0, top: 9, bottom: 9,
-                    width: 3, borderRadius: "0 2px 2px 0", bgcolor: "#55cbc4",
+                    width: 3, borderRadius: "0 2px 2px 0", bgcolor: "#3b82f6",
                   },
-                  "&:hover": { bgcolor: "#254047" },
+                  "&:hover": { bgcolor: "#17417e" },
                 },
               }}
             >
@@ -121,10 +122,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           );
         })}
       </List>
-      <Box sx={{ mt: "auto", px: 2, py: 1.75, borderTop: "1px solid #2b373d" }}>
+      <Box sx={{ mt: "auto", px: 2, py: 1.75, borderTop: "1px solid #1b2d4d" }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "#47bf87" }} />
-          <Typography sx={{ color: "#9aabb1", fontSize: 10.5 }}>控制面在线</Typography>
+          <Typography sx={{ color: "#9db0ca", fontSize: 10.5 }}>控制平台在线</Typography>
         </Stack>
       </Box>
     </Box>
@@ -137,7 +138,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         sx={{
           zIndex: (value) => value.zIndex.drawer + 1,
           borderBottom: 1,
-          borderColor: "divider",
+          borderColor: { xs: "#1b2d4d", md: "divider" },
+          bgcolor: { xs: "#0b1733", md: "rgba(255, 255, 255, 0.96)" },
+          color: { xs: "#ffffff", md: "text.primary" },
           ml: compact ? 0 : `${drawerWidth}px`,
           width: compact ? "100%" : `calc(100% - ${drawerWidth}px)`,
         }}
@@ -145,13 +148,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Toolbar sx={{ minHeight: "56px !important", px: { xs: 1.5, sm: 2.5 } }}>
           {compact ? (
             <Tooltip title="打开导航">
-              <IconButton aria-label="打开导航" onClick={() => setMobileOpen(true)} sx={{ mr: 1 }}>
+              <IconButton aria-label="打开导航" onClick={() => setMobileOpen(true)} sx={{ mr: 1, color: "inherit" }}>
                 <MenuOutlined />
               </IconButton>
             </Tooltip>
           ) : null}
-          <Typography noWrap sx={{ fontWeight: 720, fontSize: 14 }}>
-            {activeNavigation?.[0] ?? "Any2API"}
+          <Typography noWrap sx={{ fontWeight: 720, fontSize: { xs: 16, md: 14 } }}>
+            {appBarTitle}
           </Typography>
           <Box sx={{ flex: 1 }} />
           <Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
@@ -162,11 +165,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Box>
             <AccountCircleOutlined sx={{ display: { xs: "none", sm: "block" }, fontSize: 18, color: "text.secondary" }} />
             <Typography noWrap sx={{ display: { xs: "none", sm: "block" }, maxWidth: 140, fontSize: 12, fontWeight: 650 }}>
-              {session.data?.username ?? "admin"}
+              {session.data?.username ?? "管理员"}
             </Typography>
             <Tooltip title="退出登录">
               <span>
-                <IconButton aria-label="退出登录" onClick={() => logout.mutate()} disabled={logout.isPending}>
+                <IconButton aria-label="退出登录" onClick={() => logout.mutate()} disabled={logout.isPending} sx={{ color: "inherit" }}>
                   <LogoutOutlined sx={{ fontSize: 18 }} />
                 </IconButton>
               </span>
@@ -204,14 +207,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function SessionGate() {
   return (
-    <Box sx={{ minWidth: 0, minHeight: "100vh", display: "grid", placeItems: "center", bgcolor: "#10171b" }}>
+    <Box sx={{ minWidth: 0, minHeight: "100vh", display: "grid", placeItems: "center", bgcolor: "#071126" }}>
       <Stack spacing={2} sx={{ alignItems: "center" }}>
-        <Box sx={{ width: 38, height: 38, border: "1px solid #4bbfb9", transform: "rotate(45deg)", display: "grid", placeItems: "center" }}>
-          <ApiOutlined sx={{ color: "#7be0da", fontSize: 21, transform: "rotate(-45deg)" }} />
+        <Box sx={{ width: 38, height: 38, border: "1px solid #3b82f6", transform: "rotate(45deg)", display: "grid", placeItems: "center" }}>
+          <ApiOutlined sx={{ color: "#93c5fd", fontSize: 21, transform: "rotate(-45deg)" }} />
         </Box>
-        <CircularProgress size={20} thickness={4} sx={{ color: "#62d8d0" }} />
+        <CircularProgress size={20} thickness={4} sx={{ color: "#60a5fa" }} />
         <Typography sx={{ color: "#839399", fontFamily: "ui-monospace, monospace", fontSize: 10 }}>
-          VERIFYING ADMIN SESSION
+          正在验证管理员会话
         </Typography>
       </Stack>
     </Box>

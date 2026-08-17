@@ -35,3 +35,5 @@ databaseChangeLog:
       file: db/changelog/releases/017-admin-console.sql
   - include:
       file: db/changelog/releases/018-governance-policies.sql
+  - include:
+      file: db/changelog/releases/019-registration-schedules.sql

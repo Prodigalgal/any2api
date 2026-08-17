@@ -111,7 +111,7 @@ export function ModelPolicies() {
 
         {tab === 0 ? (
           <Box>
-            <Box sx={{ p: { xs: 1.25, sm: 1.5 }, borderBottom: 1, borderColor: "divider", bgcolor: "#fbfcfc" }}>
+            <Box sx={{ p: { xs: 1.25, sm: 1.5 }, borderBottom: 1, borderColor: "divider", bgcolor: "#f7f9fc" }}>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(240px, 1fr) 220px 40px" }, gap: 1.25 }}>
                 <TextField
                   value={search}

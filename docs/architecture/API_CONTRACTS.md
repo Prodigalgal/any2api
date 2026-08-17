@@ -206,9 +206,15 @@ Events preserve order, request correlation, provider/account trace identifiers, 
 
 ```text
 GET  /api/admin/v1/registration-jobs
+GET  /api/admin/v1/registration-jobs/page
 POST /api/admin/v1/registration-jobs
 GET  /api/admin/v1/registration-jobs/{jobId}
 POST /api/admin/v1/registration-jobs/{jobId}/cancel
+GET    /api/admin/v1/registration-schedules/page
+POST   /api/admin/v1/registration-schedules
+PUT    /api/admin/v1/registration-schedules/{scheduleId}
+PATCH  /api/admin/v1/registration-schedules/{scheduleId}/enabled
+DELETE /api/admin/v1/registration-schedules/{scheduleId}
 POST /api/admin/v1/accounts/{accountId}/reauthenticate
 POST /api/admin/v1/account-probes
 GET  /api/admin/v1/models/limits
@@ -219,6 +225,14 @@ Registration job responses contain counters, status, timestamps, error class, an
 Creation also accepts per-identity flow retries, attempt timeout, consecutive failed-round limit,
 proxy policy, browser headless mode, and an optional configured mail domain. One Java attempt owns
 one mailbox; provider-local browser retries reuse it.
+
+`GET /registration-jobs/page` uses zero-based `page`, bounded `size`, optional `provider` and
+optional `status`, ordered by `created_at DESC, id DESC`. The legacy list endpoint remains available
+for compatible callers. Registration schedules support one-time and fixed-interval execution. A
+schedule stores the normalized registration job command, exposes paged administration, and creates
+an ordinary registration job when due; schedules never bypass the existing job policy or readiness
+pipeline. The enable endpoint only changes lifecycle state, while `PUT` replaces the editable plan
+contract.
 
 `POST /api/admin/v1/account-probes` accepts `accountId` and an enabled provider-owned `modelId`, then
 returns readiness, model, bounded upstream text output, duration, completion time, and refreshed

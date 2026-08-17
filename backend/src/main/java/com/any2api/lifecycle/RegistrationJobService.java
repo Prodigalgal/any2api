@@ -8,7 +8,10 @@ import com.any2api.settings.RuntimeSettingsService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -21,6 +24,8 @@ public class RegistrationJobService {
     private static final int MAX_CONCURRENCY = 8;
     private static final int MAX_ATTEMPT_INTERVAL_SECONDS = 3600;
     private static final int MAX_ROUND_INTERVAL_SECONDS = 86400;
+    private static final Set<String> JOB_STATUSES = Set.of(
+        "PENDING", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED");
 
     private final JdbcClient jdbc;
     private final ProviderRegistry providers;
@@ -44,6 +49,49 @@ public class RegistrationJobService {
 
     @Transactional
     public RegistrationJobView create(CreateCommand command) {
+        var normalized = normalize(command);
+        var captcha = RegistrationCaptchaPolicy.resolve(
+            normalized.aiCaptchaEnabled(), normalized.aiCaptchaMode());
+        var request = mapper.createObjectNode();
+        request.set("captcha", captcha.toWire(mapper));
+        request.put("attempt_timeout_seconds", normalized.attemptTimeoutSeconds());
+        request.put("flow_max_attempts", normalized.flowMaxAttempts());
+        request.put("max_consecutive_failure_batches",
+            normalized.maxConsecutiveFailureBatches());
+        request.put("proxy_policy", normalized.proxyPolicy().name());
+        request.put("headless", normalized.headless());
+        if (normalized.mailDomain() != null && !normalized.mailDomain().isBlank()) {
+            request.put("mail_domain", normalized.mailDomain());
+        }
+        var key = normalized.idempotencyKey() == null || normalized.idempotencyKey().isBlank()
+            ? "registration:" + normalized.providerId() + ":" + UUID.randomUUID()
+            : normalized.idempotencyKey();
+        var id = UUID.randomUUID();
+        jdbc.sql("""
+            INSERT INTO registration_jobs(
+                id, provider_id, status, idempotency_key, requested, target,
+                concurrency, attempt_interval_seconds, round_interval_seconds,
+                request, result, next_attempt_at)
+            VALUES (:id, :provider, 'PENDING', :key, :requested, :target,
+                    :concurrency, :attemptInterval, :roundInterval,
+                    CAST(:request AS jsonb), '{"account_ids":[]}'::jsonb, CURRENT_TIMESTAMP)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            """)
+            .param("id", id)
+            .param("provider", normalized.providerId())
+            .param("key", key)
+            .param("requested", normalized.maxAttempts())
+            .param("target", normalized.target())
+            .param("concurrency", normalized.concurrency())
+            .param("attemptInterval", normalized.attemptIntervalSeconds())
+            .param("roundInterval", normalized.roundIntervalSeconds())
+            .param("request", request.toString())
+            .update();
+        return jdbc.sql("SELECT * FROM registration_jobs WHERE idempotency_key = :key")
+            .param("key", key).query(this::map).single();
+    }
+
+    public CreateCommand normalize(CreateCommand command) {
         var provider = providers.require(command.providerId());
         if (provider.manifest().capabilities().getOrDefault(
             ProviderCapability.REGISTRATION, SupportLevel.UNSUPPORTED) == SupportLevel.UNSUPPORTED) {
@@ -81,42 +129,16 @@ public class RegistrationJobService {
             command.aiCaptchaEnabled() == null
                 ? defaults.aiCaptchaEnabled() : command.aiCaptchaEnabled(),
             command.aiCaptchaMode() == null ? defaults.aiCaptchaMode() : command.aiCaptchaMode());
-        var request = mapper.createObjectNode();
-        request.set("captcha", captcha.toWire(mapper));
-        request.put("attempt_timeout_seconds", attemptTimeoutSeconds);
-        request.put("flow_max_attempts", flowMaxAttempts);
-        request.put("max_consecutive_failure_batches", maxConsecutiveFailureBatches);
-        request.put("proxy_policy", proxyPolicy.name());
-        request.put("headless", headless);
-        if (command.mailDomain() != null && !command.mailDomain().isBlank()) {
-            request.put("mail_domain", command.mailDomain().trim().toLowerCase());
-        }
-        var key = command.idempotencyKey() == null || command.idempotencyKey().isBlank()
-            ? "registration:" + command.providerId() + ":" + UUID.randomUUID()
-            : command.idempotencyKey().trim();
-        var id = UUID.randomUUID();
-        jdbc.sql("""
-            INSERT INTO registration_jobs(
-                id, provider_id, status, idempotency_key, requested, target,
-                concurrency, attempt_interval_seconds, round_interval_seconds,
-                request, result, next_attempt_at)
-            VALUES (:id, :provider, 'PENDING', :key, :requested, :target,
-                    :concurrency, :attemptInterval, :roundInterval,
-                    CAST(:request AS jsonb), '{"account_ids":[]}'::jsonb, CURRENT_TIMESTAMP)
-            ON CONFLICT (idempotency_key) DO NOTHING
-            """)
-            .param("id", id)
-            .param("provider", command.providerId())
-            .param("key", key)
-            .param("requested", attempts)
-            .param("target", target)
-            .param("concurrency", concurrency)
-            .param("attemptInterval", attemptIntervalSeconds)
-            .param("roundInterval", roundIntervalSeconds)
-            .param("request", request.toString())
-            .update();
-        return jdbc.sql("SELECT * FROM registration_jobs WHERE idempotency_key = :key")
-            .param("key", key).query(this::map).single();
+        var mailDomain = command.mailDomain() == null || command.mailDomain().isBlank()
+            ? null : command.mailDomain().trim().toLowerCase();
+        var idempotencyKey = command.idempotencyKey() == null
+            || command.idempotencyKey().isBlank()
+            ? null : command.idempotencyKey().trim();
+        return new CreateCommand(
+            command.providerId().trim(), target, attempts, concurrency,
+            attemptIntervalSeconds, roundIntervalSeconds, attemptTimeoutSeconds,
+            flowMaxAttempts, maxConsecutiveFailureBatches, proxyPolicy, headless,
+            mailDomain, captcha.aiEnabled(), captcha.aiMode(), idempotencyKey);
     }
 
     static int effectiveMaxAttempts(
@@ -141,6 +163,46 @@ public class RegistrationJobService {
         }
         return jdbc.sql("SELECT * FROM registration_jobs ORDER BY created_at DESC LIMIT 200")
             .query(this::map).list();
+    }
+
+    @Transactional(readOnly = true)
+    public RegistrationJobPageView page(
+        String providerId,
+        String status,
+        int page,
+        int size
+    ) {
+        if (page < 0 || size < 10 || size > 100) {
+            throw new IllegalArgumentException("registration job page is outside allowed range");
+        }
+        var normalizedProvider = providerId == null || providerId.isBlank()
+            ? null : providerId.trim();
+        if (normalizedProvider != null) providers.requirePlugin(normalizedProvider);
+        var normalizedStatus = status == null || status.isBlank()
+            ? null : status.trim().toUpperCase();
+        if (normalizedStatus != null && !JOB_STATUSES.contains(normalizedStatus)) {
+            throw new IllegalArgumentException("unknown registration job status: " + status);
+        }
+
+        var predicates = new ArrayList<String>();
+        var parameters = new HashMap<String, Object>();
+        if (normalizedProvider != null) {
+            predicates.add("provider_id = :provider");
+            parameters.put("provider", normalizedProvider);
+        }
+        if (normalizedStatus != null) {
+            predicates.add("status = :status");
+            parameters.put("status", normalizedStatus);
+        }
+        var where = predicates.isEmpty() ? "" : " WHERE " + String.join(" AND ", predicates);
+        var offset = Math.multiplyExact((long) page, size);
+        var items = jdbc.sql("SELECT * FROM registration_jobs" + where
+                + " ORDER BY created_at DESC, id DESC LIMIT :size OFFSET :offset")
+            .params(parameters).param("size", size).param("offset", offset)
+            .query(this::map).list();
+        var total = jdbc.sql("SELECT COUNT(*) FROM registration_jobs" + where)
+            .params(parameters).query(Long.class).single();
+        return RegistrationJobPageView.of(items, total, page, size);
     }
 
     @Transactional(readOnly = true)
@@ -210,6 +272,14 @@ public class RegistrationJobService {
             if (providerId == null || providerId.isBlank()) {
                 throw new IllegalArgumentException("provider_id is required");
             }
+        }
+
+        public CreateCommand withIdempotencyKey(String value) {
+            return new CreateCommand(
+                providerId, target, maxAttempts, concurrency, attemptIntervalSeconds,
+                roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
+                maxConsecutiveFailureBatches, proxyPolicy, headless, mailDomain,
+                aiCaptchaEnabled, aiCaptchaMode, value);
         }
     }
 

@@ -173,6 +173,21 @@ Always respond in Chinese (Simplified).
 - `tasks/current.md`：轻量当前任务板。
 - `tasks/backlog/`、`tasks/in-progress/`、`tasks/done/`：仅用于 S3 长线任务。
 
+## Versioning And Release Rules
+
+- 项目版本统一使用 `x.y.z`，含义遵循 SemVer；版本号按变更中最高影响级别递增，不能为了保持小版本而把新功能或破坏性变更记为补丁版本。
+- `x`（major）仅在存在不向后兼容的系统级变更时递增，例如破坏性 API/数据契约、不可兼容的权限或组织模型重构、必须同步升级客户端的协议变更。递增 `x` 时 `y`、`z` 归零，并必须具备迁移、回滚和升级策略。
+- `y`（minor）在新增向后兼容的业务能力或明显扩展既有能力时递增，例如新增完整功能、可选 API、可回滚数据结构、主要业务流程或管理能力。递增 `y` 时 `z` 归零。
+- `z`（patch）只用于不改变既有契约和能力边界的修复，例如 bug、安全补丁、性能优化、文案和 UI 细节、兼容性索引或精确数据修复。只要新增用户可感知能力，就不能只递增 `z`。
+- 同一业务版本的 Backend、WEB、APP、数据库迁移、镜像 tag、SBOM 和发布记录使用同一个 `x.y.z`；某一端没有代码变化也不得另行编造版本号。
+- 每个包含新代码、配置或迁移的可部署测试候选和可安装 APP 都必须先占用新的正式三段式 `x.y.z`，不得沿用上一个已部署候选的版本号、仅修改 `test.N`/镜像 tag，或复用 Android `versionCode`。候选验收通过时直接提升同一不可变制品；验收后只要再修改源码，就必须按最高影响级别继续递增 `x`、`y` 或 `z`。允许未通过候选形成版本空档，禁止回收版本号。
+- `test.N`、`rc.N` 仅作为 Git tag、镜像 tag、部署注解和发布记录的候选轮次，例如 `v2.0.1-test.1`、`20260816-v2.0.1-performance-test-1`；运行时 Backend、WEB、APP 与 Android `versionName` 仍统一使用该候选已占用的 `x.y.z`。镜像 tag 必须包含日期、版本和用途，且生成后不可覆盖。
+- Android `versionCode` 必须全局唯一且严格递增，统一按 `(x - 1) * 1_000_000 + y * 1_000 + z` 计算，约束 `x >= 1`、`0 <= y,z < 1000`。历史生产基线 `1.0.47 -> code47` 与该公式一致；例如 `1.1.0 -> code1000`、`2.0.0 -> code1000000`。
+- Android `versionName` 使用候选已占用的 `x.y.z`；验收包可追加既有的 `-acceptance` 后缀。Expo `version`、Gradle `versionName`、NPM package/lockfile、WEB 构建版本和发布中心登记必须一致；`runtimeVersion` 固定为 `android-x.y.z-native<versionCode>`。
+- 已发布的正式版本、`versionCode`、APK、R2 对象和镜像不可覆盖或复用。回滚 Backend/WEB 使用上一不可变镜像；APP 出现问题时发布更高版本修复，不能降级或复用旧 `versionCode`。
+- 数据库迁移编号独立连续递增，但迁移文档和 Liquibase tag 必须记录所属业务版本。破坏性迁移至少递增 `x`；纯向后兼容新增结构随 `y`；只修复索引、约束或数据可随 `z`。
+- 发版前必须运行版本契约校验，并核对源码、构建产物、APK 元数据、镜像 tag、迁移 tag、下载中心和发布说明；任一处不一致都必须阻断发布。
+
 ## Verification Rules
 
 - 交付前尽量运行最相关的测试、构建、lint、HTTP/API smoke、浏览器 smoke 或运行态检查。

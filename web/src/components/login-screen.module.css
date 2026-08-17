@@ -7,22 +7,22 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 520px;
   background: #f4f6f7;
-  color: #172126;
+  color: #14213d;
 }
 
 .visual {
   position: relative;
   overflow: hidden;
-  background: #162126;
-  color: #edf4f5;
-  border-right: 1px solid #314047;
+  background: #0b1733;
+  color: #edf5ff;
+  border-right: 1px solid #1b2d4d;
 }
 
 .visual::before {
   content: "";
   position: absolute;
   inset: 72px 58px 116px;
-  border: 1px solid rgb(127 174 177 / 13%);
+  border: 1px solid rgb(96 165 250 / 13%);
   box-shadow: inset 0 0 70px rgb(6 14 18 / 16%);
   animation: frameBreath 9s ease-in-out infinite;
 }
@@ -46,7 +46,7 @@
   height: 105%;
   display: block;
   transform-origin: top center;
-  background: linear-gradient(180deg, rgb(105 216 209 / 10%), rgb(105 216 209 / 2%) 54%, transparent 86%);
+  background: linear-gradient(180deg, rgb(96 165 250 / 10%), rgb(96 165 250 / 2%) 54%, transparent 86%);
   clip-path: polygon(43% 0, 57% 0, 100% 100%, 0 100%);
   filter: blur(12px);
   animation: rayDrift 15s ease-in-out infinite alternate;
@@ -77,8 +77,8 @@
 .surfaceTexture {
   opacity: 0.18;
   background-image:
-    linear-gradient(rgb(132 173 176 / 7%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(132 173 176 / 7%) 1px, transparent 1px);
+    linear-gradient(rgb(96 165 250 / 7%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(96 165 250 / 7%) 1px, transparent 1px);
   background-size: 72px 72px;
   mask-image: linear-gradient(to bottom, transparent 4%, #000 24%, #000 76%, transparent 96%);
 }
@@ -96,7 +96,7 @@
 .visualHeader p {
   margin: 0;
   color: transparent;
-  background: linear-gradient(110deg, #f5f9fa 34%, #9ceae5 49%, #f5f9fa 64%);
+  background: linear-gradient(110deg, #f5f9ff 34%, #93c5fd 49%, #f5f9ff 64%);
   background-size: 240% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -108,7 +108,7 @@
 }
 
 .visualHeader span {
-  color: #819399;
+  color: #8fa5c4;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 9px;
 }
@@ -117,7 +117,7 @@
 .brandMark,
 .hubMark {
   position: relative;
-  border: 1px solid #4bbfb9;
+  border: 1px solid #3b82f6;
 }
 
 .visualMark {
@@ -130,7 +130,7 @@
 .hubMark span {
   position: absolute;
   display: block;
-  background: #69d8d1;
+  background: #60a5fa;
 }
 
 .visualMark span:first-child,
@@ -168,7 +168,7 @@
   position: absolute;
   width: 24px;
   height: 24px;
-  border-color: rgb(105 216 209 / 38%);
+  border-color: rgb(96 165 250 / 38%);
   border-style: solid;
   pointer-events: none;
 }
@@ -191,7 +191,7 @@
   right: 17%;
   top: calc(50% - 72px);
   height: 144px;
-  background: linear-gradient(90deg, transparent, rgb(75 191 185 / 5%) 30%, rgb(75 191 185 / 9%) 50%, rgb(75 191 185 / 5%) 70%, transparent);
+  background: linear-gradient(90deg, transparent, rgb(59 130 246 / 5%) 30%, rgb(59 130 246 / 9%) 50%, rgb(59 130 246 / 5%) 70%, transparent);
   filter: blur(18px);
   animation: topologyBreathe 8s ease-in-out infinite;
 }
@@ -199,8 +199,8 @@
 .topologyFrame {
   position: absolute;
   inset: 0;
-  border-top: 1px solid rgb(105 216 209 / 12%);
-  border-bottom: 1px solid rgb(105 216 209 / 12%);
+  border-top: 1px solid rgb(96 165 250 / 12%);
+  border-bottom: 1px solid rgb(96 165 250 / 12%);
   box-shadow: inset 0 1px rgb(255 255 255 / 1.5%), inset 0 -1px rgb(255 255 255 / 1.5%);
 }
 
@@ -224,9 +224,9 @@
   top: calc(50% - 4px);
   height: 9px;
   background:
-    linear-gradient(to bottom, transparent 4px, rgb(105 216 209 / 64%) 4px, rgb(105 216 209 / 64%) 5px, transparent 5px),
-    repeating-linear-gradient(90deg, transparent 0 31px, rgb(105 216 209 / 20%) 31px 32px);
-  box-shadow: 0 0 14px rgb(105 216 209 / 9%);
+    linear-gradient(to bottom, transparent 4px, rgb(96 165 250 / 64%) 4px, rgb(96 165 250 / 64%) 5px, transparent 5px),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgb(96 165 250 / 20%) 31px 32px);
+  box-shadow: 0 0 14px rgb(96 165 250 / 9%);
 }
 
 .routeBus::before,
@@ -236,8 +236,8 @@
   top: 1px;
   width: 7px;
   height: 7px;
-  border: 1px solid #69d8d1;
-  background: #172126;
+  border: 1px solid #60a5fa;
+  background: #14213d;
 }
 
 .routeBus::before { left: 0; }
@@ -250,9 +250,9 @@
   width: 5px;
   height: 5px;
   display: block;
-  background: #d8f27d;
+  background: #93c5fd;
   border-radius: 50%;
-  box-shadow: 0 0 12px rgb(216 242 125 / 42%);
+  box-shadow: 0 0 12px rgb(147 197 253 / 42%);
   animation: packetFlow 6.8s cubic-bezier(0.42, 0, 0.58, 1) infinite;
 }
 
@@ -264,31 +264,31 @@
   width: 21%;
   height: 92px;
   opacity: 0.82;
-  filter: drop-shadow(0 0 5px rgb(105 216 209 / 8%));
+  filter: drop-shadow(0 0 5px rgb(96 165 250 / 8%));
 }
 
 .branchTopLeft {
   left: 16%;
   top: calc(50% - 92px);
-  background: linear-gradient(to bottom right, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+  background: linear-gradient(to bottom right, transparent 49.55%, rgb(96 165 250 / 46%) 49.8% 50.2%, transparent 50.45%);
 }
 
 .branchBottomLeft {
   left: 16%;
   top: 50%;
-  background: linear-gradient(to top right, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+  background: linear-gradient(to top right, transparent 49.55%, rgb(96 165 250 / 46%) 49.8% 50.2%, transparent 50.45%);
 }
 
 .branchTopRight {
   right: 16%;
   top: calc(50% - 92px);
-  background: linear-gradient(to bottom left, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+  background: linear-gradient(to bottom left, transparent 49.55%, rgb(96 165 250 / 46%) 49.8% 50.2%, transparent 50.45%);
 }
 
 .branchBottomRight {
   right: 16%;
   top: 50%;
-  background: linear-gradient(to top left, transparent 49.55%, rgb(105 216 209 / 46%) 49.8% 50.2%, transparent 50.45%);
+  background: linear-gradient(to top left, transparent 49.55%, rgb(96 165 250 / 46%) 49.8% 50.2%, transparent 50.45%);
 }
 
 .endpoint {
@@ -296,9 +296,9 @@
   width: 10px;
   height: 10px;
   display: block;
-  background: #223138;
-  border: 1px solid #69d8d1;
-  box-shadow: 0 0 0 5px rgb(105 216 209 / 5%), 0 0 16px rgb(105 216 209 / 8%);
+  background: #102a52;
+  border: 1px solid #60a5fa;
+  box-shadow: 0 0 0 5px rgb(96 165 250 / 5%), 0 0 16px rgb(96 165 250 / 8%);
   animation: endpointPulse 4.4s ease-in-out infinite;
 }
 
@@ -306,7 +306,7 @@
   content: "";
   position: absolute;
   inset: -6px;
-  border: 1px solid rgb(105 216 209 / 18%);
+  border: 1px solid rgb(96 165 250 / 18%);
   clip-path: polygon(0 0, 44% 0, 44% 6%, 56% 6%, 56% 0, 100% 0, 100% 44%, 94% 44%, 94% 56%, 100% 56%, 100% 100%, 56% 100%, 56% 94%, 44% 94%, 44% 100%, 0 100%, 0 56%, 6% 56%, 6% 44%, 0 44%);
   animation: reticleSpin 14s linear infinite;
 }
@@ -329,7 +329,7 @@
   gap: 14px;
   padding: 0 18px;
   background: rgb(29 42 48 / 92%);
-  border: 1px solid rgb(105 216 209 / 72%);
+  border: 1px solid rgb(96 165 250 / 72%);
   box-shadow: 0 18px 40px rgb(0 0 0 / 20%), inset 0 1px rgb(255 255 255 / 4%);
   backdrop-filter: blur(8px);
   clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
@@ -343,8 +343,8 @@
   width: 210px;
   height: 102px;
   transform: translate(-50%, -50%);
-  border-top: 1px solid rgb(105 216 209 / 20%);
-  border-bottom: 1px solid rgb(105 216 209 / 20%);
+  border-top: 1px solid rgb(96 165 250 / 20%);
+  border-bottom: 1px solid rgb(96 165 250 / 20%);
   clip-path: polygon(0 0, 18px 0, 18px 1px, calc(100% - 18px) 1px, calc(100% - 18px) 0, 100% 0, 100% 100%, calc(100% - 18px) 100%, calc(100% - 18px) calc(100% - 1px), 18px calc(100% - 1px), 18px 100%, 0 100%);
   animation: hudLock 5.8s ease-in-out infinite;
 }
@@ -357,8 +357,8 @@
   width: 18px;
   height: 4px;
   transform: translateX(-50%);
-  border-left: 1px solid #d8f27d;
-  border-right: 1px solid #d8f27d;
+  border-left: 1px solid #93c5fd;
+  border-right: 1px solid #93c5fd;
   opacity: 0.55;
 }
 
@@ -376,7 +376,7 @@
 }
 
 .hub span {
-  color: #91a4aa;
+  color: #9fb1ca;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 8px;
 }
@@ -387,7 +387,7 @@
   bottom: 0;
   left: 0;
   width: 1px;
-  background: linear-gradient(to bottom, transparent, rgb(216 242 125 / 32%) 30%, rgb(216 242 125 / 32%) 70%, transparent);
+  background: linear-gradient(to bottom, transparent, rgb(147 197 253 / 32%) 30%, rgb(147 197 253 / 32%) 70%, transparent);
   opacity: 0;
   filter: blur(0.5px);
   animation: topologyScan 9s ease-in-out infinite;
@@ -409,7 +409,7 @@
 
 .visualCopy p {
   margin: 6px 0 0;
-  color: #819399;
+  color: #8fa5c4;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 10px;
 }
@@ -423,7 +423,7 @@
   gap: 16px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 9px;
-  color: #819399;
+  color: #8fa5c4;
 }
 
 .visualStatus span {
@@ -436,11 +436,11 @@
   width: 6px;
   height: 6px;
   display: block;
-  background: #69d8d1;
+  background: #60a5fa;
 }
 
 .visualStatus b {
-  color: #d8f27d;
+  color: #bfdbfe;
   font-weight: 650;
 }
 
@@ -462,7 +462,7 @@
   z-index: -1;
   pointer-events: none;
   opacity: 0.48;
-  background: radial-gradient(circle 280px at var(--spotlight-x) var(--spotlight-y), rgb(8 127 140 / 8%), transparent 76%);
+  background: radial-gradient(circle 280px at var(--spotlight-x) var(--spotlight-y), rgb(20 110 245 / 8%), transparent 76%);
   transition: opacity 420ms ease;
 }
 
@@ -473,7 +473,7 @@
   top: 12%;
   bottom: 12%;
   width: 1px;
-  background: linear-gradient(to bottom, transparent, rgb(8 127 140 / 22%), transparent);
+  background: linear-gradient(to bottom, transparent, rgb(20 110 245 / 22%), transparent);
   pointer-events: none;
 }
 
@@ -489,7 +489,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #172126;
+  color: #14213d;
   font-size: 15px;
   font-weight: 720;
 }
@@ -497,11 +497,11 @@
 .brandMark {
   width: 30px;
   height: 30px;
-  border-color: #087f8c;
-  box-shadow: 0 0 0 5px rgb(8 127 140 / 5%);
+  border-color: #146ef5;
+  box-shadow: 0 0 0 5px rgb(20 110 245 / 5%);
 }
 
-.brandMark span { background: #087f8c; }
+.brandMark span { background: #146ef5; }
 
 .brandWord {
   letter-spacing: 0;
@@ -522,9 +522,9 @@
   width: 7px;
   height: 7px;
   display: block;
-  background: #087f8c;
+  background: #146ef5;
   border-radius: 50%;
-  box-shadow: 0 0 0 4px rgb(8 127 140 / 7%), 0 0 12px rgb(8 127 140 / 12%);
+  box-shadow: 0 0 0 4px rgb(20 110 245 / 7%), 0 0 12px rgb(20 110 245 / 12%);
 }
 
 .powState b {
@@ -550,8 +550,8 @@
 }
 
 @keyframes endpointPulse {
-  0%, 100% { opacity: 0.46; box-shadow: 0 0 0 5px rgb(105 216 209 / 4%), 0 0 12px transparent; }
-  50% { opacity: 1; box-shadow: 0 0 0 7px rgb(105 216 209 / 7%), 0 0 18px rgb(105 216 209 / 12%); }
+  0%, 100% { opacity: 0.46; box-shadow: 0 0 0 5px rgb(96 165 250 / 4%), 0 0 12px transparent; }
+  50% { opacity: 1; box-shadow: 0 0 0 7px rgb(96 165 250 / 7%), 0 0 18px rgb(96 165 250 / 12%); }
 }
 
 @keyframes topologyScan {
@@ -585,8 +585,8 @@
 }
 
 @keyframes frameBreath {
-  0%, 100% { border-color: rgb(127 174 177 / 10%); }
-  50% { border-color: rgb(127 174 177 / 17%); }
+  0%, 100% { border-color: rgb(96 165 250 / 10%); }
+  50% { border-color: rgb(96 165 250 / 17%); }
 }
 
 @media (prefers-reduced-motion: reduce) {

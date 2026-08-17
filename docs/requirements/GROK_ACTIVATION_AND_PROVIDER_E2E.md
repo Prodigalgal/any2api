@@ -42,4 +42,4 @@
 - Backend 单元测试覆盖激活动作选择、封禁和边界窗口。
 - Automation 执行 format、lint 和完整 pytest。
 - WEB 执行 lint 与 production build。
-- 0.6.0 不可变镜像通过 CI 后，在临时 namespace 执行逐厂商账号探针并保存脱敏结果。
+- 0.6.1 不可变镜像通过 CI 后，在临时 namespace 执行逐厂商账号探针并保存脱敏结果。

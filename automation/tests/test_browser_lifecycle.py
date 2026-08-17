@@ -83,6 +83,7 @@ def test_browser_flow_bounds_context_cleanup_timeout(monkeypatch) -> None:
 
 def test_browser_launcher_cleans_partially_started_camoufox(monkeypatch) -> None:
     import camoufox.sync_api
+    import camoufox.utils
 
     class Manager:
         def __init__(self) -> None:
@@ -97,6 +98,7 @@ def test_browser_launcher_cleans_partially_started_camoufox(monkeypatch) -> None
 
     manager = Manager()
     monkeypatch.setattr(camoufox.sync_api, "Camoufox", lambda **options: manager)
+    monkeypatch.setattr(camoufox.utils, "launch_options", lambda **options: options)
 
     with (
         pytest.raises(RuntimeError, match="no browser backend available"),
@@ -168,6 +170,7 @@ def test_browser_launcher_replays_geo_aligned_camoufox_config_without_regenerati
 
 def test_browser_launcher_reaps_processes_when_runtime_close_fails(monkeypatch) -> None:
     import camoufox.sync_api
+    import camoufox.utils
 
     class Manager:
         def __enter__(self) -> object:
@@ -179,6 +182,7 @@ def test_browser_launcher_reaps_processes_when_runtime_close_fails(monkeypatch) 
 
     reaped: list[tuple[tuple[int, ...], str]] = []
     monkeypatch.setattr(camoufox.sync_api, "Camoufox", lambda **options: Manager())
+    monkeypatch.setattr(camoufox.utils, "launch_options", lambda **options: options)
     monkeypatch.setattr(browser_lifecycle, "_driver_pid", lambda value: 700)
     monkeypatch.setattr(browser_lifecycle, "_process_tree", lambda pid: [pid, 701])
     monkeypatch.setattr(

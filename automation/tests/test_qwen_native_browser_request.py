@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-import re
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from types import SimpleNamespace
@@ -251,23 +250,8 @@ async def test_qwen_native_transport_holds_the_proxy_lease_through_the_request()
 
 
 @pytest.mark.asyncio
-async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_qwen_native_transport_executes_the_real_request_in_the_page_main_world() -> None:
     body = b'{"data":{"id":"chat"}}'
-    captured_headers: dict[str, str] = {}
-
-    def send(_payload: dict[str, object], headers: dict[str, str]):
-        captured_headers.update(headers)
-        return {
-            "status": 200,
-            "contentType": "application/json",
-            "requestId": "upstream-id",
-            "retryAfter": "",
-            "bodyBase64": base64.b64encode(body).decode(),
-        }, body
-
-    monkeypatch.setattr("any2api_automation.providers.qwen_risk._send_qwen_request", send)
 
     class FakeRequest:
         url = "https://chat.qwen.ai/api/v2/chats/new"
@@ -296,35 +280,25 @@ async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
 
             return resolve()
 
-    class FakeRoute:
-        def __init__(self) -> None:
-            self.aborted = False
-
-        async def abort(self) -> None:
-            self.aborted = True
-
     class FakePage:
         def __init__(self) -> None:
             self.script = ""
-            self.routed = False
-            self.unrouted = False
-            self.route_handler = None
-            self.fake_route = FakeRoute()
-
-        async def route(self, _url: str, handler, **_kwargs: object) -> None:
-            self.routed = True
-            self.route_handler = handler
-
-        async def unroute(self, _url: str) -> None:
-            self.unrouted = True
+            self.payload: dict[str, object] = {}
 
         def expect_request(self, predicate, **_kwargs: object) -> FakeRequestInfo:
             assert predicate(FakeRequest())
             return FakeRequestInfo()
 
-        async def add_script_tag(self, *, content: str) -> None:
-            self.script = content
-            await self.route_handler(self.fake_route)
+        async def evaluate(self, script: str, payload: dict[str, object]) -> dict[str, object]:
+            self.script = script
+            self.payload = payload
+            return {
+                "status": 200,
+                "contentType": "application/json",
+                "requestId": "upstream-id",
+                "retryAfter": "",
+                "bodyBase64": base64.b64encode(body).decode(),
+            }
 
     page = FakePage()
     session = _AccountBrowserSession("account", object(), page, "current")
@@ -344,17 +318,11 @@ async def test_qwen_native_transport_captures_baxia_then_sends_browser_shaped(
 
     result, actual_body = await transport._fetch_in_main_world(session, payload)
 
-    assert "fetch(request.url" in page.script
-    assert page.routed is True
-    assert page.unrouted is True
-    assert page.fake_route.aborted is True
+    assert "await fetch(request.url" in page.script
+    assert "response.body?.getReader()" in page.script
+    assert page.payload["path"] == "/api/v2/chats/new"
     assert "token-value-that-is-long-enough" not in page.script
     assert "Authorization" not in page.script
-    encoded_match = re.search(r"atob\('([^']+)'\)", page.script)
-    assert encoded_match is not None
-    encoded = encoded_match.group(1)
-    assert "bearerToken" not in json.loads(base64.b64decode(encoded))
-    assert captured_headers["bx-v"] == "2.5.37"
     assert result["requestId"] == "upstream-id"
     assert actual_body == body
 

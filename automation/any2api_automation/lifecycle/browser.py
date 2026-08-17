@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -17,6 +18,9 @@ from ..config import settings
 from .proxy import proxy_lease, proxy_parameters
 
 logger = logging.getLogger("any2api_automation.browser")
+BROWSER_EXECUTION_CONTEXT_SCHEMA_VERSION = 1
+MAX_BROWSER_EXECUTION_CONTEXT_BYTES = 4 * 1024 * 1024
+_CAMOUFOX_RUNTIME_CONFIGS: dict[int, dict[str, Any]] = {}
 
 
 def _driver_pid(value: Any) -> int | None:
@@ -330,8 +334,19 @@ def run_browser_flow(
             page = context.new_page()
             try:
                 result = flow(page, context, backend, leased_proxy)
+                execution_context = capture_browser_execution_context(
+                    browser,
+                    context,
+                    page,
+                    backend=backend,
+                    fingerprint_variant=fingerprint_variant,
+                )
                 return replace(
                     result,
+                    credential={
+                        **result.credential,
+                        "browser_execution_context": execution_context,
+                    },
                     metadata={
                         **result.metadata,
                         "fingerprint_variant": fingerprint_variant,
@@ -421,10 +436,13 @@ def launch_browser(
                             **dict(prepared.get("firefox_user_prefs") or {}),
                             **deepcopy(effective_profile.camoufox_firefox_user_prefs),
                         }
-                    manager = Camoufox(from_options=prepared)
+                    persisted_config = camoufox_config_from_options(prepared)
                 else:
-                    manager = Camoufox(**manager_options)
+                    prepared = launch_options(**manager_options)
+                    persisted_config = camoufox_config_from_options(prepared)
+                manager = Camoufox(from_options=prepared)
                 browser = manager.__enter__()
+                _CAMOUFOX_RUNTIME_CONFIGS[id(browser)] = persisted_config
             except Exception as exc:  # noqa: BLE001 - optional third-party backend
                 if manager is not None:
                     with suppress(Exception):
@@ -444,10 +462,13 @@ def launch_browser(
                     ):
                         manager.__exit__(None, None, None)
                 finally:
-                    terminate_residual_browser_process(
-                        driver_processes,
-                        label="camoufox runtime cleanup",
-                    )
+                    try:
+                        terminate_residual_browser_process(
+                            driver_processes,
+                            label="camoufox runtime cleanup",
+                        )
+                    finally:
+                        _CAMOUFOX_RUNTIME_CONFIGS.pop(id(browser), None)
             return
         if backend == "patchright":
             runtime = None
@@ -584,3 +605,92 @@ def credential_from_context(
         if any(marker in lowered for marker in ("token", "auth", "user")):
             credential[key] = value
     return credential
+
+
+def capture_browser_execution_context(
+    browser: Any,
+    context: Any,
+    page: Any,
+    *,
+    backend: str,
+    fingerprint_variant: str,
+) -> dict[str, Any]:
+    storage_state_method = getattr(context, "storage_state", None)
+    if callable(storage_state_method):
+        try:
+            storage_state = storage_state_method(indexed_db=True)
+        except TypeError:
+            storage_state = storage_state_method()
+    else:
+        storage_state = {"cookies": [], "origins": []}
+    evaluate = getattr(page, "evaluate", None)
+    runtime = (
+        evaluate(
+            r"""() => {
+          const gl = document.createElement('canvas').getContext('webgl');
+          const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+          return {
+            user_agent: navigator.userAgent,
+            platform: navigator.platform || '',
+            language: navigator.language || '',
+            languages: Array.from(navigator.languages || []),
+            hardware_concurrency: navigator.hardwareConcurrency || null,
+            device_memory: navigator.deviceMemory || null,
+            timezone_id: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+            timezone_offset_minutes: new Date().getTimezoneOffset(),
+            color_scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+            screen: {
+              width: screen.width,
+              height: screen.height,
+              avail_width: screen.availWidth,
+              avail_height: screen.availHeight,
+              color_depth: screen.colorDepth,
+              pixel_ratio: devicePixelRatio
+            },
+            webgl_vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : '',
+            webgl_renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : ''
+          };
+        }"""
+        )
+        if callable(evaluate)
+        else {}
+    )
+    value: dict[str, Any] = {
+        "schema_version": BROWSER_EXECUTION_CONTEXT_SCHEMA_VERSION,
+        "backend": backend,
+        "fingerprint_variant": fingerprint_variant,
+        "storage_state": storage_state,
+        "runtime_fingerprint": runtime,
+    }
+    camoufox_config = _CAMOUFOX_RUNTIME_CONFIGS.get(id(browser))
+    if backend == "camoufox" and isinstance(camoufox_config, dict):
+        value["camoufox_config"] = deepcopy(camoufox_config)
+    encoded = json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode()
+    if len(encoded) > MAX_BROWSER_EXECUTION_CONTEXT_BYTES:
+        raise RuntimeError("browser execution context exceeds the encrypted credential limit")
+    return value
+
+
+def camoufox_config_from_options(options: dict[str, Any]) -> dict[str, Any]:
+    env = options.get("env")
+    if not isinstance(env, dict):
+        return {}
+    chunks: list[tuple[int, str]] = []
+    for name, raw_value in env.items():
+        if not str(name).startswith("CAMOU_CONFIG_"):
+            continue
+        try:
+            index = int(str(name).rsplit("_", 1)[1])
+        except ValueError:
+            continue
+        chunks.append((index, str(raw_value)))
+    if not chunks:
+        return {}
+    try:
+        config = json.loads("".join(value for _, value in sorted(chunks)))
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("Camoufox emitted an invalid fingerprint configuration") from error
+    if not isinstance(config, dict):
+        raise TypeError("Camoufox emitted a non-object fingerprint configuration")
+    config.pop("addons", None)
+    return config

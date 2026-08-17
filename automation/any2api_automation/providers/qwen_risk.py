@@ -16,7 +16,6 @@ from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
-from curl_cffi import requests as curl_requests
 from fastapi import APIRouter, Depends, HTTPException
 from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
@@ -442,8 +441,6 @@ class QwenNativeBrowserTransport:
             "requestId": str(uuid4()),
             "maximumBytes": maximum,
             "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
-            "browserProfile": session.browser_profile,
-            "proxyUrl": session.proxy_url,
         }
         result, body = await self._fetch_in_main_world(session, payload)
         if len(body) > maximum:
@@ -455,13 +452,8 @@ class QwenNativeBrowserTransport:
         session: _AccountBrowserSession,
         payload: dict[str, Any],
     ) -> tuple[dict[str, Any], bytes]:
-        encoded = base64.b64encode(
-            json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode()
-        ).decode()
-        script = f"""(() => {{
-          const bytes = Uint8Array.from(atob('{encoded}'), value => value.charCodeAt(0));
-          const request = JSON.parse(new TextDecoder().decode(bytes));
-          const headers = {{
+        script = r"""async request => {
+          const headers = {
             'Accept': request.path.includes('/chat/completions')
               ? 'application/json'
               : 'application/json, text/plain, */*',
@@ -470,46 +462,102 @@ class QwenNativeBrowserTransport:
             'Timezone': request.timezone,
             'X-Request-Id': request.requestId,
             'version': request.version
-          }};
+          };
           if (request.path.includes('/chat/completions')) headers['X-Accel-Buffering'] = 'no';
-          fetch(request.url, {{
-            method: request.method,
-            headers,
-            body: request.method === 'GET' ? undefined : request.body,
-            credentials: 'same-origin',
-            cache: 'no-store',
-            referrer: request.referrer
-          }}).catch(() => {{}});
-          if (document.currentScript) document.currentScript.remove();
-        }})();"""
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+          let response;
+          try {
+            response = await fetch(request.url, {
+              method: request.method,
+              headers,
+              body: request.method === 'GET' ? undefined : request.body,
+              credentials: 'same-origin',
+              cache: 'no-store',
+              referrer: request.referrer,
+              signal: controller.signal
+            });
+            const chunks = [];
+            let total = 0;
+            let tail = '';
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            const eventStream = (response.headers.get('content-type') || '')
+              .includes('text/event-stream');
+            const terminal = text => {
+              for (const rawLine of text.split(/\r?\n/)) {
+                const line = rawLine.trimStart();
+                if (!line.startsWith('data:')) continue;
+                const data = line.slice(5).trim();
+                if (data === '[DONE]') return true;
+                try {
+                  const value = JSON.parse(data);
+                  if (value?.['response.completed']) return true;
+                  const choice = value?.choices?.[0] || {};
+                  const delta = choice.delta || choice.message || {};
+                  if (choice.finish_reason || ['completed', 'finished'].includes(value?.status)) {
+                    return true;
+                  }
+                  if (delta.status === 'finished' &&
+                      !['thinking', 'thinking_summary'].includes(delta.phase)) return true;
+                } catch (_) {}
+              }
+              return false;
+            };
+            if (reader) {
+              while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                if (!value?.length) continue;
+                total += value.length;
+                if (total > request.maximumBytes) {
+                  await reader.cancel();
+                  throw new Error('Qwen browser response exceeds the buffered byte limit');
+                }
+                chunks.push(value);
+                if (eventStream) {
+                  tail = (tail + decoder.decode(value, {stream: true})).slice(-65536);
+                  if (terminal(tail)) {
+                    await reader.cancel();
+                    break;
+                  }
+                }
+              }
+            }
+            const body = new Uint8Array(total);
+            let offset = 0;
+            for (const chunk of chunks) {
+              body.set(chunk, offset);
+              offset += chunk.length;
+            }
+            let binary = '';
+            for (let index = 0; index < body.length; index += 32768) {
+              binary += String.fromCharCode(...body.subarray(index, index + 32768));
+            }
+            return {
+              status: response.status,
+              contentType: response.headers.get('content-type') || 'application/octet-stream',
+              requestId: response.headers.get('x-request-id') || request.requestId,
+              retryAfter: response.headers.get('retry-after') || '',
+              bodyBase64: btoa(binary)
+            };
+          } finally {
+            clearTimeout(timeout);
+          }
+        }"""
         target_url = str(payload["url"])
         method = str(payload["method"])
         request_id = str(payload["requestId"])
-        probe_aborted = asyncio.Event()
-
-        # Baxia only hooks the page's main world; abort that probe before the same-process
-        # curl session sends the captured browser-shaped request and consumes its stream.
-        async def abort_probe(route: Any) -> None:
-            try:
-                await route.abort()
-            finally:
-                probe_aborted.set()
-
-        await session.page.route(target_url, abort_probe, times=1)
-        try:
-            async with session.page.expect_request(
-                lambda request: (
-                    request.url == target_url
-                    and request.method == method
-                    and request.headers.get("x-request-id") == request_id
-                ),
-                timeout=30_000,
-            ) as request_info:
-                await session.page.add_script_tag(content=script)
-            browser_request = await request_info.value
-            await asyncio.wait_for(probe_aborted.wait(), timeout=10)
-        finally:
-            await session.page.unroute(target_url)
+        async with session.page.expect_request(
+            lambda request: (
+                request.url == target_url
+                and request.method == method
+                and request.headers.get("x-request-id") == request_id
+            ),
+            timeout=30_000,
+        ) as request_info:
+            result = await session.page.evaluate(script, payload)
+        browser_request = await request_info.value
         request_headers = await browser_request.all_headers()
         baxia_headers = {"bx-ua", "bx-umidtoken", "bx-v"}
         if not baxia_headers.issubset(request_headers):
@@ -518,7 +566,13 @@ class QwenNativeBrowserTransport:
                 payload["path"],
                 sorted(baxia_headers.difference(request_headers)),
             )
-        return await asyncio.to_thread(_send_qwen_request, payload, request_headers)
+        if not isinstance(result, dict):
+            raise TypeError("Qwen browser transport returned an invalid response")
+        try:
+            body = base64.b64decode(str(result.get("bodyBase64") or ""), validate=True)
+        except ValueError as error:
+            raise RuntimeError("Qwen browser transport returned invalid body encoding") from error
+        return result, body
 
     async def _prepare_authenticated_surface(
         self,
@@ -669,6 +723,8 @@ class QwenNativeBrowserTransport:
         if "/chat/completions" in request.path and b"data:" not in body:
             code = _qwen_failure_code(body) or "unknown"
             logger.warning("qwen_native_browser_unexpected_completion code=%s", code)
+        elif "/chat/completions" in request.path and not _qwen_sse_finished(body):
+            logger.warning("qwen_native_browser_incomplete_completion")
         return {
             "status": int(result.get("status") or 502),
             "content_type": content_type,
@@ -1022,56 +1078,6 @@ class QwenNativeBrowserTransport:
                 session.browser_fingerprint, runtime
             )
             session.fingerprint_digest = qwen_fingerprint_digest(session.browser_fingerprint)
-
-
-def _send_qwen_request(
-    payload: dict[str, Any],
-    browser_headers: dict[str, str],
-) -> tuple[dict[str, Any], bytes]:
-    maximum = int(payload["maximumBytes"])
-    headers = {
-        name: value
-        for name, value in browser_headers.items()
-        if name.lower() not in {"content-length", "host", "connection"}
-    }
-    with curl_requests.Session(
-        impersonate=str(payload["browserProfile"]),
-        http_version="v2",
-        default_headers=False,
-    ) as client:
-        proxy_url = str(payload.get("proxyUrl") or "")
-        response = client.request(
-            str(payload["method"]),
-            str(payload["url"]),
-            headers=headers,
-            data=None if payload["method"] == "GET" else str(payload["body"]),
-            timeout=int(payload["timeoutMs"]) / 1000,
-            allow_redirects=False,
-            stream=True,
-            proxy=proxy_url or None,
-        )
-        try:
-            body_buffer = bytearray()
-            event_stream = "text/event-stream" in response.headers.get("content-type", "")
-            for chunk in response.iter_content(chunk_size=8192):
-                if not chunk:
-                    continue
-                body_buffer.extend(chunk)
-                if len(body_buffer) > maximum:
-                    raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
-                if event_stream and _qwen_sse_finished(bytes(body_buffer[-65_536:])):
-                    break
-            body = bytes(body_buffer)
-            result = {
-                "status": response.status_code,
-                "contentType": response.headers.get("content-type", "application/octet-stream"),
-                "requestId": response.headers.get("x-request-id", str(payload["requestId"])),
-                "retryAfter": response.headers.get("retry-after", ""),
-                "bodyBase64": base64.b64encode(body).decode(),
-            }
-            return result, body
-        finally:
-            response.close()
 
 
 def _qwen_sse_finished(body: bytes) -> bool:

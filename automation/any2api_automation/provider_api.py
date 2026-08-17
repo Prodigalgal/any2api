@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import time
 from typing import Any, Literal
@@ -158,6 +159,8 @@ async def transport_request(provider_id: str, request: ProviderTransportRequest)
         "body": request.body,
     }
     try:
+        if inspect.iscoroutinefunction(provider.transport_request):
+            return await provider.transport_request(payload)
         return await asyncio.to_thread(provider.transport_request, payload)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -181,6 +184,8 @@ async def transport_stream(
     }
     try:
         stream = provider.transport_stream(payload)
+        if inspect.isawaitable(stream):
+            stream = await stream
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return StreamingResponse(stream, media_type="application/x-ndjson")

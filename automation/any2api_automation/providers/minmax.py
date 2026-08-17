@@ -8,13 +8,14 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse
 
 import httpx
-from curl_cffi.requests import Session as CurlSession
 
 from ..config import settings as core_settings
 from ..lifecycle.account import (
@@ -36,6 +37,7 @@ from ..lifecycle.browser import (
 from ..lifecycle.mail import Mailbox
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from .base import AutomationProvider, AutomationProviderManifest
+from .minmax_browser import MinmaxOfficialBrowserTransport
 from .minmax_settings import settings
 
 
@@ -67,8 +69,15 @@ class MinmaxAutomationProvider(AutomationProvider):
         mail, mailbox, password = await prepare_registration(payload)
         attempts = flow_max_attempts(payload, 1)
         last_error: Exception | None = None
-        for _ in range(attempts):
+        for attempt in range(1, attempts + 1):
             try:
+                attempt_payload = {**browser_payload}
+                if not str(attempt_payload.get("proxy_affinity_key") or "").strip():
+                    attempt_payload["proxy_affinity_key"] = _minmax_proxy_affinity(
+                        mailbox.address, attempt
+                    )
+                if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
+                    attempt_payload["strict_proxy_affinity"] = True
                 result = await asyncio.to_thread(
                     run_browser_flow,
                     lambda page, context, backend, proxy_url: _account_browser_flow(
@@ -76,7 +85,14 @@ class MinmaxAutomationProvider(AutomationProvider):
                     ),
                     preferred=self.manifest.browser_backend,
                     fallback=self.manifest.fallback_backend,
-                    payload=browser_payload,
+                    payload=attempt_payload,
+                )
+                result = replace(
+                    result,
+                    credential={
+                        **result.credential,
+                        "proxy_affinity_key": attempt_payload["proxy_affinity_key"],
+                    },
                 )
                 return result.response()
             except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
@@ -109,56 +125,27 @@ class MinmaxAutomationProvider(AutomationProvider):
         current = credential(payload)
         return await asyncio.to_thread(_keepalive_sync, current, payload)
 
-    def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         method, path, body = _transport_input(payload, stream=False)
         current = credential(payload)
-        config = settings()
-        with proxy_lease(
-            check_url=config.minmax_base_url,
-            reject_redirect_hosts=("minimaxi.com",),
-            **_optional_proxy_parameters(payload),
-        ) as proxy_url:
-            url, headers = _signed_request(path, method, body, current, stream=False)
-            with CurlSession(impersonate=_impersonate(current)) as client:
-                response = client.request(
-                    method,
-                    url,
-                    data=body if method == "POST" else None,
-                    headers=headers,
-                    proxy=proxy_url or None,
-                    timeout=120,
-                )
-        return {"status": response.status_code, "body": response.text}
+        async with _transport_proxy_lease(payload) as proxy_url:
+            return await official_browser_transport.request(
+                current, method, path, body, proxy_url
+            )
 
-    def transport_stream(self, payload: dict[str, Any]) -> Iterator[bytes]:
+    async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
         method, path, body = _transport_input(payload, stream=True)
         current = credential(payload)
-        config = settings()
-        with proxy_lease(
-            check_url=config.minmax_base_url,
-            reject_redirect_hosts=("minimaxi.com",),
-            **_optional_proxy_parameters(payload),
-        ) as proxy_url:
-            url, headers = _signed_request(path, method, body, current, stream=True)
-            with (
-                CurlSession(impersonate=_impersonate(current)) as client,
-                client.stream(
-                    method,
-                    url,
-                    data=body,
-                    headers=headers,
-                    proxy=proxy_url or None,
-                    timeout=core_settings().registration_timeout_seconds,
-                ) as response,
+        async with _transport_proxy_lease(payload) as proxy_url:
+            async for event in official_browser_transport.stream(
+                current, method, path, body, proxy_url
             ):
-                yield _transport_frame("status", status=response.status_code)
-                if response.status_code >= 400:
-                    yield _transport_frame("error", data=response.text[:16_384])
-                    return
-                for line in response.iter_lines():
-                    text = line.decode("utf-8", "replace") if isinstance(line, bytes) else line
-                    if text.startswith("data:") and text[5:].strip():
-                        yield _transport_frame("data", data=text[5:].strip())
+                event_type = str(event.get("type") or "error")
+                details = {key: value for key, value in event.items() if key != "type"}
+                yield _transport_frame(event_type, **details)
+
+    async def close(self) -> None:
+        await official_browser_transport.close()
 
 
 def _keepalive_sync(current: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -554,6 +541,21 @@ def _optional_proxy_parameters(payload: dict[str, Any]) -> dict[str, Any]:
     return proxy_parameters(payload)
 
 
+@asynccontextmanager
+async def _transport_proxy_lease(payload: dict[str, Any]):
+    config = settings()
+    lease = proxy_lease(
+        check_url=config.minmax_base_url,
+        reject_redirect_hosts=("minimaxi.com",),
+        **_optional_proxy_parameters(payload),
+    )
+    proxy_url = await asyncio.to_thread(lease.__enter__)
+    try:
+        yield proxy_url
+    finally:
+        await asyncio.to_thread(lease.__exit__, None, None, None)
+
+
 def _browser_name(user_agent: str, captured: str) -> str:
     if "Firefox/" in user_agent:
         return "Firefox"
@@ -739,3 +741,16 @@ def _script_urls(base_url: str, html: str, allowed: set[str | None]) -> list[str
         for url in scripts[:40]
         if urlparse(url).scheme == "https" and urlparse(url).hostname in allowed
     ]
+
+
+official_browser_transport = MinmaxOfficialBrowserTransport(settings().minmax_base_url)
+
+
+def _minmax_proxy_affinity(email: str, attempt: int) -> str:
+    if attempt < 1:
+        raise ValueError("MinMax proxy affinity attempt must be positive")
+    normalized = email.strip().lower()
+    if not normalized:
+        raise ValueError("MinMax proxy affinity requires an email address")
+    digest = hashlib.sha256(f"{normalized}\0{attempt}".encode()).hexdigest()[:32]
+    return f"minmax-{digest}"

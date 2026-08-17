@@ -15,7 +15,8 @@ Java Spring Boot Modular Monolith ---- PostgreSQL
     |          +---- provider upstreams
     |
     +---- Python Automation Platform
-              browser, registration, captcha, proxy, mail, risk headers
+              browser, registration, captcha, proxy, mail,
+              official browser runtime transport
 ```
 
 The Java application can run multiple replicas. Every replica contains all modules. PostgreSQL row claims and Redis leases coordinate duplicate schedulers and concurrent inference; module boundaries do not imply deployment boundaries.
@@ -38,6 +39,11 @@ record usage and release the lease
 Provider-specific paths use the discovered provider ID, for example `/acme/v1`. The unified `/v1`
 route requires a namespaced model such as `acme/acme-ultra`. A conflict between path and model
 namespace returns HTTP 400. Cross-provider fallback is never implicit.
+
+For protected web providers, the Java adapter still owns the semantic request and canonical event
+contract, while Python restores the encrypted account browser context and invokes the current
+official frontend request module. This exception is capability-gated; stable documented APIs remain
+native Java transports. See ADR 0005.
 
 ## High-level and low-level boundaries
 

@@ -98,21 +98,22 @@ public final class MinmaxProvider implements InferenceProvider {
         var credential = MinmaxCredential.from(account);
         var prepared = requestMapper.prepare(request);
         var proxyPool = proxyPool();
-        var affinityKey = account.accountId() + ":" + request.requestId();
+        var affinityKey = proxyAffinityKey(account);
         return mediaUploader.upload(account.credential(), prepared.media(), proxyPool, affinityKey)
             .flatMapMany(attachments -> resolveAgent(account.credential(), credential,
-                    prepared.agentRole(), proxyPool, affinityKey)
+                    prepared.agentRole(), proxyPool, affinityKey, context)
                 .flatMap(agentId -> createSession(account.credential(), agentId,
-                    prepared.sessionModel(), proxyPool, affinityKey))
+                    prepared.sessionModel(), proxyPool, affinityKey, context))
                 .flatMapMany(sessionId -> streamMessage(account.credential(), sessionId,
-                    prepared, attachments, request.requestId(), proxyPool, affinityKey)));
+                    prepared, attachments, request.requestId(), proxyPool, affinityKey, context)));
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
         MinmaxCredential.from(account);
+        var affinityKey = proxyAffinityKey(account);
         return transport.request("GET", "/archon/api/v1/config", "", account.credential(),
-                proxyPool(), account.accountId().toString())
+                proxyPool(), affinityKey)
             .flatMap(response -> responseJson(response).flatMap(body -> {
                     var models = new java.util.LinkedHashMap<String, DiscoveredModel>();
                     for (var item : body.path("models")) {
@@ -137,12 +138,13 @@ public final class MinmaxProvider implements InferenceProvider {
         MinmaxCredential credential,
         String role,
         Map<String, Object> proxyPool,
-        String affinityKey
+        String affinityKey,
+        ProviderExecutionContext context
     ) {
         if (!credential.agentId().isBlank()) return Mono.just(credential.agentId());
         return transport.request("GET", "/archon/api/v1/agent?limit=20", "", rawCredential,
                 proxyPool, affinityKey)
-            .flatMap(this::responseJson)
+            .flatMap(response -> responseJson(response, context))
             .flatMap(body -> {
                     for (var agent : body.path("agents")) {
                         if (role.equalsIgnoreCase(agent.path("agent_role").asText(""))) {
@@ -159,13 +161,14 @@ public final class MinmaxProvider implements InferenceProvider {
         String agentId,
         String model,
         Map<String, Object> proxyPool,
-        String affinityKey
+        String affinityKey,
+        ProviderExecutionContext context
     ) {
         var body = mapper.createObjectNode().put("model", model);
         var bodyText = mapper.writeValueAsString(body);
         var path = "/archon/api/v1/agent/" + agentId + "/session";
         return transport.request("POST", path, bodyText, rawCredential, proxyPool, affinityKey)
-            .flatMap(this::responseJson)
+            .flatMap(response -> responseJson(response, context))
             .flatMap(bodyNode -> {
                     var sessionId = bodyNode.path("session_id").asText("").trim();
                     return sessionId.isBlank()
@@ -182,7 +185,8 @@ public final class MinmaxProvider implements InferenceProvider {
         List<ObjectNode> attachments,
         String requestId,
         Map<String, Object> proxyPool,
-        String affinityKey
+        String affinityKey,
+        ProviderExecutionContext context
     ) {
         var body = mapper.createObjectNode();
         body.put("content", prepared.content());
@@ -208,6 +212,8 @@ public final class MinmaxProvider implements InferenceProvider {
                             summarize(code, frame.path("data").asText(""))));
                     } else if ("data".equals(type) && status.get() < 400) {
                         sink.next(frame.path("data").asText(""));
+                    } else if ("credential_patch".equals(type)) {
+                        context.acceptCredentialPatch(frame.path("data"));
                     }
                 })
                 .cast(String.class)
@@ -230,6 +236,19 @@ public final class MinmaxProvider implements InferenceProvider {
             return Mono.error(new MinmaxUpstreamException(502,
                 "MinMax upstream returned invalid JSON"));
         }
+    }
+
+    private Mono<JsonNode> responseJson(
+        MinmaxTransportClient.TransportResponse response,
+        ProviderExecutionContext context
+    ) {
+        context.acceptCredentialPatch(response.credentialPatch());
+        return responseJson(response);
+    }
+
+    private static String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
     private Map<String, Object> proxyPool() {

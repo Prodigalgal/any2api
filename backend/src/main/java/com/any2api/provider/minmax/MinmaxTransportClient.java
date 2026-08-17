@@ -40,7 +40,8 @@ final class MinmaxTransportClient {
             .retrieve()
             .bodyToMono(JsonNode.class)
             .map(value -> new TransportResponse(
-                value.path("status").asInt(502), value.path("body").asText("")));
+                value.path("status").asInt(502), value.path("body").asText(""),
+                value.path("credential_patch").deepCopy()));
     }
 
     Flux<JsonNode> stream(
@@ -87,5 +88,5 @@ final class MinmaxTransportClient {
         if (!token.isBlank()) headers.setBearerAuth(token);
     }
 
-    record TransportResponse(int status, String body) {}
+    record TransportResponse(int status, String body, JsonNode credentialPatch) {}
 }

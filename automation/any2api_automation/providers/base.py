@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Awaitable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,10 +38,14 @@ class AutomationProvider(ABC):
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError(f"keepalive is not implemented for {self.manifest.id}")
 
-    def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def transport_request(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         raise NotImplementedError(f"request transport is not implemented for {self.manifest.id}")
 
-    def transport_stream(self, payload: dict[str, Any]) -> Iterator[bytes]:
+    def transport_stream(
+        self, payload: dict[str, Any]
+    ) -> Iterator[bytes] | AsyncIterator[bytes]:
         raise NotImplementedError(f"stream transport is not implemented for {self.manifest.id}")
 
     def routers(self) -> tuple[Any, ...]:

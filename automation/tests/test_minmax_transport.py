@@ -5,6 +5,7 @@ from any2api_automation.providers.minmax import (
     _browser_name,
     _client_hint_headers,
     _impersonate,
+    _minmax_proxy_affinity,
     _optional_proxy_parameters,
     _signed_request,
     _transport_input,
@@ -57,6 +58,13 @@ def test_lifecycle_and_inference_are_direct_without_a_scoped_pool() -> None:
     assert parameters["dynamic"] is False
     assert parameters["explicit_url"] == ""
     assert parameters["node_urls"] is None
+
+
+def test_minmax_registration_proxy_affinity_is_stable_per_identity_and_attempt() -> None:
+    first = _minmax_proxy_affinity("Account@Example.test", 1)
+
+    assert first == _minmax_proxy_affinity("account@example.test", 1)
+    assert first != _minmax_proxy_affinity("account@example.test", 2)
 
 
 def test_stream_signature_uses_the_dedicated_official_origin(monkeypatch) -> None:

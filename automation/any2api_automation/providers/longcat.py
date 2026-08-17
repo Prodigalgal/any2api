@@ -105,9 +105,7 @@ class LongcatAutomationProvider(AutomationProvider):
         trace.mark(RegistrationStage.MAILBOX_CREATED)
         flow_payload = {**payload}
         flow_payload.setdefault("proxy_check_url", _login_url())
-        if current.get("proxy_affinity_key") and not flow_payload.get(
-            "proxy_affinity_key"
-        ):
+        if current.get("proxy_affinity_key") and not flow_payload.get("proxy_affinity_key"):
             flow_payload["proxy_affinity_key"] = current["proxy_affinity_key"]
             flow_payload["strict_proxy_affinity"] = True
         result = await asyncio.to_thread(

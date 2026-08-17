@@ -36,9 +36,7 @@ def test_minmax_storage_injection_rejects_cross_provider_state() -> None:
     )
 
     assert [cookie["name"] for cookie in result["cookies"]] == ["minmax"]
-    assert [origin["origin"] for origin in result["origins"]] == [
-        "https://agent.minimax.io"
-    ]
+    assert [origin["origin"] for origin in result["origins"]] == ["https://agent.minimax.io"]
 
 
 @pytest.mark.asyncio
@@ -115,9 +113,9 @@ async def test_legacy_minmax_account_persists_the_generated_camoufox_config() ->
         camoufox_config={"navigator.userAgent": "Mozilla/5.0 Firefox/150.0"},
     )
 
-    patch = await MinmaxOfficialBrowserTransport(
-        "https://agent.minimax.io"
-    )._credential_patch(session, {"token": "token", "user_id": "user"})
+    patch = await MinmaxOfficialBrowserTransport("https://agent.minimax.io")._credential_patch(
+        session, {"token": "token", "user_id": "user"}
+    )
 
     execution = patch["browser_execution_context"]
     assert execution["schema_version"] == 1

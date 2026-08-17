@@ -4,6 +4,7 @@ import {
   CloseOutlined,
   LoginOutlined,
   MonitorHeartOutlined,
+  PlayCircleOutlineOutlined,
   RefreshOutlined,
 } from "@mui/icons-material";
 import {
@@ -44,13 +45,14 @@ export function AccountDetailDialog({ account, providerName, reauthenticationSup
     queryClient.invalidateQueries({ queryKey: ["accounts-page"] }),
   ]);
   const reauthenticate = useMutation({ mutationFn: () => api.reauthenticateAccount(account.id), onSuccess: invalidate });
+  const activate = useMutation({ mutationFn: () => api.activateAccount(account.id), onSuccess: invalidate });
   const update = useMutation({
-    mutationFn: (enabled: boolean) => api.updateAccount(account.id, { enabled, status: enabled ? "ACTIVE" : "DISABLED" }),
+    mutationFn: () => api.updateAccount(account.id, { enabled: false, status: "DISABLED" }),
     onSuccess: invalidate,
   });
   const metadata = useMemo(() => metadataEntries(detail.data?.account.metadata ?? {}), [detail.data?.account.metadata]);
   const current = detail.data?.account ?? account;
-  const error = detail.error ?? events.error ?? reauthenticate.error ?? update.error;
+  const error = detail.error ?? events.error ?? reauthenticate.error ?? activate.error ?? update.error;
 
   return (
     <Dialog
@@ -83,13 +85,22 @@ export function AccountDetailDialog({ account, providerName, reauthenticationSup
         </Tabs>
         <Box sx={{ flex: 1 }} />
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          {reauthenticationSupported ? <Button size="small" startIcon={<LoginOutlined />} disabled={reauthenticate.isPending || !current.enabled} onClick={() => reauthenticate.mutate()} sx={{ display: { xs: "none", sm: "inline-flex" } }}>重新认证</Button> : null}
+          {!current.enabled ? (
+            <Button size="small" startIcon={<PlayCircleOutlineOutlined />} disabled={activate.isPending || current.status === "BANNED"} onClick={() => activate.mutate()}>激活入池</Button>
+          ) : reauthenticationSupported ? (
+            <Button size="small" startIcon={<LoginOutlined />} disabled={reauthenticate.isPending} onClick={() => reauthenticate.mutate()}>重新认证</Button>
+          ) : null}
           <Button size="small" variant="contained" startIcon={<MonitorHeartOutlined />} onClick={onProbe}>发起探测</Button>
         </Stack>
       </Box>
       <DialogContent sx={{ p: 0, overflow: "auto" }}>
         {detail.isLoading ? <DetailSkeleton /> : null}
         {error ? <Alert severity="error" sx={{ m: 2 }}>{error.message}</Alert> : null}
+        {activate.data ? (
+          <Alert severity="info" sx={{ m: 2 }}>
+            激活任务已排队：{activate.data.action === "PROBE" ? "真实探测" : "重新认证后探测"}
+          </Alert>
+        ) : null}
         {!detail.isLoading && tab === 0 && detail.data ? (
           <Box>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(5, 1fr)" }, borderBottom: 1, borderColor: "divider" }}>
@@ -112,8 +123,16 @@ export function AccountDetailDialog({ account, providerName, reauthenticationSup
                   <DetailField label="最近成功" value={formatTime(detail.data.account.lastSuccessAt)} />
                 </DetailGrid>
                 <Stack direction="row" spacing={1.25} sx={{ minHeight: 54, px: 2, alignItems: "center", borderTop: 1, borderColor: "divider" }}>
-                  <Switch size="small" checked={current.enabled} disabled={update.isPending} onChange={(_, enabled) => update.mutate(enabled)} />
-                  <Box><Typography sx={{ fontSize: 12.5, fontWeight: 680 }}>参与推理路由</Typography><Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{current.enabled ? "已启用" : "已停用"}</Typography></Box>
+                  <Switch
+                    size="small"
+                    checked={current.enabled}
+                    disabled={update.isPending || activate.isPending || (!current.enabled && current.status === "BANNED")}
+                    onChange={(_, enabled) => {
+                      if (enabled) activate.mutate();
+                      else update.mutate();
+                    }}
+                  />
+                  <Box><Typography sx={{ fontSize: 12.5, fontWeight: 680 }}>参与推理路由</Typography><Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{current.enabled ? "已启用" : activate.isPending ? "正在排队激活" : "已停用，开启需通过探针"}</Typography></Box>
                 </Stack>
               </DetailSection>
               <DetailSection title="环境与亲和">

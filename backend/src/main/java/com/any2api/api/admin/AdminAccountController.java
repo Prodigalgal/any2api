@@ -10,6 +10,8 @@ import com.any2api.account.AccountPageView;
 import com.any2api.account.AccountSearchQuery;
 import com.any2api.observability.OperationEventService;
 import com.any2api.lifecycle.AccountProbeService;
+import com.any2api.lifecycle.AccountActivationService;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -35,17 +37,20 @@ public class AdminAccountController {
     private final AccountCommandService commands;
     private final OperationEventService events;
     private final AccountProbeService probes;
+    private final AccountActivationService activations;
 
     public AdminAccountController(
         AccountManagementService accounts,
         AccountCommandService commands,
         OperationEventService events,
-        AccountProbeService probes
+        AccountProbeService probes,
+        AccountActivationService activations
     ) {
         this.accounts = accounts;
         this.commands = commands;
         this.events = events;
         this.probes = probes;
+        this.activations = activations;
     }
 
     @GetMapping("/page")
@@ -96,6 +101,17 @@ public class AdminAccountController {
         return accounts.reauthenticate(accountId);
     }
 
+    @PostMapping("/{accountId}/activate")
+    public AccountActivationService.Result activate(
+        @PathVariable UUID accountId,
+        @RequestBody(required = false) ActivationRequest request
+    ) {
+        var seconds = request == null || request.spreadSeconds() == null
+            ? AccountActivationService.DEFAULT_SPREAD.toSeconds()
+            : request.spreadSeconds();
+        return activations.activate(accountId, Duration.ofSeconds(seconds));
+    }
+
     @PostMapping("/{accountId}/probe")
     public Mono<AccountProbeService.Result> probe(@PathVariable UUID accountId) {
         return probes.probe(accountId);
@@ -139,6 +155,9 @@ public class AdminAccountController {
     }
 
     public record StateRequest(AccountStatus status, Boolean enabled) {
+    }
+
+    public record ActivationRequest(Long spreadSeconds) {
     }
 
 }

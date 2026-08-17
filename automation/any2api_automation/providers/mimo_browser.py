@@ -21,6 +21,7 @@ from .runtime_rules import (
 
 logger = logging.getLogger("any2api_automation.providers.mimo_browser")
 
+
 def _locate_bridge(rule: RuntimeRule) -> str:
     markers = json.dumps(rule.discovery_markers.get("requestModule", ()))
     chat_capability = json.dumps(rule.capabilities.get("chat", ""))
@@ -196,9 +197,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
     ) -> AsyncIterator[dict[str, Any]]:
         body = build_mimo_chat_request(semantic_command)
         async with self.lock:
-            session, selection, reports = await self._select_session(
-                credential, proxy_url, plan
-            )
+            session, selection, reports = await self._select_session(credential, proxy_url, plan)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
             request_id = uuid4().hex
@@ -224,10 +223,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                     await queue.put(
                         {
                             "type": "error",
-                            "data": (
-                                "official browser stream failed "
-                                f"({type(error).__name__})"
-                            ),
+                            "data": (f"official browser stream failed ({type(error).__name__})"),
                         }
                     )
                 finally:
@@ -258,9 +254,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                         data_seen = True
                     yield event
                 if pending_error is None and data_seen and 200 <= status < 300:
-                    success_report = successful_canary(
-                        plan, selection, session.build_id
-                    )
+                    success_report = successful_canary(plan, selection, session.build_id)
                     if success_report is not None:
                         yield {"type": "runtime_canary", **success_report}
                 if terminal_data is not None:
@@ -346,9 +340,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                 session = await self.session_for(credential, proxy_url, plan.candidate)
                 return session, plan.candidate, reports
             except RuntimeRuleDiscoveryError as error:
-                reports.append(
-                    runtime_canary(plan.candidate, "", "FAILED", str(error))
-                )
+                reports.append(runtime_canary(plan.candidate, "", "FAILED", str(error)))
         session = await self.session_for(credential, proxy_url, plan.active)
         return session, plan.active, reports
 
@@ -358,9 +350,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         queue = self._active_stream_queue
         if queue is None:
             return
-        queue.put_nowait(
-            {key: value for key, value in event.items() if key != "requestId"}
-        )
+        queue.put_nowait({key: value for key, value in event.items() if key != "requestId"})
 
 
 def build_mimo_chat_request(command: dict[str, Any]) -> dict[str, Any]:
@@ -396,8 +386,7 @@ def build_mimo_chat_request(command: dict[str, Any]) -> dict[str, Any]:
                 function = call.get("function") if isinstance(call, dict) else {}
                 function = function if isinstance(function, dict) else {}
                 calls.append(
-                    f"TOOL_CALL: {function.get('name', '')}"
-                    f"({function.get('arguments', '{}')})"
+                    f"TOOL_CALL: {function.get('name', '')}({function.get('arguments', '{}')})"
                 )
             conversation.append("[ASSISTANT]\n" + "\n".join(calls))
         else:
@@ -445,9 +434,7 @@ def default_runtime_plan() -> RuntimePlan:
         session_max_age_seconds=900,
         canary_timeout_seconds=60,
         build_asset_markers=("xiaomimimo.com",),
-        discovery_markers={
-            "requestModule": ("/open-apis/bot/chat", "genUploadInfo")
-        },
+        discovery_markers={"requestModule": ("/open-apis/bot/chat", "genUploadInfo")},
         capabilities={"chat": "completions", "models": "getConfig"},
         endpoint_paths={
             "chat": "/open-apis/bot/chat",
@@ -525,4 +512,8 @@ def _tool_prompt(tools: list[Any], parallel: bool, required: bool) -> str:
 
 
 def _number(value: Any, fallback: float) -> float:
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else fallback
+    return (
+        float(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        else fallback
+    )

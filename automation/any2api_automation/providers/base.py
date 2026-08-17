@@ -43,9 +43,7 @@ class AutomationProvider(ABC):
     ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         raise NotImplementedError(f"request transport is not implemented for {self.manifest.id}")
 
-    def transport_stream(
-        self, payload: dict[str, Any]
-    ) -> Iterator[bytes] | AsyncIterator[bytes]:
+    def transport_stream(self, payload: dict[str, Any]) -> Iterator[bytes] | AsyncIterator[bytes]:
         raise NotImplementedError(f"stream transport is not implemented for {self.manifest.id}")
 
     def routers(self) -> tuple[Any, ...]:

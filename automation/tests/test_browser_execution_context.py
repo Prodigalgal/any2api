@@ -25,9 +25,7 @@ def test_browser_execution_context_persists_storage_and_runtime_fingerprint() ->
             }
 
     browser = object()
-    _CAMOUFOX_RUNTIME_CONFIGS[id(browser)] = {
-        "navigator.userAgent": "Mozilla/5.0 Firefox/150.0"
-    }
+    _CAMOUFOX_RUNTIME_CONFIGS[id(browser)] = {"navigator.userAgent": "Mozilla/5.0 Firefox/150.0"}
 
     result = capture_browser_execution_context(
         browser,

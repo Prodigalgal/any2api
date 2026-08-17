@@ -61,6 +61,15 @@ public class LifecycleScheduleService {
 
     @Transactional
     public void scheduleReauthentication(UUID accountId, String providerId) {
+        scheduleReauthentication(accountId, providerId, Duration.ofMinutes(5));
+    }
+
+    @Transactional
+    public void scheduleReauthentication(
+        UUID accountId,
+        String providerId,
+        Duration spread
+    ) {
         lifecycleLock(accountId, providerId);
         var active = activeCount(accountId, providerId, "reauthenticate");
         if (active > 0) return;
@@ -72,7 +81,7 @@ public class LifecycleScheduleService {
             .update();
         var generation = nextGeneration(accountId, providerId);
         schedule(accountId, providerId, "reauthenticate", generation,
-            Instant.now().plus(deterministicJitter(accountId, generation, Duration.ofMinutes(5))));
+            Instant.now().plus(deterministicJitter(accountId, generation, spread)));
     }
 
     private void lifecycleLock(UUID accountId, String providerId) {

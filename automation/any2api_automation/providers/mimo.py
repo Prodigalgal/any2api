@@ -89,9 +89,9 @@ class MimoAutomationProvider(AutomationProvider):
                         "mimo_browser_context_bootstrap_pending error_type=%s",
                         type(error).__name__,
                     )
-                    registered.setdefault("metadata", {})[
-                        "browser_context_pending"
-                    ] = type(error).__name__
+                    registered.setdefault("metadata", {})["browser_context_pending"] = type(
+                        error
+                    ).__name__
                 return registered
             except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
                 last_error = error
@@ -173,11 +173,7 @@ class MimoAutomationProvider(AutomationProvider):
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
         plan_value = payload.get("runtime_plan")
-        plan = (
-            parse_runtime_plan(plan_value, "mimo")
-            if isinstance(plan_value, dict)
-            else None
-        )
+        plan = parse_runtime_plan(plan_value, "mimo") if isinstance(plan_value, dict) else None
         async with transport_proxy_lease(
             payload,
             check_url=settings().mimo_base_url,

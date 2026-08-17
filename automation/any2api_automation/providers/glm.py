@@ -83,9 +83,7 @@ class GlmAutomationProvider(AutomationProvider):
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
         browser_payload = {**payload}
-        if current.get("proxy_affinity_key") and not browser_payload.get(
-            "proxy_affinity_key"
-        ):
+        if current.get("proxy_affinity_key") and not browser_payload.get("proxy_affinity_key"):
             browser_payload["proxy_affinity_key"] = current["proxy_affinity_key"]
             browser_payload["strict_proxy_affinity"] = True
         result = await asyncio.to_thread(
@@ -156,17 +154,14 @@ class GlmAutomationProvider(AutomationProvider):
                             {
                                 "type": "error",
                                 "data": (
-                                    "official browser stream failed "
-                                    f"({type(error).__name__})"
+                                    f"official browser stream failed ({type(error).__name__})"
                                 ),
                             }
                         ),
                         loop,
                     ).result()
                 finally:
-                    asyncio.run_coroutine_threadsafe(
-                        queue.put({"type": "done"}), loop
-                    ).result()
+                    asyncio.run_coroutine_threadsafe(queue.put({"type": "done"}), loop).result()
 
             task = asyncio.create_task(asyncio.to_thread(worker))
             try:
@@ -175,9 +170,7 @@ class GlmAutomationProvider(AutomationProvider):
                     event_type = str(event.get("type") or "error")
                     if event_type == "done":
                         break
-                    details = {
-                        key: value for key, value in event.items() if key != "type"
-                    }
+                    details = {key: value for key, value in event.items() if key != "type"}
                     yield transport_frame(event_type, **details)
             finally:
                 await task

@@ -171,7 +171,9 @@ class MinmaxOfficialBrowserTransport:
             try:
                 raw_body = base64.b64decode(str(result.get("bodyBase64") or ""), validate=True)
             except ValueError as error:
-                raise RuntimeError("MinMax official browser returned invalid body encoding") from error
+                raise RuntimeError(
+                    "MinMax official browser returned invalid body encoding"
+                ) from error
             patch = await self._credential_patch(session, credential)
             return {
                 "status": int(result.get("status") or 502),
@@ -251,14 +253,16 @@ class MinmaxOfficialBrowserTransport:
                 await self._close_session(self._session)
                 self._session = None
 
-    async def _session_for(
-        self, credential: dict[str, Any], proxy_url: str
-    ) -> _Session:
+    async def _session_for(self, credential: dict[str, Any], proxy_url: str) -> _Session:
         key = _account_key(credential)
         incoming_digest = _execution_context_digest(credential)
         current = self._session
         if current is not None:
-            closed = current.page.is_closed() if callable(getattr(current.page, "is_closed", None)) else False
+            closed = (
+                current.page.is_closed()
+                if callable(getattr(current.page, "is_closed", None))
+                else False
+            )
             accepted_digests = {current.input_digest, current.state_digest}
             if (
                 closed
@@ -284,7 +288,9 @@ class MinmaxOfficialBrowserTransport:
         state_digest: str,
     ) -> _Session:
         execution = _execution_context(credential)
-        backend = str(execution.get("backend") or credential.get("registration_backend") or "camoufox")
+        backend = str(
+            execution.get("backend") or credential.get("registration_backend") or "camoufox"
+        )
         storage_state = _minmax_storage_state(execution)
         browser_manager = None
         playwright = None

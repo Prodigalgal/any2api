@@ -7,9 +7,10 @@ store in the current source inventory.
 
 The default mode is a secret-silent dry run. `--apply` requires
 `ANY2API_MIGRATION_ADMIN_PASSWORD` and imports every source row as `PENDING`, disabled, with lifecycle
-scheduling suppressed. `--schedule-probes` is a separate phase and spreads first probes over the
-configured window. A healthy provider probe promotes an account to `ACTIVE`; a stored row alone never
-does.
+scheduling suppressed. `--schedule-activations` is a separate phase and spreads activation actions
+over the configured window. Providers with reauthentication support refresh credentials first; other
+providers execute a real inference probe. A healthy provider probe promotes an account to `ACTIVE`;
+a stored row alone never does.
 
 The report contains counts, inventory hashes, and hashed failure references. It never contains
 credentials, email addresses, or raw external account IDs. SQLite snapshots and reports containing

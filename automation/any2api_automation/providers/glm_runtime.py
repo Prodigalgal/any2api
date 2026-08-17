@@ -147,9 +147,7 @@ class GlmOfficialBrowserTransport:
         )
         execution = _execution_context(credential)
         backend = str(
-            execution.get("backend")
-            or credential.get("registration_backend")
-            or "camoufox"
+            execution.get("backend") or credential.get("registration_backend") or "camoufox"
         )
         with _launch_browser(backend, execution, proxy_url) as launched:
             actual_backend, browser, camoufox_config = launched
@@ -175,9 +173,7 @@ class GlmOfficialBrowserTransport:
                     "token => localStorage.setItem('token', token)",
                     token,
                 )
-                selection, runtime_build_id, reports = _select_runtime(
-                    page, plan
-                )
+                selection, runtime_build_id, reports = _select_runtime(page, plan)
                 for report in reports:
                     yield {"type": "runtime_canary", **report}
                 chat_id = page.evaluate(_CREATE_CHAT, {"chat": command["chat"]})
@@ -190,9 +186,7 @@ class GlmOfficialBrowserTransport:
                         "prompt": command["prompt"],
                         "ticket": ticket,
                         "timeoutMs": timeout_seconds * 1000,
-                        "apiBase": selection.rules.endpoint_paths.get(
-                            "apiBase", "/api/v2"
-                        ),
+                        "apiBase": selection.rules.endpoint_paths.get("apiBase", "/api/v2"),
                     },
                 )
                 status = int(metadata.get("status") or 502)
@@ -207,9 +201,7 @@ class GlmOfficialBrowserTransport:
                         data_seen = True
                         yield {"type": "data", "data": body}
                 if data_seen and 200 <= status < 300:
-                    success_report = successful_canary(
-                        plan, selection, runtime_build_id
-                    )
+                    success_report = successful_canary(plan, selection, runtime_build_id)
                     if success_report is not None:
                         yield {"type": "runtime_canary", **success_report}
                 yield {
@@ -309,9 +301,7 @@ def _load_official_runtime(
         timeout=selection.rules.canary_timeout_seconds * 1000,
     )
     if not response.ok:
-        raise RuntimeError(
-            f"GLM official runtime asset returned HTTP {response.status}"
-        )
+        raise RuntimeError(f"GLM official runtime asset returned HTTP {response.status}")
     source = response.text()
     runtime_build_id = build_id(
         [
@@ -444,9 +434,7 @@ def build_glm_command(
 ) -> dict[str, Any]:
     _validate_semantic_command(command)
     timestamp = (
-        timestamp_ms
-        if timestamp_ms is not None
-        else round(datetime.now(UTC).timestamp() * 1000)
+        timestamp_ms if timestamp_ms is not None else round(datetime.now(UTC).timestamp() * 1000)
     )
     user_message_id = str(uuid4())
     prompt = _last_user_prompt(command["messages"])
@@ -473,9 +461,7 @@ def build_glm_command(
         },
         "tags": [],
         "flags": [],
-        "features": [
-            {"server": "tool_selector_h", "status": "hidden", "type": "tool_selector"}
-        ],
+        "features": [{"server": "tool_selector_h", "status": "hidden", "type": "tool_selector"}],
         "mcp_servers": [],
         "enable_thinking": thinking,
         "reasoning_effort": effort,
@@ -672,8 +658,7 @@ def _filter_storage_state(state: dict[str, Any]) -> dict[str, Any]:
     filtered_cookies = [
         deepcopy(cookie)
         for cookie in cookies
-        if isinstance(cookie, dict)
-        and _allowed_host(str(cookie.get("domain") or ""))
+        if isinstance(cookie, dict) and _allowed_host(str(cookie.get("domain") or ""))
     ]
     filtered_origins = []
     for origin in origins:
@@ -704,8 +689,7 @@ def _add_credential_cookies(context: Any, credential: dict[str, Any]) -> None:
             "sameSite": "Lax",
         }
         for name, value in values.items()
-        if re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,128}", str(name))
-        and str(value)
+        if re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,128}", str(name)) and str(value)
     ]
     if cookies:
         context.add_cookies(cookies)

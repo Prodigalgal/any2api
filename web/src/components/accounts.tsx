@@ -8,6 +8,7 @@ import {
   ManageSearchOutlined,
   MonitorHeartOutlined,
   MoreVertOutlined,
+  PlayCircleOutlineOutlined,
   RefreshOutlined,
   SearchOutlined,
 } from "@mui/icons-material";
@@ -91,6 +92,7 @@ export function Accounts() {
   const [traceAccount, setTraceAccount] = useState<Account | null>(null);
   const [detailAccount, setDetailAccount] = useState<Account | null>(null);
   const [probeAccount, setProbeAccount] = useState<Account | null>(null);
+  const [activationNotice, setActivationNotice] = useState("");
   const debouncedSearch = useDebouncedValue(search.trim(), 300);
 
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
@@ -145,6 +147,15 @@ export function Accounts() {
     mutationFn: (id: string) => api.reauthenticateAccount(id),
     onSuccess: invalidateAccounts,
   });
+  const activate = useMutation({
+    mutationFn: (id: string) => api.activateAccount(id),
+    onSuccess: async (result) => {
+      setActivationNotice(
+        `${result.providerId} 激活任务已排队：${result.action === "PROBE" ? "真实探测" : "重新认证后探测"}`,
+      );
+      await invalidateAccounts();
+    },
+  });
   const commands = useQuery({
     queryKey: ["account-commands", commandAccount?.id],
     queryFn: () => api.accountCommands(commandAccount!.id),
@@ -166,7 +177,7 @@ export function Accounts() {
   };
   const filtersActive = Boolean(provider || status || enabled || expiry !== "ANY" || search);
   const error = accounts.error ?? commands.error ?? executeCommand.error
-    ?? update.error ?? remove.error ?? reauthenticate.error;
+    ?? update.error ?? remove.error ?? reauthenticate.error ?? activate.error;
 
   return (
     <PageContainer>
@@ -295,6 +306,11 @@ export function Accounts() {
       </ToolbarSurface>
 
       {error ? <Alert severity="error" sx={{ mb: 2 }}>{error.message}</Alert> : null}
+      {activationNotice ? (
+        <Alert severity="info" onClose={() => setActivationNotice("")} sx={{ mb: 2 }}>
+          {activationNotice}
+        </Alert>
+      ) : null}
 
       <DataSurface>
         <LinearProgress
@@ -336,11 +352,17 @@ export function Accounts() {
                   updating={update.isPending && update.variables?.account.id === account.id}
                   removing={remove.isPending && remove.variables === account.id}
                   reauthenticating={reauthenticate.isPending && reauthenticate.variables === account.id}
+                  activating={activate.isPending && activate.variables === account.id}
                   probeSupported={probeProviders.has(account.providerId)}
+                  reauthenticationSupported={reauthenticationProviders.has(account.providerId)}
                   onOpenDetails={() => setDetailAccount(account)}
-                  onToggle={(nextEnabled) => update.mutate({ account, nextEnabled })}
+                  onToggle={(nextEnabled) => {
+                    if (nextEnabled) activate.mutate(account.id);
+                    else update.mutate({ account, nextEnabled: false });
+                  }}
                   onCommands={(event) => openCommands(event, account)}
                   onReauthenticate={() => reauthenticate.mutate(account.id)}
+                  onActivate={() => activate.mutate(account.id)}
                   onProbe={() => setProbeAccount(account)}
                   onEvents={() => setTraceAccount(account)}
                   onDelete={() => {
@@ -448,11 +470,14 @@ const AccountRow = memo(function AccountRow({
   updating,
   removing,
   reauthenticating,
+  activating,
   probeSupported,
+  reauthenticationSupported,
   onOpenDetails,
   onToggle,
   onCommands,
   onReauthenticate,
+  onActivate,
   onProbe,
   onEvents,
   onDelete,
@@ -462,11 +487,14 @@ const AccountRow = memo(function AccountRow({
   updating: boolean;
   removing: boolean;
   reauthenticating: boolean;
+  activating: boolean;
   probeSupported: boolean;
+  reauthenticationSupported: boolean;
   onOpenDetails: () => void;
   onToggle: (enabled: boolean) => void;
   onCommands: (event: MouseEvent<HTMLElement>) => void;
   onReauthenticate: () => void;
+  onActivate: () => void;
   onProbe: () => void;
   onEvents: () => void;
   onDelete: () => void;
@@ -506,7 +534,7 @@ const AccountRow = memo(function AccountRow({
         <Switch
           size="small"
           checked={account.enabled}
-          disabled={updating}
+          disabled={updating || activating || (!account.enabled && account.status === "BANNED")}
           onChange={(_, nextEnabled) => onToggle(nextEnabled)}
           slotProps={{ input: { "aria-label": `${account.externalId} 启用状态` } }}
         />
@@ -537,13 +565,23 @@ const AccountRow = memo(function AccountRow({
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title="重新认证">
-            <span>
-              <IconButton size="small" disabled={reauthenticating || !account.enabled} onClick={onReauthenticate}>
-                <LoginOutlined sx={{ fontSize: 18 }} />
-              </IconButton>
-            </span>
-          </Tooltip>
+          {!account.enabled ? (
+            <Tooltip title="激活入池">
+              <span>
+                <IconButton size="small" disabled={activating || account.status === "BANNED"} onClick={onActivate}>
+                  <PlayCircleOutlineOutlined sx={{ fontSize: 18 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : reauthenticationSupported ? (
+            <Tooltip title="重新认证">
+              <span>
+                <IconButton size="small" disabled={reauthenticating} onClick={onReauthenticate}>
+                  <LoginOutlined sx={{ fontSize: 18 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : null}
           <Tooltip title="删除账号">
             <span>
               <IconButton size="small" color="error" disabled={removing} onClick={onDelete}>

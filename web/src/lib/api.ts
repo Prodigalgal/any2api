@@ -139,6 +139,13 @@ export type AccountProbeResult = {
   account: Account;
 };
 
+export type AccountActivationResult = {
+  accountId: string;
+  providerId: string;
+  action: "PROBE" | "REAUTHENTICATE";
+  spreadSeconds: number;
+};
+
 export type TokenLimits = {
   maxContextTokens: number | null;
   maxInputTokens: number | null;
@@ -582,6 +589,10 @@ export const api = {
   ),
   reauthenticateAccount: (id: string) => adminJson<Account>(
     `/api/admin/v1/accounts/${id}/reauthenticate`, { method: "POST" },
+  ),
+  activateAccount: (id: string, spreadSeconds = 300) => adminJson<AccountActivationResult>(
+    `/api/admin/v1/accounts/${id}/activate`,
+    { method: "POST", body: JSON.stringify({ spreadSeconds }) },
   ),
   accountCommands: (id: string) => adminJson<AccountCommand[]>(
     `/api/admin/v1/accounts/${id}/commands`,

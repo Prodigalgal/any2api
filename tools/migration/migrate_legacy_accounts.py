@@ -2,8 +2,8 @@
 """Stage provider-scoped accounts from legacy SQLite stores into Any2API.
 
 The script never writes credentials to its report. Imports are idempotent and are
-staged as PENDING/disabled without lifecycle scheduling. Probes are an explicit,
-bounded second phase.
+staged as PENDING/disabled without lifecycle scheduling. Activation is an explicit,
+bounded second phase that performs reauthentication or a real provider probe.
 """
 
 from __future__ import annotations
@@ -297,10 +297,10 @@ class Any2ApiClient:
             },
         )
 
-    def schedule_probe(self, account_id: str, spread_seconds: int) -> None:
+    def schedule_activation(self, account_id: str, spread_seconds: int) -> None:
         self.request(
             "POST",
-            f"/api/admin/v1/accounts/{urllib.parse.quote(account_id)}/probe",
+            f"/api/admin/v1/accounts/{urllib.parse.quote(account_id)}/activate",
             {"spreadSeconds": spread_seconds},
         )
 
@@ -408,8 +408,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--admin-username", default="admin")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--schedule-probes", action="store_true")
-    parser.add_argument("--probe-spread-seconds", type=int, default=86_400)
+    parser.add_argument(
+        "--schedule-activations",
+        "--schedule-probes",
+        dest="schedule_activations",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--activation-spread-seconds",
+        "--probe-spread-seconds",
+        dest="activation_spread_seconds",
+        type=int,
+        default=86_400,
+    )
     return parser.parse_args()
 
 
@@ -448,7 +459,7 @@ def main() -> int:
         "failed": 0,
         "failures": [],
         "reconciled": False,
-        "scheduledProbes": 0,
+        "scheduledActivations": 0,
     }
     if args.apply:
         password = os.environ.get("ANY2API_MIGRATION_ADMIN_PASSWORD", "")
@@ -483,18 +494,20 @@ def main() -> int:
             {"provider": key[0], "ref": ref(key)} for key in missing
         ]
         report["reconciled"] = report["failed"] == 0 and not missing
-        if args.schedule_probes and report["reconciled"]:
-            if not 1 <= args.probe_spread_seconds <= 604_800:
-                raise ValueError("probe spread must be between 1 second and 7 days")
+        if args.schedule_activations and report["reconciled"]:
+            if not 1 <= args.activation_spread_seconds <= 604_800:
+                raise ValueError("activation spread must be between 1 second and 7 days")
             for key in sorted(expected_keys):
-                client.schedule_probe(str(target_by_key[key]["id"]), args.probe_spread_seconds)
-                report["scheduledProbes"] += 1
+                client.schedule_activation(
+                    str(target_by_key[key]["id"]), args.activation_spread_seconds
+                )
+                report["scheduledActivations"] += 1
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     print(json.dumps({key: report[key] for key in (
         "mode", "sourceCounts", "sourceTotal", "expectedTargetCounts",
         "expectedTargetTotal", "imported", "updated", "failed", "reconciled",
-        "scheduledProbes")}, separators=(",", ":")))
+        "scheduledActivations")}, separators=(",", ":")))
     return 0 if report["failed"] == 0 else 1
 
 

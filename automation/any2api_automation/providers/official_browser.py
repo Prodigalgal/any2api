@@ -59,9 +59,7 @@ class OfficialBrowserRuntime:
         self.provider_id = provider_id
         self.base_url = base_url.rstrip("/")
         self.allowed_domain_suffixes = tuple(
-            value.strip().lower().lstrip(".")
-            for value in allowed_domain_suffixes
-            if value.strip()
+            value.strip().lower().lstrip(".") for value in allowed_domain_suffixes if value.strip()
         )
         self.identity_fields = identity_fields
         self.lock = asyncio.Lock()
@@ -92,8 +90,7 @@ class OfficialBrowserRuntime:
                 or current.proxy_url != proxy_url
                 or current.rule_revision != selection.revision
                 or current.rule_digest != rule_digest(selection)
-                or time.monotonic() - current.created_at
-                >= selection.rules.session_max_age_seconds
+                or time.monotonic() - current.created_at >= selection.rules.session_max_age_seconds
                 or (incoming_digest and incoming_digest not in accepted_digests)
             ):
                 await self._close_session(current)
@@ -151,9 +148,7 @@ class OfficialBrowserRuntime:
         if not isinstance(value, dict):
             raise TypeError(f"{self.provider_id} browser execution context must be an object")
         if value.get("schema_version") != SCHEMA_VERSION:
-            raise ValueError(
-                f"{self.provider_id} browser execution context schema is unsupported"
-            )
+            raise ValueError(f"{self.provider_id} browser execution context schema is unsupported")
         return deepcopy(value)
 
     def execution_context_digest(self, credential: dict[str, Any]) -> str:
@@ -164,14 +159,11 @@ class OfficialBrowserRuntime:
         cookies = state.get("cookies", [])
         origins = state.get("origins", [])
         if not isinstance(cookies, list) or not isinstance(origins, list):
-            raise TypeError(
-                f"{self.provider_id} browser storage state collections must be arrays"
-            )
+            raise TypeError(f"{self.provider_id} browser storage state collections must be arrays")
         filtered_cookies = [
             deepcopy(cookie)
             for cookie in cookies
-            if isinstance(cookie, dict)
-            and self._allowed_host(str(cookie.get("domain") or ""))
+            if isinstance(cookie, dict) and self._allowed_host(str(cookie.get("domain") or ""))
         ]
         filtered_origins = []
         for origin in origins:
@@ -311,9 +303,7 @@ class OfficialBrowserRuntime:
         if state is None:
             return None
         if not isinstance(state, dict):
-            raise TypeError(
-                f"{self.provider_id} browser storage state must be an object"
-            )
+            raise TypeError(f"{self.provider_id} browser storage state must be an object")
         return self.filter_storage_state(state)
 
     def _account_key(self, credential: dict[str, Any]) -> str:
@@ -321,15 +311,12 @@ class OfficialBrowserRuntime:
             value = str(credential.get(field) or "").strip().lower()
             if value:
                 return hashlib.sha256(value.encode()).hexdigest()
-        raise ValueError(
-            f"{self.provider_id} browser transport requires a stable account identity"
-        )
+        raise ValueError(f"{self.provider_id} browser transport requires a stable account identity")
 
     def _allowed_host(self, value: str) -> bool:
         host = value.strip().lower().lstrip(".")
         return any(
-            host == suffix or host.endswith("." + suffix)
-            for suffix in self.allowed_domain_suffixes
+            host == suffix or host.endswith("." + suffix) for suffix in self.allowed_domain_suffixes
         )
 
 
@@ -390,9 +377,7 @@ def context_options(execution: dict[str, Any], backend: str) -> dict[str, Any]:
     height = int(screen.get("height") or 900)
     options.update(
         {
-            "user_agent": str(
-                runtime.get("user_agent") or core_settings().provider_user_agent
-            ),
+            "user_agent": str(runtime.get("user_agent") or core_settings().provider_user_agent),
             "locale": str(runtime.get("language") or "en-US"),
             "timezone_id": str(runtime.get("timezone_id") or "UTC"),
             "viewport": {"width": width, "height": height},

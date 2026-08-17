@@ -99,10 +99,7 @@ def successful_canary(
     selection: RuntimeRuleSelection,
     current_build_id: str,
 ) -> dict[str, Any] | None:
-    is_candidate = (
-        plan.candidate is not None
-        and plan.candidate.revision == selection.revision
-    )
+    is_candidate = plan.candidate is not None and plan.candidate.revision == selection.revision
     if not is_candidate and plan.active_build_id == current_build_id:
         return None
     return runtime_canary(selection, current_build_id, "PASSED")
@@ -168,9 +165,7 @@ def _parse_rule(value: Any) -> RuntimeRule:
     session_age = _bounded_integer(
         value.get("sessionMaxAgeSeconds"), 60, 86_400, "sessionMaxAgeSeconds"
     )
-    timeout = _bounded_integer(
-        value.get("canaryTimeoutSeconds"), 5, 300, "canaryTimeoutSeconds"
-    )
+    timeout = _bounded_integer(value.get("canaryTimeoutSeconds"), 5, 300, "canaryTimeoutSeconds")
     build_markers = _string_list(value.get("buildAssetMarkers"), 1, 16)
     discovery = _string_list_map(value.get("discoveryMarkers"), require_value=True)
     capabilities = _string_map(value.get("capabilities"), paths=False)

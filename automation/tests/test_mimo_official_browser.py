@@ -43,9 +43,7 @@ def test_mimo_storage_injection_rejects_cross_provider_state() -> None:
     )
 
     assert [cookie["name"] for cookie in result["cookies"]] == ["mimo"]
-    assert [origin["origin"] for origin in result["origins"]] == [
-        "https://aistudio.xiaomimimo.com"
-    ]
+    assert [origin["origin"] for origin in result["origins"]] == ["https://aistudio.xiaomimimo.com"]
 
 
 def test_mimo_builds_provider_body_from_semantic_command() -> None:
@@ -90,9 +88,7 @@ async def test_mimo_transport_normalizes_startup_failure_to_error_frame(
         )
     ]
 
-    assert frames == [
-        {"type": "error", "data": "official browser stream failed (RuntimeError)"}
-    ]
+    assert frames == [{"type": "error", "data": "official browser stream failed (RuntimeError)"}]
 
 
 def _semantic_command() -> dict[str, object]:
@@ -126,9 +122,7 @@ def _runtime_plan() -> dict[str, object]:
                 "sessionMaxAgeSeconds": 900,
                 "canaryTimeoutSeconds": 60,
                 "buildAssetMarkers": ["xiaomimimo.com"],
-                "discoveryMarkers": {
-                    "requestModule": ["/open-apis/bot/chat", "genUploadInfo"]
-                },
+                "discoveryMarkers": {"requestModule": ["/open-apis/bot/chat", "genUploadInfo"]},
                 "capabilities": {"chat": "completions", "models": "getConfig"},
                 "endpointPaths": {
                     "chat": "/open-apis/bot/chat",

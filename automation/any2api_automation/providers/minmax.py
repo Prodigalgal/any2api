@@ -129,9 +129,7 @@ class MinmaxAutomationProvider(AutomationProvider):
         method, path, body = _transport_input(payload, stream=False)
         current = credential(payload)
         async with _transport_proxy_lease(payload) as proxy_url:
-            return await official_browser_transport.request(
-                current, method, path, body, proxy_url
-            )
+            return await official_browser_transport.request(current, method, path, body, proxy_url)
 
     async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
         method, path, body = _transport_input(payload, stream=True)

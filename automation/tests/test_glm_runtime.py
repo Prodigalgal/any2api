@@ -48,9 +48,7 @@ def test_glm_storage_injection_rejects_cross_provider_state() -> None:
     )
 
     assert [cookie["name"] for cookie in result["cookies"]] == ["glm"]
-    assert [origin["origin"] for origin in result["origins"]] == [
-        "https://chat.z.ai"
-    ]
+    assert [origin["origin"] for origin in result["origins"]] == ["https://chat.z.ai"]
 
 
 @pytest.mark.parametrize(
@@ -68,9 +66,7 @@ def test_glm_rejects_incomplete_semantic_commands(command: dict[str, object]) ->
 
 
 def test_glm_builds_current_chat_envelopes_in_automation() -> None:
-    command = build_glm_command(
-        _semantic_command(), "user@example.test", 1_785_337_442_000
-    )
+    command = build_glm_command(_semantic_command(), "user@example.test", 1_785_337_442_000)
 
     assert command["chat"]["models"] == ["glm-5.2"]
     assert command["completion"]["model"] == "glm-5.2"
@@ -108,9 +104,7 @@ async def test_glm_transport_normalizes_worker_startup_failure_to_error_frame(
         )
     ]
 
-    assert frames == [
-        {"type": "error", "data": "official browser stream failed (RuntimeError)"}
-    ]
+    assert frames == [{"type": "error", "data": "official browser stream failed (RuntimeError)"}]
 
 
 def _semantic_command() -> dict[str, object]:

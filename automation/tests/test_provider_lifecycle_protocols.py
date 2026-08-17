@@ -680,6 +680,49 @@ def test_grok_reauthentication_preserves_new_sso_when_oauth_is_pending(monkeypat
     assert result["credential_patch"]["auth_stage"] == "registered_pending_auth"
 
 
+def test_grok_forced_sso_refresh_skips_existing_tokens(monkeypatch) -> None:
+    from any2api_automation.providers import grok
+
+    @contextmanager
+    def no_proxy(**_kwargs):
+        yield ""
+
+    refresh_attempted = False
+
+    def refresh(*_args):
+        nonlocal refresh_attempted
+        refresh_attempted = True
+        return {"access_token": "stale-access"}
+
+    monkeypatch.setattr(grok, "proxy_lease", no_proxy)
+    monkeypatch.setattr(grok, "_refresh_oauth_token", refresh)
+    monkeypatch.setattr(
+        grok,
+        "_password_relogin_sso",
+        lambda *_args: ("new-sso", {"sso": "new-sso", "sso-rw": "new-sso"}),
+    )
+    monkeypatch.setattr(
+        grok,
+        "_exchange_sso_token",
+        lambda sso, _proxy: {"access_token": f"access-for-{sso}", "expires_in": 3600},
+    )
+
+    result = grok._reauthenticate_sync(
+        {"force_sso_refresh": True},
+        {
+            "email": "old@example.test",
+            "password": "Password1!",
+            "refresh_token": "old-refresh",
+            "sso": "old-sso",
+        },
+    )
+
+    assert refresh_attempted is False
+    assert result["healthy"] is True
+    assert result["recovery_attempts"] == ["password_relogin", "new_sso_oauth"]
+    assert result["credential_patch"]["sso"] == "new-sso"
+
+
 def test_grok_saved_sso_supports_legacy_credential_shapes() -> None:
     from any2api_automation.providers.grok import _saved_sso
 

@@ -17,6 +17,7 @@ import com.any2api.observability.RequestCorrelation;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.BrowserTransportClient;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class GlmProvider implements InferenceProvider {
+    private static final Duration BROWSER_ACCOUNT_PROBE_TIMEOUT = Duration.ofMinutes(2);
     private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
         Map.of(
             "enable_thinking", ProviderProtocolContract.OptionType.BOOLEAN,
@@ -81,6 +83,8 @@ public final class GlmProvider implements InferenceProvider {
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
+
+    @Override public Duration accountProbeTimeout() { return BROWSER_ACCOUNT_PROBE_TIMEOUT; }
 
     @Override
     public void validateCredential(JsonNode credential) {

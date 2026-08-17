@@ -84,6 +84,37 @@ public class LifecycleScheduleService {
             Instant.now().plus(deterministicJitter(accountId, generation, spread)));
     }
 
+    @Transactional
+    public void scheduleRecoveryProbe(
+        UUID accountId,
+        String providerId,
+        Duration spread
+    ) {
+        lifecycleLock(accountId, providerId);
+        jdbc.sql("""
+            UPDATE scheduled_actions SET status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
+            WHERE provider_id = :providerId AND entity_type = 'ACCOUNT' AND entity_id = :entityId
+              AND action_family = 'reauthenticate' AND status = 'PENDING'
+            """).param("providerId", providerId).param("entityId", accountId.toString())
+            .update();
+        var generation = nextGeneration(accountId, providerId);
+        var dueAt = Instant.now().plus(deterministicJitter(accountId, generation, spread));
+        var updated = jdbc.sql("""
+            UPDATE scheduled_actions
+            SET due_at = :dueAt, attempts = 0, last_error_class = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE provider_id = :providerId AND entity_type = 'ACCOUNT'
+              AND entity_id = :entityId AND action_family = 'keepalive'
+              AND status = 'PENDING'
+            """)
+            .param("dueAt", PostgresResultValues.timestamp(dueAt))
+            .param("providerId", providerId)
+            .param("entityId", accountId.toString())
+            .update();
+        if (updated > 0 || activeCount(accountId, providerId, "keepalive") > 0) return;
+        schedule(accountId, providerId, "keepalive", generation, dueAt);
+    }
+
     private void lifecycleLock(UUID accountId, String providerId) {
         locks.lockTransaction(providerId + ":" + accountId + ":lifecycle");
     }

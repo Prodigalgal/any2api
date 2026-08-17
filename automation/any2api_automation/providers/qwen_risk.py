@@ -548,16 +548,34 @@ class QwenNativeBrowserTransport:
         target_url = str(payload["url"])
         method = str(payload["method"])
         request_id = str(payload["requestId"])
-        async with session.page.expect_request(
-            lambda request: (
-                request.url == target_url
-                and request.method == method
-                and request.headers.get("x-request-id") == request_id
-            ),
-            timeout=30_000,
-        ) as request_info:
-            result = await session.page.evaluate(script, payload)
-        browser_request = await request_info.value
+        failure_reasons: list[str] = []
+
+        def capture_request_failure(request: Any) -> None:
+            if request.url == target_url and request.method == method:
+                failure_reasons.append(_qwen_network_failure_reason(request.failure))
+
+        session.page.on("requestfailed", capture_request_failure)
+        try:
+            async with session.page.expect_request(
+                lambda request: (
+                    request.url == target_url
+                    and request.method == method
+                    and request.headers.get("x-request-id") == request_id
+                ),
+                timeout=30_000,
+            ) as request_info:
+                result = await session.page.evaluate(script, payload)
+            browser_request = await request_info.value
+        except Exception as error:
+            reason = failure_reasons[-1] if failure_reasons else type(error).__name__
+            logger.warning(
+                "qwen_native_browser_request_failed path=%s failure=%s",
+                payload["path"],
+                reason,
+            )
+            raise RuntimeError(f"Qwen browser request failed: {reason}") from error
+        finally:
+            session.page.remove_listener("requestfailed", capture_request_failure)
         request_headers = await browser_request.all_headers()
         baxia_headers = {"bx-ua", "bx-umidtoken", "bx-v"}
         if not baxia_headers.issubset(request_headers):
@@ -1078,6 +1096,11 @@ class QwenNativeBrowserTransport:
                 session.browser_fingerprint, runtime
             )
             session.fingerprint_digest = qwen_fingerprint_digest(session.browser_fingerprint)
+
+
+def _qwen_network_failure_reason(value: object) -> str:
+    reason = " ".join(str(value or "unknown").split())
+    return reason[:160] or "unknown"
 
 
 def _qwen_sse_finished(body: bytes) -> bool:

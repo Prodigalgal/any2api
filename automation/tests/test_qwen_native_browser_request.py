@@ -22,6 +22,7 @@ from any2api_automation.providers.qwen_risk import (
     NativeBrowserRequest,
     QwenNativeBrowserTransport,
     _AccountBrowserSession,
+    _qwen_network_failure_reason,
     _qwen_punish_url,
     _qwen_sse_finished,
 )
@@ -284,6 +285,14 @@ async def test_qwen_native_transport_executes_the_real_request_in_the_page_main_
         def __init__(self) -> None:
             self.script = ""
             self.payload: dict[str, object] = {}
+            self.listeners: dict[str, object] = {}
+
+        def on(self, event: str, callback: object) -> None:
+            self.listeners[event] = callback
+
+        def remove_listener(self, event: str, callback: object) -> None:
+            assert self.listeners.get(event) is callback
+            self.listeners.pop(event)
 
         def expect_request(self, predicate, **_kwargs: object) -> FakeRequestInfo:
             assert predicate(FakeRequest())
@@ -325,6 +334,72 @@ async def test_qwen_native_transport_executes_the_real_request_in_the_page_main_
     assert "Authorization" not in page.script
     assert result["requestId"] == "upstream-id"
     assert actual_body == body
+    assert page.listeners == {}
+
+
+def test_qwen_network_failure_reason_is_bounded_and_single_line() -> None:
+    reason = _qwen_network_failure_reason("net::ERR_FAILED\n" + "x" * 300)
+
+    assert "\n" not in reason
+    assert len(reason) == 160
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_reports_browser_network_failure() -> None:
+    class FailedRequest:
+        url = "https://chat.qwen.ai/api/v2/chat/completions?chat_id=chat"
+        method = "POST"
+        failure = "net::ERR_FAILED"
+        headers: ClassVar[dict[str, str]] = {"x-request-id": "request-id"}
+
+    class RequestInfo:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class Page:
+        def __init__(self) -> None:
+            self.listener = None
+
+        def on(self, event: str, callback) -> None:
+            assert event == "requestfailed"
+            self.listener = callback
+
+        def remove_listener(self, event: str, callback) -> None:
+            assert event == "requestfailed"
+            assert self.listener is callback
+            self.listener = None
+
+        def expect_request(self, predicate, **_kwargs: object) -> RequestInfo:
+            assert predicate(FailedRequest())
+            return RequestInfo()
+
+        async def evaluate(self, _script: str, _payload: dict[str, object]) -> None:
+            assert self.listener is not None
+            self.listener(FailedRequest())
+            raise RuntimeError("Page.evaluate: NetworkError when attempting to fetch resource")
+
+    page = Page()
+    session = _AccountBrowserSession("account", object(), page, "current")
+    payload = {
+        "url": FailedRequest.url,
+        "path": "/api/v2/chat/completions?chat_id=chat",
+        "method": "POST",
+        "body": "{}",
+        "referrer": "https://chat.qwen.ai/c/chat",
+        "timeoutMs": 60_000,
+        "maximumBytes": 1024,
+        "version": "current",
+        "requestId": "request-id",
+        "timezone": "Wed Aug 05 2026 12:00:00 GMT+0800",
+    }
+
+    with pytest.raises(RuntimeError, match="net::ERR_FAILED"):
+        await QwenNativeBrowserTransport()._fetch_in_main_world(session, payload)
+
+    assert page.listener is None
 
 
 @pytest.mark.parametrize(

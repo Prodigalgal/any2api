@@ -20,6 +20,7 @@ import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.OfficialBrowserTransportClient;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class MimoProvider implements InferenceProvider {
+    private static final Duration BROWSER_ACCOUNT_PROBE_TIMEOUT = Duration.ofMinutes(2);
     private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
         Map.of(
             "conversation_id", ProviderProtocolContract.OptionType.STRING,
@@ -95,6 +97,11 @@ public final class MimoProvider implements InferenceProvider {
     @Override
     public ProviderProtocolContract protocolContract() {
         return PROTOCOL;
+    }
+
+    @Override
+    public Duration accountProbeTimeout() {
+        return BROWSER_ACCOUNT_PROBE_TIMEOUT;
     }
 
     @Override

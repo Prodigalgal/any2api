@@ -1,6 +1,6 @@
 [project]
 name = "any2api-automation"
-version = "0.6.1"
+version = "0.7.0"
 description = "Shared browser, registration, captcha, proxy, and mail automation for Any2API"
 requires-python = ">=3.12,<3.13"
 dependencies = [

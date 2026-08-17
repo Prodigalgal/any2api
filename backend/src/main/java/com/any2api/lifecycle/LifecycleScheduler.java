@@ -45,6 +45,7 @@ public class LifecycleScheduler {
     private final ObjectMapper mapper;
     private final OperationEventService observability;
     private final RuntimeSettingsService runtimeSettings;
+    private final List<CredentialPropagationPolicy> credentialPropagationPolicies;
 
     public LifecycleScheduler(
         JdbcClient jdbc,
@@ -57,7 +58,8 @@ public class LifecycleScheduler {
         InferenceReadinessProbe readiness,
         ObjectMapper mapper,
         OperationEventService observability,
-        RuntimeSettingsService runtimeSettings
+        RuntimeSettingsService runtimeSettings,
+        List<CredentialPropagationPolicy> credentialPropagationPolicies
     ) {
         this.jdbc = jdbc;
         this.transactions = transactions;
@@ -70,6 +72,7 @@ public class LifecycleScheduler {
         this.mapper = mapper;
         this.observability = observability;
         this.runtimeSettings = runtimeSettings;
+        this.credentialPropagationPolicies = List.copyOf(credentialPropagationPolicies);
     }
 
     @Scheduled(fixedDelayString = "${any2api.lifecycle.poll-interval:10s}")
@@ -222,10 +225,16 @@ public class LifecycleScheduler {
         var completedAt = Instant.now();
         var credentialExpiresAt = result.credentialExpiresAt();
         if (credentialExpiresAt == null) credentialExpiresAt = task.credentialExpiresAt();
+        var recoveredCredential = mergedCredential(
+            task.credential(), result.credentialPatch());
         if (result.credentialPatch().isObject()) {
-            var merged = (tools.jackson.databind.node.ObjectNode) task.credential().deepCopy();
-            merged.setAll((tools.jackson.databind.node.ObjectNode) result.credentialPatch());
-            credentials.store(task.account(), action.providerId(), merged, credentialExpiresAt);
+            credentials.store(
+                task.account(), action.providerId(), recoveredCredential, credentialExpiresAt);
+        }
+        if (credentialExpiresAt != null
+            && !credentialExpiresAt.equals(task.account().getExpiresAt())) {
+            task.account().updateCredentialExpiry(credentialExpiresAt);
+            accounts.save(task.account());
         }
         if (result.metadataPatch().isObject()) {
             task.account().mergeMetadata(mapper.convertValue(
@@ -240,6 +249,11 @@ public class LifecycleScheduler {
                 "inference_probe_error", probe.errorClass(),
                 "inference_readiness_pending", !probe.ready()));
             accounts.save(task.account());
+        }
+        if (result.healthy() && "reauthenticate".equals(action.action())) {
+            for (var policy : credentialPropagationPolicies) {
+                policy.propagate(task.account(), recoveredCredential, credentialExpiresAt);
+            }
         }
         var healthy = result.healthy() && probe.ready();
         var authExpired = result.authExpired();

@@ -79,23 +79,25 @@ def _reauthenticate_sync(payload: dict[str, Any], current: dict[str, Any]) -> di
     config = settings()
     with proxy_lease(check_url=config.grok_authorize_url, **proxy_parameters(payload)) as proxy_url:
         attempted: list[str] = []
-        refresh_token = str(current.get("refresh_token") or "").strip()
-        if refresh_token:
-            attempted.append("refresh_token")
-            refreshed = _refresh_oauth_token(payload, current, refresh_token, proxy_url)
-            if refreshed is not None:
-                refreshed.setdefault("refresh_token", refresh_token)
-                return _reauthentication_success("refresh_token", refreshed, attempted)
+        force_sso_refresh = bool(payload.get("force_sso_refresh"))
+        if not force_sso_refresh:
+            refresh_token = str(current.get("refresh_token") or "").strip()
+            if refresh_token:
+                attempted.append("refresh_token")
+                refreshed = _refresh_oauth_token(payload, current, refresh_token, proxy_url)
+                if refreshed is not None:
+                    refreshed.setdefault("refresh_token", refresh_token)
+                    return _reauthentication_success("refresh_token", refreshed, attempted)
 
-        sso = _saved_sso(current)
-        if sso:
-            attempted.append("saved_sso")
-            try:
-                token = _exchange_sso_token(sso, proxy_url)
-            except RuntimeError:
-                token = {}
-            if token.get("access_token"):
-                return _reauthentication_success("saved_sso", token, attempted)
+            sso = _saved_sso(current)
+            if sso:
+                attempted.append("saved_sso")
+                try:
+                    token = _exchange_sso_token(sso, proxy_url)
+                except RuntimeError:
+                    token = {}
+                if token.get("access_token"):
+                    return _reauthentication_success("saved_sso", token, attempted)
 
         email = str(current.get("email") or "").strip()
         password = str(current.get("password") or current.get("register_password") or "").strip()

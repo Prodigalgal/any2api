@@ -18,6 +18,18 @@ public interface AccountRepository extends JpaRepository<AccountEntity, UUID>,
 
     Optional<AccountEntity> findByProviderIdAndExternalId(String providerId, String externalId);
 
+    @Query(value = """
+        SELECT * FROM accounts
+        WHERE provider_id = :providerId
+          AND metadata->>'identity_group_id' = :identityGroup
+        ORDER BY created_at, id
+        LIMIT 1
+        """, nativeQuery = true)
+    Optional<AccountEntity> findByProviderIdAndIdentityGroup(
+        @Param("providerId") String providerId,
+        @Param("identityGroup") String identityGroup
+    );
+
     boolean existsByProviderIdAndEnabledTrue(String providerId);
 
     @Query("""

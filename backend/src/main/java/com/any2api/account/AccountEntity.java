@@ -204,6 +204,10 @@ public class AccountEntity {
         if (enabled != null) this.enabled = enabled;
     }
 
+    public void updateCredentialExpiry(Instant expiresAt) {
+        if (expiresAt != null) this.expiresAt = expiresAt;
+    }
+
     public void mergeMetadata(Map<String, Object> patch) {
         if (patch != null) this.metadata.putAll(patch);
     }

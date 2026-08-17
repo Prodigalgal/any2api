@@ -259,7 +259,7 @@ class InferenceCoordinatorTest {
             ProviderRegistry.allEnabled(List.of(provider)),
             accounts,
             new ProviderFailureDisposition(
-                accounts, mock(com.any2api.lifecycle.LifecycleScheduleService.class)),
+                accounts, mock(com.any2api.lifecycle.AccountRecoveryService.class)),
             telemetry,
             new ModelRuntimeGuard(
                 new Any2ApiProperties(),

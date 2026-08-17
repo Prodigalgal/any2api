@@ -1,6 +1,7 @@
 package com.any2api.lifecycle;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import com.any2api.observability.OperationContext;
@@ -16,17 +17,20 @@ final class LifecycleOperationExecutor {
     private final LifecycleAutomationClient automation;
     private final RuntimeSettingsService runtimeSettings;
     private final ProviderRuntimeRuleService runtimeRules;
+    private final List<LifecyclePayloadPolicy> payloadPolicies;
 
     LifecycleOperationExecutor(
         ProviderLifecycleRegistry local,
         LifecycleAutomationClient automation,
         RuntimeSettingsService runtimeSettings,
-        ProviderRuntimeRuleService runtimeRules
+        ProviderRuntimeRuleService runtimeRules,
+        List<LifecyclePayloadPolicy> payloadPolicies
     ) {
         this.local = local;
         this.automation = automation;
         this.runtimeSettings = runtimeSettings;
         this.runtimeRules = runtimeRules;
+        this.payloadPolicies = List.copyOf(payloadPolicies);
     }
 
     Mono<LifecycleResult> execute(
@@ -56,8 +60,13 @@ final class LifecycleOperationExecutor {
                 proxyPool))
             .orElseGet(() -> {
                 var payload = new HashMap<String, Object>();
+                var metadata = accountMetadata == null ? Map.<String, Object>of() : accountMetadata;
                 payload.put("credential", credential);
-                payload.put("metadata", accountMetadata == null ? Map.of() : accountMetadata);
+                payload.put("metadata", metadata);
+                for (var policy : payloadPolicies) {
+                    policy.contribute(
+                        providerId, externalOperation, credential, metadata, payload);
+                }
                 if (proxyPool != null && !proxyPool.isEmpty()) {
                     payload.put("proxy_pool", proxyPool);
                     var affinityKey = credential.path("proxy_affinity_key").asText("").trim();

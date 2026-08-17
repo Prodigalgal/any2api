@@ -30,7 +30,7 @@ from any2api_automation.providers.grok_protocol.device_flow import (
     _parse_consent_page,
 )
 from any2api_automation.providers.grok_settings import settings as grok_settings
-from any2api_automation.providers.longcat import _login_url
+from any2api_automation.providers.longcat import _login_url, _longcat_proxy_affinity
 from any2api_automation.providers.longcat_settings import settings as longcat_settings
 from any2api_automation.providers.mimo_protocol import (
     XiaomiProtocolClient,
@@ -178,6 +178,14 @@ def test_longcat_login_url_is_built_from_provider_configuration() -> None:
     assert query["service"] == [config.longcat_service]
     assert query["region"] == [config.longcat_region]
     assert query["backurl"][0].startswith(config.longcat_base_url)
+
+
+def test_longcat_proxy_affinity_is_stable_per_identity_and_attempt() -> None:
+    first = _longcat_proxy_affinity(" User@Example.com ", 1)
+
+    assert first == _longcat_proxy_affinity("user@example.com", 1)
+    assert first != _longcat_proxy_affinity("user@example.com", 2)
+    assert first.startswith("longcat-")
 
 
 def test_minmax_official_asset_hosts_include_current_and_legacy_cdn() -> None:

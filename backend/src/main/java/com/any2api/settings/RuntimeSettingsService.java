@@ -24,7 +24,7 @@ public class RuntimeSettingsService {
     private static final Pattern PARAMETER_NAME = Pattern.compile("^[A-Za-z][A-Za-z0-9_.-]{0,79}$");
     private static final Set<String> RESERVED_LIFECYCLE_PARAMETERS = Set.of(
         "credential", "metadata", "proxy_pool", "proxyPool", "mail",
-        "proxy_affinity_key", "strict_proxy_affinity");
+        "proxy_affinity_key", "strict_proxy_affinity", "proxy_node_offset");
 
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;

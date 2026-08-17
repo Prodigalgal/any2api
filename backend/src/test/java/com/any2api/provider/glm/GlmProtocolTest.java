@@ -15,16 +15,6 @@ class GlmProtocolTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void reproducesTheObservedDoubleHmacContract() {
-        var signature = new GlmSigner(new GlmProperties()).sign(
-            "req-1", "user-1", "hello", 1785337442000L);
-
-        assertThat(signature.signature()).isEqualTo(
-            "27dcc89a89af5b8ae5760cb645286bfcd4c5c58e3d3e540e798d7798f87f3ede");
-        assertThat(signature.timestamp()).isEqualTo(1785337442000L);
-    }
-
-    @Test
     void mapsResponsesInputToTheGlmChatEnvelope() {
         var raw = mapper.createObjectNode()
             .put("model", "glm/glm-5.2")

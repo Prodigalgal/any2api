@@ -17,7 +17,7 @@ import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.BrowserTransportClient;
-import com.any2api.transport.SseDataDecoder;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +44,7 @@ public final class MimoProvider implements InferenceProvider {
             "web_search_status", "tools", "tool_choice", "parallel_tool_calls"),
         java.util.Set.of("function"));
     private final BrowserTransportClient transport;
+    private final OfficialBrowserTransportClient officialTransport;
     private final ProxyPoolService proxyPools;
     private final MimoProperties properties;
     private final MimoRequestMapper requestMapper;
@@ -52,6 +53,7 @@ public final class MimoProvider implements InferenceProvider {
 
     public MimoProvider(
         BrowserTransportClient transport,
+        OfficialBrowserTransportClient officialTransport,
         ProxyPoolService proxyPools,
         MimoProperties properties,
         MimoRequestMapper requestMapper,
@@ -59,6 +61,7 @@ public final class MimoProvider implements InferenceProvider {
         ObjectMapper mapper
     ) {
         this.transport = transport;
+        this.officialTransport = officialTransport;
         this.proxyPools = proxyPools;
         this.properties = properties;
         this.requestMapper = requestMapper;
@@ -68,7 +71,7 @@ public final class MimoProvider implements InferenceProvider {
 
     @Override
     public ProviderManifest manifest() {
-        return new ProviderManifest("mimo", "MiMo", "native-mimo-web-v1", "2",
+        return new ProviderManifest("mimo", "MiMo", "official-browser-mimo-web-v1", "3",
             List.of("mimo-v2.5-pro", "mimo-v2.5"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
@@ -122,45 +125,35 @@ public final class MimoProvider implements InferenceProvider {
     ) {
         var credential = MimoCredential.from(account);
         var prepared = requestMapper.prepare(request);
-        var affinityKey = account.accountId() + ":" + request.requestId();
-        return Flux.usingWhen(
-            transport.open(sessionCommand(credential, affinityKey)),
-            session -> mediaUploader.upload(
-                    session, credential, prepared.media(), request.model())
-                .flatMapMany(media -> Flux.defer(() -> {
-                    var upstreamMedia = prepared.body().putArray("multiMedias");
-                    media.forEach(upstreamMedia::add);
-                    var decoder = new MimoEventDecoder(
-                        request.requestId(), prepared.tools(), prepared.toolRequired(),
-                        prepared.parallelToolCalls());
-                    var sse = new SseDataDecoder();
-                    return transport.stream(session.id(), request(
-                            "POST", chatPath(credential), prepared.body(), 300))
-                        .concatMapIterable(sse::decode)
-                        .takeUntil(data -> "[DONE]".equals(data.trim()))
-                        .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
-                        .concatMapIterable(decoder::decode)
-                        .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
-                })),
-            this::close,
-            (session, ignored) -> close(session),
-            this::close);
+        var affinityKey = proxyAffinityKey(account);
+        var proxyPool = proxyPool();
+        return uploadMedia(credential, prepared, request.model(), affinityKey)
+            .flatMapMany(media -> Flux.defer(() -> {
+                var upstreamMedia = prepared.body().putArray("multiMedias");
+                media.forEach(upstreamMedia::add);
+                return streamOfficial(
+                    account.credential(),
+                    prepared,
+                    request.requestId(),
+                    proxyPool,
+                    affinityKey,
+                    context);
+            }));
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        var credential = MimoCredential.from(account);
-        return Mono.usingWhen(
-            transport.open(sessionCommand(credential, account.accountId() + ":catalog")),
-            session -> transport.request(session.id(), request(
-                    "GET", configPath(credential), null, 120))
-                .flatMap(response -> response.successful()
-                    ? Mono.just(parseModels(json(response)))
-                    : Mono.error(new MimoUpstreamException(response.status(),
-                        summarize(response.status(), response.text())))),
-            this::close,
-            (session, ignored) -> close(session),
-            this::close);
+        MimoCredential.from(account);
+        return officialTransport.request(
+                manifest().id(),
+                "GET",
+                "/open-apis/bot/config",
+                "",
+                account.credential(),
+                proxyPool(),
+                proxyAffinityKey(account))
+            .flatMap(response -> responseJson(response, null))
+            .map(this::parseModels);
     }
 
     private List<DiscoveredModel> parseModels(JsonNode body) {
@@ -168,7 +161,11 @@ public final class MimoProvider implements InferenceProvider {
             "(?:tts|asr|speech|audio|voice(?:clone|design)?)",
             java.util.regex.Pattern.CASE_INSENSITIVE);
         var models = new java.util.LinkedHashMap<String, DiscoveredModel>();
-        for (var item : body.path("data").path("modelConfigList")) {
+        var items = body.path("data").path("modelConfigListNg");
+        if (!items.isArray() || items.isEmpty()) {
+            items = body.path("data").path("modelConfigList");
+        }
+        for (var item : items) {
             var id = item.path("model").asText("").trim();
             if (!id.isBlank() && !excluded.matcher(id).find()) {
                 models.putIfAbsent(id, new DiscoveredModel(id, id,
@@ -176,6 +173,71 @@ public final class MimoProvider implements InferenceProvider {
             }
         }
         return List.copyOf(models.values());
+    }
+
+    private Mono<List<tools.jackson.databind.node.ObjectNode>> uploadMedia(
+        MimoCredential credential,
+        MimoPreparedRequest prepared,
+        String model,
+        String affinityKey
+    ) {
+        if (prepared.media().isEmpty()) return Mono.just(List.of());
+        return Mono.usingWhen(
+            transport.open(sessionCommand(credential, affinityKey)),
+            session -> mediaUploader.upload(session, credential, prepared.media(), model),
+            this::close,
+            (session, ignored) -> close(session),
+            this::close);
+    }
+
+    private Flux<CanonicalEvent> streamOfficial(
+        JsonNode rawCredential,
+        MimoPreparedRequest prepared,
+        String requestId,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        ProviderExecutionContext context
+    ) {
+        var body = mapper.writeValueAsString(prepared.body());
+        return Flux.defer(() -> {
+            var decoder = new MimoEventDecoder(
+                requestId,
+                prepared.tools(),
+                prepared.toolRequired(),
+                prepared.parallelToolCalls());
+            var status = new java.util.concurrent.atomic.AtomicInteger(-1);
+            return officialTransport.stream(
+                    manifest().id(),
+                    "POST",
+                    "/open-apis/bot/chat",
+                    body,
+                    rawCredential,
+                    proxyPool,
+                    affinityKey)
+                .handle((frame, sink) -> {
+                    var type = frame.path("type").asText("");
+                    if ("status".equals(type)) {
+                        status.set(frame.path("status").asInt(502));
+                    } else if ("error".equals(type)) {
+                        var code = status.get() < 0 ? 502 : status.get();
+                        sink.error(new MimoUpstreamException(
+                            code,
+                            summarize(code, frame.path("data").asText(""))));
+                    } else if ("data".equals(type) && status.get() < 400) {
+                        sink.next(frame.path("data").asText(""));
+                    } else if ("credential_patch".equals(type)) {
+                        context.acceptCredentialPatch(frame.path("data"));
+                    }
+                })
+                .cast(String.class)
+                .takeUntil(data -> "[DONE]".equals(data.trim()))
+                .concatMapIterable(decoder::decode)
+                .concatWith(Flux.defer(() -> status.get() >= 400
+                    ? Flux.error(new MimoUpstreamException(
+                        status.get(),
+                        "MiMo upstream returned HTTP " + status.get()))
+                    : Flux.fromIterable(decoder.finish())));
+        });
     }
 
     private BrowserTransportClient.OpenCommand sessionCommand(
@@ -195,42 +257,37 @@ public final class MimoProvider implements InferenceProvider {
             affinityKey, !proxyPool.isEmpty(), "");
     }
 
-    private BrowserTransportClient.Request request(
-        String method,
-        String path,
-        JsonNode body,
-        int timeout
+    private Mono<JsonNode> responseJson(
+        OfficialBrowserTransportClient.TransportResponse response,
+        ProviderExecutionContext context
     ) {
-        return new BrowserTransportClient.Request(
-            method, path, Map.of("x-timezone", properties.getTimezone()),
-            BrowserTransportClient.FingerprintProfile.SAME_ORIGIN_FETCH,
-            body, timeout);
-    }
-
-    private String chatPath(MimoCredential credential) {
-        return path("/open-apis/bot/chat", credential);
-    }
-
-    private String configPath(MimoCredential credential) {
-        return path("/open-apis/bot/config", credential);
-    }
-
-    private String path(String value, MimoCredential credential) {
-        return org.springframework.web.util.UriComponentsBuilder.fromPath(value)
-            .queryParam("xiaomichatbot_ph", credential.phase())
-            .build().encode().toUriString();
-    }
-
-    private JsonNode json(BrowserTransportClient.BufferedResponse response) {
+        if (context != null) context.acceptCredentialPatch(response.credentialPatch());
+        if (response.status() < 200 || response.status() >= 300) {
+            return Mono.error(new MimoUpstreamException(
+                response.status(),
+                summarize(response.status(), response.body())));
+        }
         try {
-            return mapper.readTree(response.text());
+            return Mono.just(mapper.readTree(response.body()));
         } catch (RuntimeException error) {
-            throw new MimoUpstreamException(502, "MiMo upstream returned invalid JSON");
+            return Mono.error(new MimoUpstreamException(
+                502,
+                "MiMo upstream returned invalid JSON"));
         }
     }
 
     private Mono<Void> close(BrowserTransportClient.Session session) {
         return transport.close(session.id()).then();
+    }
+
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(manifest().id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
+    }
+
+    private static String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
     @Override

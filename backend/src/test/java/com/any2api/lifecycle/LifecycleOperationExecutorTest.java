@@ -25,7 +25,8 @@ class LifecycleOperationExecutorTest {
         var mapper = new ObjectMapper();
         var credential = mapper.createObjectNode()
             .put("service_token", "secret")
-            .put("proxy_affinity_key", "persisted-affinity");
+            .put("proxy_affinity_key", "persisted-affinity")
+            .put("proxy_node_offset", 2);
         var metadata = Map.<String, Object>of(
             "inference_probe_status", "FAILED",
             "inference_probe_error", "credential_rejected");
@@ -52,6 +53,7 @@ class LifecycleOperationExecutorTest {
             .containsEntry("metadata", metadata)
             .containsEntry("proxy_pool", proxyPool)
             .containsEntry("proxy_affinity_key", "persisted-affinity")
+            .containsEntry("proxy_node_offset", 2)
             .containsEntry("strict_proxy_affinity", true);
     }
 }

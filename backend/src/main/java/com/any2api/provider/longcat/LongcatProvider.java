@@ -113,9 +113,9 @@ public final class LongcatProvider implements InferenceProvider {
     ) {
         var credential = LongcatCredential.from(account);
         var prepared = requestMapper.prepare(request);
-        var affinityKey = account.accountId() + ":" + request.requestId();
+        var affinityKey = proxyAffinityKey(account);
         return Flux.usingWhen(
-            transport.open(sessionCommand(credential, affinityKey)),
+            transport.open(sessionCommand(credential, affinityKey), proxyNodeOffset(account)),
             session -> createSession(session, prepared.agentId())
             .flatMapMany(conversationId -> {
                 var decoder = new LongcatEventDecoder(request.requestId(), prepared.reasonEnabled(),
@@ -183,6 +183,15 @@ public final class LongcatProvider implements InferenceProvider {
 
     private Mono<Void> close(BrowserTransportClient.Session session) {
         return transport.close(session.id()).then();
+    }
+
+    private static String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
+    }
+
+    private static int proxyNodeOffset(LeasedProviderAccount account) {
+        return Math.max(0, account.credential().path("proxy_node_offset").asInt(0));
     }
 
     @Override

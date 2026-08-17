@@ -38,6 +38,14 @@ public final class BrowserTransportClient {
     }
 
     public Mono<Session> open(OpenCommand command) {
+        return open(command, 0);
+    }
+
+    public Mono<Session> open(OpenCommand command, int proxyNodeOffset) {
+        if (proxyNodeOffset < 0) {
+            return Mono.error(new IllegalArgumentException(
+                "proxy node offset must not be negative"));
+        }
         var body = mapper.createObjectNode()
             .put("origin", command.origin().toString())
             .put("user_agent", value(command.userAgent()))
@@ -46,6 +54,7 @@ public final class BrowserTransportClient {
             .put("dynamic_proxy", false)
             .put("proxy_affinity_key", value(command.proxyAffinityKey()))
             .put("strict_proxy_affinity", command.strictProxyAffinity())
+            .put("proxy_node_offset", proxyNodeOffset)
             .put("clearance_revision", value(command.clearanceRevision()))
             .put("bearer_token", value(command.bearerToken()))
             .put("ttl_seconds", command.ttlSeconds());

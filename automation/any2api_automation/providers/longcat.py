@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import re
 import time
+from dataclasses import replace
 from typing import Any
 from urllib.parse import urlencode
 
@@ -51,6 +53,12 @@ class LongcatAutomationProvider(AutomationProvider):
                 trace.mark(RegistrationStage.MAILBOX_CREATED)
                 flow_payload = {**payload}
                 flow_payload.setdefault("proxy_check_url", _login_url())
+                flow_payload.setdefault(
+                    "proxy_affinity_key",
+                    _longcat_proxy_affinity(mailbox.address, attempt),
+                )
+                if flow_payload.get("dynamic_proxy") or flow_payload.get("proxy_pool"):
+                    flow_payload["strict_proxy_affinity"] = True
                 result = await asyncio.to_thread(
                     run_browser_flow,
                     lambda page, context, backend, proxy_url, _mail=mail, _mailbox=mailbox, _password=password, _trace=trace: (
@@ -69,6 +77,13 @@ class LongcatAutomationProvider(AutomationProvider):
                     payload=flow_payload,
                     context_profile=self.browser_context_profile(),
                     launch_profile=self.browser_launch_profile(),
+                )
+                result = replace(
+                    result,
+                    credential={
+                        **result.credential,
+                        "proxy_affinity_key": flow_payload["proxy_affinity_key"],
+                    },
                 )
                 response = result.response()
                 response.setdefault("metadata", {})["browser_attempt"] = attempt
@@ -90,6 +105,11 @@ class LongcatAutomationProvider(AutomationProvider):
         trace.mark(RegistrationStage.MAILBOX_CREATED)
         flow_payload = {**payload}
         flow_payload.setdefault("proxy_check_url", _login_url())
+        if current.get("proxy_affinity_key") and not flow_payload.get(
+            "proxy_affinity_key"
+        ):
+            flow_payload["proxy_affinity_key"] = current["proxy_affinity_key"]
+            flow_payload["strict_proxy_affinity"] = True
         result = await asyncio.to_thread(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _email_browser_flow(
@@ -533,3 +553,13 @@ def _login_url() -> str:
         }
     )
     return f"{config.longcat_passport_url.rstrip('/')}/pc/login?{query}"
+
+
+def _longcat_proxy_affinity(email: str, attempt: int) -> str:
+    if attempt < 1:
+        raise ValueError("LongCat proxy affinity attempt must be positive")
+    normalized = email.strip().lower()
+    if not normalized:
+        raise ValueError("LongCat proxy affinity requires an email address")
+    value = hashlib.sha256(f"{normalized}\0{attempt}".encode()).hexdigest()[:32]
+    return f"longcat-{value}"

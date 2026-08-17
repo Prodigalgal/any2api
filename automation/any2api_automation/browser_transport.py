@@ -97,6 +97,7 @@ class BrowserSessionOpenRequest(BaseModel):
     dynamic_proxy: bool = False
     proxy_affinity_key: str = Field(default="", max_length=256)
     strict_proxy_affinity: bool = False
+    proxy_node_offset: int = Field(default=0, ge=0, le=10_000)
     clearance_revision: str = Field(default="", max_length=128)
     bearer_token: str = Field(default="", max_length=16_384)
     ttl_seconds: int | None = Field(default=None, ge=30, le=900)
@@ -177,6 +178,7 @@ class BrowserSessionManager:
                 "dynamic_proxy": request.dynamic_proxy,
                 "proxy_affinity_key": request.proxy_affinity_key,
                 "strict_proxy_affinity": request.strict_proxy_affinity,
+                "proxy_node_offset": request.proxy_node_offset,
             }
             if request.proxy_pool is not None:
                 proxy_payload["proxy_pool"] = request.proxy_pool

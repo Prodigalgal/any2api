@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import string
+from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -31,7 +34,9 @@ from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_paramete
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
 from .glm_challenge import GlmAliyunChallenge
+from .glm_runtime import GlmOfficialBrowserTransport
 from .glm_settings import settings
+from .transport_support import transport_frame, transport_proxy_lease
 
 logger = logging.getLogger("any2api_automation.providers.glm")
 
@@ -45,6 +50,7 @@ class GlmAutomationProvider(AutomationProvider):
         challenge_types=("aliyun_traceless", "semantic_slider"),
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
+        inference_transport=True,
         registration_attempt_mode="single_identity",
     )
 
@@ -76,6 +82,12 @@ class GlmAutomationProvider(AutomationProvider):
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
+        browser_payload = {**payload}
+        if current.get("proxy_affinity_key") and not browser_payload.get(
+            "proxy_affinity_key"
+        ):
+            browser_payload["proxy_affinity_key"] = current["proxy_affinity_key"]
+            browser_payload["strict_proxy_affinity"] = True
         result = await asyncio.to_thread(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _reauthenticate_browser(
@@ -86,7 +98,7 @@ class GlmAutomationProvider(AutomationProvider):
             ),
             preferred=self.manifest.browser_backend,
             fallback=self.manifest.fallback_backend,
-            payload={**payload, "proxy_check_url": settings().glm_base_url},
+            payload={**browser_payload, "proxy_check_url": settings().glm_base_url},
             context_profile=self.browser_context_profile(),
             launch_profile=self.browser_launch_profile(),
             fingerprint_policy=self.browser_fingerprint_policy(),
@@ -101,10 +113,67 @@ class GlmAutomationProvider(AutomationProvider):
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
 
-    def routers(self) -> tuple[Any, ...]:
-        from .glm_runtime import router
+    async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
+        method = str(payload.get("method") or "").upper()
+        path = str(payload.get("path") or "")
+        if method != "POST" or path != "/api/v2/chat/completions":
+            raise ValueError("GLM transport operation is not allowlisted")
+        command = json.loads(str(payload.get("body") or ""))
+        if not isinstance(command, dict):
+            raise TypeError("GLM transport body must be an object")
+        current = credential(payload)
+        timeout_seconds = min(240, settings().glm_captcha_timeout_seconds + 120)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().glm_base_url,
+        ) as proxy_url:
+            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            loop = asyncio.get_running_loop()
 
-        return (router,)
+            def worker() -> None:
+                try:
+                    for event in official_browser_transport.stream(
+                        current,
+                        command,
+                        proxy_url,
+                        timeout_seconds=timeout_seconds,
+                    ):
+                        asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
+                except Exception as error:  # noqa: BLE001 - normalized stream boundary
+                    logger.warning(
+                        "glm_transport_worker_failed error_type=%s",
+                        type(error).__name__,
+                    )
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put(
+                            {
+                                "type": "error",
+                                "data": (
+                                    "official browser stream failed "
+                                    f"({type(error).__name__})"
+                                ),
+                            }
+                        ),
+                        loop,
+                    ).result()
+                finally:
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put({"type": "done"}), loop
+                    ).result()
+
+            task = asyncio.create_task(asyncio.to_thread(worker))
+            try:
+                while True:
+                    event = await queue.get()
+                    event_type = str(event.get("type") or "error")
+                    if event_type == "done":
+                        break
+                    details = {
+                        key: value for key, value in event.items() if key != "type"
+                    }
+                    yield transport_frame(event_type, **details)
+            finally:
+                await task
 
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile(
@@ -149,7 +218,14 @@ async def _run_registration_browser(
     for attempt in range(1, attempts + 1):
         logger.info("GLM registration browser attempt attempt=%s/%s", attempt, attempts)
         try:
-            return await asyncio.to_thread(
+            attempt_payload = proxy_attempt_payload(
+                payload,
+                identity=mailbox.address,
+                attempt=attempt,
+            )
+            if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
+                attempt_payload["strict_proxy_affinity"] = True
+            result = await asyncio.to_thread(
                 run_browser_flow,
                 lambda page, context, backend, proxy_url: _register_browser(
                     page,
@@ -162,14 +238,18 @@ async def _run_registration_browser(
                 ),
                 preferred=provider.manifest.browser_backend,
                 fallback=provider.manifest.fallback_backend,
-                payload=proxy_attempt_payload(
-                    payload,
-                    identity=mailbox.address,
-                    attempt=attempt,
-                ),
+                payload=attempt_payload,
                 context_profile=provider.browser_context_profile(),
                 launch_profile=provider.browser_launch_profile(),
                 fingerprint_policy=provider.browser_fingerprint_policy(),
+            )
+            return replace(
+                result,
+                credential={
+                    **result.credential,
+                    "proxy_affinity_key": attempt_payload["proxy_affinity_key"],
+                    "proxy_node_offset": attempt_payload["proxy_node_offset"],
+                },
             )
         except RuntimeError as error:
             retryable = _retryable_registration_challenge(trace, error)
@@ -453,3 +533,6 @@ def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[st
         "ready_for_inference": False,
         "inference_probe_required": True,
     }
+
+
+official_browser_transport = GlmOfficialBrowserTransport(settings().glm_base_url)

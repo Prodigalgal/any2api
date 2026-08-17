@@ -125,6 +125,8 @@ async def test_registration_browser_retries_reuse_one_identity(monkeypatch) -> N
     assert next(iter(affinity_keys)).startswith("flow-")
     assert mailbox.address not in next(iter(affinity_keys))
     assert [call["proxy_node_offset"] for call in calls] == [0, 1, 2]
+    assert result.credential["proxy_affinity_key"] == next(iter(affinity_keys))
+    assert result.credential["proxy_node_offset"] == 2
 
 
 def test_keepalive_requires_authenticated_model_catalog(monkeypatch) -> None:

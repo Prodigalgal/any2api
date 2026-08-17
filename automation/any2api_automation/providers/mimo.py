@@ -1,5 +1,9 @@
 import asyncio
+import hashlib
+import json
+import logging
 import secrets
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -13,12 +17,21 @@ from ..lifecycle.account import (
     prepare_registration,
     required,
 )
-from ..lifecycle.browser import BrowserResult, credential_from_context, fill_first, run_browser_flow
+from ..lifecycle.browser import (
+    BrowserResult,
+    credential_from_context,
+    fill_first,
+    run_browser_flow,
+)
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from .base import AutomationProvider, AutomationProviderManifest
+from .mimo_browser import MimoOfficialBrowserTransport
 from .mimo_protocol import XiaomiProtocolClient
 from .mimo_settings import settings
+from .transport_support import transport_frame, transport_proxy_lease
+
+logger = logging.getLogger("any2api_automation.providers.mimo")
 
 _MIMO_PASSWORD_ALPHABET = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*"
 _MIMO_PASSWORD_POLICY = RegistrationPasswordPolicy(
@@ -31,11 +44,12 @@ _MIMO_PASSWORD_POLICY = RegistrationPasswordPolicy(
 class MimoAutomationProvider(AutomationProvider):
     manifest = AutomationProviderManifest(
         id="mimo",
-        browser_backend="http",
-        fallback_backend=None,
-        isolation="request",
+        browser_backend="camoufox",
+        fallback_backend="patchright",
+        isolation="process",
         challenge_types=("ocr",),
         operations=("register", "reauthenticate", "keepalive"),
+        inference_transport=True,
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -45,9 +59,40 @@ class MimoAutomationProvider(AutomationProvider):
         )
         attempts = flow_max_attempts(payload, 1)
         last_error: Exception | None = None
-        for _ in range(attempts):
+        for attempt in range(1, attempts + 1):
             try:
-                return await asyncio.to_thread(_register_protocol, payload, mail, mailbox, password)
+                attempt_payload = {**payload}
+                attempt_payload.setdefault(
+                    "proxy_affinity_key",
+                    _mimo_proxy_affinity(mailbox.address, attempt),
+                )
+                if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
+                    attempt_payload["strict_proxy_affinity"] = True
+                registered = await asyncio.to_thread(
+                    _register_protocol,
+                    attempt_payload,
+                    mail,
+                    mailbox,
+                    password,
+                )
+                registered["credential"]["proxy_affinity_key"] = attempt_payload[
+                    "proxy_affinity_key"
+                ]
+                try:
+                    registered["credential"] = await asyncio.to_thread(
+                        _bootstrap_browser_context,
+                        attempt_payload,
+                        registered["credential"],
+                    )
+                except Exception as error:  # noqa: BLE001 - account registration already succeeded
+                    logger.warning(
+                        "mimo_browser_context_bootstrap_pending error_type=%s",
+                        type(error).__name__,
+                    )
+                    registered.setdefault("metadata", {})[
+                        "browser_context_pending"
+                    ] = type(error).__name__
+                return registered
             except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
                 last_error = error
         assert last_error is not None
@@ -126,7 +171,56 @@ class MimoAutomationProvider(AutomationProvider):
         }
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
+        current = credential(payload)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().mimo_base_url,
+        ) as proxy_url:
+            result = await official_browser_transport.request(current, proxy_url)
+        status = int(result.get("status") or 502)
+        return {
+            "healthy": status == 200,
+            "auth_expired": status in {401, 403},
+            "credential_patch": result.get("credential_patch") or {},
+        }
+
+    async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        _validate_transport_input(payload, stream=False)
+        current = credential(payload)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().mimo_base_url,
+        ) as proxy_url:
+            return await official_browser_transport.request(current, proxy_url)
+
+    async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
+        body = _validate_transport_input(payload, stream=True)
+        current = credential(payload)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().mimo_base_url,
+        ) as proxy_url:
+            try:
+                async for event in official_browser_transport.stream(
+                    current,
+                    body,
+                    proxy_url,
+                ):
+                    event_type = str(event.get("type") or "error")
+                    details = {key: value for key, value in event.items() if key != "type"}
+                    yield transport_frame(event_type, **details)
+            except Exception as error:  # noqa: BLE001 - normalized stream boundary
+                logger.warning(
+                    "mimo_transport_stream_failed error_type=%s",
+                    type(error).__name__,
+                )
+                yield transport_frame(
+                    "error",
+                    data=f"official browser stream failed ({type(error).__name__})",
+                )
+
+    async def close(self) -> None:
+        await official_browser_transport.close()
 
 
 def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
@@ -214,6 +308,91 @@ def _register_protocol(
     }
 
 
+def _bootstrap_browser_context(
+    payload: dict[str, Any],
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    result = run_browser_flow(
+        lambda page, context, backend, proxy_url: _bootstrap_browser(
+            page,
+            context,
+            backend,
+            current,
+        ),
+        preferred="camoufox",
+        fallback="patchright",
+        payload={
+            **payload,
+            "proxy_check_url": settings().mimo_base_url,
+        },
+    )
+    return {**current, **result.credential}
+
+
+def _bootstrap_browser(page, context, backend: str, current: dict[str, Any]) -> BrowserResult:
+    context.add_cookies(
+        [
+            {
+                "name": name,
+                "value": required(current, field),
+                "domain": ".xiaomimimo.com",
+                "path": "/",
+                "secure": True,
+                "sameSite": "Lax",
+            }
+            for name, field in (
+                ("serviceToken", "service_token"),
+                ("userId", "user_id"),
+                ("xiaomichatbot_ph", "xiaomichatbot_ph"),
+            )
+        ]
+    )
+    page.goto(settings().mimo_base_url, wait_until="domcontentloaded", timeout=90_000)
+    status = page.evaluate(
+        """async () => (await fetch('/open-apis/bot/config', {
+          credentials: 'include'
+        })).status"""
+    )
+    if status != 200:
+        raise RuntimeError(f"MiMo browser context bootstrap returned HTTP {status}")
+    identity = required(current, "email", "user_id")
+    return BrowserResult(
+        identity,
+        str(current.get("email") or identity),
+        {
+            **current,
+            "registration_backend": backend,
+        },
+    )
+
+
+def _validate_transport_input(payload: dict[str, Any], *, stream: bool) -> str:
+    method = str(payload.get("method") or "").upper()
+    path = str(payload.get("path") or "")
+    body = str(payload.get("body") or "")
+    expected = "/open-apis/bot/chat" if stream else "/open-apis/bot/config"
+    expected_method = "POST" if stream else "GET"
+    if method != expected_method or path != expected:
+        raise ValueError("MiMo transport operation is not allowlisted")
+    if stream:
+        parsed = json.loads(body)
+        if not isinstance(parsed, dict):
+            raise TypeError("MiMo completion body must be an object")
+    elif body:
+        raise ValueError("MiMo config transport does not accept a body")
+    return body
+
+
+def _mimo_proxy_affinity(email: str, attempt: int) -> str:
+    if attempt < 1:
+        raise ValueError("MiMo proxy affinity attempt must be positive")
+    normalized = email.strip().lower()
+    if not normalized:
+        raise ValueError("MiMo proxy affinity requires an email address")
+    value = hashlib.sha256(f"{normalized}\0{attempt}".encode()).hexdigest()[:32]
+    return f"mimo-{value}"
+
+
 def _login_browser(page, context, backend, current, payload) -> BrowserResult:
     config = settings()
     page.goto(
@@ -293,3 +472,6 @@ def _normalize_mimo_cookies(value: dict[str, Any]) -> None:
             if cookies.get(name):
                 value[target] = cookies[name]
                 break
+
+
+official_browser_transport = MimoOfficialBrowserTransport(settings().mimo_base_url)

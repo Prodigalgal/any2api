@@ -10,6 +10,7 @@ import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.BrowserTransportClient;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -126,7 +127,8 @@ class MimoProtocolTest {
     @Test
     void acceptsOnlyOutputLimitsThatCannotConstrainTheOfficialWebModel() {
         var provider = new MimoProvider(
-            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
+            mock(BrowserTransportClient.class), mock(OfficialBrowserTransportClient.class),
+            mock(ProxyPoolService.class),
             new MimoProperties(), mock(MimoRequestMapper.class),
             mock(MimoMediaUploader.class), mapper);
         var raw = mapper.createObjectNode().put("model", "mimo/mimo-v2.5-pro");

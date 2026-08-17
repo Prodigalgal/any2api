@@ -60,6 +60,8 @@ final class LifecycleOperationExecutor {
                     if (!affinityKey.isBlank()) {
                         payload.put("proxy_affinity_key", affinityKey);
                         payload.put("strict_proxy_affinity", true);
+                        payload.put("proxy_node_offset", Math.max(0,
+                            credential.path("proxy_node_offset").asInt(0)));
                     }
                 }
                 runtimeSettings.applyLifecycleParameters(

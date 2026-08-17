@@ -136,7 +136,9 @@ public final class DeepseekProvider implements InferenceProvider {
     ) {
         var credential = DeepseekCredential.from(account);
         return Flux.usingWhen(
-            transport.open(sessionCommand(credential, account.accountId() + ":" + request.requestId())),
+            transport.open(
+                sessionCommand(credential, proxyAffinityKey(account)),
+                proxyNodeOffset(account)),
             session -> createSession(session, credential)
                 .flatMapMany(sessionId -> createPow(session, credential)
                     .flatMapMany(challenge -> Mono.fromCallable(() -> pow.solve(challenge))
@@ -152,7 +154,9 @@ public final class DeepseekProvider implements InferenceProvider {
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
         var credential = DeepseekCredential.from(account);
         return Mono.usingWhen(
-            transport.open(sessionCommand(credential, account.accountId() + ":catalog")),
+            transport.open(
+                sessionCommand(credential, proxyAffinityKey(account)),
+                proxyNodeOffset(account)),
             session -> transport.request(session.id(), request(
                     "GET",
                     "/api/v0/client/settings?did=" + url(credential.deviceId()) + "&scope=model",
@@ -327,6 +331,15 @@ public final class DeepseekProvider implements InferenceProvider {
 
     private Mono<Void> close(BrowserTransportClient.Session session) {
         return transport.close(session.id()).then();
+    }
+
+    private static String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
+    }
+
+    private static int proxyNodeOffset(LeasedProviderAccount account) {
+        return Math.max(0, account.credential().path("proxy_node_offset").asInt(0));
     }
 
     private String url(String value) {

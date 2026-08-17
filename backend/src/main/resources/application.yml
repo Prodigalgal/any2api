@@ -132,8 +132,6 @@ any2api:
       model-probe-timeout: ${ANY2API_PROVIDER_QWEN_MODEL_PROBE_TIMEOUT:240s}
     glm:
       base-url: ${ANY2API_PROVIDER_GLM_BASE_URL:https://chat.z.ai}
-      frontend-version: ${ANY2API_PROVIDER_GLM_FRONTEND_VERSION:1.1.79}
-      signature-key: ${ANY2API_PROVIDER_GLM_SIGNATURE_KEY:key-@@@@)))()((9))-xxxx&&&%%%%%}
     longcat:
       base-url: ${ANY2API_PROVIDER_LONGCAT_BASE_URL:https://longcat.chat}
       app-key: ${ANY2API_PROVIDER_LONGCAT_APP_KEY:fe_com.sankuai.friday.fe.longcat}

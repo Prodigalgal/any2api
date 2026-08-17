@@ -7,6 +7,7 @@ import pytest
 from any2api_automation import browser_transport
 from any2api_automation.browser_transport import (
     BrowserRequest,
+    BrowserSessionOpenRequest,
     BrowserWebSocketOpenRequest,
     BrowserWebSocketSendRequest,
     _allowed_origin,
@@ -46,6 +47,20 @@ def test_browser_transport_accepts_only_allowlisted_https_origins() -> None:
         _allowed_origin("https://169.254.169.254")
     with pytest.raises(ValueError, match="HTTPS origin"):
         _allowed_origin("http://grok.com")
+
+
+def test_browser_transport_validates_proxy_node_offset() -> None:
+    request = BrowserSessionOpenRequest(
+        origin="https://grok.com",
+        proxy_node_offset=2,
+    )
+
+    assert request.proxy_node_offset == 2
+    with pytest.raises(ValueError):
+        BrowserSessionOpenRequest(
+            origin="https://grok.com",
+            proxy_node_offset=-1,
+        )
 
 
 def test_browser_transport_rejects_cross_origin_cookie_domains() -> None:

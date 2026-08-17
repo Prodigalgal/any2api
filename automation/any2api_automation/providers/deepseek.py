@@ -5,6 +5,7 @@ import logging
 import random
 import re
 import time
+from dataclasses import replace
 from types import TracebackType
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -30,11 +31,7 @@ from ..lifecycle.browser import (
     run_browser_flow,
 )
 from ..lifecycle.mail import Mailbox, TempMailClient
-from ..lifecycle.proxy import (
-    proxy_attempt_payload,
-    proxy_lease,
-    proxy_parameters,
-)
+from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import correlation_id
 from .base import AutomationProvider, AutomationProviderManifest
@@ -169,21 +166,32 @@ async def _run_registration_browser(
     attempts = flow_max_attempts(payload, settings().deepseek_registration_browser_attempts)
     for attempt in range(1, attempts + 1):
         try:
-            return await asyncio.to_thread(
+            attempt_payload = proxy_attempt_payload(
+                payload,
+                identity=mailbox.address,
+                attempt=attempt,
+            )
+            if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
+                attempt_payload["strict_proxy_affinity"] = True
+            result = await asyncio.to_thread(
                 run_browser_flow,
                 lambda page, context, backend, proxy_url: _register_browser(
                     page, backend, mail, mailbox, password, trace, captcha_policy
                 ),
                 preferred=provider.manifest.browser_backend,
                 fallback=provider.manifest.fallback_backend,
-                payload=proxy_attempt_payload(
-                    payload,
-                    identity=mailbox.address,
-                    attempt=attempt,
-                ),
+                payload=attempt_payload,
                 context_profile=provider.browser_context_profile(),
                 launch_profile=provider.browser_launch_profile(),
                 fingerprint_policy=provider.browser_fingerprint_policy(),
+            )
+            return replace(
+                result,
+                credential={
+                    **result.credential,
+                    "proxy_affinity_key": attempt_payload["proxy_affinity_key"],
+                    "proxy_node_offset": attempt_payload["proxy_node_offset"],
+                },
             )
         except Exception as error:
             accepted = trace.current in {

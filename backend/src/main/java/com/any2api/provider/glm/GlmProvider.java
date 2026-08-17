@@ -46,7 +46,7 @@ public final class GlmProvider implements InferenceProvider {
             "preview_mode"),
         java.util.Set.of());
     private static final ProviderManifest MANIFEST = new ProviderManifest(
-        "glm", "GLM", "native-z-ai-web-v1", "2", List.of("glm-5.2"), Map.of(
+        "glm", "GLM", "official-browser-z-ai-web-v1", "3", List.of("glm-5.2"), Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
             ProviderCapability.RESPONSES, SupportLevel.NATIVE,
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
@@ -108,16 +108,16 @@ public final class GlmProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        var credential = GlmCredential.from(account, properties);
+        GlmCredential.from(account);
         var decoder = new GlmEventDecoder(request.requestId(), mapper);
         var proxyPool = proxyPools.runtimeForProvider(
             manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
         return protocol.chat(
-                credential,
+                account.credential(),
                 account.email(),
                 request,
                 proxyPool,
-                affinity(account.metadata()),
+                proxyAffinityKey(account),
                 context::acceptCredentialPatch)
             .concatMapIterable(decoder::decode)
             .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
@@ -190,8 +190,12 @@ public final class GlmProvider implements InferenceProvider {
         return 0;
     }
 
-    private String affinity(Map<String, Object> metadata) {
-        return String.valueOf(metadata.getOrDefault("identity_group_id", "")).trim();
+    private String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        if (!persisted.isBlank()) return persisted;
+        var identityGroup = String.valueOf(
+            account.metadata().getOrDefault("identity_group_id", "")).trim();
+        return identityGroup.isBlank() ? account.accountId().toString() : identityGroup;
     }
 
     private String message(Throwable error) {

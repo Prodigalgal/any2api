@@ -454,6 +454,38 @@ export type ProviderKeepaliveSettings = {
   providers: Record<string, ProviderKeepalivePolicy>;
 };
 
+export type ProviderRuntimeRuleDocument = {
+  schemaVersion: 1;
+  sessionMaxAgeSeconds: number;
+  canaryTimeoutSeconds: number;
+  buildAssetMarkers: string[];
+  discoveryMarkers: Record<string, string[]>;
+  capabilities: Record<string, string>;
+  endpointPaths: Record<string, string>;
+};
+
+export type ProviderRuntimeRuleRevision = {
+  providerId: string;
+  revision: number;
+  schemaVersion: number;
+  rules: ProviderRuntimeRuleDocument;
+  checksum: string;
+  createdAt: string;
+};
+
+export type ProviderRuntimeRuleState = {
+  providerId: string;
+  active: ProviderRuntimeRuleRevision;
+  candidate: ProviderRuntimeRuleRevision | null;
+  lastKnownGoodRevision: number | null;
+  candidateStatus: "IDLE" | "PENDING" | "FAILED";
+  activeBuildId: string | null;
+  candidateBuildId: string | null;
+  failureReason: string | null;
+  updatedAt: string;
+  revisions: ProviderRuntimeRuleRevision[];
+};
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(5_000) });
   if (!response.ok) throw new Error(`${url} 返回 HTTP ${response.status}`);
@@ -667,5 +699,26 @@ export const api = {
     adminJson<ProviderKeepaliveSettings>(
       "/api/admin/v1/settings/provider-keepalive",
       { method: "PUT", body: JSON.stringify(body) },
+    ),
+  providerRuntimeRules: () => adminJson<ProviderRuntimeRuleState[]>(
+    "/api/admin/v1/provider-runtime-rules",
+  ),
+  createProviderRuntimeRuleCandidate: (
+    providerId: string,
+    body: ProviderRuntimeRuleDocument,
+  ) => adminJson<ProviderRuntimeRuleState>(
+    `/api/admin/v1/provider-runtime-rules/${encodeURIComponent(providerId)}/candidates`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  discardProviderRuntimeRuleCandidate: (providerId: string) =>
+    adminJson<ProviderRuntimeRuleState>(
+      `/api/admin/v1/provider-runtime-rules/${encodeURIComponent(providerId)}/candidate`,
+      { method: "DELETE" },
+    ),
+  rollbackProviderRuntimeRule: (providerId: string, revision: number) =>
+    adminJson<ProviderRuntimeRuleState>(
+      `/api/admin/v1/provider-runtime-rules/${encodeURIComponent(providerId)}`
+      + `/rollback/${revision}`,
+      { method: "POST" },
     ),
 };

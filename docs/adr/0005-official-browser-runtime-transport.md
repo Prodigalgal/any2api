@@ -34,6 +34,13 @@ shape at runtime. CDN filenames and numeric Webpack/Rspack module identifiers ar
 not configuration contracts. A provider transport must use the same account-scoped proxy affinity
 for registration, inference and reauthorization.
 
+Runtime discovery rules are declarative, immutable revisions stored in PostgreSQL. They may change
+only bounded literal markers, capability names, same-origin endpoint paths and canary/session
+timeouts. They cannot contain executable JavaScript, regular expressions, credentials or arbitrary
+headers. A candidate revision is promoted with revision fencing only after the official browser has
+completed a real semantic operation on the discovered build. Discovery failure may fall back to the
+last-known-good revision only before an upstream operation starts.
+
 ## Rollout
 
 - Qwen: the page main world now performs the real request and consumes the response; curl replay is removed.
@@ -42,6 +49,8 @@ for registration, inference and reauthorization.
 - DeepSeek: official HTTP and PoW modules are confirmed by runtime evidence, but completion migration
   remains disabled until an authenticated stream probe validates the raw response contract.
 - Providers with stable documented APIs continue using their existing native clients.
+- MiMo and GLM: Java sends canonical semantic commands; Python builds their current upstream request
+  bodies and reports `buildId` plus rule revision canary evidence.
 
 ## Failure And Recovery
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import random
 import string
@@ -36,6 +35,7 @@ from .base import AutomationProvider, AutomationProviderManifest
 from .glm_challenge import GlmAliyunChallenge
 from .glm_runtime import GlmOfficialBrowserTransport
 from .glm_settings import settings
+from .runtime_rules import parse_runtime_plan
 from .transport_support import transport_frame, transport_proxy_lease
 
 logger = logging.getLogger("any2api_automation.providers.glm")
@@ -114,15 +114,21 @@ class GlmAutomationProvider(AutomationProvider):
         return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
 
     async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
-        method = str(payload.get("method") or "").upper()
-        path = str(payload.get("path") or "")
-        if method != "POST" or path != "/api/v2/chat/completions":
+        if str(payload.get("operation") or "") != "chat":
             raise ValueError("GLM transport operation is not allowlisted")
-        command = json.loads(str(payload.get("body") or ""))
+        command = payload.get("semantic_command")
         if not isinstance(command, dict):
-            raise TypeError("GLM transport body must be an object")
+            raise TypeError("GLM semantic command must be an object")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), "glm")
         current = credential(payload)
-        timeout_seconds = min(240, settings().glm_captcha_timeout_seconds + 120)
+        rule_timeout = max(
+            plan.active.rules.canary_timeout_seconds,
+            plan.candidate.rules.canary_timeout_seconds if plan.candidate else 0,
+        )
+        timeout_seconds = min(
+            300,
+            max(rule_timeout, settings().glm_captcha_timeout_seconds + 120),
+        )
         async with transport_proxy_lease(
             payload,
             check_url=settings().glm_base_url,
@@ -136,6 +142,7 @@ class GlmAutomationProvider(AutomationProvider):
                         current,
                         command,
                         proxy_url,
+                        plan,
                         timeout_seconds=timeout_seconds,
                     ):
                         asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()

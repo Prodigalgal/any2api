@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +16,7 @@ class GlmProtocolTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void mapsResponsesInputToTheGlmChatEnvelope() {
+    void sendsCanonicalSemanticCommandWithoutGlmUpstreamEnvelope() {
         var raw = mapper.createObjectNode()
             .put("model", "glm/glm-5.2")
             .put("web_search", true);
@@ -32,20 +33,17 @@ class GlmProtocolTest {
             List.of(),
             Map.of("preview_mode", false),
             raw);
-        var requestMapper = new GlmRequestMapper(mapper);
-        var seed = requestMapper.prepareChat(request, 1785337442000L);
-        var completion = requestMapper.prepareCompletion(
-            request, seed, "chat-1", "user@example.test", 1785337442000L);
+        var command = new OfficialBrowserSemanticCommandFactory(mapper).chat(request);
 
-        assertThat(seed.body().path("chat").path("models").get(0).asText())
-            .isEqualTo("glm-5.2");
-        assertThat(completion.path("model").asText()).isEqualTo("glm-5.2");
-        assertThat(completion.path("signature_prompt").asText()).isEqualTo("hello");
-        assertThat(completion.has("captcha_verify_param")).isFalse();
-        assertThat(completion.path("features").path("auto_web_search").asBoolean()).isTrue();
-        assertThat(completion.path("features").path("preview_mode").asBoolean()).isFalse();
-        assertThat(completion.path("features").path("reasoning_effort").asText())
-            .isEqualTo("high");
+        assertThat(command.path("model").asText()).isEqualTo("glm-5.2");
+        assertThat(command.path("messages").get(0).path("content").asText())
+            .isEqualTo("hello");
+        assertThat(command.path("generation").path("temperature").asDouble())
+            .isEqualTo(0.3);
+        assertThat(command.path("providerOptions").path("preview_mode").asBoolean())
+            .isFalse();
+        assertThat(command.has("chat")).isFalse();
+        assertThat(command.has("completion")).isFalse();
     }
 
     @Test

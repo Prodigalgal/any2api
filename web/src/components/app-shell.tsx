@@ -13,6 +13,7 @@ import {
   HistoryOutlined,
   MenuOutlined,
   SettingsOutlined,
+  RuleOutlined,
   TuneOutlined,
 } from "@mui/icons-material";
 import {
@@ -43,6 +44,7 @@ const navigation = [
   ["运行概览", DashboardOutlined, "/"],
   ["账号池", AccountTreeOutlined, "/accounts"],
   ["模型策略", TuneOutlined, "/models"],
+  ["运行时规则", RuleOutlined, "/runtime-rules"],
   ["生命周期", AutorenewOutlined, "/lifecycle"],
   ["请求记录", ReceiptLongOutlined, "/requests"],
   ["操作记录", HistoryOutlined, "/operations"],

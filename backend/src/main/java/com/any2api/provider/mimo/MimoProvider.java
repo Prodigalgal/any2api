@@ -18,6 +18,7 @@ import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.OfficialBrowserTransportClient;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,7 @@ public final class MimoProvider implements InferenceProvider {
         java.util.Set.of("function"));
     private final BrowserTransportClient transport;
     private final OfficialBrowserTransportClient officialTransport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final MimoProperties properties;
     private final MimoRequestMapper requestMapper;
@@ -54,6 +56,7 @@ public final class MimoProvider implements InferenceProvider {
     public MimoProvider(
         BrowserTransportClient transport,
         OfficialBrowserTransportClient officialTransport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         MimoProperties properties,
         MimoRequestMapper requestMapper,
@@ -62,6 +65,7 @@ public final class MimoProvider implements InferenceProvider {
     ) {
         this.transport = transport;
         this.officialTransport = officialTransport;
+        this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.properties = properties;
         this.requestMapper = requestMapper;
@@ -129,10 +133,11 @@ public final class MimoProvider implements InferenceProvider {
         var proxyPool = proxyPool();
         return uploadMedia(credential, prepared, request.model(), affinityKey)
             .flatMapMany(media -> Flux.defer(() -> {
-                var upstreamMedia = prepared.body().putArray("multiMedias");
-                media.forEach(upstreamMedia::add);
+                var command = semanticCommands.chat(request);
+                command.set("uploadedMedia", mapper.valueToTree(media));
                 return streamOfficial(
                     account.credential(),
+                    command,
                     prepared,
                     request.requestId(),
                     proxyPool,
@@ -146,9 +151,8 @@ public final class MimoProvider implements InferenceProvider {
         MimoCredential.from(account);
         return officialTransport.request(
                 manifest().id(),
-                "GET",
-                "/open-apis/bot/config",
-                "",
+                "models",
+                semanticCommands.models(),
                 account.credential(),
                 proxyPool(),
                 proxyAffinityKey(account))
@@ -192,13 +196,13 @@ public final class MimoProvider implements InferenceProvider {
 
     private Flux<CanonicalEvent> streamOfficial(
         JsonNode rawCredential,
+        JsonNode semanticCommand,
         MimoPreparedRequest prepared,
         String requestId,
         Map<String, Object> proxyPool,
         String affinityKey,
         ProviderExecutionContext context
     ) {
-        var body = mapper.writeValueAsString(prepared.body());
         return Flux.defer(() -> {
             var decoder = new MimoEventDecoder(
                 requestId,
@@ -208,9 +212,8 @@ public final class MimoProvider implements InferenceProvider {
             var status = new java.util.concurrent.atomic.AtomicInteger(-1);
             return officialTransport.stream(
                     manifest().id(),
-                    "POST",
-                    "/open-apis/bot/chat",
-                    body,
+                    "chat",
+                    semanticCommand,
                     rawCredential,
                     proxyPool,
                     affinityKey)

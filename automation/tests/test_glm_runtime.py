@@ -9,7 +9,8 @@ from any2api_automation.providers import glm as glm_module
 from any2api_automation.providers.glm import GlmAutomationProvider
 from any2api_automation.providers.glm_runtime import (
     _filter_storage_state,
-    _validate_command,
+    _validate_semantic_command,
+    build_glm_command,
     discover_runtime_names,
 )
 
@@ -63,7 +64,20 @@ def test_glm_storage_injection_rejects_cross_provider_state() -> None:
 )
 def test_glm_rejects_incomplete_semantic_commands(command: dict[str, object]) -> None:
     with pytest.raises((TypeError, ValueError)):
-        _validate_command(command)
+        _validate_semantic_command(command)
+
+
+def test_glm_builds_current_chat_envelopes_in_automation() -> None:
+    command = build_glm_command(
+        _semantic_command(), "user@example.test", 1_785_337_442_000
+    )
+
+    assert command["chat"]["models"] == ["glm-5.2"]
+    assert command["completion"]["model"] == "glm-5.2"
+    assert command["completion"]["signature_prompt"] == "hello"
+    assert command["completion"]["features"]["auto_web_search"] is True
+    assert command["completion"]["features"]["preview_mode"] is False
+    assert command["completion"]["features"]["reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio
@@ -86,11 +100,9 @@ async def test_glm_transport_normalizes_worker_startup_failure_to_error_frame(
         json.loads(frame)
         async for frame in GlmAutomationProvider().transport_stream(
             {
-                "method": "POST",
-                "path": "/api/v2/chat/completions",
-                "body": json.dumps(
-                    {"chat": {}, "completion": {}, "prompt": "hello"}
-                ),
+                "operation": "chat",
+                "semantic_command": _semantic_command(),
+                "runtime_plan": _runtime_plan(),
                 "credential": {},
             }
         )
@@ -99,3 +111,46 @@ async def test_glm_transport_normalizes_worker_startup_failure_to_error_frame(
     assert frames == [
         {"type": "error", "data": "official browser stream failed (RuntimeError)"}
     ]
+
+
+def _semantic_command() -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "requestId": "request-1",
+        "protocol": "RESPONSES",
+        "model": "glm-5.2",
+        "stream": True,
+        "messages": [{"role": "user", "content": "hello"}],
+        "generation": {"temperature": 0.3},
+        "reasoning": {"effort": "high"},
+        "tools": [],
+        "providerOptions": {"preview_mode": False, "web_search": True},
+        "controls": {"web_search": True},
+    }
+
+
+def _runtime_plan() -> dict[str, object]:
+    return {
+        "active": {
+            "providerId": "glm",
+            "revision": 1,
+            "rules": {
+                "schemaVersion": 1,
+                "sessionMaxAgeSeconds": 900,
+                "canaryTimeoutSeconds": 60,
+                "buildAssetMarkers": ["/assets/index-"],
+                "discoveryMarkers": {
+                    "newChat": ["/chats/new"],
+                    "completion": ["X-Signature"],
+                    "requestContext": ["sortedPayload"],
+                    "sign": ["5*60*1e3"],
+                },
+                "capabilities": {},
+                "endpointPaths": {
+                    "chat": "/api/v2/chat/completions",
+                    "apiBase": "/api/v2",
+                },
+            },
+        },
+        "candidate": None,
+    }

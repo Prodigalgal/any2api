@@ -9,6 +9,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.any2api.observability.OperationContext;
+import com.any2api.runtime.ProviderRuntimeRuleService;
+import com.any2api.settings.RuntimeSettingsService;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -39,7 +42,8 @@ class LifecycleOperationExecutorTest {
 
         var settings = org.mockito.Mockito.mock(
             com.any2api.settings.RuntimeSettingsService.class);
-        new LifecycleOperationExecutor(registry, automation, settings)
+        var runtimeRules = mock(com.any2api.runtime.ProviderRuntimeRuleService.class);
+        new LifecycleOperationExecutor(registry, automation, settings, runtimeRules)
             .execute("mimo", "reauthenticate", credential, metadata, proxyPool)
             .block();
 
@@ -55,5 +59,39 @@ class LifecycleOperationExecutorTest {
             .containsEntry("proxy_affinity_key", "persisted-affinity")
             .containsEntry("proxy_node_offset", 2)
             .containsEntry("strict_proxy_affinity", true);
+    }
+
+    @Test
+    void forwardsCurrentRuntimePlanToOfficialBrowserKeepalive() {
+        var registry = mock(ProviderLifecycleRegistry.class);
+        var automation = mock(LifecycleAutomationClient.class);
+        var settings = mock(RuntimeSettingsService.class);
+        var runtimeRules = mock(ProviderRuntimeRuleService.class);
+        var mapper = new ObjectMapper();
+        var document = new ProviderRuntimeRuleService.RuleDocument(
+            1, 900, 60, List.of("asset"),
+            Map.of("requestModule", List.of("marker")),
+            Map.of("models", "getConfig"),
+            Map.of("models", "/config"));
+        var selection = new ProviderRuntimeRuleService.RuleSelection(
+            "mimo", 7, document);
+        var plan = new ProviderRuntimeRuleService.RuntimePlan(selection, null, null, null);
+        when(registry.handler("mimo", AutomationOperation.KEEPALIVE))
+            .thenReturn(Optional.empty());
+        when(runtimeRules.findPlan("mimo")).thenReturn(Optional.of(plan));
+        when(automation.execute(
+            eq("mimo"), eq("keepalive"), anyMap(), any(OperationContext.class)))
+            .thenReturn(Mono.just(mapper.createObjectNode().put("healthy", true)));
+
+        new LifecycleOperationExecutor(registry, automation, settings, runtimeRules)
+            .execute("mimo", "keepalive", mapper.createObjectNode(), Map.of(), Map.of())
+            .block();
+
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        var payload = (ArgumentCaptor<Map<String, Object>>) (ArgumentCaptor)
+            ArgumentCaptor.forClass(Map.class);
+        verify(automation).execute(
+            eq("mimo"), eq("keepalive"), payload.capture(), any(OperationContext.class));
+        assertThat(payload.getValue()).containsEntry("runtime_plan", plan);
     }
 }

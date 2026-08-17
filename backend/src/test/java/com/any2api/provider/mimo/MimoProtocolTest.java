@@ -11,6 +11,7 @@ import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.OfficialBrowserTransportClient;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -36,8 +37,10 @@ class MimoProtocolTest {
         events.addAll(decoder.decode("{\"promptTokens\":3,\"completionTokens\":2,\"totalTokens\":5}"));
         events.addAll(decoder.finish());
 
-        assertThat(prepared.body().path("query").asText()).contains("hello");
-        assertThat(prepared.body().path("modelConfig").path("enableThinking").asBoolean()).isTrue();
+        var command = new OfficialBrowserSemanticCommandFactory(mapper).chat(request);
+        assertThat(command.path("messages").get(0).path("content").asText())
+            .isEqualTo("hello");
+        assertThat(command.path("reasoning").path("effort").asText()).isEqualTo("high");
         assertThat(events).anyMatch(CanonicalEvent.ReasoningDelta.class::isInstance)
             .anyMatch(CanonicalEvent.OutputTextDelta.class::isInstance)
             .anyMatch(CanonicalEvent.Usage.class::isInstance)
@@ -58,7 +61,6 @@ class MimoProtocolTest {
 
         var prepared = new MimoRequestMapper(mapper).prepare(request);
 
-        assertThat(prepared.body().path("query").asText()).contains("inspect");
         assertThat(prepared.media()).singleElement().satisfies(media -> {
             assertThat(media.kind()).isEqualTo("image");
             assertThat(media.dataUrl()).startsWith("data:image/png;base64,");
@@ -78,9 +80,7 @@ class MimoProtocolTest {
         var decoder = new MimoEventDecoder("tools", prepared.tools(), prepared.toolRequired(),
             prepared.parallelToolCalls());
 
-        assertThat(prepared.body().path("query").asText())
-            .contains("You must call at least one declared function")
-            .contains("<|MiMoML|parameter name=\"PARAMETER_NAME\">");
+        assertThat(prepared.toolRequired()).isTrue();
 
         decoder.decode("{\"type\":\"text\",\"content\":\"<|MiMoML|tool_calls>"
             + "<|MiMoML|invoke name='get_weather'><|MiMoML|parameter name='city'>"
@@ -128,6 +128,7 @@ class MimoProtocolTest {
     void acceptsOnlyOutputLimitsThatCannotConstrainTheOfficialWebModel() {
         var provider = new MimoProvider(
             mock(BrowserTransportClient.class), mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper),
             mock(ProxyPoolService.class),
             new MimoProperties(), mock(MimoRequestMapper.class),
             mock(MimoMediaUploader.class), mapper);

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,13 @@ from patchright.async_api import async_playwright
 
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
+from .runtime_rules import (
+    RuntimeRule,
+    RuntimeRuleDiscoveryError,
+    RuntimeRuleSelection,
+    build_id,
+    rule_digest,
+)
 
 SCHEMA_VERSION = 1
 
@@ -28,6 +36,10 @@ class OfficialBrowserSession:
     state_digest: str
     input_digest: str
     proxy_url: str
+    rule_revision: int
+    rule_digest: str
+    build_id: str
+    created_at: float
     browser_manager: Any | None = None
     playwright: Any | None = None
     camoufox_config: dict[str, Any] | None = None
@@ -62,6 +74,7 @@ class OfficialBrowserRuntime:
         self,
         credential: dict[str, Any],
         proxy_url: str,
+        selection: RuntimeRuleSelection,
     ) -> OfficialBrowserSession:
         key = self._account_key(credential)
         incoming_digest = self.execution_context_digest(credential)
@@ -77,6 +90,10 @@ class OfficialBrowserRuntime:
                 closed
                 or current.key != key
                 or current.proxy_url != proxy_url
+                or current.rule_revision != selection.revision
+                or current.rule_digest != rule_digest(selection)
+                or time.monotonic() - current.created_at
+                >= selection.rules.session_max_age_seconds
                 or (incoming_digest and incoming_digest not in accepted_digests)
             ):
                 await self._close_session(current)
@@ -88,6 +105,7 @@ class OfficialBrowserRuntime:
                 credential,
                 proxy_url,
                 incoming_digest,
+                selection,
             )
             self.current = current
         elif incoming_digest:
@@ -178,8 +196,8 @@ class OfficialBrowserRuntime:
     ) -> None:
         del session, credential
 
-    async def wait_until_ready(self, page: Any) -> None:
-        del page
+    async def wait_until_ready(self, page: Any, rule: RuntimeRule) -> None:
+        del page, rule
 
     async def _new_session(
         self,
@@ -187,6 +205,7 @@ class OfficialBrowserRuntime:
         credential: dict[str, Any],
         proxy_url: str,
         state_digest: str,
+        selection: RuntimeRuleSelection,
     ) -> OfficialBrowserSession:
         execution = self.execution_context(credential)
         backend = str(execution.get("backend") or "camoufox")
@@ -233,6 +252,10 @@ class OfficialBrowserRuntime:
                 state_digest=state_digest,
                 input_digest=state_digest,
                 proxy_url=proxy_url,
+                rule_revision=selection.revision,
+                rule_digest=rule_digest(selection),
+                build_id="",
+                created_at=time.monotonic(),
                 browser_manager=browser_manager,
                 playwright=playwright,
                 camoufox_config=camoufox_config,
@@ -243,11 +266,22 @@ class OfficialBrowserRuntime:
                 wait_until="domcontentloaded",
                 timeout=90_000,
             )
-            await self.wait_until_ready(page)
+            try:
+                session.build_id = await official_build_id(
+                    page, selection.rules.build_asset_markers
+                )
+                await self.wait_until_ready(page, selection.rules)
+            except Exception as error:
+                raise RuntimeRuleDiscoveryError(
+                    f"{self.provider_id} runtime discovery failed ({type(error).__name__})"
+                ) from error
             self.logger.info(
-                "official_browser_session lifecycle=created backend=%s proxy_bound=%s",
+                "official_browser_session lifecycle=created backend=%s proxy_bound=%s "
+                "rule_revision=%s build_id=%s",
                 backend,
                 bool(proxy_url),
+                selection.revision,
+                session.build_id[:12],
             )
             return session
         except Exception:
@@ -397,3 +431,19 @@ async def runtime_fingerprint(page: Any) -> dict[str, Any]:
         }"""
     )
     return value if isinstance(value, dict) else {}
+
+
+async def official_build_id(page: Any, markers: tuple[str, ...]) -> str:
+    values = await page.evaluate(
+        """markers => [...document.scripts]
+          .map(script => String(script.src || ''))
+          .filter(source => source && markers.some(marker => source.includes(marker)))
+          .map(source => {
+            const parsed = new URL(source, location.href);
+            return parsed.origin + parsed.pathname;
+          })""",
+        list(markers),
+    )
+    if not isinstance(values, list):
+        raise RuntimeRuleDiscoveryError("official build asset collection is invalid")
+    return build_id([str(value) for value in values])

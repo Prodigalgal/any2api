@@ -29,8 +29,11 @@ class ProviderOperationRequest(BaseModel):
 
 
 class ProviderTransportRequest(BaseModel):
-    method: Literal["GET", "POST"]
-    path: str = Field(min_length=1, max_length=1024)
+    operation: str | None = Field(default=None, min_length=1, max_length=64)
+    semantic_command: dict[str, Any] = Field(default_factory=dict)
+    runtime_plan: dict[str, Any] = Field(default_factory=dict)
+    method: Literal["GET", "POST"] | None = None
+    path: str = Field(default="", max_length=1024)
     body: str = Field(default="", max_length=2 * 1024 * 1024)
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -154,10 +157,12 @@ async def transport_request(provider_id: str, request: ProviderTransportRequest)
     provider = _transport_provider(provider_id)
     payload = {
         **request.payload,
-        "method": request.method,
-        "path": request.path,
-        "body": request.body,
+        "operation": request.operation,
+        "semantic_command": request.semantic_command,
+        "runtime_plan": request.runtime_plan,
     }
+    if request.method is not None:
+        payload.update(method=request.method, path=request.path, body=request.body)
     try:
         if inspect.iscoroutinefunction(provider.transport_request):
             return await provider.transport_request(payload)
@@ -178,10 +183,12 @@ async def transport_stream(
     provider = _transport_provider(provider_id)
     payload = {
         **request.payload,
-        "method": request.method,
-        "path": request.path,
-        "body": request.body,
+        "operation": request.operation,
+        "semantic_command": request.semantic_command,
+        "runtime_plan": request.runtime_plan,
     }
+    if request.method is not None:
+        payload.update(method=request.method, path=request.path, body=request.body)
     try:
         stream = provider.transport_stream(payload)
         if inspect.isawaitable(stream):

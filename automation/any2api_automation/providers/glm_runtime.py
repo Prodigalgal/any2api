@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from patchright.sync_api import sync_playwright
 
@@ -18,6 +21,15 @@ from .official_browser import (
     SCHEMA_VERSION,
     camoufox_launch_options,
     context_options,
+)
+from .runtime_rules import (
+    RuntimePlan,
+    RuntimeRule,
+    RuntimeRuleDiscoveryError,
+    RuntimeRuleSelection,
+    build_id,
+    runtime_canary,
+    successful_canary,
 )
 
 logger = logging.getLogger("any2api_automation.providers.glm_runtime")
@@ -50,7 +62,7 @@ _START_COMPLETION = r"""async input => {
   const response = await runtime.completion(
     localStorage.getItem('token') || '',
     body,
-    location.origin + '/api/v2',
+    location.origin + input.apiBase,
     controller,
     signed.signature,
     requestContext.urlParams + '&signature_timestamp=' + signed.timestamp,
@@ -79,10 +91,10 @@ _READ_COMPLETION_CHUNK = r"""async () => {
   return {done: false, body: new TextDecoder().decode(result.value, {stream: true})};
 }"""
 
-_READ_RUNTIME_ASSET = r"""() => {
+_READ_RUNTIME_ASSET = r"""markers => {
   const sourceUrl = [...document.scripts]
     .map(script => script.src)
-    .find(value => /\/assets\/index-[A-Za-z0-9_-]+\.js(?:\?|$)/.test(value));
+    .find(value => value && markers.some(marker => value.includes(marker)));
   if (!sourceUrl) throw new Error('GLM official runtime asset was not found');
   return sourceUrl;
 }"""
@@ -122,12 +134,17 @@ class GlmOfficialBrowserTransport:
     def stream(
         self,
         credential: dict[str, Any],
-        command: dict[str, Any],
+        semantic_command: dict[str, Any],
         proxy_url: str,
+        plan: RuntimePlan,
         *,
         timeout_seconds: int,
     ) -> Iterator[dict[str, Any]]:
-        _validate_command(command)
+        _validate_semantic_command(semantic_command)
+        command = build_glm_command(
+            semantic_command,
+            _required(credential, "email", "user_id"),
+        )
         execution = _execution_context(credential)
         backend = str(
             execution.get("backend")
@@ -158,7 +175,11 @@ class GlmOfficialBrowserTransport:
                     "token => localStorage.setItem('token', token)",
                     token,
                 )
-                _load_official_runtime(page)
+                selection, runtime_build_id, reports = _select_runtime(
+                    page, plan
+                )
+                for report in reports:
+                    yield {"type": "runtime_canary", **report}
                 chat_id = page.evaluate(_CREATE_CHAT, {"chat": command["chat"]})
                 ticket = challenge.solve(page, timeout_seconds=timeout_seconds)
                 metadata = page.evaluate(
@@ -169,17 +190,28 @@ class GlmOfficialBrowserTransport:
                         "prompt": command["prompt"],
                         "ticket": ticket,
                         "timeoutMs": timeout_seconds * 1000,
+                        "apiBase": selection.rules.endpoint_paths.get(
+                            "apiBase", "/api/v2"
+                        ),
                     },
                 )
                 status = int(metadata.get("status") or 502)
                 yield {"type": "status", "status": status}
+                data_seen = False
                 while True:
                     chunk = page.evaluate(_READ_COMPLETION_CHUNK)
                     if not isinstance(chunk, dict) or bool(chunk.get("done")):
                         break
                     body = str(chunk.get("body") or "")
                     if body:
+                        data_seen = True
                         yield {"type": "data", "data": body}
+                if data_seen and 200 <= status < 300:
+                    success_report = successful_canary(
+                        plan, selection, runtime_build_id
+                    )
+                    if success_report is not None:
+                        yield {"type": "runtime_canary", **success_report}
                 yield {
                     "type": "credential_patch",
                     "data": _credential_patch(
@@ -256,44 +288,83 @@ def _launch_browser(
         playwright.stop()
 
 
-def _load_official_runtime(page: Any) -> None:
-    source_url = str(page.evaluate(_READ_RUNTIME_ASSET) or "")
-    response = page.context.request.get(source_url, timeout=60_000)
+def _load_official_runtime(
+    page: Any,
+    selection: RuntimeRuleSelection,
+) -> str:
+    try:
+        source_url = str(
+            page.evaluate(
+                _READ_RUNTIME_ASSET,
+                list(selection.rules.build_asset_markers),
+            )
+            or ""
+        )
+    except Exception as error:
+        raise RuntimeRuleDiscoveryError(
+            f"GLM runtime asset discovery failed ({type(error).__name__})"
+        ) from error
+    response = page.context.request.get(
+        source_url,
+        timeout=selection.rules.canary_timeout_seconds * 1000,
+    )
     if not response.ok:
         raise RuntimeError(
             f"GLM official runtime asset returned HTTP {response.status}"
         )
     source = response.text()
-    names = discover_runtime_names(source)
-    if not bool(
-        page.evaluate(
-            _IMPORT_RUNTIME,
-            {"source": source, "names": names},
-        )
-    ):
-        raise RuntimeError("GLM official runtime import was incomplete")
+    runtime_build_id = build_id(
+        [
+            source_url.split("?", 1)[0].split("#", 1)[0],
+            hashlib.sha256(source.encode()).hexdigest(),
+        ]
+    )
+    try:
+        names = discover_runtime_names(source, selection.rules)
+        if not bool(
+            page.evaluate(
+                _IMPORT_RUNTIME,
+                {"source": source, "names": names},
+            )
+        ):
+            raise RuntimeError("GLM official runtime import was incomplete")
+    except Exception as error:
+        raise RuntimeRuleDiscoveryError(
+            f"GLM runtime import failed ({type(error).__name__})"
+        ) from error
+    return runtime_build_id
 
 
-def discover_runtime_names(source: str) -> dict[str, str]:
-    new_chat = _assignment_before(
+def discover_runtime_names(
+    source: str,
+    rule: RuntimeRule | None = None,
+) -> dict[str, str]:
+    current = rule or default_runtime_rule()
+    new_chat = _assignment_before_any(
         source,
-        "/chats/new",
+        current.discovery_markers.get("newChat", ()),
         r"(?:const|let|var)?\s*([A-Za-z_$][\w$]*)=async\(",
         2_000,
     )
-    completion = _assignment_before(
+    completion = _assignment_before_any(
         source,
-        "X-Signature",
+        current.discovery_markers.get("completion", ()),
         r"(?:const|let|var)?\s*([A-Za-z_$][\w$]*)=async\(",
         4_000,
     )
-    request_context = _assignment_before(
+    request_context = _assignment_before_any(
         source,
-        "sortedPayload",
+        current.discovery_markers.get("requestContext", ()),
         r"(?:const|let|var)?\s*([A-Za-z_$][\w$]*)=\(\)=>\{",
         12_000,
     )
-    sign_marker = source.find("5*60*1e3", source.find("sortedPayload"))
+    context_markers = current.discovery_markers.get("requestContext", ())
+    context_index = _first_marker_index(source, context_markers)
+    sign_marker = _first_marker_index(
+        source,
+        current.discovery_markers.get("sign", ()),
+        context_index,
+    )
     if sign_marker < 0:
         raise RuntimeError("GLM official signature bucket marker was not found")
     sign = _assignment_before_index(
@@ -314,16 +385,26 @@ def discover_runtime_names(source: str) -> dict[str, str]:
     return values
 
 
-def _assignment_before(
+def _assignment_before_any(
     source: str,
-    marker: str,
+    markers: tuple[str, ...],
     pattern: str,
     window: int,
 ) -> str:
-    index = source.find(marker)
+    index = _first_marker_index(source, markers)
     if index < 0:
-        raise RuntimeError(f"GLM official runtime marker was not found: {marker}")
+        raise RuntimeError("GLM official runtime marker was not found")
     return _assignment_before_index(source, index, pattern, window)
+
+
+def _first_marker_index(
+    source: str,
+    markers: tuple[str, ...],
+    start: int = 0,
+) -> int:
+    indexes = [source.find(marker, max(0, start)) for marker in markers]
+    present = [index for index in indexes if index >= 0]
+    return min(present) if present else -1
 
 
 def _assignment_before_index(
@@ -339,13 +420,228 @@ def _assignment_before_index(
     return matches[-1].group(1)
 
 
-def _validate_command(command: dict[str, Any]) -> None:
-    if not isinstance(command.get("chat"), dict):
-        raise TypeError("GLM transport command requires a chat object")
-    if not isinstance(command.get("completion"), dict):
-        raise TypeError("GLM transport command requires a completion object")
-    if not str(command.get("prompt") or "").strip():
-        raise ValueError("GLM transport command requires a signature prompt")
+def _select_runtime(
+    page: Any,
+    plan: RuntimePlan,
+) -> tuple[RuntimeRuleSelection, str, list[dict[str, Any]]]:
+    reports: list[dict[str, Any]] = []
+    if plan.candidate is not None:
+        try:
+            return (
+                plan.candidate,
+                _load_official_runtime(page, plan.candidate),
+                reports,
+            )
+        except RuntimeRuleDiscoveryError as error:
+            reports.append(runtime_canary(plan.candidate, "", "FAILED", str(error)))
+    return plan.active, _load_official_runtime(page, plan.active), reports
+
+
+def build_glm_command(
+    command: dict[str, Any],
+    email: str,
+    timestamp_ms: int | None = None,
+) -> dict[str, Any]:
+    _validate_semantic_command(command)
+    timestamp = (
+        timestamp_ms
+        if timestamp_ms is not None
+        else round(datetime.now(UTC).timestamp() * 1000)
+    )
+    user_message_id = str(uuid4())
+    prompt = _last_user_prompt(command["messages"])
+    model = str(command["model"])
+    effort = _reasoning_effort(command)
+    thinking = _thinking_enabled(command, effort)
+    web_search = _boolean_option(command, "web_search", False)
+    message = {
+        "id": user_message_id,
+        "parentId": None,
+        "role": "user",
+        "content": prompt,
+        "timestamp": timestamp // 1000,
+        "childrenIds": [],
+        "models": [model],
+    }
+    chat = {
+        "id": "",
+        "title": "New Chat",
+        "params": {},
+        "history": {
+            "messages": {user_message_id: message},
+            "currentId": user_message_id,
+        },
+        "tags": [],
+        "flags": [],
+        "features": [
+            {"server": "tool_selector_h", "status": "hidden", "type": "tool_selector"}
+        ],
+        "mcp_servers": [],
+        "enable_thinking": thinking,
+        "reasoning_effort": effort,
+        "auto_web_search": web_search,
+        "message_version": 1,
+        "extra": {},
+        "timestamp": timestamp,
+        "type": "default",
+        "models": [model],
+    }
+    completion = {
+        "stream": True,
+        "model": model,
+        "messages": _canonical_messages(command),
+        "signature_prompt": prompt,
+        "params": _generation_params(command),
+        "extra": {},
+        "features": {
+            "image_generation": False,
+            "web_search": False,
+            "auto_web_search": web_search,
+            "preview_mode": _boolean_option(command, "preview_mode", True),
+            "flags": [],
+            "vlm_tools_enable": False,
+            "vlm_web_search_enable": False,
+            "vlm_website_mode": False,
+            "enable_thinking": thinking,
+            "reasoning_effort": effort,
+        },
+        "variables": _variables(email, timestamp),
+        "chat_id": "",
+        "id": str(uuid4()),
+        "current_user_message_id": user_message_id,
+        "current_user_message_parent_id": None,
+        "background_tasks": {"title_generation": True, "tags_generation": True},
+    }
+    return {"chat": chat, "completion": completion, "prompt": prompt}
+
+
+def _validate_semantic_command(command: dict[str, Any]) -> None:
+    if not isinstance(command, dict) or command.get("schemaVersion") != 1:
+        raise ValueError("GLM semantic command schema is unsupported")
+    if not str(command.get("model") or "").strip():
+        raise ValueError("GLM semantic command requires a model")
+    if not isinstance(command.get("messages"), list):
+        raise TypeError("GLM semantic command messages must be an array")
+    for name in ("generation", "reasoning", "providerOptions", "controls"):
+        if not isinstance(command.get(name), dict):
+            raise TypeError(f"GLM semantic command {name} must be an object")
+
+
+def _last_user_prompt(messages: list[Any]) -> str:
+    candidates = [
+        _content(message.get("content"))
+        for message in messages
+        if isinstance(message, dict) and _role(message.get("role")) == "user"
+    ]
+    candidates = [value for value in candidates if value]
+    if not candidates:
+        raise ValueError("GLM request requires a user message")
+    return candidates[-1]
+
+
+def _canonical_messages(command: dict[str, Any]) -> list[dict[str, str]]:
+    output: list[dict[str, str]] = []
+    tools = command.get("tools") or []
+    if tools:
+        output.append(
+            {
+                "role": "system",
+                "content": "Available function tools:\n"
+                + json.dumps(tools, ensure_ascii=True, separators=(",", ":")),
+            }
+        )
+    for source in command["messages"]:
+        if not isinstance(source, dict):
+            continue
+        role = _role(source.get("role"))
+        content = _content(source.get("content"))
+        if role == "assistant" and isinstance(source.get("tool_calls"), list):
+            content += "\n" + json.dumps(source["tool_calls"], separators=(",", ":"))
+        output.append({"role": role, "content": content})
+    return output
+
+
+def _generation_params(command: dict[str, Any]) -> dict[str, float | int]:
+    generation = command["generation"]
+    output: dict[str, float | int] = {}
+    for field in ("temperature", "top_p"):
+        value = generation.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            output[field] = float(value)
+    for source in ("max_completion_tokens", "max_output_tokens", "max_tokens"):
+        value = generation.get(source)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            output["max_tokens"] = int(value)
+            break
+    return output
+
+
+def _reasoning_effort(command: dict[str, Any]) -> str:
+    options = command["providerOptions"]
+    value = options.get("reasoning_effort") or command["reasoning"].get("effort")
+    value = value or command["controls"].get("reasoning_effort") or "max"
+    normalized = str(value).strip().lower()
+    return normalized or "max"
+
+
+def _thinking_enabled(command: dict[str, Any], effort: str) -> bool:
+    value = command["providerOptions"].get("enable_thinking")
+    return value if isinstance(value, bool) else effort not in {"none", "minimal", "low"}
+
+
+def _boolean_option(command: dict[str, Any], name: str, fallback: bool) -> bool:
+    value = command["providerOptions"].get(name, command["controls"].get(name))
+    return value if isinstance(value, bool) else fallback
+
+
+def _variables(email: str, timestamp_ms: int) -> dict[str, str]:
+    current = datetime.fromtimestamp(timestamp_ms / 1000).astimezone()
+    return {
+        "{{USER_NAME}}": email,
+        "{{USER_LOCATION}}": "Unknown",
+        "{{CURRENT_DATETIME}}": current.strftime("%Y-%m-%d %H:%M:%S"),
+        "{{CURRENT_DATE}}": current.date().isoformat(),
+        "{{CURRENT_TIME}}": current.time().replace(microsecond=0).isoformat(),
+        "{{CURRENT_WEEKDAY}}": current.strftime("%A").upper(),
+        "{{CURRENT_TIMEZONE}}": str(current.tzinfo),
+        "{{USER_LANGUAGE}}": "en-US",
+    }
+
+
+def _role(value: Any) -> str:
+    role = str(value or "user").lower()
+    if role == "developer":
+        return "system"
+    return role if role in {"assistant", "system", "tool"} else "user"
+
+
+def _content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return ""
+    return "\n".join(
+        str(part if isinstance(part, str) else part.get("text") or "")
+        for part in value
+        if isinstance(part, (str, dict))
+    )
+
+
+def default_runtime_rule() -> RuntimeRule:
+    return RuntimeRule(
+        schema_version=1,
+        session_max_age_seconds=900,
+        canary_timeout_seconds=60,
+        build_asset_markers=("/assets/index-",),
+        discovery_markers={
+            "newChat": ("/chats/new",),
+            "completion": ("X-Signature",),
+            "requestContext": ("sortedPayload",),
+            "sign": ("5*60*1e3",),
+        },
+        capabilities={},
+        endpoint_paths={"chat": "/api/v2/chat/completions", "apiBase": "/api/v2"},
+    )
 
 
 def _execution_context(credential: dict[str, Any]) -> dict[str, Any]:

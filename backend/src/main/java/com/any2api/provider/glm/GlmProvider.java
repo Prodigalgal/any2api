@@ -114,7 +114,6 @@ public final class GlmProvider implements InferenceProvider {
             manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
         return protocol.chat(
                 account.credential(),
-                account.email(),
                 request,
                 proxyPool,
                 proxyAffinityKey(account),

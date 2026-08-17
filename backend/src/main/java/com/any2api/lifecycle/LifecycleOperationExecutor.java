@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 import com.any2api.observability.OperationContext;
 import com.any2api.settings.RuntimeSettingsService;
+import com.any2api.runtime.ProviderRuntimeRuleService;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
@@ -14,15 +15,18 @@ final class LifecycleOperationExecutor {
     private final ProviderLifecycleRegistry local;
     private final LifecycleAutomationClient automation;
     private final RuntimeSettingsService runtimeSettings;
+    private final ProviderRuntimeRuleService runtimeRules;
 
     LifecycleOperationExecutor(
         ProviderLifecycleRegistry local,
         LifecycleAutomationClient automation,
-        RuntimeSettingsService runtimeSettings
+        RuntimeSettingsService runtimeSettings,
+        ProviderRuntimeRuleService runtimeRules
     ) {
         this.local = local;
         this.automation = automation;
         this.runtimeSettings = runtimeSettings;
+        this.runtimeRules = runtimeRules;
     }
 
     Mono<LifecycleResult> execute(
@@ -66,6 +70,10 @@ final class LifecycleOperationExecutor {
                 }
                 runtimeSettings.applyLifecycleParameters(
                     payload, providerId, externalOperation);
+                if ("keepalive".equals(externalOperation)) {
+                    runtimeRules.findPlan(providerId)
+                        .ifPresent(plan -> payload.put("runtime_plan", plan));
+                }
                 runtimeSettings.applyMailSettings(payload, null);
                 return automation.execute(
                         providerId, externalOperation, Map.copyOf(payload), context)

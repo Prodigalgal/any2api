@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import json
 import logging
 import secrets
 from collections.abc import AsyncIterator
@@ -29,6 +28,7 @@ from .base import AutomationProvider, AutomationProviderManifest
 from .mimo_browser import MimoOfficialBrowserTransport
 from .mimo_protocol import XiaomiProtocolClient
 from .mimo_settings import settings
+from .runtime_rules import RuntimePlan, parse_runtime_plan
 from .transport_support import transport_frame, transport_proxy_lease
 
 logger = logging.getLogger("any2api_automation.providers.mimo")
@@ -172,11 +172,17 @@ class MimoAutomationProvider(AutomationProvider):
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
+        plan_value = payload.get("runtime_plan")
+        plan = (
+            parse_runtime_plan(plan_value, "mimo")
+            if isinstance(plan_value, dict)
+            else None
+        )
         async with transport_proxy_lease(
             payload,
             check_url=settings().mimo_base_url,
         ) as proxy_url:
-            result = await official_browser_transport.request(current, proxy_url)
+            result = await official_browser_transport.request(current, proxy_url, plan)
         status = int(result.get("status") or 502)
         return {
             "healthy": status == 200,
@@ -185,16 +191,16 @@ class MimoAutomationProvider(AutomationProvider):
         }
 
     async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        _validate_transport_input(payload, stream=False)
+        _command, plan = _validate_transport_input(payload, stream=False)
         current = credential(payload)
         async with transport_proxy_lease(
             payload,
             check_url=settings().mimo_base_url,
         ) as proxy_url:
-            return await official_browser_transport.request(current, proxy_url)
+            return await official_browser_transport.request(current, proxy_url, plan)
 
     async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
-        body = _validate_transport_input(payload, stream=True)
+        command, plan = _validate_transport_input(payload, stream=True)
         current = credential(payload)
         async with transport_proxy_lease(
             payload,
@@ -203,8 +209,9 @@ class MimoAutomationProvider(AutomationProvider):
             try:
                 async for event in official_browser_transport.stream(
                     current,
-                    body,
+                    command,
                     proxy_url,
+                    plan,
                 ):
                     event_type = str(event.get("type") or "error")
                     details = {key: value for key, value in event.items() if key != "type"}
@@ -366,21 +373,17 @@ def _bootstrap_browser(page, context, backend: str, current: dict[str, Any]) -> 
     )
 
 
-def _validate_transport_input(payload: dict[str, Any], *, stream: bool) -> str:
-    method = str(payload.get("method") or "").upper()
-    path = str(payload.get("path") or "")
-    body = str(payload.get("body") or "")
-    expected = "/open-apis/bot/chat" if stream else "/open-apis/bot/config"
-    expected_method = "POST" if stream else "GET"
-    if method != expected_method or path != expected:
+def _validate_transport_input(
+    payload: dict[str, Any], *, stream: bool
+) -> tuple[dict[str, Any], RuntimePlan]:
+    operation = str(payload.get("operation") or "")
+    expected = "chat" if stream else "models"
+    if operation != expected:
         raise ValueError("MiMo transport operation is not allowlisted")
-    if stream:
-        parsed = json.loads(body)
-        if not isinstance(parsed, dict):
-            raise TypeError("MiMo completion body must be an object")
-    elif body:
-        raise ValueError("MiMo config transport does not accept a body")
-    return body
+    command = payload.get("semantic_command")
+    if not isinstance(command, dict) or command.get("schemaVersion") != 1:
+        raise ValueError("MiMo semantic command schema is unsupported")
+    return command, parse_runtime_plan(payload.get("runtime_plan"), "mimo")
 
 
 def _mimo_proxy_affinity(email: str, attempt: int) -> str:

@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 public final class XaiAccountRecoveryPolicy implements AccountRecoveryPolicy {
     private static final String SOURCE_PROVIDER = "grok";
     private static final Set<String> DERIVED_PROVIDERS = Set.of("grok_web", "grok_console");
+    private static final Set<String> RECOVERABLE_FAILURES = Set.of(
+        "credential_rejected", "permission_or_egress_denied");
 
     private final AccountRepository accounts;
 
@@ -20,8 +22,12 @@ public final class XaiAccountRecoveryPolicy implements AccountRecoveryPolicy {
     }
 
     @Override
-    public Optional<RecoveryTarget> resolve(LeasedProviderAccount failedAccount) {
+    public Optional<RecoveryTarget> resolve(
+        LeasedProviderAccount failedAccount,
+        String failureType
+    ) {
         if (!DERIVED_PROVIDERS.contains(failedAccount.providerId())) return Optional.empty();
+        if (!RECOVERABLE_FAILURES.contains(failureType)) return Optional.empty();
         var identityGroup = String.valueOf(
             failedAccount.metadata().getOrDefault("identity_group_id", "")).trim();
         if (identityGroup.isBlank()) return Optional.empty();

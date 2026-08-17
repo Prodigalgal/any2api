@@ -6,7 +6,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface AccountRecoveryPolicy {
-    Optional<RecoveryTarget> resolve(LeasedProviderAccount failedAccount);
+    Optional<RecoveryTarget> resolve(
+        LeasedProviderAccount failedAccount,
+        String failureType
+    );
 
     record RecoveryTarget(
         UUID accountId,

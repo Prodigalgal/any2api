@@ -30,16 +30,32 @@ public class AccountRecoveryService {
 
     @Transactional
     public boolean schedule(LeasedProviderAccount failedAccount) {
+        return schedule(failedAccount, "credential_rejected", true);
+    }
+
+    @Transactional
+    public boolean schedulePolicyRecovery(
+        LeasedProviderAccount failedAccount,
+        String failureType
+    ) {
+        return schedule(failedAccount, failureType, false);
+    }
+
+    private boolean schedule(
+        LeasedProviderAccount failedAccount,
+        String failureType,
+        boolean allowDirectReauthentication
+    ) {
         var provider = providers.require(failedAccount.providerId());
         var reauthentication = provider.manifest().capabilities().getOrDefault(
             ProviderCapability.REAUTHENTICATION, SupportLevel.UNSUPPORTED);
-        if (reauthentication != SupportLevel.UNSUPPORTED) {
+        if (allowDirectReauthentication && reauthentication != SupportLevel.UNSUPPORTED) {
             schedules.scheduleReauthentication(
                 failedAccount.accountId(), failedAccount.providerId());
             return true;
         }
         var target = policies.stream()
-            .map(policy -> policy.resolve(failedAccount))
+            .map(policy -> policy.resolve(failedAccount, failureType))
             .flatMap(java.util.Optional::stream)
             .findFirst();
         if (target.isEmpty()) return false;

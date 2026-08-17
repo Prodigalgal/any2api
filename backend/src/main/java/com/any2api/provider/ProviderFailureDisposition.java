@@ -35,6 +35,11 @@ public final class ProviderFailureDisposition {
                     account, failure.message())
                 .then(Mono.<Void>fromRunnable(() -> recoveries.schedule(account))
                     .subscribeOn(Schedulers.boundedElastic()));
+            case "permission_or_egress_denied" -> accounts.reportFailure(
+                    account, failure.message(), Duration.ofMinutes(5))
+                .then(Mono.<Void>fromRunnable(() -> recoveries.schedulePolicyRecovery(
+                        account, failure.type()))
+                    .subscribeOn(Schedulers.boundedElastic()));
             case "account_blocked" -> accounts.reportFailure(
                 account, failure.message(), Duration.ofHours(6));
             case "anti_bot_rejected" -> accounts.reportFailure(

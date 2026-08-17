@@ -26,7 +26,8 @@ class XaiAccountRecoveryPolicyTest {
             1, null, JsonNodeFactory.instance.objectNode(),
             Map.of("identity_group_id", "group-1"), null);
 
-        var target = new XaiAccountRecoveryPolicy(accounts).resolve(failed);
+        var target = new XaiAccountRecoveryPolicy(accounts).resolve(
+            failed, "permission_or_egress_denied");
 
         assertThat(target).isPresent();
         assertThat(target.orElseThrow().accountId()).isEqualTo(source.getId());
@@ -34,5 +35,19 @@ class XaiAccountRecoveryPolicyTest {
         assertThat(target.orElseThrow().metadataPatch())
             .containsEntry("xai_force_sso_refresh", true)
             .containsEntry("xai_recovery_source", "grok_console");
+    }
+
+    @Test
+    void rejectsFailuresThatDoNotIndicateSessionRecovery() {
+        var accounts = mock(AccountRepository.class);
+        var failed = new LeasedProviderAccount(
+            java.util.UUID.randomUUID(), "grok_web", "derived", null,
+            1, null, JsonNodeFactory.instance.objectNode(),
+            Map.of("identity_group_id", "group-1"), null);
+
+        var target = new XaiAccountRecoveryPolicy(accounts).resolve(
+            failed, "rate_limited");
+
+        assertThat(target).isEmpty();
     }
 }

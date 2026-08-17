@@ -52,7 +52,7 @@ class AccountRecoveryServiceTest {
         var target = new AccountRecoveryPolicy.RecoveryTarget(
             source.getId(), "grok", Map.of("xai_force_sso_refresh", true));
         when(providers.require("grok_web")).thenReturn(provider);
-        when(policy.resolve(failed)).thenReturn(Optional.of(target));
+        when(policy.resolve(failed, "credential_rejected")).thenReturn(Optional.of(target));
         when(accounts.findById(source.getId())).thenReturn(Optional.of(source));
 
         var scheduled = new AccountRecoveryService(
@@ -81,6 +81,24 @@ class AccountRecoveryServiceTest {
         assertThat(scheduled).isFalse();
         verify(schedules, never()).scheduleReauthentication(
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void policyRecoveryDoesNotReauthenticateAnUnrelatedDirectProvider() {
+        var accounts = mock(AccountRepository.class);
+        var providers = mock(ProviderRegistry.class);
+        var schedules = mock(LifecycleScheduleService.class);
+        var provider = provider("qwen", Map.of(
+            ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE));
+        var failed = leased("qwen", Map.of());
+        when(providers.require("qwen")).thenReturn(provider);
+
+        var scheduled = new AccountRecoveryService(
+            accounts, providers, schedules, List.of()).schedulePolicyRecovery(
+                failed, "permission_or_egress_denied");
+
+        assertThat(scheduled).isFalse();
+        verify(schedules, never()).scheduleReauthentication(failed.accountId(), "qwen");
     }
 
     private static InferenceProvider provider(

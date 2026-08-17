@@ -91,4 +91,23 @@ class ProviderFailureDispositionTest {
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.any());
     }
+
+    @Test
+    void ambiguousPermissionFailureLetsProviderPolicyChooseRecovery() {
+        var accounts = mock(AccountSelectionService.class);
+        var recoveries = mock(AccountRecoveryService.class);
+        var account = mock(LeasedProviderAccount.class);
+        when(accounts.reportFailure(account, "forbidden", Duration.ofMinutes(5)))
+            .thenReturn(Mono.empty());
+
+        new ProviderFailureDisposition(accounts, recoveries).report(
+            account, "model-a",
+            new ProviderFailure(
+                "permission_or_egress_denied", "forbidden", false, Map.of())).block();
+
+        verify(accounts).reportFailure(account, "forbidden", Duration.ofMinutes(5));
+        verify(recoveries).schedulePolicyRecovery(account, "permission_or_egress_denied");
+        verify(accounts, never()).reportAuthenticationFailure(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
 }

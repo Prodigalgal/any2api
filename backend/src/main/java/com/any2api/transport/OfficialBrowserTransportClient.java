@@ -30,6 +30,7 @@ public final class OfficialBrowserTransportClient {
         ObjectMapper mapper
     ) {
         client = builder.clone()
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(20 << 20))
             .filter(RequestCorrelation.propagationFilter())
             .baseUrl(properties.getAutomation().getBaseUrl().toString())
             .build();

@@ -16,9 +16,7 @@ import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import com.any2api.transport.OfficialBrowserTransportClient;
-import com.any2api.transport.SseDataDecoder;
 import java.time.Duration;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -123,7 +121,6 @@ public final class LongcatProvider implements InferenceProvider {
             var decoder = new LongcatEventDecoder(
                 request.requestId(), reasoningEnabled, toolPlan, toolProtocol);
             var status = new AtomicInteger(-1);
-            var sse = new SseDataDecoder();
             return transport.stream(
                     MANIFEST.id(),
                     "chat",
@@ -148,9 +145,6 @@ public final class LongcatProvider implements InferenceProvider {
                 })
                 .cast(String.class)
                 .takeUntil(data -> "[DONE]".equals(data.trim()))
-                .map(data -> data.getBytes(StandardCharsets.UTF_8))
-                .concatMapIterable(sse::decode)
-                .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
                 .concatMapIterable(decoder::decode)
                 .concatWith(Flux.defer(() -> status.get() >= 400
                     ? Flux.error(new LongcatUpstreamException(

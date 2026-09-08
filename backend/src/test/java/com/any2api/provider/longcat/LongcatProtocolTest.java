@@ -2,7 +2,11 @@ package com.any2api.provider.longcat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
@@ -13,6 +17,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 
 class LongcatProtocolTest {
@@ -123,6 +128,43 @@ class LongcatProtocolTest {
         assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
             && failed.errorType().equals("empty_model_response"));
         assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
+    void decodesRawJsonFramesFromTheBrowserTransport() {
+        var mapper = new ObjectMapper();
+        var transport = mock(OfficialBrowserTransportClient.class);
+        when(transport.stream(
+            anyString(), anyString(), any(), any(), anyMap(), anyString(), anyMap()))
+            .thenReturn(Flux.just(
+                mapper.createObjectNode().put("type", "status").put("status", 200),
+                mapper.createObjectNode().put("type", "data").put("data",
+                    "{\"event\":{\"type\":\"content\",\"content\":\"READY\"}}"),
+                mapper.createObjectNode().put("type", "data").put("data",
+                    "{\"event\":{\"type\":\"finish\",\"finalContentX\":\"\"}}")));
+        var tools = new LongcatToolProtocol(mapper);
+        var provider = new LongcatProvider(
+            transport,
+            new OfficialBrowserSemanticCommandFactory(mapper),
+            mock(ProxyPoolService.class),
+            new LongcatProperties(),
+            tools,
+            mapper);
+        var request = request(mapper, mapper.createArrayNode(), mapper.createObjectNode());
+        var account = new com.any2api.account.LeasedProviderAccount(
+            java.util.UUID.randomUUID(), "longcat", "external", "user@example.com", 1L,
+            null, mapper.createObjectNode().put("passport_token_key", "session"),
+            Map.of(), null);
+        var context = new com.any2api.provider.ProviderExecutionContext(
+            request.requestId(), account.accountId(), "version", "lease", 1L,
+            java.time.Instant.now().plusSeconds(60));
+
+        var events = provider.generate(request, context, account).collectList().block();
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta delta
+            && delta.delta().equals("READY"));
+        assertThat(events).anyMatch(CanonicalEvent.Completed.class::isInstance);
+        assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed);
     }
 
     private CanonicalRequest request(

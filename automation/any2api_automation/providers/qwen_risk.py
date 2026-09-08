@@ -405,7 +405,13 @@ _UPLOAD_MEDIA = r"""async input => {
   };
   const encodePath = value => value.split('/').map(encodeURIComponent).join('/');
   const uploadUrl = (endpoint, bucket, objectName) => {
-    const parsed = new URL(endpoint);
+    const endpointText = String(endpoint || '').trim();
+    const normalizedEndpoint = endpointText.startsWith('//')
+      ? 'https:' + endpointText
+      : (/^[a-z][a-z0-9+.-]*:\/\//i.test(endpointText)
+        ? endpointText
+        : 'https://' + endpointText);
+    const parsed = new URL(normalizedEndpoint);
     if (parsed.protocol !== 'https:') throw new Error('Qwen OSS endpoint must use HTTPS');
     if (!parsed.hostname.startsWith(bucket + '.')) parsed.hostname = bucket + '.' + parsed.hostname;
     const prefix = parsed.pathname.replace(/\/+$/, '');

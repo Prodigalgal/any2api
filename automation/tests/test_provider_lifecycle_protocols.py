@@ -200,6 +200,18 @@ def test_longcat_session_rejection_keeps_safe_upstream_reason() -> None:
         )
 
 
+def test_longcat_session_accepts_success_code_zero() -> None:
+    assert (
+        _conversation_id(
+            {
+                "status": 200,
+                "body": '{"code":0,"message":"success","data":{"conversationId":"conversation-1"}}',
+            }
+        )
+        == "conversation-1"
+    )
+
+
 def test_minmax_official_asset_hosts_include_current_and_legacy_cdn() -> None:
     config = minmax_settings()
     allowed = {

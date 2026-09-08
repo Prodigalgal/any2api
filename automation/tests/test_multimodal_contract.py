@@ -32,6 +32,9 @@ from any2api_automation.providers.qwen_risk import (
 def test_shared_content_contract_covers_image_audio_video_and_file_sources() -> None:
     assert "OSS4-HMAC-SHA256" in _UPLOAD_MEDIA
     assert "https://' + endpointText" in _UPLOAD_MEDIA
+    assert "aliyun_v4' + sts.accessKeySecret" in _UPLOAD_MEDIA
+    assert "'/' + sts.bucket + '/' + encodePath(sts.objectName)" in _UPLOAD_MEDIA
+    assert "AdditionalHeaders" not in _UPLOAD_MEDIA
     assert "Qwen OSS upload was rejected with HTTP ' + response.status" in _UPLOAD_MEDIA
     blocks = content_blocks(
         [

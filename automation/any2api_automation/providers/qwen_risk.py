@@ -425,21 +425,20 @@ _UPLOAD_MEDIA = r"""async input => {
     const region = sts.region.startsWith('oss-') ? sts.region.slice(4) : sts.region;
     const scope = shortDate + '/' + region + '/oss/aliyun_v4_request';
     const payloadHash = 'UNSIGNED-PAYLOAD';
-    const signedHeaders = 'content-type;host;x-oss-content-sha256;x-oss-date;x-oss-security-token';
     const canonicalHeaders = [
       'content-type:' + decoded.contentType,
-      'host:' + endpoint.host,
       'x-oss-content-sha256:' + payloadHash,
       'x-oss-date:' + now,
       'x-oss-security-token:' + sts.securityToken
     ].join('\n') + '\n';
     const canonicalRequest = [
-      'PUT', endpoint.pathname, '', canonicalHeaders, signedHeaders, payloadHash
+      'PUT', '/' + sts.bucket + '/' + encodePath(sts.objectName), '',
+      canonicalHeaders, '', payloadHash
     ].join('\n');
     const stringToSign = [
       'OSS4-HMAC-SHA256', now, scope, await hash(text(canonicalRequest))
     ].join('\n');
-    const dateKey = await hmac('aliyun' + sts.accessKeySecret, shortDate);
+    const dateKey = await hmac('aliyun_v4' + sts.accessKeySecret, shortDate);
     const regionKey = await hmac(dateKey, region);
     const serviceKey = await hmac(regionKey, 'oss');
     const signingKey = await hmac(serviceKey, 'aliyun_v4_request');
@@ -452,7 +451,7 @@ _UPLOAD_MEDIA = r"""async input => {
         'x-oss-date': now,
         'x-oss-security-token': sts.securityToken,
         'Authorization': 'OSS4-HMAC-SHA256 Credential=' + sts.accessKeyId + '/' + scope +
-          ',AdditionalHeaders=' + signedHeaders + ',Signature=' + signature
+          ',Signature=' + signature
       },
       body: decoded.bytes
     });

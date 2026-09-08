@@ -4,6 +4,9 @@ import com.any2api.persistence.PostgresResultValues;
 import com.any2api.account.AccountRepository;
 import com.any2api.account.AccountStatus;
 import com.any2api.credential.CredentialVault;
+import com.any2api.coordination.AccountCapacityException;
+import com.any2api.coordination.AccountLease;
+import com.any2api.coordination.AccountLeaseService;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
@@ -23,6 +26,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -38,6 +43,7 @@ public class LifecycleScheduler {
     private final TransactionTemplate transactions;
     private final AccountRepository accounts;
     private final CredentialVault credentials;
+    private final AccountLeaseService accountLeases;
     private final ProviderRegistry providers;
     private final ProxyPoolService proxyPools;
     private final LifecycleOperationExecutor lifecycle;
@@ -52,6 +58,7 @@ public class LifecycleScheduler {
         TransactionTemplate transactions,
         AccountRepository accounts,
         CredentialVault credentials,
+        AccountLeaseService accountLeases,
         ProviderRegistry providers,
         ProxyPoolService proxyPools,
         LifecycleOperationExecutor lifecycle,
@@ -65,6 +72,7 @@ public class LifecycleScheduler {
         this.transactions = transactions;
         this.accounts = accounts;
         this.credentials = credentials;
+        this.accountLeases = accountLeases;
         this.providers = providers;
         this.proxyPools = proxyPools;
         this.lifecycle = lifecycle;
@@ -160,6 +168,37 @@ public class LifecycleScheduler {
     }
 
     private reactor.core.publisher.Mono<Void> execute(Action action, String owner) {
+        return Mono.usingWhen(
+            accountLeases.acquireExclusive(
+                action.providerId(), UUID.fromString(action.entityId()), LEASE_TTL),
+            lease -> Mono.firstWithSignal(
+                renewOwnership(action, owner, lease).then(executeOwned(action, owner, lease)),
+                Flux.interval(Duration.ofMinutes(1))
+                    .concatMap(ignored -> renewOwnership(action, owner, lease))
+                    .then()),
+            lease -> accountLeases.release(lease).then(),
+            (lease, error) -> accountLeases.release(lease).then(),
+            lease -> accountLeases.release(lease).then());
+    }
+
+    private Mono<Void> renewOwnership(Action action, String owner, AccountLease lease) {
+        return accountLeases.renew(lease, LEASE_TTL)
+            .flatMap(renewed -> !renewed
+                ? Mono.<Void>error(new IllegalStateException("lifecycle account lease was lost"))
+                : Mono.<Void>fromRunnable(() -> {
+                    var updated = jdbc.sql("""
+                        UPDATE scheduled_actions
+                        SET lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '5 minutes'
+                        WHERE id = :id AND status = 'LEASED' AND lease_owner = :owner
+                          AND lease_expires_at > CURRENT_TIMESTAMP
+                        """).param("id", action.id()).param("owner", owner).update();
+                    if (updated != 1) {
+                        throw new IllegalStateException("lifecycle action lease was lost");
+                    }
+                }).subscribeOn(Schedulers.boundedElastic()));
+    }
+
+    private Mono<Void> executeOwned(Action action, String owner, AccountLease lease) {
         var context = new OperationContext(
             UUID.randomUUID().toString(), "ACCOUNT", action.entityId(), action.attempts() + 1);
         var observed = observability.start(
@@ -180,7 +219,8 @@ public class LifecycleScheduler {
                 credential.expiresAt(),
                 proxyPools.runtimeForProvider(
                     action.providerId(), ProxyTrafficScope.LIFECYCLE).orElse(null));
-        }).doOnNext(task -> observability.linkAccount(observed, task.account().getId()))
+        }).subscribeOn(Schedulers.boundedElastic())
+            .doOnNext(task -> observability.linkAccount(observed, task.account().getId()))
             .flatMap(task -> lifecycle.execute(
                 action.providerId(), action.action(), task.credential(),
                 task.account().getMetadata(), task.proxyPool(), context)
@@ -194,7 +234,8 @@ public class LifecycleScheduler {
                         mergedCredential(task.credential(), result.credentialPatch()),
                         task.credentialVersion(), result.credentialExpiresAt() == null
                             ? task.credentialExpiresAt() : result.credentialExpiresAt());
-                return probe.flatMap(probeResult -> reactor.core.publisher.Mono.<Void>fromRunnable(() -> {
+                return probe.flatMap(probeResult -> renewOwnership(action, owner, lease)
+                    .then(reactor.core.publisher.Mono.<Void>fromRunnable(() -> {
                     transactions.executeWithoutResult(ignored ->
                         complete(action, owner, task, result, probeResult));
                     if (result.healthy() && probeResult.ready()) {
@@ -209,7 +250,7 @@ public class LifecycleScheduler {
                             !probeResult.ready() ? "inference_probe" : "lifecycle_operation",
                             "lifecycle operation did not establish inference readiness");
                     }
-                }));
+                }).subscribeOn(Schedulers.boundedElastic())));
             }))
             .doOnError(error -> observability.fail(observed, error))
             .contextWrite(RequestCorrelation.context(context.correlationId()));
@@ -226,11 +267,10 @@ public class LifecycleScheduler {
         var credentialExpiresAt = result.credentialExpiresAt();
         if (credentialExpiresAt == null) credentialExpiresAt = task.credentialExpiresAt();
         var recoveredCredential = mergedCredential(
-            task.credential(), result.credentialPatch());
-        if (result.credentialPatch().isObject()) {
-            credentials.store(
-                task.account(), action.providerId(), recoveredCredential, credentialExpiresAt);
-        }
+            mergedCredential(task.credential(), result.credentialPatch()), probe.credentialPatch());
+        credentials.storeIfVersion(
+            task.account(), action.providerId(), task.credentialVersion(),
+            recoveredCredential, credentialExpiresAt);
         if (credentialExpiresAt != null
             && !credentialExpiresAt.equals(task.account().getExpiresAt())) {
             task.account().updateCredentialExpiry(credentialExpiresAt);
@@ -331,7 +371,8 @@ public class LifecycleScheduler {
 
     private reactor.core.publisher.Mono<Void> fail(Action action, String owner, Throwable error) {
         return reactor.core.publisher.Mono.fromRunnable(() -> transactions.executeWithoutResult(ignored -> {
-            var attempts = action.attempts() + 1;
+            var busy = error instanceof AccountCapacityException;
+            var attempts = busy ? action.attempts() : action.attempts() + 1;
             jdbc.sql("""
                 UPDATE scheduled_actions
                 SET status = CASE WHEN :exhausted THEN 'EXHAUSTED' ELSE 'PENDING' END,
@@ -343,7 +384,7 @@ public class LifecycleScheduler {
                 .param("attempts", attempts)
                 .param("exhausted", attempts >= MAX_ATTEMPTS)
                 .param("dueAt", PostgresResultValues.timestamp(
-                    Instant.now().plus(retryDelay(attempts))))
+                    Instant.now().plus(busy ? Duration.ofMinutes(1) : retryDelay(attempts))))
                 .param("errorClass", error.getClass().getSimpleName())
                 .param("id", action.id())
                 .param("owner", owner)

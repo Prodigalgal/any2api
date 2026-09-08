@@ -1,5 +1,8 @@
+import asyncio
 import json
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -132,3 +135,49 @@ def _runtime_plan() -> dict[str, object]:
         },
         "candidate": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_accounts_receive_only_their_own_stream_events(monkeypatch) -> None:
+    from any2api_automation.providers import mimo_browser
+
+    runtime = MimoOfficialBrowserTransport("https://aistudio.xiaomimimo.com")
+    both_started = asyncio.Event()
+    started = set()
+
+    class Page:
+        def __init__(self, account):
+            self.account = account
+
+        async def evaluate(self, _script, payload):
+            started.add(self.account)
+            if len(started) == 2:
+                both_started.set()
+            await both_started.wait()
+            runtime._emit({"requestId": payload["requestId"], "type": "status", "status": 200})
+            runtime._emit({"requestId": payload["requestId"], "type": "data", "data": self.account})
+
+    async def select(credential, _proxy, _plan):
+        return SimpleNamespace(page=Page(credential["user_id"]), build_id=""), None, []
+
+    runtime._select_session = AsyncMock(side_effect=select)
+    runtime.credential_patch = AsyncMock(return_value={})
+    monkeypatch.setattr(mimo_browser, "_stream_request", lambda _rule: "test")
+    monkeypatch.setattr(mimo_browser, "successful_canary", lambda *_args: None)
+
+    async def selection(credential, proxy, plan):
+        session, _, reports = await select(credential, proxy, plan)
+        return session, SimpleNamespace(rules=None), reports
+
+    runtime._select_session = AsyncMock(side_effect=selection)
+
+    async def consume(account):
+        return [event async for event in runtime.stream(
+            {"user_id": account}, _semantic_command(), "", None
+        )]
+
+    a, b = await asyncio.wait_for(asyncio.gather(consume("a"), consume("b")), 2)
+    assert [event["data"] for event in a if event["type"] == "data"] == ["a"]
+    assert [event["data"] for event in b if event["type"] == "data"] == ["b"]
+    assert runtime._stream_queues == {}
+    await runtime.close()

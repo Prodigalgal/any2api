@@ -7,6 +7,8 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -17,6 +19,7 @@ from patchright.async_api import async_playwright
 
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
+from ..session_pool import AccountSessionPool, SessionSlot
 
 logger = logging.getLogger("any2api_automation.providers.minmax_browser")
 _SCHEMA_VERSION = 1
@@ -141,8 +144,19 @@ class MinmaxOfficialBrowserTransport:
 
     def __init__(self, base_url: str) -> None:
         self._base_url = base_url.rstrip("/")
-        self._request_lock = asyncio.Lock()
-        self._session: _Session | None = None
+        self._sessions: AccountSessionPool[_Session] = AccountSessionPool(
+            core_settings().official_browser_session_pool_size, self._close_session
+        )
+        self._operation: ContextVar[SessionSlot[_Session]] = ContextVar("minmax_browser_operation")
+
+    @asynccontextmanager
+    async def _account_operation(self, credential: dict[str, Any]):
+        async with self._sessions.borrow(_account_key(credential)) as slot:
+            token = self._operation.set(slot)
+            try:
+                yield
+            finally:
+                self._operation.reset(token)
 
     async def request(
         self,
@@ -152,7 +166,7 @@ class MinmaxOfficialBrowserTransport:
         body: str,
         proxy_url: str,
     ) -> dict[str, Any]:
-        async with self._request_lock:
+        async with self._account_operation(credential):
             session = await self._session_for(credential, proxy_url)
             await self._inject_context(session, credential)
             result = await session.page.evaluate(
@@ -190,7 +204,7 @@ class MinmaxOfficialBrowserTransport:
         body: str,
         proxy_url: str,
     ) -> AsyncIterator[dict[str, Any]]:
-        async with self._request_lock:
+        async with self._account_operation(credential):
             session = await self._session_for(credential, proxy_url)
             await self._inject_context(session, credential)
             request_id = uuid4().hex
@@ -248,15 +262,15 @@ class MinmaxOfficialBrowserTransport:
                 await asyncio.gather(task, return_exceptions=True)
 
     async def close(self) -> None:
-        async with self._request_lock:
-            if self._session is not None:
-                await self._close_session(self._session)
-                self._session = None
+        await self._sessions.close()
 
     async def _session_for(self, credential: dict[str, Any], proxy_url: str) -> _Session:
         key = _account_key(credential)
         incoming_digest = _execution_context_digest(credential)
-        current = self._session
+        slot = self._operation.get()
+        if slot.key != key:
+            raise ValueError("browser operation account mismatch")
+        current = slot.value
         if current is not None:
             closed = (
                 current.page.is_closed()
@@ -270,12 +284,12 @@ class MinmaxOfficialBrowserTransport:
                 or current.proxy_url != proxy_url
                 or (incoming_digest and incoming_digest not in accepted_digests)
             ):
+                slot.value = None
                 await self._close_session(current)
                 current = None
-                self._session = None
         if current is None:
             current = await self._new_session(key, credential, proxy_url, incoming_digest)
-            self._session = current
+            slot.value = current
         elif incoming_digest:
             current.input_digest = incoming_digest
         return current
@@ -355,7 +369,7 @@ class MinmaxOfficialBrowserTransport:
                 bool(proxy_url),
             )
             return session
-        except Exception:
+        except BaseException:
             if context is not None:
                 await context.close()
             if browser_manager is not None:

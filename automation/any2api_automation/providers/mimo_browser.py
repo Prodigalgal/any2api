@@ -152,8 +152,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
             allowed_domain_suffixes=("xiaomimimo.com",),
             identity_fields=("user_id", "email"),
         )
-        self._active_stream_id = ""
-        self._active_stream_queue: asyncio.Queue[dict[str, Any]] | None = None
+        self._stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 
     async def request(
         self,
@@ -161,7 +160,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         proxy_url: str,
         plan: RuntimePlan | None = None,
     ) -> dict[str, Any]:
-        async with self.lock:
+        async with self.account_operation(credential):
             session, selection, reports = await self._select_session(
                 credential, proxy_url, plan or default_runtime_plan()
             )
@@ -196,14 +195,13 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         plan: RuntimePlan,
     ) -> AsyncIterator[dict[str, Any]]:
         body = build_mimo_chat_request(semantic_command)
-        async with self.lock:
+        async with self.account_operation(credential):
             session, selection, reports = await self._select_session(credential, proxy_url, plan)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
             request_id = uuid4().hex
             queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-            self._active_stream_id = request_id
-            self._active_stream_queue = queue
+            self._stream_queues[request_id] = queue
 
             async def execute() -> None:
                 try:
@@ -265,8 +263,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                 if pending_error is not None:
                     yield pending_error
             finally:
-                self._active_stream_id = ""
-                self._active_stream_queue = None
+                self._stream_queues.pop(request_id, None)
                 if not task.done():
                     task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -345,9 +342,9 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         return session, plan.active, reports
 
     def _emit(self, event: Any) -> None:
-        if not isinstance(event, dict) or event.get("requestId") != self._active_stream_id:
+        if not isinstance(event, dict):
             return
-        queue = self._active_stream_queue
+        queue = self._stream_queues.get(str(event.get("requestId") or ""))
         if queue is None:
             return
         queue.put_nowait({key: value for key, value in event.items() if key != "requestId"})

@@ -2,6 +2,8 @@ package com.any2api.credential;
 
 import com.any2api.account.AccountEntity;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -11,6 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 public class CredentialVault {
 
     private static final String CREDENTIAL_TYPE = "provider-session";
+    private static final Logger LOGGER = LoggerFactory.getLogger(CredentialVault.class);
     private final AccountCredentialRepository credentials;
     private final ObjectMapper objectMapper;
     private final SecretCipher cipher;
@@ -54,6 +57,8 @@ public class CredentialVault {
         var entity = credentials.findForUpdate(account.getId(), CREDENTIAL_TYPE)
             .orElseThrow(() -> new IllegalStateException("account has no provider credential"));
         if (entity.getCredentialVersion() != expectedVersion) {
+            LOGGER.warn("Credential write rejected provider={} account={} expected_version={} current_version={}",
+                expectedProviderId, account.getId(), expectedVersion, entity.getCredentialVersion());
             throw new IllegalStateException(
                 "provider credential changed while the account command was running");
         }

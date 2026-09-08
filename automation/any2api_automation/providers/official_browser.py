@@ -7,6 +7,8 @@ import logging
 import os
 import time
 from copy import deepcopy
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -15,6 +17,7 @@ from patchright.async_api import async_playwright
 
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
+from ..session_pool import AccountSessionPool, SessionSlot
 from .runtime_rules import (
     RuntimeRule,
     RuntimeRuleDiscoveryError,
@@ -46,7 +49,7 @@ class OfficialBrowserSession:
 
 
 class OfficialBrowserRuntime:
-    """Restores one account-bound official page runtime at a time."""
+    """Restores isolated account runtimes with bounded, idle-only eviction."""
 
     def __init__(
         self,
@@ -62,11 +65,24 @@ class OfficialBrowserRuntime:
             value.strip().lower().lstrip(".") for value in allowed_domain_suffixes if value.strip()
         )
         self.identity_fields = identity_fields
-        self.lock = asyncio.Lock()
-        self.current: OfficialBrowserSession | None = None
+        self._sessions: AccountSessionPool[OfficialBrowserSession] = AccountSessionPool(
+            core_settings().official_browser_session_pool_size, self._close_session
+        )
+        self._operation: ContextVar[SessionSlot[OfficialBrowserSession]] = ContextVar(
+            f"{provider_id}_browser_operation"
+        )
         self.logger = logging.getLogger(
             f"any2api_automation.providers.{provider_id}_official_browser"
         )
+
+    @asynccontextmanager
+    async def account_operation(self, credential: dict[str, Any]):
+        async with self._sessions.borrow(self._account_key(credential)) as slot:
+            token = self._operation.set(slot)
+            try:
+                yield
+            finally:
+                self._operation.reset(token)
 
     async def session_for(
         self,
@@ -76,7 +92,10 @@ class OfficialBrowserRuntime:
     ) -> OfficialBrowserSession:
         key = self._account_key(credential)
         incoming_digest = self.execution_context_digest(credential)
-        current = self.current
+        slot = self._operation.get()
+        if slot.key != key:
+            raise ValueError("browser operation account mismatch")
+        current = slot.value
         if current is not None:
             closed = (
                 current.page.is_closed()
@@ -93,9 +112,9 @@ class OfficialBrowserRuntime:
                 or time.monotonic() - current.created_at >= selection.rules.session_max_age_seconds
                 or (incoming_digest and incoming_digest not in accepted_digests)
             ):
+                slot.value = None
                 await self._close_session(current)
                 current = None
-                self.current = None
         if current is None:
             current = await self._new_session(
                 key,
@@ -104,16 +123,13 @@ class OfficialBrowserRuntime:
                 incoming_digest,
                 selection,
             )
-            self.current = current
+            slot.value = current
         elif incoming_digest:
             current.input_digest = incoming_digest
         return current
 
     async def close(self) -> None:
-        async with self.lock:
-            if self.current is not None:
-                await self._close_session(self.current)
-                self.current = None
+        await self._sessions.close()
 
     async def credential_patch(
         self,
@@ -276,7 +292,7 @@ class OfficialBrowserRuntime:
                 session.build_id[:12],
             )
             return session
-        except Exception:
+        except BaseException:
             if context is not None:
                 await context.close()
             if browser_manager is not None:

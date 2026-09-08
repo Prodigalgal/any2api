@@ -182,30 +182,16 @@ public class AccountSelectionService {
         LeasedProviderAccount leased,
         JsonNode patch
     ) {
-        for (var attempt = 0; attempt < 3; attempt++) {
-            var account = accounts.findById(leased.accountId())
-                .orElseThrow(() -> new IllegalStateException(
-                    "provider account no longer exists"));
-            var current = credentials.read(account, leased.providerId());
-            if (!current.payload().isObject()) {
-                throw new IllegalStateException(
-                    "provider credential payload must be an object");
-            }
-            var merged = (ObjectNode) current.payload().deepCopy();
-            patch.properties().forEach(entry ->
-                merged.set(entry.getKey(), entry.getValue().deepCopy()));
-            try {
-                credentials.storeIfVersion(
-                    account, leased.providerId(), current.version(),
-                    merged, current.expiresAt());
-                return true;
-            } catch (IllegalStateException error) {
-                if (!String.valueOf(error.getMessage()).contains("credential changed")
-                    || attempt == 2) {
-                    throw error;
-                }
-            }
+        var account = accounts.findById(leased.accountId())
+            .orElseThrow(() -> new IllegalStateException("provider account no longer exists"));
+        if (!leased.credential().isObject()) {
+            throw new IllegalStateException("provider credential payload must be an object");
         }
-        return false;
+        // A patch belongs to the snapshot that produced it, never to a newer login session.
+        var merged = (ObjectNode) leased.credential().deepCopy();
+        patch.properties().forEach(entry -> merged.set(entry.getKey(), entry.getValue().deepCopy()));
+        credentials.storeIfVersion(
+            account, leased.providerId(), leased.credentialVersion(), merged, leased.credentialExpiresAt());
+        return true;
     }
 }

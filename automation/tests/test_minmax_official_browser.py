@@ -120,3 +120,29 @@ async def test_legacy_minmax_account_persists_the_generated_camoufox_config() ->
     execution = patch["browser_execution_context"]
     assert execution["schema_version"] == 1
     assert execution["camoufox_config"]["navigator.userAgent"].endswith("Firefox/150.0")
+
+
+@pytest.mark.asyncio
+async def test_switching_accounts_reuses_sessions_and_only_refreshes_changed_identity() -> None:
+    transport = MinmaxOfficialBrowserTransport("https://agent.minimax.io")
+
+    async def create(key, _credential, proxy, digest):
+        return _Session(
+            key=key, browser=object(), context=object(), page=object(), backend="camoufox",
+            state_digest=digest, input_digest=digest, proxy_url=proxy,
+        )
+
+    transport._new_session = AsyncMock(side_effect=create)
+    transport._close_session = AsyncMock()
+    a = {"user_id": "a", "token": "token-a"}
+    b = {"user_id": "b", "token": "token-b"}
+    async with transport._account_operation(a):
+        first = await transport._session_for(a, "proxy-a")
+    async with transport._account_operation(b):
+        other = await transport._session_for(b, "proxy-b")
+    async with transport._account_operation(a):
+        assert await transport._session_for(a, "proxy-a") is first
+        assert await transport._session_for(a, "proxy-new") is not first
+    transport._close_session.assert_awaited_once_with(first)
+    async with transport._account_operation(b):
+        assert await transport._session_for(b, "proxy-b") is other

@@ -231,6 +231,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
             data_seen = False
             data_events = 0
             data_bytes = 0
+            data_shapes: set[str] = set()
             try:
                 while True:
                     event = await queue.get()
@@ -257,15 +258,19 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                     if event_type == "data" and str(event.get("data") or ""):
                         data_seen = True
                         data_events += 1
-                        data_bytes += len(str(event.get("data") or "").encode("utf-8"))
+                        data = str(event.get("data") or "")
+                        data_bytes += len(data.encode("utf-8"))
+                        if len(data_shapes) < 8:
+                            data_shapes.add(_data_shape(data))
                     yield event
                 self._logger.info(
                     "official_browser_stream_complete endpoint=%s status=%s "
-                    "data_events=%s data_bytes=%s error=%s",
+                    "data_events=%s data_bytes=%s data_shapes=%s error=%s",
                     endpoint_key or target_path,
                     status,
                     data_events,
                     data_bytes,
+                    ",".join(sorted(data_shapes)) or "-",
                     pending_error is not None,
                 )
                 if pending_error is None and data_seen and 200 <= status < 300:
@@ -363,6 +368,34 @@ def _error_reason(error: BaseException) -> str:
     if not value:
         return "<empty>"
     return value[:200]
+
+
+def _data_shape(value: str) -> str:
+    """Return bounded upstream event metadata without logging event contents."""
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return "non_json"
+    if not isinstance(parsed, dict):
+        return f"json:{type(parsed).__name__}"
+    top_keys = ",".join(_shape_label(key) for key in sorted(parsed, key=str)[:16]) or "-"
+    nested = parsed.get("event")
+    if not isinstance(nested, dict):
+        nested = parsed
+    event_type = _shape_label(nested.get("type"))
+    event_keys = ",".join(_shape_label(key) for key in sorted(nested, key=str)[:16]) or "-"
+    content = nested.get("content")
+    content_type = type(content).__name__ if content is not None else "none"
+    content_length = len(content) if isinstance(content, (str, list, dict)) else 0
+    return (
+        f"json:top={top_keys};event={event_type};event_keys={event_keys};"
+        f"content_type={content_type};content_len={content_length}"
+    )
+
+
+def _shape_label(value: Any) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_.:-]", "_", str(value or ""))[:64]
+    return normalized or "-"
 
 
 def _path(value: str) -> str:

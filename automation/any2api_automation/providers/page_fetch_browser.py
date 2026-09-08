@@ -140,12 +140,9 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         timeout_ms: int | None = None,
     ) -> dict[str, Any]:
         method = _method(method)
-        path = _path(path)
         async with self.account_operation(credential):
             session, selection, reports = await self._select_session(credential, proxy_url, plan)
-            target_path = _path(
-                selection.rules.endpoint_paths.get(endpoint_key, path) if endpoint_key else path
-            )
+            target_path = _resolve_target_path(path, endpoint_key, selection.rules.endpoint_paths)
             response = await session.page.evaluate(
                 _buffered_request_script(),
                 {
@@ -182,12 +179,9 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         timeout_ms: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         method = _method(method)
-        path = _path(path)
         async with self.account_operation(credential):
             session, selection, reports = await self._select_session(credential, proxy_url, plan)
-            target_path = _path(
-                selection.rules.endpoint_paths.get(endpoint_key, path) if endpoint_key else path
-            )
+            target_path = _resolve_target_path(path, endpoint_key, selection.rules.endpoint_paths)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
 
@@ -342,6 +336,18 @@ def _path(value: str) -> str:
     ):
         raise ValueError("official browser endpoint must be a same-origin path")
     return normalized
+
+
+def _resolve_target_path(
+    fallback_path: str,
+    endpoint_key: str | None,
+    endpoint_paths: dict[str, str],
+) -> str:
+    if endpoint_key:
+        configured_path = endpoint_paths.get(endpoint_key)
+        if configured_path:
+            return _path(configured_path)
+    return _path(fallback_path)
 
 
 def _headers(value: dict[str, str] | None) -> dict[str, str]:

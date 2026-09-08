@@ -15,6 +15,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -30,6 +31,7 @@ class MinmaxProtocolTest {
             .containsKey(RandomModelRole.TOP_TEXT)
             .doesNotContainKey(RandomModelRole.TOP_MULTIMODAL);
         assertThat(provider.retryPolicy().shouldRetry("quota_exhausted", 1)).isTrue();
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofMinutes(2));
     }
 
     @Test

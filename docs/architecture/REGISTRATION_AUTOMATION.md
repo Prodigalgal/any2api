@@ -29,17 +29,16 @@ One Python service and image contains Camoufox, Patchright, Xvfb, provider plugi
 
 Each attempt receives an isolated browser process/context and one node from the proxy pool bound to that provider. The node is held for the entire provider flow and cannot be shared by another flow. Pools can be backed by an HTTPS subscription or an operator-managed node list, including VLESS, HTTP(S), and SOCKS5 nodes. PostgreSQL leases the durable registration job; Redis `SET NX` leases the proxy node across Python replicas. Subscription fetches, Redis, temporary mail, Java calls, and local captcha solvers bypass the provider proxy. Only vendor browser/HTTP traffic uses the leased egress.
 
-Proxy bindings are traffic-scoped. The default and migration-safe scope is `REGISTRATION`; account
-keepalive/reauthorization (`LIFECYCLE`) and public requests (`INFERENCE`) remain direct unless an
-operator explicitly enables those scopes for the provider. Core schedulers request a scope and
-never infer policy from a provider identifier.
+Proxy bindings are traffic-scoped. Every provider's `LIFECYCLE` or `INFERENCE` Runtime receives
+the account's Camoufox Browser Runtime and proxy affinity; an operator setting only controls
+whether that Runtime receives a proxy lease. Core schedulers request a scope and never infer
+policy from a provider identifier.
 
-Public Qwen, LongCat, and MiMo inference opens one origin-allowlisted Python browser-transport
-session per leased account request. The same session carries provider cookies or an internally
-seeded bearer token, TLS/HTTP2 impersonation, and the optional `INFERENCE` proxy lease across
-control and streaming calls. Without an `INFERENCE` binding the identical path is direct. MinMax
-uses its provider-specific fingerprint transport with the same scoped policy. One-time
-object-storage uploads use the provider-issued signed URL and never receive account cookies.
+Every public provider uses one Camoufox Browser Runtime session per leased account for model
+discovery, inference, and keepalive, with account cookies/storage, fingerprint, and the optional
+`INFERENCE` proxy lease shared by control and streaming calls. One-time object-storage uploads
+use the provider-issued signed URL or temporary policy inside the same page/session and do not
+send account cookies to the storage host.
 
 Qwen additionally persists versioned `browser_state` and `browser_fingerprint` objects inside the
 AES-GCM provider credential.
@@ -74,8 +73,8 @@ Qwen persists the successful registration identity's opaque proxy affinity key i
 credential. When an operator enables a compatible `LIFECYCLE` or `INFERENCE` binding, Java prefers
 that key and falls back to the stable account ID only for older credentials. The transport session
 passes its binding to the native Qwen browser so page navigation, Baxia header generation, model
-discovery, upload-token acquisition, chat creation, completion, and the matching `curl_cffi`
-request use the same egress. Request IDs and catalog probes cannot create a second account identity.
+discovery, upload-token acquisition, chat creation, and completion use the same egress. Request
+IDs and catalog probes cannot create a second account identity.
 
 The lease is passed into provider code, not hidden behind global proxy environment variables. Therefore browser navigation and follow-up vendor HTTP exchanges share the same egress in one attempt: Qwen sign-in after email activation and Grok OAuth token exchange cannot accidentally fall back to the host network. A failed node fails that attempt; only the durable Java retry starts a new flow and leases another node.
 

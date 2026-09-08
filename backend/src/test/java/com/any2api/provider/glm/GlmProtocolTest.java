@@ -67,6 +67,30 @@ class GlmProtocolTest {
     }
 
     @Test
+    void treatsOtherPhaseDeltaContentAsAnswerButKeepsUsageOnlyOtherFramesSilent() {
+        var decoder = new GlmEventDecoder("r2-other", mapper);
+        var events = new ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode(("data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"phase\":\"thinking\",\"delta_content\":\"why\"}}\n\n"
+            + "data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"phase\":\"other\",\"delta_content\":\"answer\"}}\n\n"
+            + "data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"phase\":\"other\",\"usage\":{\"prompt_tokens\":3,"
+            + "\"completion_tokens\":2}}}\n\n"
+            + "data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"phase\":\"done\",\"done\":true}}\n\n")
+            .getBytes(StandardCharsets.UTF_8)));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.ReasoningDelta delta
+            && delta.delta().equals("why"));
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta delta
+            && delta.delta().equals("answer"));
+        assertThat(events).anyMatch(CanonicalEvent.Usage.class::isInstance);
+        assertThat(events).anyMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
     void decodesNonSseAndAlternateAnswerPayloadsWithoutSilentlyDroppingThem() {
         var decoder = new GlmEventDecoder("r3", mapper);
         var events = new ArrayList<CanonicalEvent>();

@@ -20,6 +20,7 @@ from patchright.async_api import async_playwright
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
 from ..session_pool import AccountSessionPool, SessionSlot
+from .runtime_rules import RuntimePlan
 
 logger = logging.getLogger("any2api_automation.providers.minmax_browser")
 _SCHEMA_VERSION = 1
@@ -121,6 +122,118 @@ _STREAM_REQUEST = rf"""async request => {{
   }}
 }}"""
 
+_UPLOAD_MEDIA = r"""async input => {
+  const locate = () => {
+    const cached = window.__any2apiMinmaxOfficialBridge;
+    if (typeof cached === 'function') return cached;
+    throw new Error('MinMax official request bridge was not found');
+  };
+  const bridge = locate();
+  const readJson = async response => {
+    const text = await response.text();
+    let body;
+    try { body = JSON.parse(text); } catch (_) { body = {}; }
+    if (!response.ok) throw new Error('MinMax media request was rejected');
+    return body;
+  };
+  const sign = async (secret, value) => {
+    const key = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(secret), {name: 'HMAC', hash: 'SHA-1'},
+      false, ['sign']
+    );
+    const bytes = new Uint8Array(await crypto.subtle.sign(
+      'HMAC', key, new TextEncoder().encode(value)
+    ));
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  };
+  const encodedPath = value => value.split('/').map(encodeURIComponent).join('/');
+  const objectUrl = (endpoint, bucket, objectName) => {
+    const parsed = new URL(endpoint);
+    const originalHost = parsed.hostname;
+    if (!originalHost.startsWith(bucket + '.')) parsed.hostname = bucket + '.' + originalHost;
+    const prefix = parsed.pathname.replace(/\/+$/, '');
+    parsed.pathname = prefix + '/' + encodedPath(objectName);
+    return parsed.toString();
+  };
+  const output = [];
+  for (const source of input.images) {
+    const match = /^data:([^;]+);base64,(.+)$/s.exec(String(source.data_url || ''));
+    if (!match) throw new Error('MinMax media must be an inline base64 data URL');
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    if (!bytes.length || bytes.length > input.maximumBytes) {
+      throw new Error('MinMax media exceeds the configured upload limit');
+    }
+    const policyResponse = await bridge(input.policyPath, {
+      method: 'GET',
+      credentials: 'include'
+    }, {stream: false});
+    const policyBody = await readJson(policyResponse);
+    const policy = policyBody?.data || {};
+    const endpoint = String(policy.endpoint || '').trim();
+    const accessKeyId = String(policy.accessKeyId || '').trim();
+    const accessKeySecret = String(policy.accessKeySecret || '').trim();
+    const securityToken = String(policy.securityToken || '').trim();
+    const bucketName = String(policy.bucketName || '').trim();
+    const dir = String(policy.dir || '').replace(/\/+$/, '');
+    if (!endpoint || !accessKeyId || !accessKeySecret || !securityToken ||
+        !bucketName || !dir) throw new Error('MinMax upload policy is incomplete');
+    const filename = String(source.file_name || ('upload-' + crypto.randomUUID() + '.bin'));
+    const extensionIndex = filename.lastIndexOf('.');
+    const extension = extensionIndex > 0 ? filename.slice(extensionIndex) : '.bin';
+    const objectName = dir + '/' + crypto.randomUUID().replaceAll('-', '') + extension;
+    const contentType = String(source.mime_type || match[1]);
+    const ossDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const canonicalHeaders = 'x-oss-date:' + ossDate + '\n' +
+      'x-oss-security-token:' + securityToken + '\n';
+    const resource = '/' + bucketName + '/' + objectName;
+    const stringToSign = 'PUT\n\n' + contentType + '\n\n' +
+      canonicalHeaders + resource;
+    const signature = await sign(accessKeySecret, stringToSign);
+    const uploadResponse = await fetch(objectUrl(endpoint, bucketName, objectName), {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'OSS ' + accessKeyId + ':' + signature,
+        'Content-Type': contentType,
+        'x-oss-date': ossDate,
+        'x-oss-security-token': securityToken
+      },
+      body: bytes
+    });
+    if (!uploadResponse.ok) throw new Error('MinMax object upload was rejected');
+    const callbackBody = {
+      fileName: objectName.slice(objectName.lastIndexOf('/') + 1),
+      originFileName: filename,
+      dir,
+      endpoint,
+      bucketName,
+      size: String(bytes.length),
+      mimeType: contentType,
+      fileMd5: String(source.file_md5 || '')
+    };
+    const callbackResponse = await bridge(input.callbackPath, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(callbackBody)
+    }, {stream: false});
+    const callbackBodyResult = await readJson(callbackResponse);
+    const ossPath = String(callbackBodyResult?.data?.ossPath || '').trim();
+    if (!ossPath) throw new Error('MinMax media callback returned no ossPath');
+    output.push({
+      type: 'image',
+      file_path: filename,
+      file_name: filename,
+      mime_type: contentType,
+      data_url: ossPath
+    });
+  }
+  return output;
+}"""
+
 
 @dataclass
 class _Session:
@@ -195,6 +308,44 @@ class MinmaxOfficialBrowserTransport:
                 "credential_patch": patch,
                 "transport_mode": "official_browser_runtime",
             }
+
+    async def upload_media(
+        self,
+        credential: dict[str, Any],
+        attachments: list[dict[str, Any]],
+        plan: RuntimePlan,
+        proxy_url: str,
+        maximum_bytes: int,
+    ) -> list[dict[str, Any]]:
+        if not attachments:
+            return []
+        async with self._account_operation(credential):
+            session = await self._session_for(credential, proxy_url)
+            await self._inject_context(session, credential)
+            result = await session.page.evaluate(
+                _UPLOAD_MEDIA,
+                {
+                    "images": attachments,
+                    "policyPath": str(
+                        plan.active.rules.endpoint_paths.get(
+                            "filesPolicy", "/v1/api/files/request_policy"
+                        )
+                    ),
+                    "callbackPath": str(
+                        plan.active.rules.endpoint_paths.get(
+                            "filesCallback", "/v1/api/files/policy_callback"
+                        )
+                    ),
+                    "maximumBytes": maximum_bytes,
+                },
+            )
+            if not isinstance(result, list):
+                raise TypeError("MinMax media upload returned an invalid result")
+            if len(result) != len(attachments) or any(
+                not isinstance(item, dict) for item in result
+            ):
+                raise RuntimeError("MinMax media upload returned an incomplete result")
+            return list(result)
 
     async def stream(
         self,

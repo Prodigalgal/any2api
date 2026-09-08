@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://any2api.local/schemas/browser-runtime-command.schema.json",
+  "title": "Camoufox Browser Runtime Command",
+  "type": "object",
+  "$defs": {
+    "source_value": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "object" }
+      ]
+    },
+    "media_content_block": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "image", "image_url", "input_image",
+            "audio", "audio_url", "input_audio",
+            "video", "video_url", "input_video",
+            "file", "input_file", "attachment"
+          ]
+        },
+        "image_url": { "$ref": "#/$defs/source_value" },
+        "input_image": { "$ref": "#/$defs/source_value" },
+        "image": { "$ref": "#/$defs/source_value" },
+        "audio_url": { "$ref": "#/$defs/source_value" },
+        "input_audio": { "$ref": "#/$defs/source_value" },
+        "audio": { "$ref": "#/$defs/source_value" },
+        "video_url": { "$ref": "#/$defs/source_value" },
+        "input_video": { "$ref": "#/$defs/source_value" },
+        "video": { "$ref": "#/$defs/source_value" },
+        "file": { "$ref": "#/$defs/source_value" },
+        "input_file": { "$ref": "#/$defs/source_value" },
+        "attachment": { "$ref": "#/$defs/source_value" },
+        "source": { "$ref": "#/$defs/source_value" },
+        "file_id": { "type": "string" },
+        "file_url": { "type": "string" },
+        "file_data": { "type": "string" },
+        "data": { "type": "string" },
+        "base64": { "type": "string" },
+        "filename": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "content_block": {
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "#/$defs/media_content_block" },
+        {
+          "type": "object",
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "enum": ["text", "input_text", "output_text"] },
+            "text": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      ]
+    }
+  },
+  "required": [
+    "runtime_mode",
+    "operation",
+    "semantic_command",
+    "runtime_plan",
+    "payload"
+  ],
+  "properties": {
+    "runtime_mode": { "const": "camoufox_browser_runtime" },
+    "operation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "semantic_command": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "protocol",
+        "model",
+        "stream",
+        "messages",
+        "generation",
+        "reasoning",
+        "tools",
+        "providerOptions",
+        "controls"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "protocol": { "enum": ["CHAT_COMPLETIONS", "RESPONSES"] },
+        "model": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "stream": { "type": "boolean" },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "content"],
+            "properties": {
+              "role": { "type": "string", "minLength": 1 },
+              "content": {
+                "oneOf": [
+                  { "type": "string" },
+                  {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/content_block" }
+                  }
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "generation": { "type": "object" },
+        "reasoning": { "type": "object" },
+        "tools": { "type": "array" },
+        "providerOptions": { "type": "object" },
+        "controls": { "type": "object" },
+        "rawRequest": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "runtime_plan": { "type": "object" },
+    "payload": {
+      "type": "object",
+      "required": ["credential"],
+      "properties": {
+        "credential": { "type": "object" },
+        "proxy_pool": { "type": "object" },
+        "proxy_affinity_key": { "type": "string", "maxLength": 255 },
+        "strict_proxy_affinity": { "type": "boolean" },
+        "proxy_node_offset": { "type": "integer", "minimum": 0 },
+        "runtime_options": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

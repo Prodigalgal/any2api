@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import string
@@ -8,8 +9,6 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-
-import httpx
 
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
@@ -29,7 +28,7 @@ from ..lifecycle.browser import (
     run_browser_flow,
 )
 from ..lifecycle.mail import Mailbox, TempMailClient
-from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_parameters
+from ..lifecycle.proxy import proxy_attempt_payload
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
 from .glm_challenge import GlmAliyunChallenge
@@ -51,6 +50,7 @@ class GlmAutomationProvider(AutomationProvider):
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
         inference_transport=True,
+        inference_runtime="camoufox_browser_runtime",
         registration_attempt_mode="single_identity",
     )
 
@@ -109,7 +109,54 @@ class GlmAutomationProvider(AutomationProvider):
         }
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
+        current = credential(payload)
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().glm_base_url,
+        ) as proxy_url:
+            result = await asyncio.to_thread(
+                official_browser_transport.models, current, proxy_url, plan
+            )
+        status = int(result.get("status") or 502)
+        body = str(result.get("body") or "")
+        if status in {401, 403}:
+            response: dict[str, Any] = {
+                "healthy": False,
+                "auth_expired": True,
+                "ready_for_inference": False,
+                "error_class": "glm_credentials_rejected",
+            }
+        else:
+            try:
+                profile = json.loads(body)
+            except json.JSONDecodeError:
+                profile = None
+            healthy = 200 <= status < 300 and isinstance(profile, (dict, list))
+            response = {
+                "healthy": healthy,
+                "auth_expired": False,
+                "ready_for_inference": False,
+                "inference_probe_required": healthy,
+                "error_class": "" if healthy else "glm_profile_unavailable",
+            }
+        patch = result.get("credential_patch")
+        if isinstance(patch, dict) and patch:
+            response["credential_patch"] = patch
+        return response
+
+    async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if str(payload.get("operation") or "") != "models":
+            raise ValueError("GLM transport operation is not allowlisted")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().glm_base_url,
+        ) as proxy_url:
+            return await asyncio.to_thread(
+                official_browser_transport.models, current, proxy_url, plan
+            )
 
     async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
         if str(payload.get("operation") or "") != "chat":
@@ -510,29 +557,6 @@ def _browser_auth_request(page: Any, path: str, body: dict[str, Any]) -> dict[st
         }""",
         {"path": path, "body": body},
     )
-
-
-def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    config = settings()
-    token = required(current, "token", "access_token")
-    with (
-        proxy_lease(check_url=config.glm_base_url, **proxy_parameters(payload)) as proxy_url,
-        httpx.Client(proxy=proxy_url or None, timeout=60) as client,
-    ):
-        response = client.get(
-            f"{config.glm_base_url.rstrip('/')}/api/v1/auths/",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        )
-    if response.status_code in {401, 403}:
-        return {"healthy": False, "auth_expired": True, "ready_for_inference": False}
-    response.raise_for_status()
-    profile = response.json()
-    return {
-        "healthy": bool(profile.get("id")),
-        "auth_expired": not bool(profile.get("id")),
-        "ready_for_inference": False,
-        "inference_probe_required": True,
-    }
 
 
 official_browser_transport = GlmOfficialBrowserTransport(settings().glm_base_url)

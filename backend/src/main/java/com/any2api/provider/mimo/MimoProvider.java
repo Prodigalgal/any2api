@@ -16,10 +16,8 @@ import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
-import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.OfficialBrowserTransportClient;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
-import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -46,32 +44,26 @@ public final class MimoProvider implements InferenceProvider {
             "max_output_tokens", "reasoning", "reasoning_effort", "thinking",
             "web_search_status", "tools", "tool_choice", "parallel_tool_calls"),
         java.util.Set.of("function"));
-    private final BrowserTransportClient transport;
     private final OfficialBrowserTransportClient officialTransport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final MimoProperties properties;
     private final MimoRequestMapper requestMapper;
-    private final MimoMediaUploader mediaUploader;
     private final ObjectMapper mapper;
 
     public MimoProvider(
-        BrowserTransportClient transport,
         OfficialBrowserTransportClient officialTransport,
         OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         MimoProperties properties,
         MimoRequestMapper requestMapper,
-        MimoMediaUploader mediaUploader,
         ObjectMapper mapper
     ) {
-        this.transport = transport;
         this.officialTransport = officialTransport;
         this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.properties = properties;
         this.requestMapper = requestMapper;
-        this.mediaUploader = mediaUploader;
         this.mapper = mapper;
     }
 
@@ -106,6 +98,7 @@ public final class MimoProvider implements InferenceProvider {
 
     @Override
     public void validate(CanonicalRequest request) {
+        ProviderRequestValidation.requireInlineImageUploads(request, "MiMo");
         ProviderRequestValidation.requireBooleanParameters(request, "thinking");
         ProviderRequestValidation.requireStringParameters(request, "web_search_status");
         ProviderRequestValidation.requireReasoningBooleanConsistency(
@@ -138,19 +131,14 @@ public final class MimoProvider implements InferenceProvider {
         var prepared = requestMapper.prepare(request);
         var affinityKey = proxyAffinityKey(account);
         var proxyPool = proxyPool();
-        return uploadMedia(credential, prepared, request.model(), affinityKey)
-            .flatMapMany(media -> Flux.defer(() -> {
-                var command = semanticCommands.chat(request);
-                command.set("uploadedMedia", mapper.valueToTree(media));
-                return streamOfficial(
-                    account.credential(),
-                    command,
-                    prepared,
-                    request.requestId(),
-                    proxyPool,
-                    affinityKey,
-                    context);
-            }));
+        return Flux.defer(() -> streamOfficial(
+            account.credential(),
+            semanticCommands.chat(request),
+            prepared,
+            request.requestId(),
+            proxyPool,
+            affinityKey,
+            context));
     }
 
     @Override
@@ -184,21 +172,6 @@ public final class MimoProvider implements InferenceProvider {
             }
         }
         return List.copyOf(models.values());
-    }
-
-    private Mono<List<tools.jackson.databind.node.ObjectNode>> uploadMedia(
-        MimoCredential credential,
-        MimoPreparedRequest prepared,
-        String model,
-        String affinityKey
-    ) {
-        if (prepared.media().isEmpty()) return Mono.just(List.of());
-        return Mono.usingWhen(
-            transport.open(sessionCommand(credential, affinityKey)),
-            session -> mediaUploader.upload(session, credential, prepared.media(), model),
-            this::close,
-            (session, ignored) -> close(session),
-            this::close);
     }
 
     private Flux<CanonicalEvent> streamOfficial(
@@ -250,23 +223,6 @@ public final class MimoProvider implements InferenceProvider {
         });
     }
 
-    private BrowserTransportClient.OpenCommand sessionCommand(
-        MimoCredential credential,
-        String affinityKey
-    ) {
-        var origin = URI.create(properties.getBaseUrl());
-        var proxyPool = proxyPools.runtimeForProvider(
-            manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
-        var userAgent = credential.userAgent().isBlank()
-            ? properties.getUserAgent() : credential.userAgent();
-        var browserProfile = credential.browserProfile().isBlank()
-            ? "chrome146" : credential.browserProfile();
-        return new BrowserTransportClient.OpenCommand(
-            origin, credential.cookies(), List.of("." + origin.getHost()),
-            userAgent, browserProfile, "v2", proxyPool, 300, List.of(),
-            affinityKey, !proxyPool.isEmpty(), "");
-    }
-
     private Mono<JsonNode> responseJson(
         OfficialBrowserTransportClient.TransportResponse response,
         ProviderExecutionContext context
@@ -284,10 +240,6 @@ public final class MimoProvider implements InferenceProvider {
                 502,
                 "MiMo upstream returned invalid JSON"));
         }
-    }
-
-    private Mono<Void> close(BrowserTransportClient.Session session) {
-        return transport.close(session.id()).then();
     }
 
     private Map<String, Object> proxyPool() {
@@ -309,17 +261,6 @@ public final class MimoProvider implements InferenceProvider {
                 case 401, 403 -> "credential_rejected";
                 case 429 -> "rate_limited";
                 default -> "provider_upstream_error";
-            };
-            return new ProviderFailure(type, upstream.getMessage(), retryable,
-                Map.of("status", upstream.status()));
-        }
-        if (error instanceof BrowserTransportClient.BrowserTransportException upstream) {
-            var retryable = upstream.status() >= 500
-                || List.of(408, 409, 425, 429).contains(upstream.status());
-            var type = switch (upstream.status()) {
-                case 401, 403 -> "credential_rejected";
-                case 429 -> "rate_limited";
-                default -> "provider_transport_error";
             };
             return new ProviderFailure(type, upstream.getMessage(), retryable,
                 Map.of("status", upstream.status()));

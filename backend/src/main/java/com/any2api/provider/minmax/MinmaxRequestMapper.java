@@ -56,11 +56,15 @@ final class MinmaxRequestMapper {
                 var type = part.path("type").asText("");
                 if (List.of("text", "input_text", "output_text").contains(type)) {
                     values.add(part.path("text").asText(""));
-                } else if (List.of("image_url", "input_image").contains(type)) {
-                    var image = part.path("image_url");
-                    var dataUrl = image.isTextual() ? image.asText("")
-                        : image.path("url").asText("");
+                } else if (List.of("image", "image_url", "input_image").contains(type)) {
+                    var image = part.has("image_url") ? part.path("image_url")
+                        : part.has("input_image") ? part.path("input_image")
+                        : part.path("image");
+                    var dataUrl = mediaSource(image);
                     var filename = part.path("filename").asText("");
+                    if (filename.isBlank()) {
+                        filename = image.path("filename").asText("");
+                    }
                     media.add(new MinmaxMediaSource(dataUrl, filename));
                 } else {
                     throw new IllegalArgumentException(
@@ -69,6 +73,19 @@ final class MinmaxRequestMapper {
             }
         }
         return String.join("\n", values);
+    }
+
+    private String mediaSource(JsonNode value) {
+        if (value.isTextual()) return value.asText("");
+        for (var field : List.of("url", "file_url", "file_data", "data", "base64", "source")) {
+            var nested = value.path(field);
+            if (nested.isTextual() && !nested.asText("").isBlank()) return nested.asText("");
+            if (nested.isObject()) {
+                var result = mediaSource(nested);
+                if (!result.isBlank()) return result;
+            }
+        }
+        return "";
     }
 
     private String defaultVariant(CanonicalRequest request) {

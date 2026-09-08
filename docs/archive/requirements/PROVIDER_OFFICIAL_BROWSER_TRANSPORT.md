@@ -1,5 +1,9 @@
 # 厂商官方浏览器传输
 
+> 本文的“稳定 API 保持 Java native”范围约定已被 ADR-0006 supersede。当前统一目标是
+> Camoufox Browser Runtime；页面官方函数、页面 `fetch` 和页面 WebSocket 仍可作为 Runtime
+> 内部实现，不再作为顶层 API/Runtime 二选一。
+
 ## 目标
 
 通过浏览器注册或重新授权的账号必须持久化认证状态与浏览器身份。对于请求头、签名、
@@ -21,7 +25,7 @@
 
 - 提供可执行任意 Header 或 JavaScript 的管理端编辑器。
 - 官方模块发现失败后静默退回复制的签名算法。
-- 为架构形式统一而把稳定、受支持的 API 强制迁入浏览器。
+- 用模拟点击替代可以直接调用的官方前端函数或页面请求。
 - 未通过真实登录态流式验证时宣称厂商链路可投入生产。
 
 ## 本期范围
@@ -31,7 +35,7 @@
   Java 不再保留滚动的 frontend version 和 signature key。
 - MiMo、GLM、DeepSeek、LongCat 注册持久化确定性的代理亲和 key；发生注册重试时同时记录
   成功节点的 `proxy_node_offset`，模型发现、重新授权和推理复用同一节点。
-- 审计 DeepSeek、LongCat、Grok Web、Grok Console 和 Grok CLI，并按真实证据分类。
+- 审计并分阶段迁移 DeepSeek、LongCat、Grok Web、Grok Console 和 Grok CLI。
 - 保留既有 Java 请求校验、模型上下文限制、媒体上传和事件解码行为。
 
 ## 影响模块
@@ -54,10 +58,11 @@
 - 浏览器启动、模块发现和流式请求失败都输出结构化错误，不记录认证信息或请求正文。
 - Python lint/测试、Java 测试、前端 lint/build 全部通过。
 - MiMo、GLM 的真实账号完整 SSE 仍是生产发布硬门禁。
-- DeepSeek、LongCat、Grok Console 未取得认证流证据前保留原链路，不做破坏性替换。
+- 未完成真实认证流、保活和账号切换证据的 provider 保留可回滚旧链路，不做无证据删除。
 
 ## 回滚
 
-本期不修改数据库结构。回滚点是上一不可变版本镜像；MiMo、GLM 的 Java/Python transport
-必须成对回滚，不能只回滚一端。新增的 `browser_execution_context` 和
+本期若包含 Runtime 规则，则使用对应 Liquibase migration 的向后兼容回滚点；回滚点是上一
+不可变版本镜像，Java/Python transport 必须成对回滚，不能只回滚一端。新增的
+`browser_execution_context` 和
 `proxy_affinity_key` 属于兼容字段，旧版本会忽略它们。

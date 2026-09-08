@@ -1,9 +1,13 @@
 import asyncio
+import base64
 import hashlib
 import json
 import random
 import secrets
+import time
+import uuid
 from typing import Any
+from uuid import uuid4
 
 from curl_cffi import requests as curl_requests
 
@@ -20,6 +24,7 @@ from ..lifecycle.browser import (
 )
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
+from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .qwen_challenge import QwenSignupChallenge, pace
 from .qwen_fingerprint import (
     QwenFingerprintPlan,
@@ -36,6 +41,8 @@ from .qwen_session import (
     playwright_storage_state,
 )
 from .qwen_settings import settings
+from .runtime_rules import RuntimePlan, parse_runtime_plan
+from .transport_support import transport_frame, transport_proxy_lease
 
 
 class QwenAutomationProvider(AutomationProvider):
@@ -48,6 +55,7 @@ class QwenAutomationProvider(AutomationProvider):
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
         inference_transport=True,
+        inference_runtime="camoufox_browser_runtime",
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -93,11 +101,69 @@ class QwenAutomationProvider(AutomationProvider):
         )
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(
-            _keepalive_sync,
+        current = credential(payload)
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        async with transport_proxy_lease(
             payload,
-            credential(payload),
-        )
+            check_url=settings().qwen_base_url,
+        ) as proxy_url:
+            result = await _qwen_models_request(current, proxy_url, plan, payload)
+        status = int(result.get("status") or 502)
+        body = str(result.get("body") or "")
+        response: dict[str, Any] = {
+            "healthy": 200 <= status < 300 and _qwen_model_catalog_available(body),
+            "auth_expired": status in {401, 403},
+            "ready_for_inference": False,
+            "inference_probe_required": 200 <= status < 300,
+        }
+        if status not in {401, 403} and not response["healthy"]:
+            response["error_class"] = "qwen_model_catalog_unavailable"
+        patch = result.get("credential_patch")
+        if isinstance(patch, dict) and patch:
+            response["credential_patch"] = patch
+        return response
+
+    async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        operation = str(payload.get("operation") or "")
+        if operation not in {"models", "chat"}:
+            raise ValueError("Qwen transport operation is not allowlisted")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().qwen_base_url,
+        ) as proxy_url:
+            if operation == "models":
+                return await _qwen_models_request(current, proxy_url, plan, payload)
+            command = payload.get("semantic_command")
+            if not isinstance(command, dict):
+                raise TypeError("Qwen semantic command must be an object")
+            return await _qwen_chat_request(current, proxy_url, plan, command, payload)
+
+    async def transport_stream(self, payload: dict[str, Any]):
+        if str(payload.get("operation") or "") != "chat":
+            raise ValueError("Qwen transport operation is not allowlisted")
+        command = payload.get("semantic_command")
+        if not isinstance(command, dict):
+            raise TypeError("Qwen semantic command must be an object")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        async with transport_proxy_lease(
+            payload,
+            check_url=settings().qwen_base_url,
+        ) as proxy_url:
+            result = await _qwen_chat_request(current, proxy_url, plan, command, payload)
+        status = int(result.get("status") or 502)
+        yield transport_frame("status", status=status)
+        if status < 400:
+            body = _decode_qwen_body(result)
+            for data in _qwen_sse_data(body):
+                yield transport_frame("data", data=data)
+        else:
+            yield transport_frame("error", data=_qwen_body_excerpt(result))
+        patch = result.get("credential_patch")
+        if isinstance(patch, dict) and patch:
+            yield transport_frame("credential_patch", data=patch)
 
     def routers(self) -> tuple[Any, ...]:
         from .qwen_risk import router
@@ -168,12 +234,490 @@ def _reauthenticate_sync(
     return result.metadata
 
 
-def _keepalive_sync(
-    payload: dict[str, Any],
+async def _qwen_models_request(
     current: dict[str, Any],
+    proxy_url: str,
+    plan: RuntimePlan,
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
-    result = _run_qwen_api_flow(payload, current, "keepalive")
-    return result.metadata
+    return await _qwen_native_request(
+        current,
+        proxy_url,
+        plan,
+        payload,
+        method="GET",
+        endpoint_key="models",
+        fallback_path="/api/v2/models/",
+        referer_path="/",
+        timeout_seconds=120,
+    )
+
+
+async def _qwen_chat_request(
+    current: dict[str, Any],
+    proxy_url: str,
+    plan: RuntimePlan,
+    command: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    session_path = _runtime_path(plan, "session", "/api/v2/chats/new")
+    completion_path = _runtime_path(plan, "chat", "/api/v2/chat/completions")
+    session_body = json.dumps(
+        {
+            "chatId": "",
+            "project_id": "",
+            "timestamp": int(time.time() * 1000),
+            "chat_type": "t2t",
+            "chat_mode": "normal",
+            "models": [str(command.get("model") or "")],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    session = await _qwen_native_request(
+        current,
+        proxy_url,
+        plan,
+        payload,
+        method="POST",
+        path=session_path,
+        body=session_body,
+        referer_path="/c/new-chat",
+        timeout_seconds=120,
+    )
+    session_status = int(session.get("status") or 502)
+    if session_status < 200 or session_status >= 300:
+        return session
+    try:
+        session_json = json.loads(str(session.get("body") or ""))
+    except json.JSONDecodeError:
+        return {**session, "status": 502, "body": "Qwen chats/new returned invalid JSON"}
+    chat_id = _qwen_chat_id(session_json)
+    if not chat_id:
+        return {**session, "status": 502, "body": "Qwen chats/new returned no chat id"}
+    merged = {**current, **(session.get("credential_patch") or {})}
+    media_sources = _qwen_media_sources(command.get("messages"))
+    uploaded_files: list[dict[str, Any]] = []
+    upload: dict[str, Any] = {}
+    if media_sources:
+        upload = await _qwen_media_upload(
+            merged, proxy_url, plan, payload, media_sources, f"/c/{chat_id}"
+        )
+        upload_patch = upload.get("credential_patch")
+        if isinstance(upload_patch, dict) and upload_patch:
+            merged = {**merged, **upload_patch}
+        uploaded = upload.get("files")
+        if not isinstance(uploaded, list) or len(uploaded) != len(media_sources):
+            return {
+                **session,
+                "status": 502,
+                "body": "Qwen media upload returned an incomplete file list",
+            }
+        uploaded_files = [item for item in uploaded if isinstance(item, dict)]
+    completion_body = json.dumps(
+        build_qwen_request(command, chat_id, uploaded_files=uploaded_files),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    completion = await _qwen_native_request(
+        merged,
+        proxy_url,
+        plan,
+        payload,
+        method="POST",
+        path=f"{completion_path}?chat_id={chat_id}",
+        body=completion_body,
+        referer_path=f"/c/{chat_id}",
+        timeout_seconds=300,
+    )
+    patches = [
+        session.get("credential_patch"),
+        upload.get("credential_patch") if media_sources else None,
+    ]
+    patches.append(completion.get("credential_patch"))
+    merged_patch: dict[str, Any] = {}
+    for patch in patches:
+        if isinstance(patch, dict) and patch:
+            merged_patch.update(patch)
+    if merged_patch:
+        completion = {**completion, "credential_patch": merged_patch}
+    return completion
+
+
+async def _qwen_native_request(
+    current: dict[str, Any],
+    proxy_url: str,
+    plan: RuntimePlan,
+    payload: dict[str, Any],
+    *,
+    method: str,
+    path: str = "",
+    endpoint_key: str | None = None,
+    fallback_path: str = "",
+    body: str = "",
+    referer_path: str = "/",
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    from .qwen_risk import NativeBrowserRequest, native_transport
+
+    target_path = path or _runtime_path(plan, endpoint_key or "", fallback_path)
+    token = _qwen_token(current)
+    raw_account_id = str(payload.get("account_id") or "").strip()
+    account_id = raw_account_id if _uuid(raw_account_id) else ""
+    binding_id = hashlib.sha256(proxy_url.encode()).hexdigest()[:32] if proxy_url else ""
+    request = NativeBrowserRequest(
+        method=method,
+        path=target_path,
+        body=body,
+        bearer_token=token,
+        account_id=account_id,
+        cookies=_qwen_cookie_map(current),
+        browser_state=current.get("browser_state") or {},
+        browser_fingerprint=current.get("browser_fingerprint") or {},
+        referer_path=referer_path,
+        timeout_seconds=max(1, min(300, timeout_seconds)),
+        proxy_url=proxy_url,
+        proxy_binding_id=binding_id,
+    )
+    return await native_transport.fetch(request)
+
+
+async def _qwen_media_upload(
+    current: dict[str, Any],
+    proxy_url: str,
+    plan: RuntimePlan,
+    payload: dict[str, Any],
+    sources: list[dict[str, Any]],
+    referer_path: str,
+) -> dict[str, Any]:
+    from .qwen_risk import NativeBrowserRequest, native_transport
+
+    token = _qwen_token(current)
+    raw_account_id = str(payload.get("account_id") or "").strip()
+    account_id = raw_account_id if _uuid(raw_account_id) else ""
+    binding_id = hashlib.sha256(proxy_url.encode()).hexdigest()[:32] if proxy_url else ""
+    request = NativeBrowserRequest(
+        method="POST",
+        path=_runtime_path(plan, "upload", "/api/v2/files/getstsToken"),
+        bearer_token=token,
+        account_id=account_id,
+        cookies=_qwen_cookie_map(current),
+        browser_state=current.get("browser_state") or {},
+        browser_fingerprint=current.get("browser_fingerprint") or {},
+        referer_path=referer_path,
+        timeout_seconds=120,
+        proxy_url=proxy_url,
+        proxy_binding_id=binding_id,
+    )
+    return await native_transport.upload_media(
+        request,
+        sources,
+        settings().qwen_max_upload_bytes,
+        user_id=str(current.get("user_id") or current.get("userId") or ""),
+    )
+
+
+def build_qwen_request(
+    command: dict[str, Any],
+    chat_id: str,
+    *,
+    uploaded_files: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    _validate_qwen_command(command)
+    media = list(iter_media_blocks(command["messages"], "Qwen"))
+    unsupported_media = sorted({kind for _, kind, _ in media if kind != "image"})
+    if unsupported_media:
+        raise ValueError(
+            "Qwen browser upload does not support media types: "
+            + ", ".join(unsupported_media)
+        )
+    if any(
+        str(command["messages"][index].get("role") or "user").lower()
+        in {"system", "developer"}
+        for index, _, _ in media
+    ):
+        raise ValueError("Qwen image input is supported only in user messages")
+    messages = _qwen_messages(command)
+    uploaded_files = uploaded_files if uploaded_files is not None else command.get("uploadedFiles")
+    if uploaded_files is None:
+        uploaded_files = []
+    if not isinstance(uploaded_files, list):
+        raise TypeError("Qwen uploadedFiles must be an array")
+    expected_files = sum(
+        1
+        for message in messages
+        for _, kind, _ in iter_media_blocks([message], "Qwen")
+        if kind == "image"
+    )
+    if len(uploaded_files) != expected_files:
+        if expected_files:
+            raise ValueError(
+                "Qwen image input must be uploaded in the same account browser session"
+            )
+        if uploaded_files:
+            raise ValueError("Qwen uploadedFiles contains files without source content")
+    timestamp = int(time.time())
+    feature = _qwen_feature_config(command)
+    upstream_messages: list[dict[str, Any]] = []
+    message_ids = [str(uuid4()) for _ in messages]
+    response_placeholder = str(uuid4())
+    file_index = 0
+    for index, source in enumerate(messages):
+        role = _qwen_role(source.get("role"))
+        content = _qwen_content(source.get("content"))
+        if role == "assistant" and isinstance(source.get("tool_calls"), list):
+            content += "\n" + json.dumps(source["tool_calls"], ensure_ascii=False, separators=(",", ":"))
+        file_count = sum(
+            1
+            for _, kind, _ in iter_media_blocks([source], "Qwen")
+            if kind == "image"
+        )
+        files = uploaded_files[file_index : file_index + file_count]
+        if any(not isinstance(item, dict) for item in files):
+            raise TypeError("Qwen uploadedFiles entries must be objects")
+        file_index += file_count
+        existing_files = source.get("files")
+        if not isinstance(existing_files, list):
+            existing_files = []
+        merged_files = existing_files + files
+        message: dict[str, Any] = {
+            "id": None,
+            "fid": message_ids[index],
+            "role": role,
+            "content": content,
+            "user_action": "chat",
+            "timestamp": timestamp,
+            "model": str(command.get("model") or "") if role == "assistant" else "",
+            "chat_type": "t2t",
+            "sub_chat_type": "t2t",
+            "feature_config": feature,
+            "parentId": None if index == 0 else message_ids[index - 1],
+            "parent_id": None if index == 0 else message_ids[index - 1],
+            "childrenIds": [message_ids[index + 1] if index + 1 < len(messages) else response_placeholder],
+            "files": [json.loads(json.dumps(item, ensure_ascii=True)) for item in merged_files],
+            "models": [str(command.get("model") or "")] if role == "user" else [],
+            "extra": {"meta": {"subChatType": "t2t"}},
+        }
+        upstream_messages.append(message)
+    result: dict[str, Any] = {
+        "stream": True,
+        "version": str((command.get("runtimeOptions") or {}).get("request_version") or "2.1"),
+        "incremental_output": True,
+        "model": str(command.get("model") or ""),
+        "chatId": chat_id,
+        "parentId": "",
+        "chat_id": chat_id,
+        "chat_mode": "normal",
+        "parent_id": None,
+        "timestamp": timestamp,
+        "messages": upstream_messages,
+    }
+    generation = command.get("generation") or {}
+    for source, target in (("temperature", "temperature"), ("top_p", "top_p")):
+        if isinstance(generation.get(source), (int, float)):
+            result[target] = generation[source]
+    for source in ("max_completion_tokens", "max_output_tokens", "max_tokens"):
+        if isinstance(generation.get(source), (int, float)):
+            result["max_tokens"] = generation[source]
+            break
+    return result
+
+
+def _validate_qwen_command(command: dict[str, Any]) -> None:
+    if command.get("schemaVersion") != 1:
+        raise ValueError("Qwen semantic command schema is unsupported")
+    if not str(command.get("model") or "").strip():
+        raise ValueError("Qwen semantic command requires a model")
+    if not isinstance(command.get("messages"), list):
+        raise TypeError("Qwen semantic command messages must be an array")
+
+
+def _qwen_messages(command: dict[str, Any]) -> list[dict[str, Any]]:
+    source = [dict(item) for item in command["messages"] if isinstance(item, dict)]
+    instructions = [
+        _qwen_content(item.get("content"))
+        for item in source
+        if _qwen_role(item.get("role")) == "system" and _qwen_content(item.get("content"))
+    ]
+    messages = [item for item in source if _qwen_role(item.get("role")) != "system"]
+    if not instructions:
+        return messages
+    prefix = "[System instructions]\n" + "\n\n".join(instructions)
+    for index, message in enumerate(messages):
+        if _qwen_role(message.get("role")) == "user":
+            updated = {**message}
+            content = message.get("content")
+            if isinstance(content, list):
+                updated["content"] = [{"type": "text", "text": prefix}, *content]
+            else:
+                text = _qwen_content(content)
+                updated["content"] = prefix if not text else prefix + "\n\n" + text
+            messages[index] = updated
+            return messages
+    return [{"role": "user", "content": prefix}, *messages]
+
+
+def _qwen_feature_config(command: dict[str, Any]) -> dict[str, Any]:
+    options = command.get("providerOptions") or {}
+    controls = command.get("controls") or {}
+    reasoning = command.get("reasoning") or {}
+    effort = str(reasoning.get("effort") or controls.get("reasoning_effort") or "auto").lower()
+    raw_mode = str(options.get("thinking_mode") or "").strip()
+    mode = raw_mode or ("Fast" if effort in {"none", "minimal"} else "Auto" if effort == "auto" else "Thinking")
+    if mode.lower() in {"fast", "disabled", "off", "false", "none"}:
+        mode = "Fast"
+    elif mode.lower() == "auto":
+        mode = "Auto"
+    else:
+        mode = "Thinking"
+    explicit_search = options.get("web_search", controls.get("web_search"))
+    if not isinstance(explicit_search, bool):
+        explicit_search = any(
+            isinstance(tool, dict)
+            and str(tool.get("type") or "").lower() in {"web_search", "web_search_preview", "search"}
+            for tool in command.get("tools") or []
+        )
+    result: dict[str, Any] = {
+        "thinking_enabled": mode != "Fast",
+        "output_schema": "phase",
+        "research_mode": "normal",
+        "auto_thinking": mode == "Auto",
+        "thinking_mode": mode,
+        "thinking_format": "summary",
+        "auto_search": explicit_search,
+    }
+    budget = options.get("thinking_budget")
+    if isinstance(budget, (int, float)) and budget > 0:
+        result["thinking_budget"] = int(budget)
+    return result
+
+
+def _qwen_role(value: Any) -> str:
+    role = str(value or "user").lower()
+    return "system" if role == "developer" else role if role in {"assistant", "system", "tool"} else "user"
+
+
+def _qwen_content(value: Any) -> str:
+    if value is None:
+        return ""
+    return text_content(value, "Qwen", allow_media=True)
+
+
+def _qwen_media_sources(messages: Any) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for message_index, kind, part in iter_media_blocks(messages, "Qwen"):
+        role = str(messages[message_index].get("role") or "user").lower()
+        if role in {"system", "developer"}:
+            raise ValueError("Qwen image input is supported only in user messages")
+        if kind != "image":
+            raise ValueError(f"Qwen browser upload does not support {kind} input")
+        source = media_source(part)
+        mime, content = decode_inline_data_url(
+            source,
+            "Qwen image",
+            max_bytes=settings().qwen_max_upload_bytes,
+            expected_prefix="image/",
+        )
+        filename = str(part.get("filename") or "").strip()
+        filename = filename.replace("\\", "/").rsplit("/", 1)[-1][:255]
+        if not filename:
+            extension = {
+                "jpeg": "jpg",
+                "jpg": "jpg",
+                "png": "png",
+                "webp": "webp",
+                "gif": "gif",
+                "avif": "avif",
+            }.get(mime.removeprefix("image/"), "bin")
+            filename = f"upload-{uuid4().hex}.{extension}"
+        sources.append({
+            "data_url": source,
+            "filename": filename,
+            "mime_type": mime,
+            "size": len(content),
+        })
+    return sources
+
+
+def _runtime_path(plan: RuntimePlan, key: str, fallback: str) -> str:
+    return str(plan.active.rules.endpoint_paths.get(key, fallback) or fallback)
+
+
+def _qwen_token(current: dict[str, Any]) -> str:
+    for name in ("token", "access_token", "jwt"):
+        value = str(current.get(name) or "").strip()
+        if value:
+            return value
+    raise ValueError("Qwen credential requires token")
+
+
+def _qwen_cookie_map(current: dict[str, Any]) -> dict[str, str]:
+    source = current.get("cookies")
+    if not isinstance(source, dict):
+        return {}
+    return {str(key): str(value) for key, value in source.items() if str(key).strip() and str(value).strip()}
+
+
+def _decode_qwen_body(result: dict[str, Any]) -> bytes:
+    try:
+        return base64.b64decode(str(result.get("body_base64") or ""), validate=True)
+    except ValueError as error:
+        raise RuntimeError("Qwen browser returned invalid response bytes") from error
+
+
+def _qwen_sse_data(body: bytes) -> list[str]:
+    text = body.decode("utf-8", errors="replace")
+    output: list[str] = []
+    for line in text.splitlines():
+        if not line.lstrip().startswith("data:"):
+            continue
+        value = line.split(":", 1)[1].strip()
+        if value:
+            output.append(value)
+    if not output and text.strip():
+        output.append(text.strip())
+    return output
+
+
+def _qwen_body_excerpt(result: dict[str, Any]) -> str:
+    try:
+        return _decode_qwen_body(result).decode("utf-8", errors="replace")[:16_384]
+    except RuntimeError:
+        return str(result.get("body") or "Qwen browser request failed")[:16_384]
+
+
+def _qwen_chat_id(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    for candidate in (
+        value.get("id"),
+        (value.get("data") or {}).get("id") if isinstance(value.get("data"), dict) else None,
+        value.get("chat_id"),
+    ):
+        if str(candidate or "").strip():
+            return str(candidate).strip()
+    return ""
+
+
+def _qwen_model_catalog_available(body: str) -> bool:
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    candidates = [
+        value,
+        value.get("models") if isinstance(value, dict) else None,
+        value.get("data") if isinstance(value, dict) else None,
+    ]
+    return any(isinstance(candidate, (list, dict)) for candidate in candidates)
+
+
+def _uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, AttributeError):
+        return False
 
 
 def _rotated_qwen_identity(current: dict[str, Any], backend: str) -> dict[str, Any]:

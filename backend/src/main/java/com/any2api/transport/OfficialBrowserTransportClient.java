@@ -46,11 +46,25 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> proxyPool,
         String affinityKey
     ) {
+        return request(
+            providerId, operation, semanticCommand, credential, proxyPool, affinityKey, Map.of());
+    }
+
+    public Mono<TransportResponse> request(
+        String providerId,
+        String operation,
+        JsonNode semanticCommand,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions
+    ) {
         return runtimePlan(providerId).flatMap(plan -> client.post()
                 .uri("/internal/v1/providers/{providerId}/transport/request", providerId)
                 .headers(this::headers)
                 .bodyValue(command(
-                    operation, semanticCommand, plan, credential, proxyPool, affinityKey))
+                    operation, semanticCommand, plan, credential, proxyPool, affinityKey,
+                    runtimeOptions))
                 .retrieve()
                 .bodyToMono(JsonNode.class))
             .flatMap(value -> acceptReports(providerId, value.path("runtime_reports"))
@@ -68,11 +82,25 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> proxyPool,
         String affinityKey
     ) {
+        return stream(
+            providerId, operation, semanticCommand, credential, proxyPool, affinityKey, Map.of());
+    }
+
+    public Flux<JsonNode> stream(
+        String providerId,
+        String operation,
+        JsonNode semanticCommand,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions
+    ) {
         return runtimePlan(providerId).flatMapMany(plan -> client.post()
                 .uri("/internal/v1/providers/{providerId}/transport/stream", providerId)
                 .headers(this::headers)
                 .bodyValue(command(
-                    operation, semanticCommand, plan, credential, proxyPool, affinityKey))
+                    operation, semanticCommand, plan, credential, proxyPool, affinityKey,
+                    runtimeOptions))
                 .retrieve()
                 .bodyToFlux(JsonNode.class))
             .concatMap(frame -> "runtime_canary".equals(frame.path("type").asText(""))
@@ -88,6 +116,19 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> proxyPool,
         String affinityKey
     ) {
+        return command(
+            operation, semanticCommand, runtimePlan, credential, proxyPool, affinityKey, Map.of());
+    }
+
+    private Map<String, Object> command(
+        String operation,
+        JsonNode semanticCommand,
+        ProviderRuntimeRuleService.RuntimePlan runtimePlan,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions
+    ) {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("credential", credential);
         if (proxyPool != null && !proxyPool.isEmpty()) {
@@ -101,7 +142,11 @@ public final class OfficialBrowserTransportClient {
             payload.put("proxy_node_offset",
                 Math.max(0, credential.path("proxy_node_offset").asInt(0)));
         }
+        if (runtimeOptions != null && !runtimeOptions.isEmpty()) {
+            payload.put("runtime_options", Map.copyOf(runtimeOptions));
+        }
         var command = new LinkedHashMap<String, Object>();
+        command.put("runtime_mode", "camoufox_browser_runtime");
         command.put("operation", operation);
         command.put("semantic_command", semanticCommand);
         command.put("runtime_plan", mapper.valueToTree(runtimePlan));

@@ -13,9 +13,9 @@ from any2api_automation.providers import provider_registry
 from any2api_automation.providers.deepseek import (
     DeepseekAutomationProvider,
     _BrowserReauthenticationRequired,
+    _catalog_available,
     _headers,
     _is_waf_challenge,
-    _keepalive_sync,
     _reauthenticate_sync,
     _recover_registered_user,
     _registration_user,
@@ -129,37 +129,17 @@ async def test_registration_browser_retries_reuse_one_identity(monkeypatch) -> N
     assert result.credential["proxy_node_offset"] == 2
 
 
-def test_keepalive_requires_authenticated_model_catalog(monkeypatch) -> None:
-    class Response:
-        status_code = 200
+def test_keepalive_requires_authenticated_model_catalog() -> None:
+    catalog = {
+        "code": 0,
+        "data": {
+            "biz_code": 0,
+            "biz_data": {"settings": {"model_configs": {"value": []}}},
+        },
+    }
 
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self):
-            return {
-                "code": 0,
-                "data": {
-                    "biz_code": 0,
-                    "biz_data": {"settings": {"model_configs": {"value": []}}},
-                },
-            }
-
-    class Client:
-        def get(self, *args, **kwargs):
-            assert kwargs["headers"]["Authorization"] == "Bearer token"
-            return Response()
-
-    @contextmanager
-    def session(*args, **kwargs):
-        yield Client()
-
-    monkeypatch.setattr("any2api_automation.providers.deepseek._session", session)
-
-    result = _keepalive_sync({}, {"token": "token", "device_id": "device"})
-
-    assert result["healthy"] is True
-    assert result["auth_expired"] is False
+    assert _catalog_available(catalog) is True
+    assert _catalog_available({"code": 0, "data": {"biz_code": 3}}) is False
 
 
 def test_rejected_envelopes_do_not_look_healthy() -> None:

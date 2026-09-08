@@ -34,7 +34,7 @@ not live-equivalent, and `MISSING` requires implementation.
 | Models | built-in catalogs; Web filtered by tier | PARTIAL | model availability reflects at least one eligible account, not merely any account |
 | Web tools | prompt injection plus streamed tool-call recovery | DONE | nested/flat schemas, forced choice, history, arbitrary chunk boundaries, parallel calls, undeclared-call rejection, and live forced call |
 | Console tools | native Responses functions | PARTIAL | OpenAI function tools and tool outputs round-trip without silent field loss |
-| Browser transport | Chromium TLS/HTTP2 plus browser request fingerprint | DONE | curl-cffi owns HTTP; a thread-owned Camoufox/Patchright bridge owns Gateway WebSockets that libcurl cannot complete |
+| Browser transport | Chromium TLS/HTTP2 plus browser request fingerprint | DONE | one account-scoped Camoufox/Patchright Runtime owns page HTTP and Gateway WebSockets; Java owns only semantic commands |
 | Proxy affinity | stable account identity and provider-scoped egress | DONE | rendezvous-selected strict identity binding is covered by Python and Java fixtures; live proxy-change evidence remains in the release matrix |
 | Clearance | browser bootstrap bound to target plus proxy | PARTIAL | exact-proxy Patchright bootstrap, encrypted cookies, matching UA/profile, and session application are fixture-proven; live forced challenge remains |
 | Clearance concurrency | cache, singleflight, distributed refresh lock | PARTIAL | one encrypted refresh per binding with bounded wait/jitter is implemented; stale healthy fallback and live multi-replica evidence remain |
@@ -44,7 +44,7 @@ not live-equivalent, and `MISSING` requires implementation.
 | Web quota | fast/auto/expert/heavy and weekly credit windows | DONE | official modes/rate-limits, tier sync, and PostgreSQL per-account/model cooldown are implemented and fixture-covered |
 | Console quota | upstream rate state, no invented free allowance | MISSING | real probe and 429 cooldown; no fixed entitlement assumption |
 | Account settings | terms, birth date, NSFW configuration | PARTIAL | registry-driven commands and one multi-origin lease are done; terms are live-proven, birth/NSFW remain fixture-proven |
-| Attachments | bounded image/file fetch and upstream upload | MISSING | host allowlist, byte limits, MIME validation, same account/egress lease |
+| Attachments | bounded image/file fetch and upstream upload | PARTIAL | xAI block preservation and legacy media fixtures exist; Gateway chat attachment binding and live host/byte/egress acceptance remain |
 | Image lite | chat-backed image generation | PARTIAL | URL/base64, bounded count, early final-image stop, protected download, and fixtures are done; live smoke remains |
 | Imagine | WebSocket image generation and partial images | PARTIAL | browser-session WebSocket, 4/8/12 batching, moderation, ordering, final collection, and fixtures are done; partial-image SSE and live smoke remain |
 | Image editing | upload fallback, media post, edit stream | PARTIAL | bounded multipart input, V2/legacy upload, media post, edit payload, final asset and fixtures are done; partial-image SSE and live smoke remain |
@@ -107,7 +107,7 @@ Java now owns Web chat/continuation paths, request mapping, current-source Stats
 stream decoding, Responses state/account affinity, keepalive classification, official mode discovery,
 quota parsing, tier metadata, provider-local function-tool and media protocols, protected-asset
 validation, and account/model failure disposition. Python owns the generic
-curl-cffi browser session, TLS/HTTP2 impersonation, browser/request fingerprint profiles, proxy lease,
+Camoufox/Patchright browser session, TLS/HTTP2 and page-request fingerprint, proxy lease,
 cookie jar, bounded HTTP and WebSocket frames, and session cleanup. Java may select a typed profile but cannot
 override its protected fingerprint headers. The former provider-specific Python transport, Statsig
 signer, keepalive, and quota implementation have been removed.

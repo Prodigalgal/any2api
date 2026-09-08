@@ -9,7 +9,6 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.proxy.ProxyPoolService;
-import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.OfficialBrowserTransportClient;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import java.util.List;
@@ -127,11 +126,10 @@ class MimoProtocolTest {
     @Test
     void acceptsOnlyOutputLimitsThatCannotConstrainTheOfficialWebModel() {
         var provider = new MimoProvider(
-            mock(BrowserTransportClient.class), mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserTransportClient.class),
             new OfficialBrowserSemanticCommandFactory(mapper),
             mock(ProxyPoolService.class),
-            new MimoProperties(), mock(MimoRequestMapper.class),
-            mock(MimoMediaUploader.class), mapper);
+            new MimoProperties(), mock(MimoRequestMapper.class), mapper);
         var raw = mapper.createObjectNode().put("model", "mimo/mimo-v2.5-pro");
         var nonBinding = new CanonicalRequest(
             "mimo-code", CanonicalRequest.Protocol.CHAT_COMPLETIONS,

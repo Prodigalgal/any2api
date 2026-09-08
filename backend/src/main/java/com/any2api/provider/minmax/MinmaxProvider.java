@@ -3,27 +3,29 @@ package com.any2api.provider.minmax;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
-import com.any2api.provider.InferenceProvider;
 import com.any2api.provider.DiscoveredModel;
+import com.any2api.provider.InferenceProvider;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
 
 @Component
 public final class MinmaxProvider implements InferenceProvider {
@@ -31,34 +33,33 @@ public final class MinmaxProvider implements InferenceProvider {
         Map.of(
             "variant", ProviderProtocolContract.OptionType.STRING,
             "agent_role", ProviderProtocolContract.OptionType.STRING,
+            "agent_id", ProviderProtocolContract.OptionType.STRING,
             "enable_team", ProviderProtocolContract.OptionType.BOOLEAN,
             "worktree_mode", ProviderProtocolContract.OptionType.BOOLEAN),
         java.util.Set.of("reasoning", "reasoning_effort"),
         java.util.Set.of("reasoning", "reasoning_effort"),
         java.util.Set.of());
-    private final MinmaxTransportClient transport;
+
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
-    private final MinmaxRequestMapper requestMapper;
-    private final MinmaxMediaUploader mediaUploader;
     private final ObjectMapper mapper;
 
     public MinmaxProvider(
-        MinmaxTransportClient transport,
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
-        MinmaxRequestMapper requestMapper,
-        MinmaxMediaUploader mediaUploader,
         ObjectMapper mapper
     ) {
         this.transport = transport;
+        this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
-        this.requestMapper = requestMapper;
-        this.mediaUploader = mediaUploader;
         this.mapper = mapper;
     }
 
     @Override
     public ProviderManifest manifest() {
-        return new ProviderManifest("minmax", "MinMax", "native-minmax-agent-web-v1", "2",
+        return new ProviderManifest("minmax", "MinMax", "official-browser-minmax-agent-v2", "3",
             List.of("MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
@@ -84,6 +85,7 @@ public final class MinmaxProvider implements InferenceProvider {
 
     @Override
     public void validate(CanonicalRequest request) {
+        ProviderRequestValidation.requireInlineImageUploads(request, "MinMax");
         if (!request.tools().isEmpty()) {
             throw new IllegalArgumentException("MinMax does not support tools");
         }
@@ -95,121 +97,27 @@ public final class MinmaxProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        var credential = MinmaxCredential.from(account);
-        var prepared = requestMapper.prepare(request);
+        MinmaxCredential.from(account);
         var proxyPool = proxyPool();
         var affinityKey = proxyAffinityKey(account);
-        return mediaUploader.upload(account.credential(), prepared.media(), proxyPool, affinityKey)
-            .flatMapMany(attachments -> resolveAgent(account.credential(), credential,
-                    prepared.agentRole(), proxyPool, affinityKey, context)
-                .flatMap(agentId -> createSession(account.credential(), agentId,
-                    prepared.sessionModel(), proxyPool, affinityKey, context))
-                .flatMapMany(sessionId -> streamMessage(account.credential(), sessionId,
-                    prepared, attachments, request.requestId(), proxyPool, affinityKey, context)));
-    }
-
-    @Override
-    public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        MinmaxCredential.from(account);
-        var affinityKey = proxyAffinityKey(account);
-        return transport.request("GET", "/archon/api/v1/config", "", account.credential(),
-                proxyPool(), affinityKey)
-            .flatMap(response -> responseJson(response).flatMap(body -> {
-                    var models = new java.util.LinkedHashMap<String, DiscoveredModel>();
-                    for (var item : body.path("models")) {
-                        var id = item.path("model_id").asText(item.path("id").asText("")).trim();
-                        if (id.isBlank()) continue;
-                        var displayName = item.path("model_name").asText(item.path("name").asText(id));
-                        var metadata = new java.util.LinkedHashMap<String, Object>();
-                        if (item.path("variants").isArray()) metadata.put("variants", item.path("variants").deepCopy());
-                        if (item.path("provider_id").isTextual()) metadata.put("provider_id", item.path("provider_id").asText());
-                        models.putIfAbsent(id, new DiscoveredModel(id, displayName, metadata));
-                    }
-                    return Mono.just(List.copyOf(models.values()));
-                }));
-    }
-
-    private <T> Mono<T> upstreamError(int status, JsonNode body) {
-        return Mono.error(new MinmaxUpstreamException(status, summarize(status, body.toString())));
-    }
-
-    private Mono<String> resolveAgent(
-        JsonNode rawCredential,
-        MinmaxCredential credential,
-        String role,
-        Map<String, Object> proxyPool,
-        String affinityKey,
-        ProviderExecutionContext context
-    ) {
-        if (!credential.agentId().isBlank()) return Mono.just(credential.agentId());
-        return transport.request("GET", "/archon/api/v1/agent?limit=20", "", rawCredential,
-                proxyPool, affinityKey)
-            .flatMap(response -> responseJson(response, context))
-            .flatMap(body -> {
-                    for (var agent : body.path("agents")) {
-                        if (role.equalsIgnoreCase(agent.path("agent_role").asText(""))) {
-                            return Mono.just(agent.path("name").asText());
-                        }
-                    }
-                    return Mono.error(new MinmaxUpstreamException(502,
-                        "MinMax agent list has no role " + role));
-            });
-    }
-
-    private Mono<String> createSession(
-        JsonNode rawCredential,
-        String agentId,
-        String model,
-        Map<String, Object> proxyPool,
-        String affinityKey,
-        ProviderExecutionContext context
-    ) {
-        var body = mapper.createObjectNode().put("model", model);
-        var bodyText = mapper.writeValueAsString(body);
-        var path = "/archon/api/v1/agent/" + agentId + "/session";
-        return transport.request("POST", path, bodyText, rawCredential, proxyPool, affinityKey)
-            .flatMap(response -> responseJson(response, context))
-            .flatMap(bodyNode -> {
-                    var sessionId = bodyNode.path("session_id").asText("").trim();
-                    return sessionId.isBlank()
-                        ? Mono.error(new MinmaxUpstreamException(502,
-                            "MinMax session creation returned no session_id"))
-                        : Mono.just(sessionId);
-            });
-    }
-
-    private Flux<CanonicalEvent> streamMessage(
-        JsonNode rawCredential,
-        String sessionId,
-        MinmaxPreparedRequest prepared,
-        List<ObjectNode> attachments,
-        String requestId,
-        Map<String, Object> proxyPool,
-        String affinityKey,
-        ProviderExecutionContext context
-    ) {
-        var body = mapper.createObjectNode();
-        body.put("content", prepared.content());
-        body.set("model", prepared.model().deepCopy());
-        body.put("turn_id", UUID.randomUUID().toString());
-        body.put("enable_team", prepared.enableTeam());
-        body.put("worktreeMode", prepared.worktreeMode());
-        var upstreamAttachments = body.putArray("attachments");
-        attachments.forEach(upstreamAttachments::add);
-        var bodyText = mapper.writeValueAsString(body);
-        var path = "/archon/api/v1/session/" + sessionId + "/message";
         return Flux.defer(() -> {
-            var decoder = new MinmaxEventDecoder(requestId);
-            var status = new java.util.concurrent.atomic.AtomicInteger(-1);
-            return transport.stream("POST", path, bodyText, rawCredential, proxyPool, affinityKey)
+            var decoder = new MinmaxEventDecoder(request.requestId());
+            var status = new AtomicInteger(-1);
+            return transport.stream(
+                    manifest().id(),
+                    "chat",
+                    semanticCommands.chat(request),
+                    account.credential(),
+                    proxyPool,
+                    affinityKey)
                 .handle((frame, sink) -> {
                     var type = frame.path("type").asText("");
                     if ("status".equals(type)) {
                         status.set(frame.path("status").asInt(502));
                     } else if ("error".equals(type)) {
                         var code = status.get() < 0 ? 502 : status.get();
-                        sink.error(new MinmaxUpstreamException(code,
-                            summarize(code, frame.path("data").asText(""))));
+                        sink.error(new MinmaxUpstreamException(
+                            code, summarize(code, frame.path("data").asText(""))));
                     } else if ("data".equals(type) && status.get() < 400) {
                         sink.next(frame.path("data").asText(""));
                     } else if ("credential_patch".equals(type)) {
@@ -219,41 +127,70 @@ public final class MinmaxProvider implements InferenceProvider {
                 .cast(String.class)
                 .concatMapIterable(decoder::decode)
                 .concatWith(Flux.defer(() -> status.get() >= 400
-                    ? Flux.error(new MinmaxUpstreamException(status.get(),
-                        "MinMax upstream returned HTTP " + status.get()))
+                    ? Flux.error(new MinmaxUpstreamException(
+                        status.get(), "MinMax upstream returned HTTP " + status.get()))
                     : Flux.fromIterable(decoder.finish())));
         });
     }
 
-    private Mono<JsonNode> responseJson(MinmaxTransportClient.TransportResponse response) {
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
+        MinmaxCredential.from(account);
+        return transport.request(
+                manifest().id(),
+                "models",
+                semanticCommands.models(),
+                account.credential(),
+                proxyPool(),
+                proxyAffinityKey(account))
+            .flatMap(response -> responseJson(response, null))
+            .map(this::parseModels);
+    }
+
+    private List<DiscoveredModel> parseModels(JsonNode body) {
+        var models = new java.util.LinkedHashMap<String, DiscoveredModel>();
+        for (var item : body.path("models")) {
+            var id = item.path("model_id").asText(item.path("id").asText("")).trim();
+            if (!id.isBlank()) {
+                var displayName = item.path("model_name").asText(item.path("name").asText(id));
+                var metadata = new java.util.LinkedHashMap<String, Object>();
+                if (item.path("variants").isArray()) {
+                    metadata.put("variants", item.path("variants").deepCopy());
+                }
+                if (item.path("provider_id").isTextual()) {
+                    metadata.put("provider_id", item.path("provider_id").asText());
+                }
+                models.putIfAbsent(id, new DiscoveredModel(id, displayName, metadata));
+            }
+        }
+        return List.copyOf(models.values());
+    }
+
+    private Mono<JsonNode> responseJson(
+        OfficialBrowserTransportClient.TransportResponse response,
+        ProviderExecutionContext context
+    ) {
+        if (context != null) context.acceptCredentialPatch(response.credentialPatch());
         if (response.status() < 200 || response.status() >= 300) {
-            return upstreamError(response.status(), mapper.createObjectNode()
-                .put("body", response.body()));
+            return Mono.error(new MinmaxUpstreamException(
+                response.status(), summarize(response.status(), response.body())));
         }
         try {
             return Mono.just(mapper.readTree(response.body()));
         } catch (RuntimeException error) {
-            return Mono.error(new MinmaxUpstreamException(502,
-                "MinMax upstream returned invalid JSON"));
+            return Mono.error(new MinmaxUpstreamException(
+                502, "MinMax upstream returned invalid JSON"));
         }
-    }
-
-    private Mono<JsonNode> responseJson(
-        MinmaxTransportClient.TransportResponse response,
-        ProviderExecutionContext context
-    ) {
-        context.acceptCredentialPatch(response.credentialPatch());
-        return responseJson(response);
-    }
-
-    private static String proxyAffinityKey(LeasedProviderAccount account) {
-        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
-        return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
     private Map<String, Object> proxyPool() {
         return proxyPools.runtimeForProvider(manifest().id(), ProxyTrafficScope.INFERENCE)
             .orElse(Map.of());
+    }
+
+    private static String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
     @Override

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .captcha.policy import CaptchaAiPolicy, bind_captcha_policy
 from .observability import OperationFailure, bind_operation, failure_details
 from .providers import provider_registry
+from .providers.base import CAMOUFOX_BROWSER_RUNTIME
 from .resources import lanes
 from .security import require_internal_token
 
@@ -29,6 +30,7 @@ class ProviderOperationRequest(BaseModel):
 
 
 class ProviderTransportRequest(BaseModel):
+    runtime_mode: Literal["camoufox_browser_runtime"] = CAMOUFOX_BROWSER_RUNTIME
     operation: str | None = Field(default=None, min_length=1, max_length=64)
     semantic_command: dict[str, Any] = Field(default_factory=dict)
     runtime_plan: dict[str, Any] = Field(default_factory=dict)
@@ -157,6 +159,7 @@ async def transport_request(provider_id: str, request: ProviderTransportRequest)
     provider = _transport_provider(provider_id)
     payload = {
         **request.payload,
+        "runtime_mode": request.runtime_mode,
         "operation": request.operation,
         "semantic_command": request.semantic_command,
         "runtime_plan": request.runtime_plan,
@@ -183,6 +186,7 @@ async def transport_stream(
     provider = _transport_provider(provider_id)
     payload = {
         **request.payload,
+        "runtime_mode": request.runtime_mode,
         "operation": request.operation,
         "semantic_command": request.semantic_command,
         "runtime_plan": request.runtime_plan,
@@ -205,4 +209,9 @@ def _transport_provider(provider_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if not provider.manifest.inference_transport:
         raise HTTPException(status_code=501, detail="provider transport is not implemented")
+    if provider.manifest.inference_runtime != CAMOUFOX_BROWSER_RUNTIME:
+        raise HTTPException(
+            status_code=500,
+            detail="provider transport is not bound to the Camoufox Browser Runtime",
+        )
     return provider

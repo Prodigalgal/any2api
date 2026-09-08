@@ -12,15 +12,13 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
-import com.any2api.observability.RequestCorrelation;
+import com.any2api.proxy.ProxyPoolService;
+import com.any2api.proxy.ProxyTrafficScope;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.util.List;
 import java.util.Map;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 
@@ -38,8 +36,6 @@ public final class GrokConsoleProvider implements InferenceProvider {
             "truncation"),
         java.util.Set.of("function"),
         java.util.Set.of("effort", "summary"));
-    private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_TYPE =
-        new ParameterizedTypeReference<>() {};
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "grok_console", "Grok Console", "xai-console-sso-v1", "2",
         GrokConsoleModelCatalog.modelIds(), Map.of(
@@ -48,25 +44,29 @@ public final class GrokConsoleProvider implements InferenceProvider {
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
             ProviderCapability.REASONING, SupportLevel.NATIVE,
             ProviderCapability.FUNCTION_TOOLS, SupportLevel.NATIVE,
+            ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
+            ProviderCapability.FILE_INPUT, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE),
         Map.of(RandomModelRole.TOP_TEXT, List.of(
             "grok-4.20-multi-agent-0309", "grok-4.20-0309-reasoning", "grok-4.3")), true);
 
-    private final WebClient client;
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
+    private final ProxyPoolService proxyPools;
     private final GrokConsoleProperties properties;
-    private final GrokConsoleRequestMapper requestMapper;
     private final ObjectMapper mapper;
 
     public GrokConsoleProvider(
-        WebClient.Builder builder,
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
+        ProxyPoolService proxyPools,
         GrokConsoleProperties properties,
-        GrokConsoleRequestMapper requestMapper,
         ObjectMapper mapper
     ) {
-        this.client = builder.baseUrl(trim(properties.getBaseUrl().toString()))
-            .filter(RequestCorrelation.propagationFilter()).build();
+        this.transport = transport;
+        this.semanticCommands = semanticCommands;
+        this.proxyPools = proxyPools;
         this.properties = properties;
-        this.requestMapper = requestMapper;
         this.mapper = mapper;
     }
 
@@ -92,28 +92,41 @@ public final class GrokConsoleProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        var decoder = new OpenAiSseEventDecoder(mapper, request.requestId());
-        return client.post().uri("/v1/responses")
-            .header(HttpHeaders.AUTHORIZATION, "Bearer anonymous")
-            .header(HttpHeaders.COOKIE, cookies(account))
-            .header(HttpHeaders.ORIGIN, trim(properties.getBaseUrl().toString()))
-            .header(HttpHeaders.REFERER, trim(properties.getBaseUrl().toString()) + "/")
-            .header(HttpHeaders.USER_AGENT, userAgent(account))
-            .header("x-cluster", properties.getCluster())
-            .header("Sec-Fetch-Dest", "empty")
-            .header("Sec-Fetch-Mode", "cors")
-            .header("Sec-Fetch-Site", "same-origin")
-            .header("Priority", "u=1, i")
-            .contentType(MediaType.APPLICATION_JSON)
-            .accept(MediaType.TEXT_EVENT_STREAM)
-            .bodyValue(requestMapper.prepare(request))
-            .exchangeToFlux(response -> response.statusCode().is2xxSuccessful()
-                ? response.bodyToFlux(SSE_TYPE).mapNotNull(ServerSentEvent::data)
-                    .concatMapIterable(decoder::decode)
-                    .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())))
-                : response.bodyToMono(String.class).defaultIfEmpty("")
-                    .flatMapMany(body -> Flux.error(new GrokConsoleUpstreamException(
-                        response.statusCode().value(), summarize(response.statusCode().value(), body)))));
+        return Flux.defer(() -> {
+            var decoder = new OpenAiSseEventDecoder(mapper, request.requestId());
+            var status = new java.util.concurrent.atomic.AtomicInteger(-1);
+            return transport.stream(
+                    MANIFEST.id(),
+                    "chat",
+                    semanticCommands.chat(request),
+                    account.credential(),
+                    proxyPool(),
+                    proxyAffinityKey(account),
+                    Map.of(
+                        "base_url", trimTrailingSlash(properties.getBaseUrl().toString()),
+                        "cluster", properties.getCluster()))
+                .handle((frame, sink) -> {
+                    var type = frame.path("type").asText("");
+                    if ("status".equals(type)) {
+                        status.set(frame.path("status").asInt(502));
+                    } else if ("error".equals(type)) {
+                        var code = status.get() < 0 ? 502 : status.get();
+                        sink.error(new GrokConsoleUpstreamException(
+                            code, summarize(code, frame.path("data").asText(""))));
+                    } else if ("data".equals(type) && status.get() < 400) {
+                        sink.next(frame.path("data").asText(""));
+                    } else if ("credential_patch".equals(type)) {
+                        context.acceptCredentialPatch(frame.path("data"));
+                    }
+                })
+                .cast(String.class)
+                .takeUntil(data -> "[DONE]".equals(data.trim()))
+                .concatMapIterable(decoder::decode)
+                .concatWith(Flux.defer(() -> status.get() >= 400
+                    ? Flux.error(new GrokConsoleUpstreamException(
+                        status.get(), "Grok Console upstream returned HTTP " + status.get()))
+                    : Flux.fromIterable(decoder.finish())));
+        });
     }
 
     @Override
@@ -135,33 +148,24 @@ public final class GrokConsoleProvider implements InferenceProvider {
             true, Map.of("channel", "console"));
     }
 
-    private String cookies(LeasedProviderAccount account) {
-        var token = first(account, "sso", "sso-rw", "sso_rw", "sso_token");
-        if (token.isBlank()) throw new IllegalStateException("Grok Console credential has no SSO token");
-        var result = "sso=" + token + "; sso-rw=" + token;
-        var clearance = first(account, "cloudflare_cookies", "cf_cookies");
-        return clearance.isBlank() ? result : result + "; " + clearance;
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(MANIFEST.id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
     }
 
-    private String userAgent(LeasedProviderAccount account) {
-        var value = first(account, "user_agent");
-        return value.isBlank() ? properties.getUserAgent() : value;
+    private static String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
-    private String first(LeasedProviderAccount account, String... fields) {
-        return first(account.credential(), fields);
-    }
-
-    private String first(tools.jackson.databind.JsonNode credential, String... fields) {
+    private static String first(tools.jackson.databind.JsonNode credential, String... fields) {
         for (var field : fields) {
             var value = credential.path(field).asText("").trim();
-            if (!value.isBlank()) return value.startsWith("sso=") ? value.substring(4).trim() : value;
+            if (!value.isBlank()) {
+                return value.replaceFirst("(?i)^sso(?:-rw)?\\s*=\\s*", "");
+            }
         }
         return "";
-    }
-
-    private static String trim(String value) {
-        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static String summarize(int status, String body) {
@@ -169,6 +173,10 @@ public final class GrokConsoleProvider implements InferenceProvider {
         if (compact.length() > 1000) compact = compact.substring(0, 1000);
         return compact.isBlank() ? "Grok Console returned HTTP " + status
             : "Grok Console returned HTTP " + status + ": " + compact;
+    }
+
+    private static String trimTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static final class GrokConsoleUpstreamException extends RuntimeException {

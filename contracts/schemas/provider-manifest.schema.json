@@ -16,6 +16,9 @@
       "uniqueItems": true
     },
     "provider_options_schema": { "type": "object" },
+    "inference_runtime": {
+      "enum": ["none", "camoufox_browser_runtime"]
+    },
     "capabilities": {
       "type": "object",
       "additionalProperties": { "enum": ["NATIVE", "EMULATED", "UNSUPPORTED"] }

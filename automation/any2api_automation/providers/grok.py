@@ -19,6 +19,7 @@ from ..lifecycle.browser import BrowserResult, credential_from_context, fill_fir
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
+from .grok_browser import GrokOfficialBrowserTransport
 from .grok_protocol import (
     ProtocolOAuthClient,
     XConsoleAuthClient,
@@ -29,6 +30,9 @@ from .grok_protocol import (
 )
 from .grok_protocol.registration_risk import inspect_registration_risk_page
 from .grok_settings import settings
+from .runtime_rules import parse_runtime_plan
+from .sso_channel import probe_result
+from .transport_support import transport_frame, transport_proxy_lease
 
 
 class GrokAutomationProvider(AutomationProvider):
@@ -39,7 +43,21 @@ class GrokAutomationProvider(AutomationProvider):
         isolation="process",
         challenge_types=("turnstile",),
         operations=("register", "reauthenticate", "keepalive"),
+        realtime=True,
+        inference_transport=True,
+        inference_runtime="camoufox_browser_runtime",
     )
+
+    def __init__(self) -> None:
+        self._transports: dict[str, GrokOfficialBrowserTransport] = {}
+
+    def _transport(self, payload: dict[str, Any]) -> GrokOfficialBrowserTransport:
+        base_url = _runtime_base_url(payload)
+        transport = self._transports.get(base_url)
+        if transport is None:
+            transport = GrokOfficialBrowserTransport(base_url)
+            self._transports[base_url] = transport
+        return transport
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         attempts = flow_max_attempts(payload, settings().grok_registration_attempts)
@@ -72,7 +90,116 @@ class GrokAutomationProvider(AutomationProvider):
         return await asyncio.to_thread(_reauthenticate_sync, payload, credential(payload))
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
+        current = credential(payload)
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        transport = self._transport(payload)
+        base_url = _runtime_base_url(payload)
+        model = str(payload.get("model") or settings().grok_keepalive_model)
+        runtime_options = _runtime_options(payload)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            result = await transport.chat_request(
+                current,
+                proxy_url,
+                plan,
+                _probe_command(model),
+                timeout_ms=plan.active.rules.canary_timeout_seconds * 1000,
+                runtime_options=runtime_options,
+            )
+            status = int(result.get("status") or 502)
+            body = str(result.get("body") or "")
+            if status not in {401, 403}:
+                response = probe_result(status, _completed(body))
+                _merge_runtime_patch(response, result)
+                return response
+
+            refresh_token = str(current.get("refresh_token") or "").strip()
+            if not refresh_token:
+                response = probe_result(status, False)
+                _merge_runtime_patch(response, result)
+                return response
+            patch = await asyncio.to_thread(
+                _refresh_oauth_token, payload, current, refresh_token, proxy_url
+            )
+            if patch is None:
+                response = probe_result(status, False)
+                _merge_runtime_patch(response, result)
+                return response
+            patch.setdefault("refresh_token", refresh_token)
+            refreshed = {**current, **patch}
+            result = await transport.chat_request(
+                refreshed,
+                proxy_url,
+                plan,
+                _probe_command(model),
+                timeout_ms=plan.active.rules.canary_timeout_seconds * 1000,
+                runtime_options=runtime_options,
+            )
+            refreshed_status = int(result.get("status") or 502)
+            refreshed_body = str(result.get("body") or "")
+            response = probe_result(refreshed_status, _completed(refreshed_body))
+            if refreshed_status in {401, 403}:
+                response["credential_patch"] = patch
+                return response
+            response.update(
+                _reauthentication_success(
+                    "refresh_token", patch, ["inference_probe", "refresh_token"]
+                )
+            )
+            _merge_runtime_patch(response, result)
+            return response
+
+    async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        operation = str(payload.get("operation") or "")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        transport = self._transport(payload)
+        base_url = _runtime_base_url(payload)
+        runtime_options = _runtime_options(payload)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            if operation == "models":
+                return await transport.models_request(
+                    current, proxy_url, plan, runtime_options
+                )
+            if operation == "chat":
+                command = payload.get("semantic_command")
+                if not isinstance(command, dict):
+                    raise TypeError("Grok semantic command must be an object")
+                return await transport.chat_request(
+                    current, proxy_url, plan, command, runtime_options=runtime_options
+                )
+        raise ValueError("Grok transport operation is not allowlisted")
+
+    async def transport_stream(self, payload: dict[str, Any]):
+        if str(payload.get("operation") or "") != "chat":
+            raise ValueError("Grok transport operation is not allowlisted")
+        command = payload.get("semantic_command")
+        if not isinstance(command, dict):
+            raise TypeError("Grok semantic command must be an object")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        transport = self._transport(payload)
+        base_url = _runtime_base_url(payload)
+        runtime_options = _runtime_options(payload)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            try:
+                async for event in transport.chat_stream(
+                    current, proxy_url, plan, command, runtime_options=runtime_options
+                ):
+                    event_type = str(event.get("type") or "error")
+                    yield transport_frame(
+                        event_type,
+                        **{key: value for key, value in event.items() if key != "type"},
+                    )
+            except Exception as error:  # noqa: BLE001 - normalized stream boundary
+                yield transport_frame(
+                    "error", data=f"official browser stream failed ({type(error).__name__})"
+                )
+
+    async def close(self) -> None:
+        transports = tuple(self._transports.values())
+        self._transports.clear()
+        for transport in transports:
+            await transport.close()
 
 
 def _reauthenticate_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
@@ -331,64 +458,25 @@ def _token_expiry(token: dict[str, Any]) -> str | None:
     return datetime.fromtimestamp(expires_at, UTC).isoformat()
 
 
-def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    config = settings()
-    access_token = required(current, "access_token", "key", "token")
-    base_url = str(payload.get("base_url") or config.grok_base_url).rstrip("/")
-    with (
-        proxy_lease(check_url=base_url, **proxy_parameters(payload)) as proxy_url,
-        httpx.Client(timeout=60, proxy=proxy_url or None) as client,
-    ):
-        model = str(payload.get("model") or config.grok_keepalive_model)
-        status = _probe_grok_inference(
-            client,
-            base_url,
-            access_token,
-            model,
-        )
-        if status not in {401, 403}:
-            return {"healthy": True, "credential_patch": None}
-        refresh_token = str(current.get("refresh_token") or "").strip()
-        if not refresh_token:
-            return {"healthy": False, "auth_expired": True, "credential_patch": None}
-        patch = _refresh_oauth_token(payload, current, refresh_token, proxy_url)
-        if patch is None:
-            return {"healthy": False, "auth_expired": True, "credential_patch": None}
-        if not patch.get("refresh_token"):
-            patch["refresh_token"] = refresh_token
-        refreshed_status = _probe_grok_inference(
-            client,
-            base_url,
-            str(patch["access_token"]),
-            model,
-        )
-        if refreshed_status in {401, 403}:
-            return {"healthy": False, "auth_expired": True, "credential_patch": patch}
-        return _reauthentication_success(
-            "refresh_token",
-            patch,
-            ["inference_probe", "refresh_token"],
-        )
-
-
-def _probe_grok_inference(
-    client: httpx.Client,
-    base_url: str,
-    access_token: str,
-    model: str,
-) -> int:
-    config = settings()
-    with client.stream(
-        "POST",
-        f"{base_url}/responses",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "text/event-stream",
-            "x-xai-token-auth": config.grok_token_auth,
-            "x-grok-client-version": config.grok_client_version,
-            "x-grok-client-identifier": config.grok_client_identifier,
-        },
-        json={
+def _probe_command(model: str) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "requestId": uuid.uuid4().hex,
+        "protocol": "RESPONSES",
+        "model": model,
+        "stream": True,
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Reply with OK."}],
+            }
+        ],
+        "generation": {"max_output_tokens": 1},
+        "reasoning": {"effort": "low", "summary": "auto"},
+        "tools": [],
+        "providerOptions": {},
+        "controls": {},
+        "rawRequest": {
             "model": model,
             "stream": True,
             "store": False,
@@ -401,17 +489,46 @@ def _probe_grok_inference(
             "max_output_tokens": 1,
             "reasoning": {"effort": "low", "summary": "auto"},
         },
-    ) as response:
-        if response.status_code in {401, 403}:
-            return response.status_code
-        response.raise_for_status()
-        completed = any(
-            "response.completed" in line or line.strip() == "data: [DONE]"
-            for line in response.iter_lines()
-        )
-        if not completed:
-            raise RuntimeError("Grok inference probe ended without a completion event")
-        return response.status_code
+    }
+
+
+def _completed(body: str) -> bool:
+    return "response.completed" in body or "data: [DONE]" in body
+
+
+def _runtime_base_url(payload: dict[str, Any]) -> str:
+    options = payload.get("runtime_options")
+    value = ""
+    if isinstance(options, dict):
+        value = str(options.get("base_url") or "").strip()
+    value = value or str(payload.get("base_url") or settings().grok_base_url).strip()
+    value = value.rstrip("/")
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().lstrip(".")
+    if parsed.scheme != "https" or not (
+        host == "x.ai"
+        or host.endswith((".x.ai", ".grok.com"))
+        or host == "grok.com"
+    ):
+        raise ValueError("Grok runtime base URL is not allowlisted")
+    return value
+
+
+def _runtime_options(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("runtime_options")
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value[key]
+        for key in ("token_auth", "client_version", "client_identifier")
+        if value.get(key) is not None
+    }
+
+
+def _merge_runtime_patch(response: dict[str, Any], result: dict[str, Any]) -> None:
+    patch = result.get("credential_patch")
+    if isinstance(patch, dict) and patch:
+        response["credential_patch"] = patch
 
 
 def _register_same_session(

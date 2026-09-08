@@ -3,6 +3,8 @@ package com.any2api.provider.grok_web;
 import com.any2api.lifecycle.AutomationOperation;
 import com.any2api.lifecycle.LifecycleResult;
 import com.any2api.lifecycle.ProviderLifecycleHandler;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Component;
@@ -11,10 +13,15 @@ import tools.jackson.databind.JsonNode;
 
 @Component
 final class GrokWebLifecycleHandler implements ProviderLifecycleHandler {
-    private final GrokWebProtocolClient protocol;
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
 
-    GrokWebLifecycleHandler(GrokWebProtocolClient protocol) {
-        this.protocol = protocol;
+    GrokWebLifecycleHandler(
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands
+    ) {
+        this.transport = transport;
+        this.semanticCommands = semanticCommands;
     }
 
     @Override public String providerId() { return "grok_web"; }
@@ -34,12 +41,25 @@ final class GrokWebLifecycleHandler implements ProviderLifecycleHandler {
             return Mono.error(new IllegalArgumentException(
                 "unsupported Grok Web local lifecycle operation: " + operation.externalName()));
         }
-        return protocol.keepalive(
-            credential, proxyPool, affinity(accountMetadata)).map(result -> result.healthy()
-            ? LifecycleResult.healthy(result.credentialPatch(), result.metadataPatch())
-            : LifecycleResult.failed(
-                result.authExpired(), result.terminal(), result.errorClass(),
-                result.credentialPatch()));
+        return transport.request(
+                providerId(), "keepalive", semanticCommands.models(), credential,
+                proxyPool, affinity(accountMetadata))
+            .map(response -> {
+                var body = response.body() == null ? "" : response.body();
+                var authenticated = response.status() == 200
+                    && (body.contains("\"userId\"") || body.contains("\"user_id\""));
+                if (authenticated) {
+                    return LifecycleResult.healthy(
+                        response.credentialPatch(),
+                        tools.jackson.databind.node.MissingNode.getInstance());
+                }
+                return LifecycleResult.failed(
+                    response.status() == 401 || response.status() == 403,
+                    false,
+                    response.status() == 401 || response.status() == 403
+                        ? "credential_rejected" : "provider_upstream_error",
+                    response.credentialPatch());
+            });
     }
 
     private String affinity(Map<String, Object> metadata) {

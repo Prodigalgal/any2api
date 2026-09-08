@@ -38,6 +38,7 @@ class OfficialBrowserSession:
     backend: str
     state_digest: str
     input_digest: str
+    credential_digest: str
     proxy_url: str
     rule_revision: int
     rule_digest: str
@@ -58,9 +59,13 @@ class OfficialBrowserRuntime:
         *,
         allowed_domain_suffixes: tuple[str, ...],
         identity_fields: tuple[str, ...],
+        require_build_assets: bool = True,
+        page_url: str | None = None,
     ) -> None:
         self.provider_id = provider_id
         self.base_url = base_url.rstrip("/")
+        self.page_url = (page_url or self.base_url).rstrip("/")
+        self.require_build_assets = require_build_assets
         self.allowed_domain_suffixes = tuple(
             value.strip().lower().lstrip(".") for value in allowed_domain_suffixes if value.strip()
         )
@@ -92,6 +97,7 @@ class OfficialBrowserRuntime:
     ) -> OfficialBrowserSession:
         key = self._account_key(credential)
         incoming_digest = self.execution_context_digest(credential)
+        incoming_credential_digest = self.credential_digest(credential)
         slot = self._operation.get()
         if slot.key != key:
             raise ValueError("browser operation account mismatch")
@@ -111,6 +117,7 @@ class OfficialBrowserRuntime:
                 or current.rule_digest != rule_digest(selection)
                 or time.monotonic() - current.created_at >= selection.rules.session_max_age_seconds
                 or (incoming_digest and incoming_digest not in accepted_digests)
+                or current.credential_digest != incoming_credential_digest
             ):
                 slot.value = None
                 await self._close_session(current)
@@ -121,6 +128,7 @@ class OfficialBrowserRuntime:
                 credential,
                 proxy_url,
                 incoming_digest,
+                incoming_credential_digest,
                 selection,
             )
             slot.value = current
@@ -171,6 +179,12 @@ class OfficialBrowserRuntime:
         value = self.execution_context(credential)
         return digest(value) if value else ""
 
+    def credential_digest(self, credential: dict[str, Any]) -> str:
+        value = {
+            key: item for key, item in credential.items() if key != "browser_execution_context"
+        }
+        return digest(value)
+
     def filter_storage_state(self, state: dict[str, Any]) -> dict[str, Any]:
         cookies = state.get("cookies", [])
         origins = state.get("origins", [])
@@ -213,6 +227,7 @@ class OfficialBrowserRuntime:
         credential: dict[str, Any],
         proxy_url: str,
         state_digest: str,
+        credential_digest: str,
         selection: RuntimeRuleSelection,
     ) -> OfficialBrowserSession:
         execution = self.execution_context(credential)
@@ -259,6 +274,7 @@ class OfficialBrowserRuntime:
                 backend=backend,
                 state_digest=state_digest,
                 input_digest=state_digest,
+                credential_digest=credential_digest,
                 proxy_url=proxy_url,
                 rule_revision=selection.revision,
                 rule_digest=rule_digest(selection),
@@ -270,14 +286,19 @@ class OfficialBrowserRuntime:
             )
             await self.configure_page(session, credential)
             await page.goto(
-                self.base_url,
+                self.page_url,
                 wait_until="domcontentloaded",
                 timeout=90_000,
             )
             try:
-                session.build_id = await official_build_id(
-                    page, selection.rules.build_asset_markers
-                )
+                try:
+                    session.build_id = await official_build_id(
+                        page, selection.rules.build_asset_markers
+                    )
+                except RuntimeRuleDiscoveryError:
+                    if self.require_build_assets:
+                        raise
+                    session.build_id = build_id([self.page_url])
                 await self.wait_until_ready(page, selection.rules)
             except Exception as error:
                 raise RuntimeRuleDiscoveryError(

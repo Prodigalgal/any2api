@@ -7,7 +7,6 @@ from typing import Any
 
 import httpx
 
-from ..config import settings as core_settings
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
@@ -25,7 +24,7 @@ from ..lifecycle.browser import (
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from .base import AutomationProvider, AutomationProviderManifest
-from .mimo_browser import MimoOfficialBrowserTransport
+from .mimo_browser import MimoOfficialBrowserTransport, default_runtime_plan
 from .mimo_protocol import XiaomiProtocolClient
 from .mimo_settings import settings
 from .runtime_rules import RuntimePlan, parse_runtime_plan
@@ -50,6 +49,7 @@ class MimoAutomationProvider(AutomationProvider):
         challenge_types=("ocr",),
         operations=("register", "reauthenticate", "keepalive"),
         inference_transport=True,
+        inference_runtime="camoufox_browser_runtime",
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -105,7 +105,7 @@ class MimoAutomationProvider(AutomationProvider):
             try:
                 patch = await asyncio.to_thread(_exchange_pass_token, payload, current)
                 candidate = {**current, **patch}
-                verification = await asyncio.to_thread(_keepalive_sync, payload, candidate)
+                verification = await _browser_keepalive(payload, candidate)
                 if verification.get("healthy"):
                     return {
                         "healthy": True,
@@ -119,7 +119,7 @@ class MimoAutomationProvider(AutomationProvider):
             try:
                 patch = await asyncio.to_thread(_password_otp_reauthenticate, payload, current)
                 candidate = {**current, **patch}
-                verification = await asyncio.to_thread(_keepalive_sync, payload, candidate)
+                verification = await _browser_keepalive(payload, candidate)
                 if verification.get("healthy"):
                     return {
                         "healthy": True,
@@ -152,7 +152,7 @@ class MimoAutomationProvider(AutomationProvider):
             payload=payload,
         )
         try:
-            verification = await asyncio.to_thread(_keepalive_sync, payload, result.credential)
+            verification = await _browser_keepalive(payload, result.credential)
         except (httpx.HTTPError, RuntimeError, ValueError):
             verification = {"healthy": False}
         if not verification.get("healthy"):
@@ -173,7 +173,11 @@ class MimoAutomationProvider(AutomationProvider):
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
         plan_value = payload.get("runtime_plan")
-        plan = parse_runtime_plan(plan_value, "mimo") if isinstance(plan_value, dict) else None
+        plan = (
+            parse_runtime_plan(plan_value, "mimo")
+            if isinstance(plan_value, dict)
+            else default_runtime_plan()
+        )
         async with transport_proxy_lease(
             payload,
             check_url=settings().mimo_base_url,
@@ -226,32 +230,26 @@ class MimoAutomationProvider(AutomationProvider):
         await official_browser_transport.close()
 
 
-def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    config = settings()
-    service_token = required(current, "service_token")
-    user_id = required(current, "user_id")
-    phase = required(current, "xiaomichatbot_ph")
-    base_url = str(payload.get("base_url") or config.mimo_base_url).rstrip("/")
-    cookie = f"serviceToken={service_token}; userId={user_id}; xiaomichatbot_ph={phase}"
-    with (
-        proxy_lease(check_url=base_url, **proxy_parameters(payload)) as proxy_url,
-        httpx.Client(timeout=60, proxy=proxy_url or None) as client,
-    ):
-        response = client.get(
-            f"{base_url}/open-apis/bot/config",
-            headers={
-                "Accept": "application/json",
-                "Cookie": cookie,
-                "Origin": base_url,
-                "Referer": f"{base_url}/",
-                "x-timezone": config.mimo_timezone,
-                "User-Agent": core_settings().provider_user_agent,
-            },
-        )
-    if response.status_code in {401, 403}:
-        return {"healthy": False, "auth_expired": True}
-    response.raise_for_status()
-    return {"healthy": True, "auth_expired": False}
+async def _browser_keepalive(
+    payload: dict[str, Any], current: dict[str, Any]
+) -> dict[str, Any]:
+    plan_value = payload.get("runtime_plan")
+    plan = (
+        parse_runtime_plan(plan_value, "mimo")
+        if isinstance(plan_value, dict)
+        else default_runtime_plan()
+    )
+    async with transport_proxy_lease(
+        payload,
+        check_url=settings().mimo_base_url,
+    ) as proxy_url:
+        result = await official_browser_transport.request(current, proxy_url, plan)
+    status = int(result.get("status") or 502)
+    return {
+        "healthy": status == 200,
+        "auth_expired": status in {401, 403},
+        "credential_patch": result.get("credential_patch") or {},
+    }
 
 
 def _inference_credential_rejected(payload: dict[str, Any]) -> bool:

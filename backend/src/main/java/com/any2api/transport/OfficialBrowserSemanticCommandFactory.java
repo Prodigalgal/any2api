@@ -29,6 +29,9 @@ public final class OfficialBrowserSemanticCommandFactory {
         command.set("reasoning", mapper.valueToTree(request.reasoning()));
         command.set("tools", mapper.valueToTree(request.tools()));
         command.set("providerOptions", mapper.valueToTree(request.providerOptions()));
+        if (request.rawRequest() != null && request.rawRequest().isObject()) {
+            command.set("rawRequest", request.rawRequest().deepCopy());
+        }
         var controls = command.putObject("controls");
         copy(request, controls, "tool_choice");
         copy(request, controls, "parallel_tool_calls");
@@ -36,6 +39,9 @@ public final class OfficialBrowserSemanticCommandFactory {
         copy(request, controls, "reasoning_effort");
         copy(request, controls, "web_search");
         copy(request, controls, "web_search_status");
+        copy(request, controls, "agent_id");
+        copy(request, controls, "reason_enabled");
+        copy(request, controls, "search_enabled");
         return command;
     }
 

@@ -16,6 +16,7 @@ class QwenSettings(AutomationProviderSettings):
         "Chrome/146.0.0.0 Safari/537.36"
     )
     qwen_source: str = "web"
+    qwen_max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1, le=100 * 1024 * 1024)
     qwen_captcha_appear_ms: int = 25000
     qwen_slider_drag_offset_px: float = 0.0
     qwen_slider_clear_streak: int = 15

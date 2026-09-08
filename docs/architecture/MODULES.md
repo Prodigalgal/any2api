@@ -22,7 +22,7 @@
 | `persistence` | Spring Data JPA, JdbcClient, Liquibase, projections, and converters |
 | `coordination` | Redis leases, locks, token buckets, Streams, and cache invalidation |
 | `automation` | Typed client and event consumer for the Python service |
-| `transport` | Provider-neutral client for bounded opaque browser sessions |
+| `transport` | Provider-neutral client for the internal Camoufox Browser Runtime command/event contract |
 | `media` | Provider media SPI, account orchestration, private asset storage, and model cooldown integration |
 | `observability` | Request ID propagation, paged request/operation records, full admin snapshots, telemetry, and metrics |
 | `settings` | Encrypted typed runtime settings and provider-neutral registration defaults |
@@ -43,20 +43,20 @@ modules or sibling-provider references.
 | `lifecycle.browser` | Camoufox/Patchright processes, isolated contexts/profiles, realtime and batch lanes |
 | `captcha` | Provider-neutral ddddocr, captcha-recognizer, OpenCV, preprocessing, fusion, and confidence |
 | `providers` | Isolated registration, browser reauthentication, and interactive challenges |
-| `browser_transport` | Origin-allowlisted opaque curl-cffi sessions, TLS/HTTP2 impersonation, protected request-fingerprint profiles, bounded relative-path HTTP, and session-bound WebSockets |
+| `browser_runtime` | Camoufox-first account-isolated contexts, storage/fingerprint restoration, page execution, official frontend functions, page fetch/WebSocket, raw event capture, and credential patches |
+| `browser_transport` | Bounded compatibility port for legacy account/media lifecycle code; no text-inference, model-discovery, or keepalive path may depend on it |
 | `lifecycle.proxy` | sing-box children, node health, flow-affine leases, and cleanup |
 | `lifecycle.mail` | Temporary mailbox acquisition, OTP polling, and credential handoff |
 | `provider_api` | Provider-neutral execution endpoint and operation dispatch |
 
-Python does not own inference paths, model selection, upstream request bodies, semantic provider
-headers, provider signing, quota interpretation, or account state transitions. A provider may
-seed cookies or a bearer token and supply a proxy pool when opening an opaque browser session,
-while Java selects only a typed transport profile such as `navigation` or `same_origin_fetch`.
-Python materializes and protects the concrete browser headers and transport fingerprint, then
-sends the Java-owned body to an origin-allowlisted relative path; all protocol decisions remain in
-the Java plugin. A provider-local Python helper may mint a browser-bound one-time challenge ticket
-against the proxy already leased by an opaque session; it cannot construct or send the inference
-request that consumes the ticket.
+Python owns the physical upstream boundary for inference and model discovery/keepalive: browser process/context,
+storage and fingerprint restoration, proxy affinity, provider page execution, upstream request
+construction, raw stream/frame handling, and runtime diagnostics. Java still owns model selection,
+canonical semantics, quota, leases, credential versioning, and account state transitions. The
+internal command contains a typed semantic command and a constrained runtime plan; it does not
+contain arbitrary JavaScript, arbitrary upstream URLs, or unchecked headers. The legacy
+`browser_transport` port is confined to explicitly scoped lifecycle/media compatibility adapters
+and must not receive new inference implementations.
 
 Opaque session close returns a sanitized credential patch. Providers attach it to their execution
 result or context; only the shared account coordinator may merge and encrypt it. Provider packages

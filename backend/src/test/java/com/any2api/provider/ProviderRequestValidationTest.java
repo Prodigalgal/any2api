@@ -35,6 +35,67 @@ class ProviderRequestValidationTest {
     }
 
     @Test
+    void acceptsEveryCanonicalMediaShapeWhenTheCapabilityIsDeclared() {
+        var cases = Map.ofEntries(
+            Map.entry("image", ProviderCapability.IMAGE_INPUT),
+            Map.entry("image_url", ProviderCapability.IMAGE_INPUT),
+            Map.entry("input_image", ProviderCapability.IMAGE_INPUT),
+            Map.entry("audio", ProviderCapability.AUDIO_INPUT),
+            Map.entry("audio_url", ProviderCapability.AUDIO_INPUT),
+            Map.entry("input_audio", ProviderCapability.AUDIO_INPUT),
+            Map.entry("video", ProviderCapability.VIDEO_INPUT),
+            Map.entry("video_url", ProviderCapability.VIDEO_INPUT),
+            Map.entry("input_video", ProviderCapability.VIDEO_INPUT),
+            Map.entry("attachment", ProviderCapability.FILE_INPUT),
+            Map.entry("file", ProviderCapability.FILE_INPUT),
+            Map.entry("input_file", ProviderCapability.FILE_INPUT));
+
+        for (var entry : cases.entrySet()) {
+            assertThatCode(() -> ProviderRequestValidation.requireSupportedContent(
+                requestWith(entry.getKey()),
+                manifest(Map.of(entry.getValue(), SupportLevel.NATIVE))))
+                .as(entry.getKey())
+                .doesNotThrowAnyException();
+        }
+    }
+
+    @Test
+    void rejectsMalformedMediaBlocksBeforeCallingTheRuntime() {
+        var cases = Map.of(
+            "audio", ProviderCapability.AUDIO_INPUT,
+            "input_audio", ProviderCapability.AUDIO_INPUT,
+            "video", ProviderCapability.VIDEO_INPUT,
+            "input_video", ProviderCapability.VIDEO_INPUT,
+            "attachment", ProviderCapability.FILE_INPUT,
+            "input_file", ProviderCapability.FILE_INPUT);
+
+        for (var entry : cases.entrySet()) {
+            var message = mapper.createObjectNode().put("role", "user");
+            message.putArray("content").addObject().put("type", entry.getKey());
+            var request = new CanonicalRequest("malformed-" + entry.getKey(),
+                CanonicalRequest.Protocol.CHAT_COMPLETIONS, "guarded", "model", false,
+                List.of(message), Map.of(), Map.of(), List.of(), Map.of(),
+                mapper.createObjectNode());
+
+            assertThatThrownBy(() -> ProviderRequestValidation.requireSupportedContent(
+                request, manifest(Map.of(entry.getValue(), SupportLevel.NATIVE))))
+                .as(entry.getKey())
+                .isInstanceOf(OpenAiRequestException.class)
+                .hasMessageContaining("non-empty media source");
+        }
+    }
+
+    @Test
+    void rejectsNonInlineImagesBeforePageUploadProvidersLeaseAnAccount() {
+        var request = requestWithImageSource("https://media.example/image.png");
+
+        assertThatThrownBy(() -> ProviderRequestValidation.requireInlineImageUploads(
+            request, "Qwen"))
+            .isInstanceOf(OpenAiRequestException.class)
+            .hasMessageContaining("inline base64 data URL");
+    }
+
+    @Test
     void rejectsFunctionToolsWhenTheProviderDoesNotDeclareThem() {
         var tool = mapper.createObjectNode().put("type", "function")
             .putObject("function").put("name", "lookup");
@@ -253,12 +314,40 @@ class ProviderRequestValidationTest {
 
     private CanonicalRequest requestWith(String type) {
         var part = mapper.createObjectNode().put("type", type);
-        if (Set.of("image_url", "input_image").contains(type)) {
-            part.put("image_url", "data:image/png;base64,aGVsbG8=");
+        switch (type) {
+            case "image" -> part.putObject("image").putObject("source")
+                .put("data", "aGVsbG8=");
+            case "image_url" -> part.put("image_url", "data:image/png;base64,aGVsbG8=");
+            case "input_image" -> part.putObject("image_url")
+                .put("url", "data:image/png;base64,aGVsbG8=");
+            case "audio" -> part.putObject("audio").putObject("source")
+                .put("data", "YQ==");
+            case "audio_url" -> part.put("audio_url", "data:audio/wav;base64,YQ==");
+            case "input_audio" -> part.putObject("input_audio")
+                .put("data", "YQ==").put("format", "wav");
+            case "video" -> part.putObject("video").putObject("source")
+                .put("url", "https://media.example/video.mp4");
+            case "video_url" -> part.put("video_url", "https://media.example/video.mp4");
+            case "input_video" -> part.putObject("input_video")
+                .put("video_url", "https://media.example/video.mp4");
+            case "attachment" -> part.putObject("attachment").put("file_id", "file-1");
+            case "file" -> part.putObject("file").put("file_data", "data:text/plain;base64,YQ==");
+            case "input_file" -> part.putObject("input_file").put("file_id", "file-1");
+            default -> { }
         }
         var message = mapper.createObjectNode().put("role", "user");
         message.putArray("content").add(part);
         return new CanonicalRequest("guard", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "guarded", "model", false, List.of(message), Map.of(), Map.of(),
+            List.of(), Map.of(), mapper.createObjectNode());
+    }
+
+    private CanonicalRequest requestWithImageSource(String source) {
+        var message = mapper.createObjectNode().put("role", "user");
+        message.putArray("content").addObject()
+            .put("type", "input_image")
+            .put("image_url", source);
+        return new CanonicalRequest("inline-image", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
             "guarded", "model", false, List.of(message), Map.of(), Map.of(),
             List.of(), Map.of(), mapper.createObjectNode());
     }

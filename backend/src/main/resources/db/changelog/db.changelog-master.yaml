@@ -39,3 +39,13 @@ databaseChangeLog:
       file: db/changelog/releases/019-registration-schedules.sql
   - include:
       file: db/changelog/releases/020-provider-runtime-rules.sql
+  - include:
+      file: db/changelog/releases/021-grok-console-browser-runtime.sql
+  - include:
+      file: db/changelog/releases/022-grok-browser-runtime.sql
+  - include:
+      file: db/changelog/releases/023-longcat-browser-runtime.sql
+  - include:
+      file: db/changelog/releases/024-browser-runtime-provider-rules.sql
+  - include:
+      file: db/changelog/releases/025-grok-web-browser-runtime.sql

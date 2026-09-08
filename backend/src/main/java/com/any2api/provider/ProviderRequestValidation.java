@@ -203,10 +203,10 @@ public final class ProviderRequestValidation {
                     continue;
                 }
                 var capability = switch (type) {
-                    case "image_url", "input_image" -> ProviderCapability.IMAGE_INPUT;
-                    case "input_audio" -> ProviderCapability.AUDIO_INPUT;
-                    case "video_url", "input_video" -> ProviderCapability.VIDEO_INPUT;
-                    case "file", "input_file" -> ProviderCapability.FILE_INPUT;
+                    case "image", "image_url", "input_image" -> ProviderCapability.IMAGE_INPUT;
+                    case "audio", "audio_url", "input_audio" -> ProviderCapability.AUDIO_INPUT;
+                    case "video", "video_url", "input_video" -> ProviderCapability.VIDEO_INPUT;
+                    case "attachment", "file", "input_file" -> ProviderCapability.FILE_INPUT;
                     default -> null;
                 };
                 if (capability == null) {
@@ -219,17 +219,104 @@ public final class ProviderRequestValidation {
                     throw OpenAiRequestException.unsupported(
                         "input", manifest.id() + " does not support content block type " + type);
                 }
-                if (capability == ProviderCapability.IMAGE_INPUT) {
-                    var image = part.path("image_url");
-                    var url = image.isTextual() ? image.asText("")
-                        : image.path("url").asText("");
-                    if (url.isBlank()) {
-                        throw OpenAiRequestException.invalid(
-                            "input", type + " content blocks require image_url");
-                    }
+                requireMediaShape(part, type, capability);
+            }
+        }
+    }
+
+    public static void requireInlineImageUploads(
+        CanonicalRequest request,
+        String provider
+    ) {
+        for (var message : request.messages()) {
+            var content = message.path("content");
+            if (!content.isArray()) continue;
+            for (var part : content) {
+                if (!part.isObject()) continue;
+                var type = part.path("type").asText("");
+                if (!Set.of("image", "image_url", "input_image").contains(type)) continue;
+                if (!isInlineImageSource(part)) {
+                    throw OpenAiRequestException.unsupported(
+                        "input",
+                        provider + " image upload currently requires an inline base64 data URL");
                 }
             }
         }
+    }
+
+    private static void requireMediaShape(
+        JsonNode part,
+        String type,
+        ProviderCapability capability
+    ) {
+        var valid = switch (capability) {
+            case IMAGE_INPUT -> hasSource(
+                firstPresent(part, "image_url", "input_image", "image", "source"),
+                "url", "file_id", "file_url", "file_data", "data", "base64")
+                || hasText(part.path("file_id"));
+            case AUDIO_INPUT -> hasSource(
+                firstPresent(part, "input_audio", "audio_url", "audio", "source"),
+                "url", "audio_url", "file_id", "file_url", "file_data", "data", "base64");
+            case VIDEO_INPUT -> hasSource(
+                firstPresent(part, "video_url", "input_video", "video", "source"),
+                "url", "video_url", "file_id", "file_url", "file_data", "data", "base64")
+                || hasText(part.path("file_id"));
+            case FILE_INPUT -> hasSource(
+                firstPresent(part, "file", "input_file", "attachment", "source"),
+                "url", "file_url", "file_id", "file_data", "data", "base64")
+                || hasText(part.path("file_url"))
+                || hasText(part.path("file_id"))
+                || hasText(part.path("file_data"));
+            default -> true;
+        };
+        if (!valid) {
+            throw OpenAiRequestException.invalid(
+                "input", type + " content blocks require a non-empty media source");
+        }
+    }
+
+    private static JsonNode firstPresent(JsonNode part, String... fields) {
+        for (var field : fields) {
+            var value = part.path(field);
+            if (!value.isMissingNode() && !value.isNull()) return value;
+        }
+        return part;
+    }
+
+    private static boolean hasSource(JsonNode value, String... fields) {
+        if (hasText(value)) return true;
+        if (!value.isObject()) return false;
+        for (var field : fields) {
+            if (hasText(value.path(field))) return true;
+        }
+        var nested = value.path("source");
+        if (nested.isObject() && hasSource(nested, fields)) return true;
+        return false;
+    }
+
+    private static boolean hasText(JsonNode value) {
+        return value != null && value.isTextual() && !value.asText("").isBlank();
+    }
+
+    private static boolean isInlineImageSource(JsonNode part) {
+        for (var field : List.of("image_url", "input_image", "image", "source")) {
+            if (isInlineDataUrl(part.path(field))) return true;
+        }
+        return isInlineDataUrl(part.path("file_data"))
+            || isInlineDataUrl(part.path("data"));
+    }
+
+    private static boolean isInlineDataUrl(JsonNode value) {
+        if (hasText(value)) {
+            var source = value.asText("").trim().toLowerCase(java.util.Locale.ROOT);
+            return source.startsWith("data:image/") && source.contains(";base64,");
+        }
+        if (!value.isObject()) return false;
+        for (var field : List.of(
+            "url", "image_url", "file_url", "file_data", "data", "base64", "source")) {
+            if (isInlineDataUrl(value.path(field))) return true;
+        }
+        return false;
     }
 
     public static void requireSupportedRequest(

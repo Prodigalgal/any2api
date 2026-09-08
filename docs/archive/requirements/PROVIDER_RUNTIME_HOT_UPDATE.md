@@ -2,13 +2,13 @@
 
 ## 目标
 
-在不重新构建 Backend、Automation 或 WEB 镜像的前提下，调整 MiMo、GLM 官方页面的
+在不重新构建 Backend、Automation 或 WEB 镜像的前提下，调整各 provider Camoufox Runtime 的
 模块发现标记、能力导出名、允许的端点路径和会话 canary 参数。Java 只传递稳定的语义
 命令，Automation 负责把语义命令映射成当前厂商页面需要的请求。
 
 ## 范围
 
-- MiMo、GLM 使用 `operation + semanticCommand`，不再由 Java 生成厂商请求 body。
+- 已迁移 provider 使用 `operation + semanticCommand`，不再由 Java 生成厂商请求 body。
 - PostgreSQL 保存不可变规则 revision、候选状态、当前生效 revision 和 last-known-good。
 - Automation 对候选规则先执行 build discovery，再执行真实 operation；只有 operation 成功
   才允许 Backend 原子晋升候选规则。
@@ -20,8 +20,7 @@
 
 - 不允许热更新任意 JavaScript、正则表达式、请求头、Cookie 或签名实现。
 - 不在 canary 失败时把失败请求重放到其他规则，避免重复创建对话或重复计费。
-- 不迁移尚未纳入 official-browser runtime 的 provider；旧 transport 字段继续兼容 MinMax
-  等既有链路。
+- provider 迁移按批次推进；旧 transport 字段仅在迁移期间兼容，不能作为新 inference 实现。
 - 不用模型发现、keepalive 或只读页面打开替代真实推理 operation 的晋升证据。
 
 ## 规则契约
@@ -54,9 +53,9 @@
 - `backend/runtime`：规则验证、revision、状态机、晋升和回滚。
 - `backend/transport/OfficialBrowserTransportClient.java`：semantic command 与 runtime plan 契约。
 - `automation/providers/runtime_rules.py`：规则解析、选择、报告与 build ID。
-- `automation/providers/mimo_browser.py`、`glm_runtime.py`：语义映射、发现和 canary。
+- `automation/providers/*_browser.py`、`glm_runtime.py`：语义映射、发现和 canary。
 - `web`：中文运行时规则管理页面。
-- Liquibase `020`：规则 revision 与 provider 状态表。
+- Liquibase `020`：规则 revision 与 provider 状态表；后续 migration 为已迁移 provider 引导规则。
 
 ## 验收标准
 

@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from any2api_automation.providers.minmax_browser import (
+    _UPLOAD_MEDIA,
     MinmaxOfficialBrowserTransport,
     _filter_storage_state,
     _Session,
@@ -19,6 +21,13 @@ def test_minmax_bridge_discovers_the_official_runtime_without_fixed_module_ids()
     assert "return fetch(" in script
     assert "97516" not in script
     assert "I*7Cf" not in script
+
+
+def test_minmax_media_upload_stays_inside_the_browser_runtime() -> None:
+    assert "crypto.subtle" in _UPLOAD_MEDIA
+    assert "policy_callback" not in _UPLOAD_MEDIA
+    assert "bridge(input.callbackPath" in _UPLOAD_MEDIA
+    assert "fetch(objectUrl" in _UPLOAD_MEDIA
 
 
 def test_minmax_storage_injection_rejects_cross_provider_state() -> None:
@@ -87,6 +96,40 @@ async def test_minmax_stream_persists_context_before_forwarding_an_error() -> No
         "credential_patch",
         "error",
     ]
+
+
+@pytest.mark.asyncio
+async def test_minmax_media_upload_rejects_incomplete_results() -> None:
+    class Page:
+        async def evaluate(self, _script: str, _payload: dict[str, object]) -> list[dict[str, object]]:
+            return [{"data_url": "oss://one"}]
+
+    session = _Session(
+        key="account",
+        browser=object(),
+        context=object(),
+        page=Page(),
+        backend="camoufox",
+        state_digest="",
+        input_digest="",
+        proxy_url="",
+    )
+    transport = MinmaxOfficialBrowserTransport("https://agent.minimax.io")
+    transport._session_for = AsyncMock(return_value=session)
+    transport._inject_context = AsyncMock()
+    plan = SimpleNamespace(active=SimpleNamespace(rules=SimpleNamespace(endpoint_paths={})))
+
+    with pytest.raises(RuntimeError, match="incomplete result"):
+        await transport.upload_media(
+            {"user_id": "user", "token": "token"},
+            [
+                {"data_url": "data:image/png;base64,YQ=="},
+                {"data_url": "data:image/png;base64,Yg=="},
+            ],
+            plan,
+            "",
+            1024,
+        )
 
 
 @pytest.mark.asyncio

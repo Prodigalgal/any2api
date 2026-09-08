@@ -1,6 +1,6 @@
 # ADR 0005: Official Browser Runtime Transport
 
-- Status: Accepted
+- Status: Accepted, scope superseded by ADR-0006
 - Date: 2026-08-17
 
 ## Context
@@ -48,7 +48,8 @@ last-known-good revision only before an upstream operation starts.
   Registration persists its proxy affinity and inference reuses it for the account.
 - DeepSeek: official HTTP and PoW modules are confirmed by runtime evidence, but completion migration
   remains disabled until an authenticated stream probe validates the raw response contract.
-- Providers with stable documented APIs continue using their existing native clients.
+- ADR-0006 将 stable documented API 也纳入统一 Camoufox 顶层边界；是否使用官方函数、页面
+  `fetch` 或页面 WebSocket 由 provider Runtime 内部决定。
 - MiMo and GLM: Java sends canonical semantic commands; Python builds their current upstream request
   bodies and reports `buildId` plus rule revision canary evidence.
 

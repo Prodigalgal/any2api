@@ -221,8 +221,9 @@ automation/.../providers/
 
 The Java provider is a Spring bean implementing `InferenceProvider`; the Python provider is a
 discoverable `AutomationProvider` subclass. Each runtime manifest is authoritative for the
-capabilities it executes: Java owns inference protocols and model discovery, while Python owns
-lifecycle operations and browser requirements. Shared controllers and frontend selectors consume
+capabilities it executes: Java owns canonical inference semantics and domain orchestration, while
+Python owns the Camoufox Browser Runtime physical operation and browser requirements. Shared
+controllers and frontend selectors consume
 `/api/catalog/v1/providers`; they never infer the set of providers from models and never contain
 provider ID branches.
 

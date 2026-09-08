@@ -146,7 +146,7 @@ final class GlmEventDecoder {
                 reasoningDeltas++;
                 output.add(new CanonicalEvent.ReasoningDelta(
                     1, requestId, next(), delta));
-            } else if (!List.of("other", "done", "usage").contains(phase)) {
+            } else if (!List.of("done", "usage").contains(phase)) {
                 answerDeltas++;
                 output.add(new CanonicalEvent.OutputTextDelta(
                     1, requestId, next(), delta));

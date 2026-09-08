@@ -7,7 +7,8 @@ import static org.mockito.Mockito.mock;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.proxy.ProxyPoolService;
-import com.any2api.transport.BrowserTransportClient;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -21,8 +22,9 @@ class LongcatProtocolTest {
         var toolProtocol = new LongcatToolProtocol(mapper);
         var properties = new LongcatProperties();
         var provider = new LongcatProvider(
-            mock(BrowserTransportClient.class), mock(ProxyPoolService.class), properties,
-            new LongcatRequestMapper(mapper, toolProtocol), toolProtocol, mapper);
+            mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper),
+            mock(ProxyPoolService.class), properties, toolProtocol, mapper);
 
         assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
         assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));

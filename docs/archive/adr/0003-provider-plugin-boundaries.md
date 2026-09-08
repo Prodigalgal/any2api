@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Accepted for provider-isolation rules; its physical transport ownership paragraph is superseded by
+ADR-0006.
 
 ## Decision
 
@@ -20,11 +21,11 @@ hints, browser navigation/fetch request profiles, protected fingerprint-header o
 affinity. Java selects a typed fingerprint profile but cannot supply or override its managed
 `Origin`, `Referer`, `Sec-Fetch-*`, `Priority`, cache, or browser accept headers.
 
-Java owns provider paths, semantic provider headers, signing, request bodies, response parsing,
-quota semantics, and lifecycle decisions. Python sessions are opaque, bounded by TTL and byte
-limits, cannot dispatch by provider ID, and cannot infer provider paths or request bodies. Adding a
-new fingerprint profile changes the Python transport contract rather than adding provider branches
-to the transport.
+Java owns canonical semantics, response/event contracts, quota semantics, and lifecycle decisions.
+The Python Camoufox Browser Runtime owns provider paths, physical request headers, signing, request
+bodies, raw response parsing, and browser state. The internal Runtime command is typed and
+allowlisted; it cannot dispatch arbitrary provider URLs or execute arbitrary JavaScript. The old
+opaque curl-cffi session remains a migration compatibility port only. See ADR-0006.
 
 Java providers may implement `ProviderLifecycleHandler` for protocol-only keepalive and refresh
 operations. The lifecycle executor resolves these handlers through a registry and falls back to

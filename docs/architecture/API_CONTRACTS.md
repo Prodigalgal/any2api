@@ -163,18 +163,35 @@ namespace per candidate provider; each candidate validates only its own namespac
 
 All rows use the same canonical event stream and central Chat/Responses renderer. `Emulated` means
 the provider adapter injects a provider-local prompt contract and parses the model output; it does
-not mean the field is forwarded natively.
+not mean the field is forwarded natively. A vendor's product-level multimodal marketing claim does
+not automatically make every model and every channel callable through this text adapter. `Native`
+below means the current adapter preserves the block and has a local contract fixture; live account
+completion is a separate release gate.
 
-| Provider | Chat | Responses | Reasoning | Function tools | Image input | Stored Responses |
-|---|---|---|---|---|---|---|
-| Qwen | Native | Native | Native | Unsupported; search tools only | Native | Unsupported |
-| LongCat | Native | Native | Native | Emulated | Unsupported | Unsupported |
-| MiMo | Native | Native | Native | Emulated | Native | Unsupported |
-| MinMax | Native | Native | Native | Unsupported | Native | Unsupported |
-| GLM | Native | Native | Native | Unsupported | Unsupported | Unsupported |
-| Grok Build | Native | Native | Native | Native | Unsupported | Unsupported |
-| Grok Web | Native | Native | Native output | Emulated | Separate media API | Native |
-| Grok Console | Native | Native | Native | Native | Unsupported | Stateless only |
+| Provider | Chat | Responses | Reasoning | Function tools | Image input | File input | Audio input | Video input | Stored Responses |
+|---|---|---|---|---|---|---|---|---|---|
+| Qwen | Native | Native | Native | Unsupported; search tools only | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
+| LongCat | Native | Native | Native | Emulated | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
+| MiMo | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
+| MinMax | Native | Native | Native | Unsupported | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
+| GLM | Native | Native | Native | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
+| Grok Build | Native | Native | Native | Native | Native block | Native block | Unsupported | Unsupported | Unsupported |
+| Grok Web | Native | Native | Native output | Emulated | Separate media ops | Unsupported in chat input | Unsupported in chat input | Separate media ops | Native |
+| Grok Console | Native | Native | Native | Native | Native block | Native block | Unsupported | Unsupported | Stateless only |
+
+For `Native upload`, the page session obtains the provider's temporary upload authorization,
+uploads through the provider object-storage path, and sends only the resulting provider file object
+in the same account/proxy context. For `Native block`, the current xAI Responses-shaped payload
+preserves `input_image`/`input_file` and lets the upstream fetch the declared URL or file ID. A
+provider marked `Unsupported` fails before account acquisition; the runtime must never flatten or
+silently discard that content. Grok Web's separate media API is not a declaration that Gateway
+chat accepts arbitrary content blocks.
+
+Qwen, MiMo, and MinMax currently declare image input only for inline base64 data URLs because their
+page upload protocols require browser-side bytes. Their Java adapters reject remote URLs and file
+IDs before account leasing; this source restriction is part of the provider contract, not a
+fallback to text. The runtime schema records all canonical image/audio/video/file block aliases,
+while provider capability and source policy decide whether a block can proceed.
 
 Grok channels remain code-installed but may be administratively hot-unplugged. Disabling them does
 not weaken protocol validation for the enabled providers.
@@ -260,8 +277,9 @@ provider bindings. Each binding selects one or more traffic scopes: `REGISTRATIO
 are interpreted as registration-only. New clients send `bindingScopes`, for example
 `{"minmax":["REGISTRATION"]}`. An empty update source preserves the current encrypted value. Read
 responses expose metadata, node count, and scoped bindings, never the subscription URL or nodes.
-Qwen, LongCat, MiMo, and MinMax consume `INFERENCE` through their isolated provider transport;
-removing that scope switches subsequent public requests back to direct egress without a restart.
+Migrated providers consume `INFERENCE` through the Camoufox Browser Runtime. The legacy
+browser-shaped transport remains only for providers still in migration; removing an `INFERENCE`
+binding changes the Runtime's proxy lease policy without changing the public API.
 
 ## Java/Python operation contract
 
@@ -279,6 +297,28 @@ operation = register | reauthenticate | keepalive
 ```
 
 Python has no domain-table access. Java persists a successful registration or credential patch only after the internal call returns. Provider exceptions are reduced to a non-sensitive error class at the service boundary.
+
+## Camoufox Browser Runtime contract
+
+For migrated inference providers, Java calls the Runtime with a typed semantic command rather than
+a provider URL or prebuilt upstream body:
+
+```text
+POST /internal/v1/providers/{provider_id}/transport/request
+POST /internal/v1/providers/{provider_id}/transport/stream
+
+runtime_mode = camoufox_browser_runtime
+operation
+semantic_command
+runtime_plan
+payload = credential + optional proxy pool/affinity + constrained runtime options
+```
+
+The stream endpoint returns newline-delimited Runtime events: `status`, `data`, `error`,
+`credential_patch` and `runtime_canary`. The Runtime owns provider URL/path, browser headers,
+official frontend/page request details and raw upstream framing. `runtime_plan` contains only
+bounded declarative revision data; it cannot carry executable JavaScript, arbitrary URLs or
+credentials outside the execution payload.
 
 ## Internal synchronous APIs
 

@@ -30,6 +30,6 @@ Backend: AccountLeaseService、AccountSelectionService、LifecycleScheduler、Cr
 
 ## 发布与回滚
 
-统一候选版本 0.8.0；无数据库迁移、无公共 API 变化。默认每个接入的厂商会话池容量为 2，
+统一候选版本 0.9.0；无数据库迁移、无公共 API 变化。默认每个接入的厂商会话池容量为 2，
 通过 ANY2API_AUTOMATION_OFFICIAL_BROWSER_SESSION_POOL_SIZE 调整，单池最大 32。该值不是全服务浏览器总上限。
 资源不足可设为 1；版本回滚使用上一个已验证镜像。浏览器与驱动依赖保持不变。

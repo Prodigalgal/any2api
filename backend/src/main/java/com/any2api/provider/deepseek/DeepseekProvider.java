@@ -17,26 +17,21 @@ import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
-import com.any2api.transport.BrowserTransportClient;
-import com.any2api.transport.SseDataDecoder;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class DeepseekProvider implements InferenceProvider {
-    private static final String COMPLETION_PATH = "/api/v0/chat/completion";
     private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
         Map.of(
             "thinking_enabled", ProviderProtocolContract.OptionType.BOOLEAN,
@@ -49,41 +44,40 @@ public final class DeepseekProvider implements InferenceProvider {
             "web_search", "enable_search", "search", "tools", "tool_choice"),
         Set.of("web_search", "web_search_preview", "search"));
 
-    private final BrowserTransportClient transport;
+    private static final ProviderManifest MANIFEST = new ProviderManifest(
+        "deepseek", "DeepSeek", "native-deepseek-web-v2.3", "2",
+        List.of("default", "expert", "vision"), Map.of(
+            ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+            ProviderCapability.RESPONSES, SupportLevel.NATIVE,
+            ProviderCapability.STREAMING, SupportLevel.NATIVE,
+            ProviderCapability.REASONING, SupportLevel.NATIVE,
+            ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
+            ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
+            ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
+            ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
+        Map.of(RandomModelRole.TOP_TEXT, List.of("expert")), true);
+
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final DeepseekProperties properties;
-    private final DeepseekRequestMapper requestMapper;
     private final ObjectMapper mapper;
-    private final DeepseekPowSolver pow = new DeepseekPowSolver();
 
     public DeepseekProvider(
-        BrowserTransportClient transport,
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         DeepseekProperties properties,
-        DeepseekRequestMapper requestMapper,
         ObjectMapper mapper
     ) {
         this.transport = transport;
+        this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.properties = properties;
-        this.requestMapper = requestMapper;
         this.mapper = mapper;
     }
 
-    @Override
-    public ProviderManifest manifest() {
-        return new ProviderManifest("deepseek", "DeepSeek", "native-deepseek-web-v2.3", "1",
-            List.of("default", "expert", "vision"), Map.of(
-                ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-                ProviderCapability.RESPONSES, SupportLevel.NATIVE,
-                ProviderCapability.STREAMING, SupportLevel.NATIVE,
-                ProviderCapability.REASONING, SupportLevel.NATIVE,
-                ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
-                ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-                ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
-                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-            Map.of(RandomModelRole.TOP_TEXT, List.of("expert")), true);
-    }
+    @Override public ProviderManifest manifest() { return MANIFEST; }
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
@@ -97,8 +91,7 @@ public final class DeepseekProvider implements InferenceProvider {
         if (!toolChoice.isMissingNode() && !toolChoice.isNull()
             && (!toolChoice.isTextual()
                 || !Set.of("auto", "none").contains(toolChoice.asText().toLowerCase()))) {
-            throw new IllegalArgumentException(
-                "DeepSeek tool_choice supports only auto or none for web search");
+            throw new IllegalArgumentException("DeepSeek tool_choice supports only auto or none");
         }
         var unsupported = request.tools().stream()
             .map(tool -> tool.path("type").asText("function"))
@@ -108,19 +101,21 @@ public final class DeepseekProvider implements InferenceProvider {
             throw new IllegalArgumentException(
                 "DeepSeek does not support tool types: " + String.join(", ", unsupported));
         }
-        if ("expert".equals(request.model()) && requestMapper.search(request)) {
+        if ("expert".equals(request.model()) && searchEnabled(request)) {
             throw OpenAiRequestException.conflict(
                 "search_enabled", "DeepSeek expert model does not support web search");
         }
-        DeepseekRequestMapper.prompt(request.messages());
+        requirePrompt(request);
     }
 
     @Override
     public void validateCredential(JsonNode credential) {
         if (credential.path("token").asText("").isBlank()
-            || credential.path("device_id").asText("").isBlank()) {
-            throw new IllegalArgumentException(
-                "DeepSeek credential requires token and device_id");
+            && credential.path("access_token").asText("").isBlank()) {
+            throw new IllegalArgumentException("DeepSeek credential requires token");
+        }
+        if (credential.path("device_id").asText("").isBlank()) {
+            throw new IllegalArgumentException("DeepSeek credential requires device_id");
         }
     }
 
@@ -134,42 +129,65 @@ public final class DeepseekProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        var credential = DeepseekCredential.from(account);
-        return Flux.usingWhen(
-            transport.open(
-                sessionCommand(credential, proxyAffinityKey(account)),
-                proxyNodeOffset(account)),
-            session -> createSession(session, credential)
-                .flatMapMany(sessionId -> createPow(session, credential)
-                    .flatMapMany(challenge -> Mono.fromCallable(() -> pow.solve(challenge))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .flatMapMany(answer -> completion(
-                            session, credential, request, sessionId, challenge, answer)))),
-            this::close,
-            (session, ignored) -> close(session),
-            this::close);
+        validateCredential(account.credential());
+        return Flux.defer(() -> {
+            var decoder = new DeepseekEventDecoder(request.requestId(), mapper);
+            var status = new AtomicInteger(-1);
+            return transport.stream(
+                    MANIFEST.id(),
+                    "chat",
+                    semanticCommands.chat(request),
+                    account.credential(),
+                    proxyPool(),
+                    proxyAffinityKey(account),
+                    runtimeOptions())
+                .handle((frame, sink) -> {
+                    var type = frame.path("type").asText("");
+                    if ("status".equals(type)) {
+                        status.set(frame.path("status").asInt(502));
+                    } else if ("error".equals(type)) {
+                        var code = status.get() < 0 ? 502 : status.get();
+                        sink.error(new DeepseekUpstreamException(
+                            code, summarize(code, frame.path("data").asText(""))));
+                    } else if ("data".equals(type) && status.get() < 400) {
+                        sink.next(frame.path("data").asText(""));
+                    } else if ("credential_patch".equals(type)) {
+                        context.acceptCredentialPatch(frame.path("data"));
+                    }
+                })
+                .cast(String.class)
+                .takeUntil(data -> "[DONE]".equals(data.trim()))
+                .concatMapIterable(decoder::decode)
+                .concatWith(Flux.defer(() -> status.get() >= 400
+                    ? Flux.error(new DeepseekUpstreamException(
+                        status.get(), "DeepSeek upstream returned HTTP " + status.get()))
+                    : Flux.fromIterable(decoder.finish())));
+        });
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        var credential = DeepseekCredential.from(account);
-        return Mono.usingWhen(
-            transport.open(
-                sessionCommand(credential, proxyAffinityKey(account)),
-                proxyNodeOffset(account)),
-            session -> transport.request(session.id(), request(
-                    "GET",
-                    "/api/v0/client/settings?did=" + url(credential.deviceId()) + "&scope=model",
-                    null,
-                    Map.of(),
-                    120,
-                    credential))
-                .flatMap(response -> response.successful()
-                    ? Mono.just(parseModels(json(response)))
-                    : Mono.error(upstream(response))),
-            this::close,
-            (session, ignored) -> close(session),
-            this::close);
+        validateCredential(account.credential());
+        return transport.request(
+                MANIFEST.id(),
+                "models",
+                semanticCommands.models(),
+                account.credential(),
+                proxyPool(),
+                proxyAffinityKey(account),
+                runtimeOptions())
+            .flatMap(response -> {
+                if (response.status() < 200 || response.status() >= 300) {
+                    return Mono.error(new DeepseekUpstreamException(
+                        response.status(), summarize(response.status(), response.body())));
+                }
+                try {
+                    return Mono.just(parseModels(mapper.readTree(response.body())));
+                } catch (RuntimeException error) {
+                    return Mono.error(new DeepseekUpstreamException(
+                        502, "DeepSeek model discovery returned invalid JSON"));
+                }
+            });
     }
 
     static List<DiscoveredModel> parseModels(JsonNode root) {
@@ -195,142 +213,59 @@ public final class DeepseekProvider implements InferenceProvider {
         return List.copyOf(result.values());
     }
 
-    private Mono<String> createSession(
-        BrowserTransportClient.Session session,
-        DeepseekCredential credential
-    ) {
-        return transport.request(session.id(), request(
-                "POST", "/api/v0/chat_session/create", mapper.createObjectNode(), Map.of(), 120,
-                credential))
-            .flatMap(response -> {
-                if (!response.successful()) return Mono.error(upstream(response));
-                var root = json(response);
-                requireSuccess(root, "create session");
-                var id = root.path("data").path("biz_data").path("chat_session")
-                    .path("id").asText("").trim();
-                return id.isBlank()
-                    ? Mono.error(new DeepseekUpstreamException(
-                        502, "DeepSeek create session returned no id"))
-                    : Mono.just(id);
-            });
-    }
-
-    private Mono<DeepseekPowSolver.Challenge> createPow(
-        BrowserTransportClient.Session session,
-        DeepseekCredential credential
-    ) {
-        var body = mapper.createObjectNode().put("target_path", COMPLETION_PATH);
-        return transport.request(session.id(), request(
-                "POST", "/api/v0/chat/create_pow_challenge", body, Map.of(), 120, credential))
-            .flatMap(response -> {
-                if (!response.successful()) return Mono.error(upstream(response));
-                var root = json(response);
-                requireSuccess(root, "create POW challenge");
-                return Mono.just(DeepseekPowSolver.parse(root, "challenge"));
-            });
-    }
-
-    private Flux<CanonicalEvent> completion(
-        BrowserTransportClient.Session session,
-        DeepseekCredential credential,
-        CanonicalRequest request,
-        String sessionId,
-        DeepseekPowSolver.Challenge challenge,
-        int answer
-    ) {
-        var proof = mapper.createObjectNode()
-            .put("algorithm", challenge.algorithm())
-            .put("challenge", challenge.challenge())
-            .put("salt", challenge.salt())
-            .put("answer", answer)
-            .put("signature", challenge.signature())
-            .put("target_path", COMPLETION_PATH);
-        var encoded = Base64.getEncoder().encodeToString(
-            mapper.writeValueAsBytes(proof));
-        var decoder = new DeepseekEventDecoder(request.requestId(), mapper);
-        var sse = new SseDataDecoder();
-        return transport.stream(session.id(), request(
-                "POST", COMPLETION_PATH, requestMapper.prepare(request, sessionId),
-                Map.of("X-DS-PoW-Response", encoded), 300, credential))
-            .concatMapIterable(sse::decode)
-            .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
-            .concatMapIterable(decoder::decode)
-            .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
-    }
-
-    private BrowserTransportClient.Request request(
-        String method,
-        String path,
-        JsonNode body,
-        Map<String, String> extraHeaders,
-        int timeout,
-        DeepseekCredential credential
-    ) {
-        var headers = new LinkedHashMap<String, String>();
-        if (body != null) headers.put("Content-Type", "application/json");
-        headers.put("X-Client-Bundle-Id", first(
-            credential.bundleId(), properties.getBundleId()));
-        headers.put("X-Client-Platform", first(
-            credential.platform(), properties.getPlatform()));
-        headers.put("X-Client-Version", first(
-            credential.clientVersion(), properties.getClientVersion()));
-        headers.put("X-Client-Locale", first(
-            credential.locale(), properties.getLocale()));
-        headers.put("X-Client-Timezone-Offset",
-            Integer.toString(credential.timezoneOffsetSeconds() == 0
-                ? properties.getTimezoneOffsetSeconds()
-                : credential.timezoneOffsetSeconds()));
-        headers.putAll(extraHeaders);
-        return new BrowserTransportClient.Request(
-            method, path, Map.copyOf(headers),
-            BrowserTransportClient.FingerprintProfile.SAME_ORIGIN_FETCH,
-            body, timeout, null, null, "/");
-    }
-
-    private BrowserTransportClient.OpenCommand sessionCommand(
-        DeepseekCredential credential,
-        String affinityKey
-    ) {
-        var origin = URI.create(properties.getBaseUrl());
-        var proxyPool = proxyPools.runtimeForProvider(
-            manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
-        var userAgent = credential.userAgent().isBlank()
-            ? properties.getUserAgent() : credential.userAgent();
-        var browserProfile = credential.browserProfile().isBlank()
-            ? properties.getBrowserProfile() : credential.browserProfile();
-        return new BrowserTransportClient.OpenCommand(
-            origin, Map.of(), List.of("." + origin.getHost()), userAgent,
-            browserProfile, "v2", proxyPool, 300, List.of(), affinityKey,
-            !proxyPool.isEmpty(), "", credential.token());
-    }
-
-    private JsonNode json(BrowserTransportClient.BufferedResponse response) {
-        try {
-            return mapper.readTree(response.text());
-        } catch (RuntimeException error) {
-            throw new DeepseekUpstreamException(502, "DeepSeek upstream returned invalid JSON");
+    @Override
+    public ProviderFailure classify(Throwable error) {
+        if (error instanceof DeepseekUpstreamException upstream) {
+            var retryable = upstream.status() >= 500
+                || List.of(408, 409, 425, 429).contains(upstream.status());
+            var type = switch (upstream.status()) {
+                case 401, 403 -> "credential_rejected";
+                case 429 -> "rate_limited";
+                default -> "provider_upstream_error";
+            };
+            return new ProviderFailure(type, upstream.getMessage(), retryable,
+                Map.of("status", upstream.status()));
         }
+        return new ProviderFailure(
+            "provider_transport_error",
+            error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
+            true,
+            Map.of());
     }
 
-    private void requireSuccess(JsonNode root, String operation) {
-        var code = root.path("code").asInt(0);
-        var bizCode = root.path("data").path("biz_code").asInt(0);
-        if (code != 0 || bizCode != 0) {
-            throw new DeepseekUpstreamException(400,
-                "DeepSeek " + operation + " failed (code=" + code
-                    + ", biz_code=" + bizCode + ")");
+    private boolean searchEnabled(CanonicalRequest request) {
+        for (var name : List.of("search_enabled", "web_search", "enable_search", "search")) {
+            var option = request.providerOptions().get(name);
+            if (option instanceof Boolean value) return value;
+            var raw = request.rawRequest().path(name);
+            if (raw.isBoolean()) return raw.asBoolean();
         }
+        return request.tools().stream().anyMatch(tool -> Set.of(
+            "web_search", "web_search_preview", "search").contains(tool.path("type").asText("")));
     }
 
-    private DeepseekUpstreamException upstream(
-        BrowserTransportClient.BufferedResponse response
-    ) {
-        return new DeepseekUpstreamException(response.status(),
-            "DeepSeek upstream returned HTTP " + response.status());
+    private void requirePrompt(CanonicalRequest request) {
+        var hasText = request.messages().stream().anyMatch(message -> {
+            var content = message.path("content");
+            return content.isTextual() && !content.asText().isBlank()
+                || content.isArray() && content.size() > 0;
+        });
+        if (!hasText) throw new IllegalArgumentException("DeepSeek prompt is empty");
     }
 
-    private Mono<Void> close(BrowserTransportClient.Session session) {
-        return transport.close(session.id()).then();
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(MANIFEST.id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
+    }
+
+    private Map<String, Object> runtimeOptions() {
+        return Map.of(
+            "base_url", properties.getBaseUrl(),
+            "bundle_id", properties.getBundleId(),
+            "platform", properties.getPlatform(),
+            "client_version", properties.getClientVersion(),
+            "locale", properties.getLocale(),
+            "timezone_offset", properties.getTimezoneOffsetSeconds());
     }
 
     private static String proxyAffinityKey(LeasedProviderAccount account) {
@@ -338,38 +273,11 @@ public final class DeepseekProvider implements InferenceProvider {
         return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
-    private static int proxyNodeOffset(LeasedProviderAccount account) {
-        return Math.max(0, account.credential().path("proxy_node_offset").asInt(0));
-    }
-
-    private String url(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
-    }
-
-    private static String first(String preferred, String fallback) {
-        return preferred == null || preferred.isBlank() ? fallback : preferred;
-    }
-
-    @Override
-    public ProviderFailure classify(Throwable error) {
-        if (error instanceof DeepseekUpstreamException upstream) {
-            return failure(upstream.status(), upstream.getMessage());
-        }
-        if (error instanceof BrowserTransportClient.BrowserTransportException upstream) {
-            return failure(upstream.status(), upstream.getMessage());
-        }
-        return new ProviderFailure("provider_transport_error",
-            error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
-            true, Map.of());
-    }
-
-    private ProviderFailure failure(int status, String message) {
-        var retryable = status >= 500 || List.of(408, 409, 425, 429).contains(status);
-        var type = switch (status) {
-            case 401, 403 -> "credential_rejected";
-            case 429 -> "rate_limited";
-            default -> "provider_upstream_error";
-        };
-        return new ProviderFailure(type, message, retryable, Map.of("status", status));
+    private String summarize(int status, String body) {
+        var compact = body == null ? "" : body.replaceAll("\\s+", " ").trim();
+        if (compact.length() > 1000) compact = compact.substring(0, 1000);
+        return compact.isBlank()
+            ? "DeepSeek upstream returned HTTP " + status
+            : "DeepSeek upstream returned HTTP " + status + ": " + compact;
     }
 }

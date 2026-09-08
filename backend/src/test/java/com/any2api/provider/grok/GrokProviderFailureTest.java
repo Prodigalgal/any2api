@@ -2,9 +2,12 @@ package com.any2api.provider.grok;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.any2api.proxy.ProxyPoolService;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.reactive.function.client.WebClient;
 import tools.jackson.databind.ObjectMapper;
+import static org.mockito.Mockito.mock;
 
 class GrokProviderFailureTest {
 
@@ -12,7 +15,11 @@ class GrokProviderFailureTest {
     void permissionDeniedRemainsAmbiguousAndRetryable() {
         var mapper = new ObjectMapper();
         var provider = new GrokProvider(
-            WebClient.builder(), new GrokProperties(), new GrokRequestMapper(mapper), mapper);
+            mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper),
+            new GrokProperties(),
+            mock(ProxyPoolService.class),
+            mapper);
 
         var failure = provider.classify(
             new GrokUpstreamException(403, "permission-denied"));

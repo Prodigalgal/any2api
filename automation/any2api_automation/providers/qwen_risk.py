@@ -9,6 +9,7 @@ import queue
 import re
 import threading
 from collections import OrderedDict
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,7 @@ from pydantic import BaseModel, Field, PrivateAttr, model_validator
 from ..browser_transport import manager as browser_session_manager
 from ..config import settings as global_settings
 from ..security import require_internal_token
+from .multimodal import decode_inline_data_url
 from .qwen_fingerprint import (
     camoufox_launch_options,
     finalize_patchright_fingerprint,
@@ -128,6 +130,8 @@ class NativeBrowserRequest(BaseModel):
     transport_session_id: str = Field(default="", max_length=32)
     referer_path: str = Field(default="/", min_length=1, max_length=2048)
     timeout_seconds: int = Field(default=300, ge=1, le=300)
+    proxy_url: str = Field(default="", max_length=2048)
+    proxy_binding_id: str = Field(default="", max_length=128)
 
     @model_validator(mode="after")
     def validate_paths(self) -> NativeBrowserRequest:
@@ -369,6 +373,169 @@ class _AccountBrowserSession:
     request_count: int = 0
 
 
+_UPLOAD_MEDIA = r"""async input => {
+  const decode = value => {
+    const match = /^data:([^;]+);base64,(.+)$/s.exec(String(value || ''));
+    if (!match) throw new Error('Qwen media must be an inline base64 data URL');
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    if (!bytes.length || bytes.length > input.maximumBytes) {
+      throw new Error('Qwen media exceeds the configured upload limit');
+    }
+    return {contentType: match[1].toLowerCase(), bytes};
+  };
+  const text = value => new TextEncoder().encode(String(value));
+  const hex = bytes => [...new Uint8Array(bytes)]
+    .map(value => value.toString(16).padStart(2, '0')).join('');
+  const hash = async value => hex(await crypto.subtle.digest('SHA-256', value));
+  const hmac = async (key, value) => {
+    const keyBytes = typeof key === 'string' ? text(key) : key;
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw', keyBytes, {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']
+    );
+    return new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, text(value)));
+  };
+  const required = (value, name) => {
+    const result = String(value || '').trim();
+    if (!result) throw new Error('Qwen STS response is missing ' + name);
+    return result;
+  };
+  const encodePath = value => value.split('/').map(encodeURIComponent).join('/');
+  const uploadUrl = (endpoint, bucket, objectName) => {
+    const parsed = new URL(endpoint);
+    if (parsed.protocol !== 'https:') throw new Error('Qwen OSS endpoint must use HTTPS');
+    if (!parsed.hostname.startsWith(bucket + '.')) parsed.hostname = bucket + '.' + parsed.hostname;
+    const prefix = parsed.pathname.replace(/\/+$/, '');
+    parsed.pathname = prefix + '/' + encodePath(objectName);
+    return parsed;
+  };
+  const putObject = async (sts, source, decoded) => {
+    const endpoint = uploadUrl(sts.endpoint, sts.bucket, sts.objectName);
+    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const shortDate = now.slice(0, 8);
+    const region = sts.region.startsWith('oss-') ? sts.region.slice(4) : sts.region;
+    const scope = shortDate + '/' + region + '/oss/aliyun_v4_request';
+    const payloadHash = 'UNSIGNED-PAYLOAD';
+    const signedHeaders = 'content-type;host;x-oss-content-sha256;x-oss-date;x-oss-security-token';
+    const canonicalHeaders = [
+      'content-type:' + decoded.contentType,
+      'host:' + endpoint.host,
+      'x-oss-content-sha256:' + payloadHash,
+      'x-oss-date:' + now,
+      'x-oss-security-token:' + sts.securityToken
+    ].join('\n') + '\n';
+    const canonicalRequest = [
+      'PUT', endpoint.pathname, '', canonicalHeaders, signedHeaders, payloadHash
+    ].join('\n');
+    const stringToSign = [
+      'OSS4-HMAC-SHA256', now, scope, await hash(text(canonicalRequest))
+    ].join('\n');
+    const dateKey = await hmac('aliyun' + sts.accessKeySecret, shortDate);
+    const regionKey = await hmac(dateKey, region);
+    const serviceKey = await hmac(regionKey, 'oss');
+    const signingKey = await hmac(serviceKey, 'aliyun_v4_request');
+    const signature = hex(await hmac(signingKey, stringToSign));
+    const response = await fetch(endpoint.toString(), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': decoded.contentType,
+        'x-oss-content-sha256': payloadHash,
+        'x-oss-date': now,
+        'x-oss-security-token': sts.securityToken,
+        'Authorization': 'OSS4-HMAC-SHA256 Credential=' + sts.accessKeyId + '/' + scope +
+          ',AdditionalHeaders=' + signedHeaders + ',Signature=' + signature
+      },
+      body: decoded.bytes
+    });
+    if (!response.ok) throw new Error('Qwen OSS upload was rejected');
+  };
+  const fileObject = (sts, source, decoded) => {
+    const now = Date.now();
+    const inner = {
+      created_at: now,
+      data: {},
+      filename: source.filename,
+      hash: null,
+      id: sts.fileId,
+      user_id: String(input.userId || ''),
+      meta: {
+        name: source.filename,
+        size: decoded.bytes.length,
+        content_type: decoded.contentType
+      },
+      update_at: now,
+      lastModified: now,
+      name: source.filename,
+      webkitRelativePath: '',
+      size: decoded.bytes.length,
+      type: decoded.contentType
+    };
+    return {
+      type: 'image',
+      file: inner,
+      id: sts.fileId,
+      url: sts.fileUrl,
+      name: source.filename,
+      collection_name: '',
+      progress: 100,
+      status: 'uploaded',
+      greenNet: 'success',
+      size: decoded.bytes.length,
+      error: '',
+      itemId: crypto.randomUUID(),
+      file_type: decoded.contentType,
+      showType: 'image',
+      file_class: 'vision'
+    };
+  };
+  if (!Array.isArray(input.sources) || input.sources.length > 16) {
+    throw new Error('Qwen media upload contains too many files');
+  }
+  const output = [];
+  for (const source of input.sources) {
+    const decoded = decode(source.data_url);
+    if (!decoded.contentType.startsWith('image/')) {
+      throw new Error('Qwen image upload received a non-image content type');
+    }
+    const filename = String(source.filename || ('upload-' + crypto.randomUUID() + '.bin'));
+    const tokenResponse = await fetch(input.stsPath, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        filename,
+        filesize: String(decoded.bytes.length),
+        filetype: 'image'
+      })
+    });
+    const tokenText = await tokenResponse.text();
+    let tokenBody;
+    try { tokenBody = JSON.parse(tokenText); } catch (_) { tokenBody = {}; }
+    const value = tokenBody?.data || {};
+    const sts = {
+      accessKeyId: required(value.access_key_id, 'access_key_id'),
+      accessKeySecret: required(value.access_key_secret, 'access_key_secret'),
+      securityToken: required(value.security_token, 'security_token'),
+      bucket: required(value.bucketname, 'bucketname'),
+      region: required(value.region, 'region'),
+      endpoint: required(value.endpoint, 'endpoint'),
+      fileId: required(value.file_id, 'file_id'),
+      objectName: required(value.file_path, 'file_path'),
+      fileUrl: required(value.file_url, 'file_url')
+    };
+    if (!tokenResponse.ok || tokenBody?.success === false) {
+      throw new Error('Qwen media upload token request was rejected');
+    }
+    await putObject(sts, source, decoded);
+    output.push(fileObject(sts, {...source, filename}, decoded));
+  }
+  return output;
+}"""
+
+
 class QwenNativeBrowserTransport:
     """Executes protected Qwen requests with one isolated context per account."""
 
@@ -383,10 +550,12 @@ class QwenNativeBrowserTransport:
         self._sessions: OrderedDict[str, _AccountBrowserSession] = OrderedDict()
 
     async def fetch(self, request: NativeBrowserRequest) -> dict[str, Any]:
-        async with (
-            self._request_lock,
-            self._transport_proxy_lease(request.transport_session_id) as proxy_binding,
-        ):
+        proxy_context = (
+            self._transport_proxy_lease(request.transport_session_id)
+            if request.transport_session_id
+            else _fixed_proxy_binding(request)
+        )
+        async with self._request_lock, proxy_context as proxy_binding:
             session = await self._session_for(request, proxy_binding)
             result, body = await self._evaluate(session, request)
             punish_url = _qwen_punish_url(body)
@@ -422,6 +591,55 @@ class QwenNativeBrowserTransport:
                 result, body = await self._evaluate(session, request)
             credential_patch = await self._credential_patch(session, request)
             return self._response(request, result, body, credential_patch)
+
+    async def upload_media(
+        self,
+        request: NativeBrowserRequest,
+        sources: list[dict[str, Any]],
+        maximum_bytes: int,
+        *,
+        user_id: str = "",
+    ) -> dict[str, Any]:
+        if not sources:
+            return {"files": []}
+        if len(sources) > 16:
+            raise ValueError("Qwen media upload contains too many files")
+        if maximum_bytes < 1:
+            raise ValueError("Qwen media upload limit must be positive")
+        for source in sources:
+            if not isinstance(source, dict):
+                raise TypeError("Qwen media upload sources must be objects")
+            decode_inline_data_url(
+                str(source.get("data_url") or ""),
+                "Qwen image",
+                max_bytes=maximum_bytes,
+                expected_prefix="image/",
+            )
+        proxy_context = (
+            self._transport_proxy_lease(request.transport_session_id)
+            if request.transport_session_id
+            else _fixed_proxy_binding(request)
+        )
+        async with self._request_lock, proxy_context as proxy_binding:
+            session = await self._session_for(request, proxy_binding)
+            await self._prepare_authenticated_surface(session, request)
+            result = await session.page.evaluate(
+                _UPLOAD_MEDIA,
+                {
+                    "stsPath": request.path,
+                    "sources": sources,
+                    "maximumBytes": maximum_bytes,
+                    "userId": user_id,
+                },
+            )
+            if not isinstance(result, list) or len(result) != len(sources):
+                raise RuntimeError("Qwen media upload returned an incomplete file list")
+            if any(not isinstance(item, dict) for item in result):
+                raise RuntimeError("Qwen media upload returned an invalid file item")
+            return {
+                "files": list(result),
+                "credential_patch": await self._credential_patch(session, request),
+            }
 
     async def _evaluate(
         self,
@@ -620,23 +838,55 @@ class QwenNativeBrowserTransport:
             try:
                 await session.page.goto(target, wait_until="domcontentloaded", timeout=60_000)
             except Exception as error:
-                if "NS_BINDING_ABORTED" not in str(error):
+                error_text = str(error)
+                if "NS_BINDING_ABORTED" in error_text:
+                    await session.page.wait_for_url(
+                        target,
+                        wait_until="domcontentloaded",
+                        timeout=10_000,
+                    )
+                    logger.info(
+                        "qwen_native_browser_navigation_superseded target_path=%s",
+                        desired.path,
+                    )
+                elif "NS_ERROR_FAILURE" in error_text:
+                    await self._recover_failed_same_origin_navigation(
+                        session, target, desired
+                    )
+                else:
                     raise
-                await session.page.wait_for_url(
-                    target,
-                    wait_until="domcontentloaded",
-                    timeout=10_000,
-                )
-                logger.info(
-                    "qwen_native_browser_navigation_superseded target_path=%s",
-                    desired.path,
-                )
             await session.page.wait_for_function(
                 "() => localStorage.getItem('token') && document.readyState !== 'loading'",
                 timeout=30_000,
             )
             await session.page.wait_for_timeout(750)
         await self._ensure_baxia_ready(session)
+
+    async def _recover_failed_same_origin_navigation(
+        self,
+        session: _AccountBrowserSession,
+        target: str,
+        desired: Any,
+    ) -> None:
+        current = urlparse(session.page.url)
+        if current.scheme != desired.scheme or current.netloc != desired.netloc:
+            raise RuntimeError(
+                "Qwen authenticated surface left the configured origin after navigation failure"
+            )
+        await session.page.evaluate(
+            "target => history.replaceState(history.state, '', target)", target
+        )
+        recovered = urlparse(session.page.url)
+        if recovered.scheme != desired.scheme or recovered.netloc != desired.netloc:
+            raise RuntimeError(
+                "Qwen authenticated surface route recovery left the configured origin"
+            )
+        if recovered.path != desired.path:
+            raise RuntimeError("Qwen authenticated surface route recovery did not reach target")
+        logger.warning(
+            "qwen_native_browser_navigation_recovered error=NS_ERROR_FAILURE target_path=%s",
+            desired.path,
+        )
 
     async def _ensure_baxia_ready(self, session: _AccountBrowserSession) -> None:
         expected = urlparse(settings().qwen_base_url)
@@ -1181,6 +1431,13 @@ def _qwen_punish_url(body: bytes) -> str:
 
 def _request_account_key(request: NativeBrowserRequest) -> str:
     return request.account_id or hashlib.sha256(request.bearer_token.encode()).hexdigest()
+
+
+@asynccontextmanager
+async def _fixed_proxy_binding(
+    request: NativeBrowserRequest,
+) -> AsyncIterator[tuple[str, str]]:
+    yield request.proxy_url, request.proxy_binding_id
 
 
 def _short_hash(value: str) -> str:

@@ -9,6 +9,12 @@ from typing import Any
 from uuid import uuid4
 
 from ..config import settings as core_settings
+from .multimodal import (
+    decode_inline_data_url,
+    iter_media_blocks,
+    media_source,
+    text_content,
+)
 from .official_browser import OfficialBrowserRuntime, OfficialBrowserSession
 from .runtime_rules import (
     RuntimePlan,
@@ -141,7 +147,78 @@ def _stream_request(rule: RuntimeRule) -> str:
   }} finally {{
     clearTimeout(timeout);
   }}
-}}"""
+    }}"""
+
+
+_UPLOAD_MEDIA = r"""async input => {
+  const decode = value => {
+    const match = /^data:([^;]+);base64,(.+)$/s.exec(String(value || ''));
+    if (!match) throw new Error('MiMo media must be an inline base64 data URL');
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    if (!bytes.length || bytes.length > input.maximumBytes) {
+      throw new Error('MiMo media exceeds the configured upload limit');
+    }
+    return {type: match[1], bytes};
+  };
+  const result = [];
+  for (const source of input.images) {
+    const decoded = decode(source.dataUrl);
+    const filename = String(source.filename || ('upload-' + crypto.randomUUID() + '.bin'));
+    const infoResponse = await fetch(input.uploadInfoPath +
+      '?xiaomichatbot_ph=' + encodeURIComponent(input.phase), {
+        method: 'POST',
+        credentials: 'include',
+        headers: {'Content-Type': 'application/json', 'x-timezone': input.timezone},
+        body: JSON.stringify({fileName: filename})
+      });
+    const info = await infoResponse.json();
+    const data = info?.data || {};
+    if (!infoResponse.ok || Number(info?.code ?? -1) !== 0 ||
+        !data.uploadUrl || !data.resourceUrl || !data.objectName) {
+      throw new Error('MiMo media upload information was rejected');
+    }
+    const uploadResponse = await fetch(data.uploadUrl, {
+      method: 'PUT',
+      body: new Blob([decoded.bytes], {type: decoded.type})
+    });
+    if (!uploadResponse.ok) throw new Error('MiMo object upload was rejected');
+    let parsed = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const parseUrl = input.parsePath + '?fileUrl=' + encodeURIComponent(data.resourceUrl) +
+        '&objectName=' + encodeURIComponent(data.objectName) +
+        '&model=' + encodeURIComponent(input.model) +
+        '&xiaomichatbot_ph=' + encodeURIComponent(input.phase);
+      const parseResponse = await fetch(parseUrl, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {'Content-Type': 'application/json', 'x-timezone': input.timezone},
+        body: '{}'
+      });
+      const parseBody = await parseResponse.json();
+      if (parseResponse.ok && Number(parseBody?.code ?? -1) === 0 && parseBody?.data?.id) {
+        parsed = parseBody.data;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    if (!parsed) throw new Error('MiMo media parsing did not complete');
+    result.push({
+      mediaType: 'image',
+      fileUrl: data.resourceUrl,
+      compressedVideoUrl: '',
+      audioTrackUrl: '',
+      name: filename,
+      size: decoded.bytes.length,
+      status: 'completed',
+      objectName: data.objectName,
+      tokenUsage: Number(parsed.tokenUsage || 0),
+      url: String(parsed.id)
+    });
+  }
+  return result;
+}"""
 
 
 class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
@@ -194,9 +271,12 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         proxy_url: str,
         plan: RuntimePlan,
     ) -> AsyncIterator[dict[str, Any]]:
-        body = build_mimo_chat_request(semantic_command)
         async with self.account_operation(credential):
             session, selection, reports = await self._select_session(credential, proxy_url, plan)
+            uploaded_media = await self._upload_media(
+                session, credential, semantic_command, selection.rules
+            )
+            body = build_mimo_chat_request(semantic_command, uploaded_media=uploaded_media)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
             request_id = uuid4().hex
@@ -267,6 +347,41 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                 if not task.done():
                     task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+
+    async def _upload_media(
+        self,
+        session: OfficialBrowserSession,
+        credential: dict[str, Any],
+        command: dict[str, Any],
+        rule: RuntimeRule,
+    ) -> list[dict[str, Any]]:
+        images = _mimo_media_sources(command.get("messages"))
+        if not images:
+            return []
+        phase = str(credential.get("xiaomichatbot_ph") or "").strip()
+        if not phase:
+            raise ValueError("MiMo media upload requires xiaomichatbot_ph")
+        result = await session.page.evaluate(
+            _UPLOAD_MEDIA,
+            {
+                "images": images,
+                "phase": phase,
+                "model": str(command.get("model") or ""),
+                "timezone": "Asia/Shanghai",
+                "uploadInfoPath": rule.endpoint_paths.get(
+                    "uploadInfo", "/open-apis/resource/genUploadInfo"
+                ),
+                "parsePath": rule.endpoint_paths.get(
+                    "parse", "/open-apis/resource/parse"
+                ),
+                "maximumBytes": 25 * 1024 * 1024,
+            },
+        )
+        if not isinstance(result, list):
+            raise TypeError("MiMo media upload returned an invalid result")
+        if len(result) != len(images) or any(not isinstance(item, dict) for item in result):
+            raise RuntimeError("MiMo media upload returned an incomplete result")
+        return list(result)
 
     async def configure_context(
         self,
@@ -350,8 +465,17 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         queue.put_nowait({key: value for key, value in event.items() if key != "requestId"})
 
 
-def build_mimo_chat_request(command: dict[str, Any]) -> dict[str, Any]:
+def build_mimo_chat_request(
+    command: dict[str, Any], *, uploaded_media: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     _validate_semantic_command(command)
+    media_blocks = list(iter_media_blocks(command["messages"], "MiMo"))
+    unsupported_media = sorted({kind for _, kind, _ in media_blocks if kind != "image"})
+    if unsupported_media:
+        raise ValueError(
+            "MiMo browser upload does not support media types: "
+            + ", ".join(unsupported_media)
+        )
     controls = command.get("controls") or {}
     generation = command.get("generation") or {}
     reasoning = command.get("reasoning") or {}
@@ -398,9 +522,17 @@ def build_mimo_chat_request(command: dict[str, Any]) -> dict[str, Any]:
     thinking = provider_options.get("thinking", controls.get("thinking"))
     if not isinstance(thinking, bool):
         thinking = bool(effort and effort not in {"none", "minimal"})
-    uploaded_media = command.get("uploadedMedia") or []
+    if uploaded_media is None:
+        uploaded_media = command.get("uploadedMedia") or []
     if not isinstance(uploaded_media, list):
         raise TypeError("MiMo uploadedMedia must be an array")
+    if len(uploaded_media) != len(media_blocks):
+        if media_blocks:
+            raise ValueError(
+                "MiMo image input must be uploaded in the same account browser session"
+            )
+        if uploaded_media:
+            raise ValueError("MiMo uploadedMedia contains files without source content")
     return {
         "msgId": uuid4().hex,
         "conversationId": str(provider_options.get("conversation_id") or uuid4().hex),
@@ -425,6 +557,35 @@ def official_bridge_script(rule: RuntimeRule | None = None) -> str:
     return _locate_bridge(rule or default_runtime_plan().active.rules)
 
 
+def _mimo_media_sources(messages: Any) -> list[dict[str, str]]:
+    media_blocks = list(iter_media_blocks(messages, "MiMo"))
+    sources: list[dict[str, str]] = []
+    extensions = {
+        "jpeg": "jpg",
+        "jpg": "jpg",
+        "png": "png",
+        "webp": "webp",
+        "gif": "gif",
+        "avif": "avif",
+    }
+    for _, kind, part in media_blocks:
+        if kind != "image":
+            raise ValueError(f"MiMo browser upload does not support {kind} input")
+        source = media_source(part)
+        mime, _ = decode_inline_data_url(
+            source,
+            "MiMo image",
+            max_bytes=25 * 1024 * 1024,
+            expected_prefix="image/",
+        )
+        extension = extensions.get(mime.removeprefix("image/"), "bin")
+        sources.append({
+            "dataUrl": source,
+            "filename": f"upload-{uuid4().hex}.{extension}",
+        })
+    return sources
+
+
 def default_runtime_plan() -> RuntimePlan:
     rule = RuntimeRule(
         schema_version=1,
@@ -436,6 +597,8 @@ def default_runtime_plan() -> RuntimePlan:
         endpoint_paths={
             "chat": "/open-apis/bot/chat",
             "models": "/open-apis/bot/config",
+            "uploadInfo": "/open-apis/resource/genUploadInfo",
+            "parse": "/open-apis/resource/parse",
         },
     )
     return RuntimePlan(RuntimeRuleSelection("mimo", 1, rule), None, "", "")
@@ -456,21 +619,7 @@ def _validate_semantic_command(command: dict[str, Any]) -> None:
 
 
 def _message_content(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if not isinstance(value, list):
-        return ""
-    parts: list[str] = []
-    for part in value:
-        if isinstance(part, str):
-            parts.append(part)
-        elif isinstance(part, dict) and part.get("type") in {
-            "text",
-            "input_text",
-            "output_text",
-        }:
-            parts.append(str(part.get("text") or ""))
-    return "\n".join(parts)
+    return text_content(value, "MiMo", allow_media=True)
 
 
 def _tool_name(tool: Any) -> str:

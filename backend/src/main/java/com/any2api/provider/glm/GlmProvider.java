@@ -13,17 +13,17 @@ import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
-import com.any2api.observability.RequestCorrelation;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
-import com.any2api.transport.BrowserTransportClient;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
@@ -59,25 +59,24 @@ public final class GlmProvider implements InferenceProvider {
             ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
         Map.of(RandomModelRole.TOP_TEXT, List.of("glm-5.2")), true);
 
-    private final GlmProtocolClient protocol;
     private final GlmProperties properties;
     private final ProxyPoolService proxyPools;
     private final ObjectMapper mapper;
-    private final WebClient webClient;
+    private final OfficialBrowserTransportClient officialTransport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
 
     public GlmProvider(
-        GlmProtocolClient protocol,
         GlmProperties properties,
         ProxyPoolService proxyPools,
         ObjectMapper mapper,
-        WebClient.Builder webClientBuilder
+        OfficialBrowserTransportClient officialTransport,
+        OfficialBrowserSemanticCommandFactory semanticCommands
     ) {
-        this.protocol = protocol;
         this.properties = properties;
         this.proxyPools = proxyPools;
         this.mapper = mapper;
-        this.webClient = webClientBuilder.baseUrl(properties.getBaseUrl())
-            .filter(RequestCorrelation.propagationFilter()).build();
+        this.officialTransport = officialTransport;
+        this.semanticCommands = semanticCommands;
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
@@ -116,22 +115,54 @@ public final class GlmProvider implements InferenceProvider {
         var decoder = new GlmEventDecoder(request.requestId(), mapper);
         var proxyPool = proxyPools.runtimeForProvider(
             manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
-        return protocol.chat(
-                account.credential(),
-                request,
-                proxyPool,
-                proxyAffinityKey(account),
-                context::acceptCredentialPatch)
+        var status = new AtomicInteger(-1);
+        return officialTransport.stream(
+                manifest().id(), "chat", semanticCommands.chat(request),
+                account.credential(), proxyPool, proxyAffinityKey(account))
+            .handle((frame, sink) -> {
+                var type = frame.path("type").asText("");
+                if ("status".equals(type)) {
+                    status.set(frame.path("status").asInt(502));
+                } else if ("error".equals(type)) {
+                    var code = status.get() < 0 ? 502 : status.get();
+                    sink.error(new GlmUpstreamException(
+                        code, summarize(code, frame.path("data").asText(""))));
+                } else if ("data".equals(type) && status.get() < 400) {
+                    sink.next(frame.path("data").asText("").getBytes(StandardCharsets.UTF_8));
+                } else if ("credential_patch".equals(type)) {
+                    context.acceptCredentialPatch(frame.path("data"));
+                }
+            })
+            .cast(byte[].class)
             .concatMapIterable(decoder::decode)
-            .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
+            .concatWith(Flux.defer(() -> status.get() >= 400
+                ? Flux.error(new GlmUpstreamException(
+                    status.get(), "GLM upstream returned HTTP " + status.get()))
+                : Flux.fromIterable(decoder.finish())));
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        return webClient.get().uri("/api/models")
-            .retrieve()
-            .bodyToMono(JsonNode.class)
-            .map(GlmProvider::parseModels);
+        return officialTransport.request(
+                manifest().id(),
+                "models",
+                semanticCommands.models(),
+                account.credential(),
+                proxyPool(),
+                proxyAffinityKey(account),
+                Map.of("base_url", properties.getBaseUrl()))
+            .flatMap(response -> {
+                if (response.status() < 200 || response.status() >= 300) {
+                    return Mono.error(new GlmUpstreamException(
+                        response.status(), summarize(response.status(), response.body())));
+                }
+                try {
+                    return Mono.just(parseModels(mapper.readTree(response.body())));
+                } catch (RuntimeException error) {
+                    return Mono.error(new GlmUpstreamException(
+                        502, "GLM model discovery returned invalid JSON"));
+                }
+            });
     }
 
     static List<DiscoveredModel> parseModels(JsonNode root) {
@@ -186,10 +217,6 @@ public final class GlmProvider implements InferenceProvider {
 
     private int status(Throwable error) {
         if (error instanceof GlmUpstreamException value) return value.status();
-        if (error instanceof BrowserTransportClient.BrowserTransportException value) {
-            return value.status();
-        }
-        if (error instanceof WebClientResponseException value) return value.getStatusCode().value();
         return 0;
     }
 
@@ -203,6 +230,19 @@ public final class GlmProvider implements InferenceProvider {
 
     private String message(Throwable error) {
         return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+    }
+
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(manifest().id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
+    }
+
+    private String summarize(int status, String body) {
+        var compact = body == null ? "" : body.replaceAll("\\s+", " ").trim();
+        if (compact.length() > 1000) compact = compact.substring(0, 1000);
+        return compact.isBlank()
+            ? "GLM upstream returned HTTP " + status
+            : "GLM upstream returned HTTP " + status + ": " + compact;
     }
 
     private static String first(JsonNode source, String... fields) {

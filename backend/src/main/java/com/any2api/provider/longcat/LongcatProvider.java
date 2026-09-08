@@ -14,15 +14,17 @@ import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
-import com.any2api.transport.BrowserTransportClient;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import com.any2api.transport.SseDataDecoder;
-import java.net.URI;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -33,66 +35,69 @@ public final class LongcatProvider implements InferenceProvider {
             "agent_id", ProviderProtocolContract.OptionType.STRING,
             "reason_enabled", ProviderProtocolContract.OptionType.BOOLEAN,
             "search_enabled", ProviderProtocolContract.OptionType.BOOLEAN),
-        java.util.Set.of(
+        Set.of(
             "reasoning", "reasoning_effort", "agent_id", "reason_enabled", "search_enabled",
             "tools", "tool_choice", "parallel_tool_calls"),
-        java.util.Set.of(
+        Set.of(
             "reasoning", "reasoning_effort", "agent_id", "reason_enabled", "search_enabled",
             "tools", "tool_choice", "parallel_tool_calls"),
-        java.util.Set.of("function"));
-    private final BrowserTransportClient transport;
+        Set.of("function"));
+
+    private static final ProviderManifest MANIFEST = new ProviderManifest(
+        "longcat", "LongCat", "native-longcat-web-v2", "3",
+        List.of("longcat-flash", "longcat-thinking", "longcat-search",
+            "longcat-reason-search", "longcat-pro"),
+        Map.of(
+            ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+            ProviderCapability.RESPONSES, SupportLevel.NATIVE,
+            ProviderCapability.STREAMING, SupportLevel.NATIVE,
+            ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
+            ProviderCapability.REASONING, SupportLevel.NATIVE,
+            ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
+            ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
+            ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
+        Map.of(RandomModelRole.TOP_TEXT, List.of("longcat-pro")), true);
+
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final LongcatProperties properties;
-    private final LongcatRequestMapper requestMapper;
     private final LongcatToolProtocol toolProtocol;
     private final ObjectMapper mapper;
 
     public LongcatProvider(
-        BrowserTransportClient transport,
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         LongcatProperties properties,
-        LongcatRequestMapper requestMapper,
         LongcatToolProtocol toolProtocol,
         ObjectMapper mapper
     ) {
         this.transport = transport;
+        this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.properties = properties;
-        this.requestMapper = requestMapper;
         this.toolProtocol = toolProtocol;
         this.mapper = mapper;
     }
 
-    @Override
-    public ProviderManifest manifest() {
-        return new ProviderManifest("longcat", "LongCat", "native-longcat-web-v1", "2",
-            List.of("longcat-flash", "longcat-thinking", "longcat-search",
-                "longcat-reason-search", "longcat-pro"),
-            Map.of(
-                ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-                ProviderCapability.RESPONSES, SupportLevel.NATIVE,
-                ProviderCapability.STREAMING, SupportLevel.NATIVE,
-                ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
-                ProviderCapability.REASONING, SupportLevel.NATIVE,
-                ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-                ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
-                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-            Map.of(RandomModelRole.TOP_TEXT, List.of("longcat-pro")), true);
-    }
+    @Override public ProviderManifest manifest() { return MANIFEST; }
+
+    @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
+
+    @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
+
+    @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override
-    public ProviderProtocolContract protocolContract() {
-        return PROTOCOL;
-    }
-
-    @Override
-    public Duration modelProbeTimeout() {
-        return properties.getModelProbeTimeout();
-    }
-
-    @Override
-    public Duration accountProbeTimeout() {
-        return properties.getModelProbeTimeout();
+    public void validateCredential(JsonNode credential) {
+        var cookie = credential.path("cookie").asText("").trim();
+        var passport = credential.path("passport_token_key")
+            .asText(credential.path("passport_token").asText("")).trim();
+        if (cookie.isBlank() && passport.isBlank()) {
+            throw new IllegalArgumentException(
+                "LongCat credential requires cookie or passport_token_key");
+        }
     }
 
     @Override
@@ -101,7 +106,7 @@ public final class LongcatProvider implements InferenceProvider {
         ProviderRequestValidation.requireBooleanParameters(
             request, "reason_enabled", "search_enabled");
         ProviderRequestValidation.requireReasoningBooleanConsistency(
-            request, "reason_enabled", java.util.Set.of("none", "minimal"), "reason_enabled");
+            request, "reason_enabled", Set.of("none", "minimal"), "reason_enabled");
         toolProtocol.plan(request);
     }
 
@@ -111,87 +116,47 @@ public final class LongcatProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        var credential = LongcatCredential.from(account);
-        var prepared = requestMapper.prepare(request);
-        var affinityKey = proxyAffinityKey(account);
-        return Flux.usingWhen(
-            transport.open(sessionCommand(credential, affinityKey), proxyNodeOffset(account)),
-            session -> createSession(session, prepared.agentId())
-            .flatMapMany(conversationId -> {
-                var decoder = new LongcatEventDecoder(request.requestId(), prepared.reasonEnabled(),
-                    prepared.toolPlan(), toolProtocol);
-                var sse = new SseDataDecoder();
-                var body = prepared.chatBody(conversationId);
-                return transport.stream(session.id(), request(
-                        "/api/v1/chat-completion-V2", body, 300))
-                    .concatMapIterable(sse::decode)
-                    .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
-                    .concatMapIterable(decoder::decode)
-                    .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
-            }),
-            session -> close(session),
-            (session, ignored) -> close(session),
-            this::close);
-    }
-
-    private Mono<String> createSession(BrowserTransportClient.Session session, String agentId) {
-        var body = mapper.createObjectNode().put("model", "").put("agentId", agentId);
-        return transport.request(session.id(), request("/api/v1/session-create", body, 120))
-            .flatMap(response -> {
-                JsonNode value;
-                try {
-                    value = mapper.readTree(response.text());
-                } catch (RuntimeException error) {
-                    return Mono.error(new LongcatUpstreamException(502,
-                        "LongCat session-create returned invalid JSON"));
-                }
-                if (!response.successful() || value.path("code").asInt(-1) != 0) {
-                    return Mono.error(new LongcatUpstreamException(response.status(),
-                        summarize(response.status(), value.toString())));
-                }
-                var id = value.path("data").path("conversationId").asText("").trim();
-                return id.isBlank()
-                    ? Mono.error(new LongcatUpstreamException(
-                        502, "LongCat session-create returned no conversationId"))
-                    : Mono.just(id);
-            });
-    }
-
-    private BrowserTransportClient.Request request(String path, JsonNode body, int timeout) {
-        return new BrowserTransportClient.Request(
-            "POST", path, Map.of(
-                "m-appkey", properties.getAppKey(),
-                "m-traceid", Long.toString(System.currentTimeMillis()),
-                "x-client-language", properties.getLanguage(),
-                "x-requested-with", properties.getRequestedWith()),
-            BrowserTransportClient.FingerprintProfile.SAME_ORIGIN_FETCH,
-            body, timeout, null, null, "/t");
-    }
-
-    private BrowserTransportClient.OpenCommand sessionCommand(
-        LongcatCredential credential,
-        String affinityKey
-    ) {
-        var origin = URI.create(properties.getBaseUrl());
-        var proxyPool = proxyPools.runtimeForProvider(
-            manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
-        return new BrowserTransportClient.OpenCommand(
-            origin, credential.cookies(), List.of("." + origin.getHost()),
-            properties.getUserAgent(), "chrome146", "v2", proxyPool, 300,
-            List.of(), affinityKey, !proxyPool.isEmpty(), "");
-    }
-
-    private Mono<Void> close(BrowserTransportClient.Session session) {
-        return transport.close(session.id()).then();
-    }
-
-    private static String proxyAffinityKey(LeasedProviderAccount account) {
-        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
-        return persisted.isBlank() ? account.accountId().toString() : persisted;
-    }
-
-    private static int proxyNodeOffset(LeasedProviderAccount account) {
-        return Math.max(0, account.credential().path("proxy_node_offset").asInt(0));
+        validateCredential(account.credential());
+        var toolPlan = toolProtocol.plan(request);
+        var reasoningEnabled = reasoningEnabled(request);
+        return Flux.defer(() -> {
+            var decoder = new LongcatEventDecoder(
+                request.requestId(), reasoningEnabled, toolPlan, toolProtocol);
+            var status = new AtomicInteger(-1);
+            var sse = new SseDataDecoder();
+            return transport.stream(
+                    MANIFEST.id(),
+                    "chat",
+                    semanticCommands.chat(request),
+                    account.credential(),
+                    proxyPool(),
+                    proxyAffinityKey(account),
+                    runtimeOptions())
+                .handle((frame, sink) -> {
+                    var type = frame.path("type").asText("");
+                    if ("status".equals(type)) {
+                        status.set(frame.path("status").asInt(502));
+                    } else if ("error".equals(type)) {
+                        var code = status.get() < 0 ? 502 : status.get();
+                        sink.error(new LongcatUpstreamException(
+                            code, summarize(code, frame.path("data").asText(""))));
+                    } else if ("data".equals(type) && status.get() < 400) {
+                        sink.next(frame.path("data").asText(""));
+                    } else if ("credential_patch".equals(type)) {
+                        context.acceptCredentialPatch(frame.path("data"));
+                    }
+                })
+                .cast(String.class)
+                .takeUntil(data -> "[DONE]".equals(data.trim()))
+                .map(data -> data.getBytes(StandardCharsets.UTF_8))
+                .concatMapIterable(sse::decode)
+                .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
+                .concatMapIterable(decoder::decode)
+                .concatWith(Flux.defer(() -> status.get() >= 400
+                    ? Flux.error(new LongcatUpstreamException(
+                        status.get(), "LongCat upstream returned HTTP " + status.get()))
+                    : Flux.fromIterable(decoder.finish())));
+        });
     }
 
     @Override
@@ -207,20 +172,41 @@ public final class LongcatProvider implements InferenceProvider {
             return new ProviderFailure(type, upstream.getMessage(), retryable,
                 Map.of("status", upstream.status()));
         }
-        if (error instanceof BrowserTransportClient.BrowserTransportException upstream) {
-            var retryable = upstream.status() >= 500
-                || List.of(408, 409, 425, 429).contains(upstream.status());
-            var type = switch (upstream.status()) {
-                case 401, 403 -> "credential_rejected";
-                case 429 -> "rate_limited";
-                default -> "provider_transport_error";
-            };
-            return new ProviderFailure(type, upstream.getMessage(), retryable,
-                Map.of("status", upstream.status()));
-        }
-        return new ProviderFailure("provider_transport_error",
+        return new ProviderFailure(
+            "provider_transport_error",
             error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
-            true, Map.of());
+            true,
+            Map.of());
+    }
+
+    private boolean reasoningEnabled(CanonicalRequest request) {
+        var option = request.providerOptions().get("reason_enabled");
+        if (option instanceof Boolean value) return value;
+        var raw = request.rawRequest().path("reason_enabled");
+        if (raw.isBoolean()) return raw.asBoolean();
+        var effort = String.valueOf(request.reasoning().getOrDefault(
+            "effort", request.rawRequest().path("reasoning_effort").asText("")));
+        if (!effort.isBlank()) return !Set.of("none", "minimal").contains(effort.toLowerCase());
+        return Set.of("longcat-thinking", "longcat-reason", "longcat-reason-search",
+            "longcat-pro").contains(request.model());
+    }
+
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(MANIFEST.id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
+    }
+
+    private Map<String, Object> runtimeOptions() {
+        return Map.of(
+            "base_url", properties.getBaseUrl(),
+            "app_key", properties.getAppKey(),
+            "language", properties.getLanguage(),
+            "requested_with", properties.getRequestedWith());
+    }
+
+    private static String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
     private String summarize(int status, String body) {

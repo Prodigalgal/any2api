@@ -94,10 +94,11 @@ final class MimoRequestMapper {
         for (var part : value) {
             if (part.isObject()) {
                 var type = part.path("type").asText("");
-                if (List.of("image_url", "input_image").contains(type)) {
-                    var image = part.path("image_url");
-                    var dataUrl = image.isTextual() ? image.asText("")
-                        : image.path("url").asText("");
+                if (List.of("image", "image_url", "input_image").contains(type)) {
+                    var image = part.has("image_url") ? part.path("image_url")
+                        : part.has("input_image") ? part.path("input_image")
+                        : part.path("image");
+                    var dataUrl = mediaSource(image);
                     media.add(new MimoMediaSource("image", dataUrl, null));
                 } else if (!List.of("text", "input_text", "output_text").contains(type)) {
                     throw new IllegalArgumentException(
@@ -105,6 +106,19 @@ final class MimoRequestMapper {
                 }
             }
         }
+    }
+
+    private String mediaSource(JsonNode value) {
+        if (value.isTextual()) return value.asText("");
+        for (var field : List.of("url", "file_url", "file_data", "data", "base64", "source")) {
+            var nested = value.path(field);
+            if (nested.isTextual() && !nested.asText("").isBlank()) return nested.asText("");
+            if (nested.isObject()) {
+                var result = mediaSource(nested);
+                if (!result.isBlank()) return result;
+            }
+        }
+        return "";
     }
 
     private record ToolChoice(boolean required, boolean disabled, String name) {}

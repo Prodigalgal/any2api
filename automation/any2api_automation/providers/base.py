@@ -9,6 +9,10 @@ from ..lifecycle.browser import (
     BrowserLaunchProfile,
 )
 
+CAMOUFOX_BROWSER_RUNTIME = "camoufox_browser_runtime"
+NO_INFERENCE_RUNTIME = "none"
+_INFERENCE_RUNTIMES = frozenset({NO_INFERENCE_RUNTIME, CAMOUFOX_BROWSER_RUNTIME})
+
 
 @dataclass(frozen=True)
 class AutomationProviderManifest:
@@ -20,7 +24,22 @@ class AutomationProviderManifest:
     operations: tuple[str, ...] = ()
     realtime: bool = False
     inference_transport: bool = False
+    inference_runtime: str = NO_INFERENCE_RUNTIME
     registration_attempt_mode: str = "new_identity"
+
+    def __post_init__(self) -> None:
+        if self.inference_runtime not in _INFERENCE_RUNTIMES:
+            raise ValueError(
+                f"unsupported inference runtime for {self.id}: {self.inference_runtime}"
+            )
+        if self.inference_transport and self.inference_runtime != CAMOUFOX_BROWSER_RUNTIME:
+            raise ValueError(
+                f"inference provider {self.id} must use {CAMOUFOX_BROWSER_RUNTIME}"
+            )
+        if not self.inference_transport and self.inference_runtime != NO_INFERENCE_RUNTIME:
+            raise ValueError(
+                f"provider {self.id} cannot declare an inference runtime without transport"
+            )
 
 
 class AutomationProvider(ABC):

@@ -536,6 +536,50 @@ async def test_qwen_native_transport_rejects_an_unrelated_navigation_error() -> 
 
 
 @pytest.mark.asyncio
+async def test_qwen_native_transport_recovers_same_origin_ns_error_failure_navigation() -> None:
+    class FakeContext:
+        async def add_cookies(self, _cookies: list[dict[str, str]]) -> None:
+            return None
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://chat.qwen.ai/c/new-chat"
+            self.token = ""
+            self.route = ""
+
+        async def evaluate(self, script: str, value: str) -> None:
+            if "localStorage.setItem" in script:
+                self.token = value
+                return
+            self.route = value
+            self.url = value
+
+        async def goto(self, _url: str, **_kwargs: object) -> None:
+            raise RuntimeError("Page.goto: NS_ERROR_FAILURE")
+
+        async def wait_for_function(self, _script: str, **_kwargs: object) -> None:
+            return None
+
+        async def wait_for_timeout(self, _timeout: int) -> None:
+            return None
+
+    transport = QwenNativeBrowserTransport()
+    transport._ensure_baxia_ready = AsyncMock()
+    session = _AccountBrowserSession("account", FakeContext(), FakePage(), "current")
+    request = NativeBrowserRequest(
+        path="/api/v2/chat/completions?chat_id=chat-1",
+        body="{}",
+        bearer_token="token-value-that-is-long-enough",
+        referer_path="/c/chat-1",
+    )
+
+    await transport._prepare_authenticated_surface(session, request)
+
+    assert session.page.token == request.bearer_token
+    assert session.page.route == "https://chat.qwen.ai/c/chat-1"
+
+
+@pytest.mark.asyncio
 async def test_qwen_native_transport_retries_baxia_after_a_navigation() -> None:
     class FakePage:
         def __init__(self) -> None:

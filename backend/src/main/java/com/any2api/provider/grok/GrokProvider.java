@@ -1,11 +1,12 @@
 package com.any2api.provider.grok;
 
 import com.any2api.account.LeasedProviderAccount;
+import com.any2api.observability.RequestCorrelation;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.OpenAiSseEventDecoder;
-import com.any2api.provider.InferenceProvider;
 import com.any2api.provider.DiscoveredModel;
+import com.any2api.provider.InferenceProvider;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
@@ -14,23 +15,23 @@ import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
-import com.any2api.observability.RequestCorrelation;
+import com.any2api.proxy.ProxyPoolService;
+import com.any2api.proxy.ProxyTrafficScope;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.codec.ServerSentEvent;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class GrokProvider implements InferenceProvider {
-
     private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
         Map.of("skip_x_search", ProviderProtocolContract.OptionType.BOOLEAN),
         Set.of(
@@ -52,53 +53,46 @@ public final class GrokProvider implements InferenceProvider {
         "grok",
         "Grok",
         "xai-cli-responses-v1",
-        "2",
+        "3",
         List.of("grok-4.5"),
-        Map.of(
-            ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-            ProviderCapability.RESPONSES, SupportLevel.NATIVE,
-            ProviderCapability.STREAMING, SupportLevel.NATIVE,
-            ProviderCapability.FUNCTION_TOOLS, SupportLevel.NATIVE,
-                ProviderCapability.REASONING, SupportLevel.NATIVE,
-                ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
-            ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-            ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
-            ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
+        Map.ofEntries(
+            Map.entry(ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.RESPONSES, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.STREAMING, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.FUNCTION_TOOLS, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.REASONING, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.FILE_INPUT, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.REGISTRATION, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE)),
         Map.of(RandomModelRole.TOP_TEXT, List.of("grok-4.5")),
         true);
 
-    private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_TYPE =
-        new ParameterizedTypeReference<>() {};
-
-    private final WebClient webClient;
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final GrokProperties properties;
-    private final GrokRequestMapper requestMapper;
+    private final ProxyPoolService proxyPools;
     private final ObjectMapper objectMapper;
 
     public GrokProvider(
-        WebClient.Builder webClientBuilder,
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
         GrokProperties properties,
-        GrokRequestMapper requestMapper,
+        ProxyPoolService proxyPools,
         ObjectMapper objectMapper
     ) {
-        this.webClient = webClientBuilder
-            .baseUrl(trimTrailingSlash(properties.getBaseUrl().toString()))
-            .filter(RequestCorrelation.propagationFilter())
-            .build();
+        this.transport = transport;
+        this.semanticCommands = semanticCommands;
         this.properties = properties;
-        this.requestMapper = requestMapper;
+        this.proxyPools = proxyPools;
         this.objectMapper = objectMapper;
     }
 
-    @Override
-    public ProviderManifest manifest() {
-        return MANIFEST;
-    }
+    @Override public ProviderManifest manifest() { return MANIFEST; }
 
-    @Override
-    public ProviderProtocolContract protocolContract() {
-        return PROTOCOL;
-    }
+    @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
     @Override
     public void validate(CanonicalRequest request) {
@@ -111,67 +105,76 @@ public final class GrokProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        var token = accessToken(account);
-        var prepared = requestMapper.prepare(request);
         return Flux.defer(() -> {
             var decoder = new OpenAiSseEventDecoder(objectMapper, request.requestId());
-            return webClient.post()
-                .uri("/responses")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                .header("x-xai-token-auth", properties.getTokenAuth())
-                .header("x-grok-client-version", properties.getClientVersion())
-                .header("x-grok-client-identifier", properties.getClientIdentifier())
-                .headers(headers -> {
-                    if (prepared.conversationId() != null) {
-                        headers.set("x-grok-conv-id", prepared.conversationId());
+            var status = new AtomicInteger(-1);
+            return transport.stream(
+                    MANIFEST.id(),
+                    "chat",
+                    semanticCommands.chat(request),
+                    account.credential(),
+                    proxyPool(),
+                    proxyAffinityKey(account),
+                    runtimeOptions())
+                .handle((frame, sink) -> {
+                    var type = frame.path("type").asText("");
+                    if ("status".equals(type)) {
+                        status.set(frame.path("status").asInt(502));
+                    } else if ("error".equals(type)) {
+                        var code = status.get() < 0 ? 502 : status.get();
+                        sink.error(new GrokUpstreamException(
+                            code, summarize(code, frame.path("data").asText(""))));
+                    } else if ("data".equals(type) && status.get() < 400) {
+                        sink.next(frame.path("data").asText(""));
+                    } else if ("credential_patch".equals(type)) {
+                        context.acceptCredentialPatch(frame.path("data"));
                     }
                 })
-                .contentType(MediaType.APPLICATION_JSON)
-                .accept(MediaType.TEXT_EVENT_STREAM)
-                .bodyValue(prepared.body())
-                .exchangeToFlux(response -> {
-                    if (response.statusCode().is2xxSuccessful()) {
-                        return response.bodyToFlux(SSE_TYPE)
-                            .mapNotNull(ServerSentEvent::data)
-                            .concatMapIterable(decoder::decode)
-                            .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
-                    }
-                    return response.bodyToMono(String.class)
-                        .defaultIfEmpty("")
-                        .flatMapMany(body -> Flux.error(new GrokUpstreamException(
-                            response.statusCode().value(),
-                            summarize(response.statusCode().value(), body))));
-                });
+                .cast(String.class)
+                .takeUntil(data -> "[DONE]".equals(data.trim()))
+                .concatMapIterable(decoder::decode)
+                .concatWith(Flux.defer(() -> status.get() >= 400
+                    ? Flux.error(new GrokUpstreamException(
+                        status.get(), "Grok upstream returned HTTP " + status.get()))
+                    : Flux.fromIterable(decoder.finish())));
         });
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        return webClient.get()
-            .uri("/models")
-            .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken(account))
-            .header("x-xai-token-auth", properties.getTokenAuth())
-            .header("x-grok-client-version", properties.getClientVersion())
-            .header("x-grok-client-identifier", properties.getClientIdentifier())
-            .exchangeToMono(response -> response.bodyToMono(tools.jackson.databind.JsonNode.class)
-                .defaultIfEmpty(tools.jackson.databind.node.JsonNodeFactory.instance.objectNode())
-                .flatMap(body -> {
-                    if (!response.statusCode().is2xxSuccessful()) {
-                        return Mono.error(new GrokUpstreamException(response.statusCode().value(),
-                            summarize(response.statusCode().value(), body.toString())));
-                    }
-                    var models = new java.util.ArrayList<DiscoveredModel>();
-                    for (var item : body.path("data")) {
-                        var id = item.path("id").asText("").trim();
-                        if (!id.isBlank()) {
-                            var metadata = new java.util.LinkedHashMap<String, Object>();
-                            if (item.has("created")) metadata.put("created", item.path("created").asLong());
-                            if (item.has("owned_by")) metadata.put("owned_by", item.path("owned_by").asText());
-                            models.add(new DiscoveredModel(id, id, metadata));
-                        }
-                    }
-                    return Mono.just(List.copyOf(models));
-                }));
+        return transport.request(
+                MANIFEST.id(),
+                "models",
+                semanticCommands.models(),
+                account.credential(),
+                proxyPool(),
+                proxyAffinityKey(account),
+                runtimeOptions())
+            .flatMap(response -> {
+                if (response.status() < 200 || response.status() >= 300) {
+                    return Mono.error(new GrokUpstreamException(
+                        response.status(), summarize(response.status(), response.body())));
+                }
+                try {
+                    return Mono.just(parseModels(objectMapper.readTree(response.body())));
+                } catch (RuntimeException error) {
+                    return Mono.error(new GrokUpstreamException(
+                        502, "Grok model discovery returned invalid JSON"));
+                }
+            });
+    }
+
+    static List<DiscoveredModel> parseModels(JsonNode body) {
+        var models = new java.util.ArrayList<DiscoveredModel>();
+        for (var item : body.path("data")) {
+            var id = item.path("id").asText("").trim();
+            if (id.isBlank()) continue;
+            var metadata = new LinkedHashMap<String, Object>();
+            if (item.has("created")) metadata.put("created", item.path("created").asLong());
+            if (item.has("owned_by")) metadata.put("owned_by", item.path("owned_by").asText());
+            models.add(new DiscoveredModel(id, id, metadata));
+        }
+        return List.copyOf(models);
     }
 
     @Override
@@ -185,17 +188,13 @@ public final class GrokProvider implements InferenceProvider {
                 case 429 -> "rate_limited";
                 default -> "provider_upstream_error";
             };
-            var detail = new java.util.LinkedHashMap<String, Object>();
+            var detail = new LinkedHashMap<String, Object>();
             detail.put("status", upstream.status());
             if (upstream.status() == 403) {
                 detail.put("attribution", "unknown");
                 detail.put("candidates", List.of("account", "email_domain", "egress_ip"));
             }
-            return new ProviderFailure(
-                type,
-                upstream.getMessage(),
-                retryable,
-                Map.copyOf(detail));
+            return new ProviderFailure(type, upstream.getMessage(), retryable, Map.copyOf(detail));
         }
         return new ProviderFailure(
             "provider_transport_error",
@@ -204,21 +203,27 @@ public final class GrokProvider implements InferenceProvider {
             Map.of());
     }
 
-    private String accessToken(LeasedProviderAccount account) {
-        for (var field : List.of("access_token", "key", "token")) {
-            var value = account.credential().path(field).asText("").trim();
-            if (!value.isBlank()) {
-                return value;
-            }
-        }
-        throw new IllegalStateException("Grok account credential has no access token");
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(MANIFEST.id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
+    }
+
+    private Map<String, Object> runtimeOptions() {
+        return Map.of(
+            "base_url", trimTrailingSlash(properties.getBaseUrl().toString()),
+            "token_auth", properties.getTokenAuth(),
+            "client_version", properties.getClientVersion(),
+            "client_identifier", properties.getClientIdentifier());
+    }
+
+    private String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
     }
 
     private String summarize(int status, String body) {
         var compact = body == null ? "" : body.replaceAll("\\s+", " ").trim();
-        if (compact.length() > 1000) {
-            compact = compact.substring(0, 1000);
-        }
+        if (compact.length() > 1000) compact = compact.substring(0, 1000);
         return compact.isBlank()
             ? "Grok upstream returned HTTP " + status
             : "Grok upstream returned HTTP " + status + ": " + compact;

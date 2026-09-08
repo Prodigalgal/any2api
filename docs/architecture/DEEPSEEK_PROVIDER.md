@@ -1,15 +1,20 @@
 # DeepSeek Provider
 
+> 迁移提示：本文保留 DeepSeek 当前 legacy provider 实现的细节。现行目标以
+> [ADR-0006](../adr/0006-unified-camoufox-inference-runtime.md) 为准：Java 保留语义编排和
+> canonical 解码，Python Camoufox Browser Runtime 承担上游物理请求；迁移完成前不得继续
+> 扩展本文描述的 Java direct/curl-cffi 出站路径。
+
 DeepSeek is a native Any2API provider. It does not proxy an older `*2api` service and it does not
 add provider-specific branches to shared routing, account selection, lifecycle scheduling, or the
 frontend.
 
 ## Runtime ownership
 
-The Java provider package owns authenticated model discovery, OpenAI Chat Completions and Responses
-translation, upstream chat-session creation, `DeepSeekHashV1` proof-of-work, SSE patch decoding,
-error classification, and optional inference-proxy use. Chat and Responses share one canonical
-request mapper and event decoder.
+The Java provider package owns authenticated model discovery policy, OpenAI Chat Completions and
+Responses translation, canonical event decoding, and error classification. The current legacy
+implementation also contains upstream chat-session and `DeepSeekHashV1` request details; those
+physical responsibilities move to the DeepSeek Camoufox Runtime in the next migration slice.
 
 The Python provider package owns email registration, the official hCaptcha browser interaction,
 temporary-mail OTP retrieval, birthday activation, password reauthentication, keepalive, browser
@@ -31,9 +36,10 @@ separately. If all result codes succeed but the response omits the user object, 
 the same browser, mailbox identity, generated password, device ID, and request profile for one
 official login recovery before declaring the account unusable.
 
-Registration traffic follows the provider's `REGISTRATION` proxy binding. Inference and keepalive
-are direct by default and use `INFERENCE` or `LIFECYCLE` proxy bindings only when an operator enables
-those scopes. Mail, Redis, Java callbacks, and captcha inference never inherit the provider proxy.
+Registration traffic follows the provider's `REGISTRATION` proxy binding. Until migration,
+inference and keepalive can use the legacy direct path and scoped proxy bindings. After migration,
+both operations use the account Camoufox Runtime and its scoped proxy lease. Mail, Redis, Java
+callbacks, and captcha inference never inherit the provider proxy.
 
 ## Protocol profile
 

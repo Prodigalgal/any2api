@@ -17,6 +17,7 @@ from patchright.sync_api import sync_playwright
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
 from .glm_challenge import GlmAliyunChallenge
+from .multimodal import text_content
 from .official_browser import (
     SCHEMA_VERSION,
     camoufox_launch_options,
@@ -97,6 +98,18 @@ _READ_RUNTIME_ASSET = r"""markers => {
     .find(value => value && markers.some(marker => value.includes(marker)));
   if (!sourceUrl) throw new Error('GLM official runtime asset was not found');
   return sourceUrl;
+}"""
+
+_MODELS_REQUEST = r"""async input => {
+  const response = await fetch(input.url, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${input.token}`
+    }
+  });
+  return {status: response.status, body: await response.text()};
 }"""
 
 _IMPORT_RUNTIME = r"""async input => {
@@ -244,6 +257,54 @@ class GlmOfficialBrowserTransport:
                         page.close()
                     except Exception:  # noqa: BLE001,S110 - browser teardown continues
                         pass
+                context.close()
+
+    def models(
+        self,
+        credential: dict[str, Any],
+        proxy_url: str,
+        plan: RuntimePlan,
+    ) -> dict[str, Any]:
+        execution = _execution_context(credential)
+        backend = str(
+            execution.get("backend") or credential.get("registration_backend") or "camoufox"
+        )
+        with _launch_browser(backend, execution, proxy_url) as launched:
+            actual_backend, browser, camoufox_config = launched
+            options = context_options(execution, actual_backend)
+            storage_state = _storage_state(execution)
+            if storage_state:
+                options["storage_state"] = storage_state
+            context = browser.new_context(**options)
+            page = None
+            try:
+                token = _required(credential, "token", "access_token", "jwt")
+                _add_credential_cookies(context, credential)
+                page = context.new_page()
+                page.goto(self.base_url, wait_until="domcontentloaded", timeout=90_000)
+                result = page.evaluate(
+                    _MODELS_REQUEST,
+                    {
+                        "url": self.base_url.rstrip("/")
+                        + plan.active.rules.endpoint_paths.get("models", "/api/models"),
+                        "token": token,
+                    },
+                )
+                if not isinstance(result, dict):
+                    raise TypeError("GLM model discovery returned an invalid response")
+                return {
+                    "status": int(result.get("status") or 502),
+                    "body": str(result.get("body") or ""),
+                    "credential_patch": _credential_patch(
+                        context, page, actual_backend, camoufox_config
+                    ),
+                    "transport_mode": "camoufox_browser_runtime",
+                    "runtime_reports": [],
+                    "runtime_revision": plan.active.revision,
+                }
+            finally:
+                if page is not None:
+                    page.close()
                 context.close()
 
 
@@ -602,15 +663,9 @@ def _role(value: Any) -> str:
 
 
 def _content(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if not isinstance(value, list):
+    if value is None:
         return ""
-    return "\n".join(
-        str(part if isinstance(part, str) else part.get("text") or "")
-        for part in value
-        if isinstance(part, (str, dict))
-    )
+    return text_content(value, "GLM")
 
 
 def default_runtime_rule() -> RuntimeRule:

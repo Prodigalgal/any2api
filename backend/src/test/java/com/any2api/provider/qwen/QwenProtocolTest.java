@@ -11,8 +11,8 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.proxy.ProxyPoolService;
-import com.any2api.proxy.ProxyTrafficScope;
-import com.any2api.transport.BrowserTransportClient;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,9 +30,9 @@ class QwenProtocolTest {
     @Test
     void allowsBrowserInitializationAndOneChallengeDuringModelProbes() {
         var provider = new QwenProvider(
-            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
-            new QwenProperties(), mock(QwenRequestMapper.class),
-            mock(QwenTransportRequests.class), mock(QwenMediaUploader.class),
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class), mock(ProxyPoolService.class),
+            new QwenProperties(),
             new ObjectMapper());
 
         assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
@@ -63,9 +63,8 @@ class QwenProtocolTest {
     @Test
     void reusesPersistedProxyAffinityForInferenceBrowserSessions() {
         var mapper = new ObjectMapper();
-        var transport = mock(BrowserTransportClient.class);
+        var transport = mock(OfficialBrowserTransportClient.class);
         var proxyPools = mock(ProxyPoolService.class);
-        var requests = mock(QwenTransportRequests.class);
         var accountId = UUID.randomUUID();
         var proxyPool = Map.<String, Object>of(
             "mode", "NODE_LIST", "nodes", List.of("http://proxy.internal:8080"));
@@ -76,33 +75,25 @@ class QwenProtocolTest {
         var account = new com.any2api.account.LeasedProviderAccount(
             accountId, "qwen", "external", "user@example.com", 1,
             null, payload, Map.of(), null);
-        var response = new QwenRiskHeaderClient.BrowserResponse(
-            200, "application/json", "{\"data\":[]}".getBytes(StandardCharsets.UTF_8),
-            mapper.createObjectNode(), "native_browser_buffered");
-        when(proxyPools.runtimeForProvider("qwen", ProxyTrafficScope.INFERENCE))
+        var response = new OfficialBrowserTransportClient.TransportResponse(
+            200, "{\"data\":[]}", mapper.createObjectNode());
+        when(proxyPools.runtimeForProvider("qwen", com.any2api.proxy.ProxyTrafficScope.INFERENCE))
             .thenReturn(Optional.of(proxyPool));
-        when(transport.open(any(BrowserTransportClient.OpenCommand.class)))
-            .thenReturn(Mono.just(new BrowserTransportClient.Session(
-                "session-id", "user-agent", "chrome146", "binding-id")));
-        when(requests.browserFetch(
-            eq("GET"), eq("/api/v2/models/"), eq(""), any(QwenCredential.class),
-            eq(accountId.toString()), eq("session-id"), eq("/"), eq(120)))
+        when(transport.request(
+            eq("qwen"), eq("models"), any(), any(), eq(proxyPool),
+            eq("persisted-affinity"), any()))
             .thenReturn(Mono.just(response));
-        when(transport.close("session-id")).thenReturn(Mono.just(
-            new BrowserTransportClient.CloseResult(mapper.createObjectNode())));
         var provider = new QwenProvider(
-            transport, proxyPools, new QwenProperties(), mock(QwenRequestMapper.class),
-            requests, mock(QwenMediaUploader.class), mapper);
+            transport, mock(OfficialBrowserSemanticCommandFactory.class), proxyPools,
+            new QwenProperties(), mapper);
 
         StepVerifier.create(provider.discoverModels(account))
             .assertNext(models -> assertThat(models).isEmpty())
             .verifyComplete();
 
-        var command = ArgumentCaptor.forClass(BrowserTransportClient.OpenCommand.class);
-        verify(transport).open(command.capture());
-        assertThat(command.getValue().proxyAffinityKey()).isEqualTo("persisted-affinity");
-        assertThat(command.getValue().strictProxyAffinity()).isTrue();
-        assertThat(command.getValue().proxyPool()).isEqualTo(proxyPool);
+        verify(transport).request(
+            eq("qwen"), eq("models"), any(), any(), eq(proxyPool),
+            eq("persisted-affinity"), any());
     }
 
     @Test
@@ -144,9 +135,9 @@ class QwenProtocolTest {
     @Test
     void excludesUnacceptedMultimodalModelFromRandomRouting() {
         var provider = new QwenProvider(
-            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
-            new QwenProperties(), mock(QwenRequestMapper.class),
-            mock(QwenTransportRequests.class), mock(QwenMediaUploader.class),
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class), mock(ProxyPoolService.class),
+            new QwenProperties(),
             new ObjectMapper());
 
         assertThat(provider.manifest().randomModelPreferences())
@@ -157,9 +148,9 @@ class QwenProtocolTest {
     @Test
     void classifiesAnHtmlChallengeSeparatelyFromCredentialExpiry() {
         var provider = new QwenProvider(
-            mock(BrowserTransportClient.class), mock(ProxyPoolService.class),
-            new QwenProperties(), mock(QwenRequestMapper.class),
-            mock(QwenTransportRequests.class), mock(QwenMediaUploader.class),
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class), mock(ProxyPoolService.class),
+            new QwenProperties(),
             new ObjectMapper());
 
         var failure = provider.classify(new QwenUpstreamException(

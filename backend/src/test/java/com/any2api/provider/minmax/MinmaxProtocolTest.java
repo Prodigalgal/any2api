@@ -7,6 +7,8 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.proxy.ProxyPoolService;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.util.List;
 import java.util.Map;
 import java.net.URI;
@@ -20,9 +22,9 @@ class MinmaxProtocolTest {
     @Test
     void excludesUnacceptedMultimodalModelFromRandomRouting() {
         var provider = new MinmaxProvider(
-            mock(MinmaxTransportClient.class), mock(ProxyPoolService.class),
-            mock(MinmaxRequestMapper.class), mock(MinmaxMediaUploader.class),
-            new ObjectMapper());
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class),
+            mock(ProxyPoolService.class), new ObjectMapper());
 
         assertThat(provider.manifest().randomModelPreferences())
             .containsKey(RandomModelRole.TOP_TEXT)

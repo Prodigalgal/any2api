@@ -5,6 +5,7 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.state.ProviderResponseStateStore;
 import com.any2api.provider.InferenceProvider;
+import com.any2api.provider.DiscoveredModel;
 import com.any2api.provider.ProviderAccountProfile;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
@@ -15,10 +16,14 @@ import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -49,7 +54,8 @@ public final class GrokWebProvider implements InferenceProvider {
             "grok-chat-heavy", "grok-chat-expert", "grok-chat-fast")), true);
     private static final Duration RESPONSE_STATE_TTL = Duration.ofHours(24);
 
-    private final GrokWebProtocolClient protocol;
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final ProviderResponseStateStore responseStates;
     private final ExecutorService databaseExecutor;
@@ -58,7 +64,8 @@ public final class GrokWebProvider implements InferenceProvider {
     private final GrokWebFailureClassifier failures;
 
     public GrokWebProvider(
-        GrokWebProtocolClient protocol,
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         ProviderResponseStateStore responseStates,
         ExecutorService databaseExecutor,
@@ -66,7 +73,8 @@ public final class GrokWebProvider implements InferenceProvider {
         ObjectMapper mapper,
         GrokWebFailureClassifier failures
     ) {
-        this.protocol = protocol;
+        this.transport = transport;
+        this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.responseStates = responseStates;
         this.databaseExecutor = databaseExecutor;
@@ -124,16 +132,63 @@ public final class GrokWebProvider implements InferenceProvider {
         var prepared = requestMapper.prepare(request);
         var decoder = new GrokWebEventDecoder(
             mapper, request.requestId(), previousConversationId, prepared.toolSieve());
-        var body = prepared.body();
-        previous.ifPresent(state -> body.put("responseId",
-            requiredState(state, "upstream_response_id")));
+        var command = semanticCommands.chat(request);
+        command.put("previousConversationId", previousConversationId);
+        previous.ifPresent(state -> command.put(
+            "previousUpstreamResponseId", requiredState(state, "upstream_response_id")));
         var proxyPool = proxyPools.runtimeForProvider(
             manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
-        return protocol.chat(account.credential(), body, previousConversationId, proxyPool,
-                affinity(account.metadata()), context::acceptCredentialPatch)
+        var status = new AtomicInteger(-1);
+        return transport.stream(
+                manifest().id(), "chat", command, account.credential(), proxyPool,
+                affinity(account.metadata()))
+            .handle((frame, sink) -> {
+                var type = frame.path("type").asText("");
+                if ("status".equals(type)) {
+                    status.set(frame.path("status").asInt(502));
+                } else if ("error".equals(type)) {
+                    var code = status.get() < 0 ? 502 : status.get();
+                    sink.error(new GrokWebEventDecoder.GrokWebStreamException(
+                        "runtime_error", failuresMessage(code, frame.path("data").asText(""))));
+                } else if ("data".equals(type) && status.get() < 400) {
+                    sink.next(frame.path("data").asText("").getBytes(StandardCharsets.UTF_8));
+                } else if ("credential_patch".equals(type)) {
+                    context.acceptCredentialPatch(frame.path("data"));
+                }
+            })
+            .cast(byte[].class)
             .concatMapIterable(decoder::decode)
-            .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())))
+            .concatWith(Flux.defer(() -> status.get() >= 400
+                ? Flux.error(new GrokWebEventDecoder.GrokWebStreamException(
+                    "http_" + status.get(), "Grok Web upstream returned HTTP " + status.get()))
+                : Flux.fromIterable(decoder.finish())))
             .concatWith(Flux.defer(() -> saveResponseState(decoder, account)));
+    }
+
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
+        return transport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), affinity(account.metadata()))
+            .flatMap(response -> {
+                if (response.status() < 200 || response.status() >= 300) {
+                    return Mono.error(new GrokWebEventDecoder.GrokWebStreamException(
+                        "http_" + response.status(),
+                        "Grok Web model discovery returned HTTP " + response.status()));
+                }
+                try {
+                    var root = mapper.readTree(response.body());
+                    var models = new java.util.ArrayList<DiscoveredModel>();
+                    for (var item : root.path("data")) {
+                        var id = item.path("id").asText("").trim();
+                        if (!id.isBlank()) models.add(new DiscoveredModel(id, id, Map.of()));
+                    }
+                    return Mono.just(List.copyOf(models));
+                } catch (RuntimeException error) {
+                    return Mono.error(new GrokWebEventDecoder.GrokWebStreamException(
+                        "invalid_model_catalog", "Grok Web model catalog is invalid"));
+                }
+            });
     }
 
     @Override
@@ -151,6 +206,11 @@ public final class GrokWebProvider implements InferenceProvider {
 
     private String affinity(Map<String, Object> metadata) {
         return String.valueOf(metadata.getOrDefault("identity_group_id", "")).trim();
+    }
+
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(manifest().id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
     }
 
     private java.util.Optional<String> previousResponseId(CanonicalRequest request) {
@@ -183,6 +243,12 @@ public final class GrokWebProvider implements InferenceProvider {
                 .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
                 .thenMany(Flux.<CanonicalEvent>empty()))
             .orElseGet(Flux::empty);
+    }
+
+    private String failuresMessage(int status, String body) {
+        var value = body == null ? "" : body.replaceAll("\\s+", " ").trim();
+        if (value.length() > 1000) value = value.substring(0, 1000);
+        return value.isBlank() ? "Grok Web upstream returned HTTP " + status : value;
     }
 
 }

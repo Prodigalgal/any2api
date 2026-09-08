@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import concurrent.futures
 import hashlib
 import json
 import re
@@ -14,8 +13,6 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse
-
-import httpx
 
 from ..config import settings as core_settings
 from ..lifecycle.account import (
@@ -39,6 +36,9 @@ from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from .base import AutomationProvider, AutomationProviderManifest
 from .minmax_browser import MinmaxOfficialBrowserTransport
 from .minmax_settings import settings
+from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
+from .runtime_rules import RuntimePlan, parse_runtime_plan
+from .transport_support import transport_frame
 
 
 class MinmaxAutomationProvider(AutomationProvider):
@@ -50,6 +50,7 @@ class MinmaxAutomationProvider(AutomationProvider):
         challenge_types=("slider",),
         operations=("register", "reauthenticate", "keepalive"),
         inference_transport=True,
+        inference_runtime="camoufox_browser_runtime",
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -123,46 +124,327 @@ class MinmaxAutomationProvider(AutomationProvider):
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
-        return await asyncio.to_thread(_keepalive_sync, current, payload)
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        async with _transport_proxy_lease(payload) as proxy_url:
+            result = await official_browser_transport.request(
+                current,
+                "GET",
+                _runtime_path(plan, "models", "/archon/api/v1/config"),
+                "",
+                proxy_url,
+            )
+        status = int(result.get("status") or 502)
+        body = str(result.get("body") or "")
+        healthy = 200 <= status < 300 and _minmax_catalog_available(body)
+        response: dict[str, Any] = {
+            "healthy": healthy,
+            "auth_expired": status in {401, 403},
+            "ready_for_inference": False,
+            "inference_probe_required": 200 <= status < 300,
+        }
+        if status not in {401, 403} and not healthy:
+            response["error_class"] = "minmax_model_catalog_unavailable"
+        patch = result.get("credential_patch")
+        if isinstance(patch, dict) and patch:
+            response["credential_patch"] = patch
+        return response
 
     async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        method, path, body = _transport_input(payload, stream=False)
         current = credential(payload)
+        operation = str(payload.get("operation") or "")
+        if operation and operation not in {"models", "agents", "files_policy", "files_callback"}:
+            raise ValueError("MinMax transport operation is not allowlisted")
+        plan_value = payload.get("runtime_plan")
+        plan = parse_runtime_plan(plan_value, self.manifest.id) if isinstance(plan_value, dict) else None
+        if operation:
+            method, path, body = _semantic_request_input(payload, plan)
+        else:
+            method, path, body = _transport_input(payload, stream=False)
         async with _transport_proxy_lease(payload) as proxy_url:
             return await official_browser_transport.request(current, method, path, body, proxy_url)
 
     async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
-        method, path, body = _transport_input(payload, stream=True)
         current = credential(payload)
+        operation = str(payload.get("operation") or "")
+        if operation and operation != "chat":
+            raise ValueError("MinMax transport operation is not allowlisted")
+        plan_value = payload.get("runtime_plan")
+        plan = parse_runtime_plan(plan_value, self.manifest.id) if isinstance(plan_value, dict) else None
         async with _transport_proxy_lease(payload) as proxy_url:
+            if operation:
+                command = payload.get("semantic_command")
+                if not isinstance(command, dict):
+                    raise TypeError("MinMax semantic command must be an object")
+                method, path, body = await _semantic_chat_input(
+                    current, command, plan or _default_runtime_plan(), proxy_url
+                )
+            else:
+                method, path, body = _transport_input(payload, stream=True)
             async for event in official_browser_transport.stream(
                 current, method, path, body, proxy_url
             ):
                 event_type = str(event.get("type") or "error")
                 details = {key: value for key, value in event.items() if key != "type"}
-                yield _transport_frame(event_type, **details)
+                yield transport_frame(event_type, **details)
 
     async def close(self) -> None:
         await official_browser_transport.close()
 
 
-def _keepalive_sync(current: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    config = settings()
-    with proxy_lease(
-        check_url=config.minmax_base_url,
-        reject_redirect_hosts=("minimaxi.com",),
-        **_optional_proxy_parameters(payload),
-    ) as proxy_url:
-        token = required(current, "token", "access_token")
-        url, headers = _signed_get("/archon/api/v1/config", current, proxy_url)
-        with httpx.Client(proxy=proxy_url or None, timeout=60) as client:
-            response = client.get(url, headers=headers)
-        if response.status_code in {401, 403}:
-            return {"healthy": False, "auth_expired": True}
-        response.raise_for_status()
-        body = response.json()
-        healthy = body.get("statusInfo", {}).get("code", 0) == 0
-        return {"healthy": healthy, "auth_expired": not healthy, "token_present": bool(token)}
+def _runtime_path(plan: RuntimePlan, key: str, fallback: str) -> str:
+    return str(plan.active.rules.endpoint_paths.get(key) or fallback)
+
+
+def _default_runtime_plan() -> RuntimePlan:
+    from .runtime_rules import RuntimeRule, RuntimeRuleSelection
+
+    rule = RuntimeRule(
+        schema_version=1,
+        session_max_age_seconds=900,
+        canary_timeout_seconds=60,
+        build_asset_markers=("agent.minimax.io",),
+        discovery_markers={"requestModule": ("x-signature", "hasSearchParamsPath")},
+        capabilities={},
+        endpoint_paths={
+            "models": "/archon/api/v1/config",
+            "agents": "/archon/api/v1/agent?limit=20",
+            "filesPolicy": "/v1/api/files/request_policy",
+            "filesCallback": "/v1/api/files/policy_callback",
+        },
+    )
+    return RuntimePlan(RuntimeRuleSelection("minmax", 1, rule), None, "", "")
+
+
+def _semantic_request_input(
+    payload: dict[str, Any], plan: RuntimePlan | None
+) -> tuple[str, str, str]:
+    selected = plan or _default_runtime_plan()
+    operation = str(payload.get("operation") or "")
+    paths = {
+        "models": ("GET", _runtime_path(selected, "models", "/archon/api/v1/config"), ""),
+        "agents": ("GET", _runtime_path(selected, "agents", "/archon/api/v1/agent?limit=20"), ""),
+        "files_policy": (
+            "GET",
+            _runtime_path(selected, "filesPolicy", "/v1/api/files/request_policy"),
+            "",
+        ),
+    }
+    if operation in paths:
+        return paths[operation]
+    if operation == "files_callback":
+        command = payload.get("semantic_command")
+        if not isinstance(command, dict):
+            raise TypeError("MinMax files callback command must be an object")
+        body = command.get("body")
+        if not isinstance(body, str):
+            raise TypeError("MinMax files callback body must be a string")
+        return (
+            "POST",
+            _runtime_path(selected, "filesCallback", "/v1/api/files/policy_callback"),
+            body,
+        )
+    raise ValueError("MinMax transport operation is not allowlisted")
+
+
+async def _semantic_chat_input(
+    current: dict[str, Any],
+    command: dict[str, Any],
+    plan: RuntimePlan,
+    proxy_url: str,
+) -> tuple[str, str, str]:
+    prepared = build_minmax_request(command)
+    if prepared["attachments"]:
+        prepared = {
+            **prepared,
+            "attachments": await official_browser_transport.upload_media(
+                current,
+                prepared["attachments"],
+                plan,
+                proxy_url,
+                settings().minmax_max_upload_bytes,
+            ),
+        }
+    agent_id = prepared["agent_id"]
+    if not agent_id:
+        agents = await official_browser_transport.request(
+            current,
+            "GET",
+            _runtime_path(plan, "agents", "/archon/api/v1/agent?limit=20"),
+            "",
+            proxy_url,
+        )
+        agent_id = _select_agent(agents, prepared["agent_role"])
+    session = await official_browser_transport.request(
+        current,
+        "POST",
+        f"/archon/api/v1/agent/{agent_id}/session",
+        json.dumps({"model": prepared["session_model"]}, separators=(",", ":")),
+        proxy_url,
+    )
+    session_id = _session_id(session)
+    return (
+        "POST",
+        f"/archon/api/v1/session/{session_id}/message",
+        json.dumps(
+            {
+                "content": prepared["content"],
+                "model": prepared["model"],
+                "turn_id": str(uuid.uuid4()),
+                "enable_team": prepared["enable_team"],
+                "worktreeMode": prepared["worktree_mode"],
+                "attachments": prepared["attachments"],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    )
+
+
+def build_minmax_request(command: dict[str, Any]) -> dict[str, Any]:
+    _validate_semantic_command(command)
+    options = command["providerOptions"]
+    raw = command.get("rawRequest") if isinstance(command.get("rawRequest"), dict) else {}
+    model_id = str(command["model"]).strip()
+    variant = str(options.get("variant") or "").strip()
+    if not variant:
+        effort = str(command.get("reasoning", {}).get("effort") or "").lower()
+        variant = "thinking" if effort not in {"", "none", "minimal"} else ""
+    model = {"provider_id": "minimax", "model_id": model_id}
+    if variant:
+        model["variant"] = variant
+    agent_id = str(options.get("agent_id") or raw.get("agent_id") or "").strip()
+    role = str(options.get("agent_role") or "mavis").strip() or "mavis"
+    return {
+        "content": _minmax_prompt(command.get("messages")),
+        "model": model,
+        "session_model": "minimax/" + model_id,
+        "agent_id": agent_id,
+        "agent_role": role,
+        "enable_team": _boolean_option(options.get("enable_team"), True),
+        "worktree_mode": _boolean_option(options.get("worktree_mode"), False),
+        "attachments": _minmax_attachments(command.get("messages")),
+    }
+
+
+def _validate_semantic_command(command: dict[str, Any]) -> None:
+    if command.get("schemaVersion") != 1 or not str(command.get("model") or "").strip():
+        raise ValueError("MinMax semantic command schema is unsupported")
+    if not isinstance(command.get("messages"), list):
+        raise TypeError("MinMax semantic command messages must be an array")
+    for field in ("reasoning", "providerOptions", "controls"):
+        if not isinstance(command.get(field), dict):
+            raise TypeError(f"MinMax semantic command {field} must be an object")
+    if command.get("tools"):
+        raise ValueError("MinMax does not support tools")
+
+
+def _minmax_prompt(messages: Any) -> str:
+    if not isinstance(messages, list):
+        raise TypeError("MinMax messages must be an array")
+    media_blocks = list(iter_media_blocks(messages, "MinMax"))
+    unsupported_media = sorted({kind for _, kind, _ in media_blocks if kind != "image"})
+    if unsupported_media:
+        raise ValueError(
+            "MinMax browser upload does not support media types: "
+            + ", ".join(unsupported_media)
+        )
+    blocks: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user").upper()
+        content = _message_text(message.get("content"))
+        if role == "ASSISTANT" and isinstance(message.get("tool_calls"), list):
+            content += "\n" + json.dumps(message["tool_calls"], ensure_ascii=False)
+        if role == "TOOL":
+            role = "TOOL " + str(message.get("tool_call_id") or "")
+        if content.strip():
+            blocks.append(f"[{role}]\n{content}")
+    if not blocks:
+        raise ValueError("MinMax prompt is empty")
+    return "\n\n".join(blocks)
+
+
+def _message_text(value: Any) -> str:
+    return text_content(value, "MinMax", allow_media=True)
+
+
+def _minmax_attachments(messages: Any) -> list[dict[str, Any]]:
+    media_blocks = list(iter_media_blocks(messages, "MinMax"))
+    attachments: list[dict[str, Any]] = []
+    for _, kind, part in media_blocks:
+        if kind != "image":
+            raise ValueError(f"MinMax browser upload does not support {kind} input")
+        source = media_source(part)
+        mime, content = decode_inline_data_url(
+            source,
+            "MinMax image",
+            max_bytes=settings().minmax_max_upload_bytes,
+            expected_prefix="image/",
+        )
+        filename = str(part.get("filename") or "").strip()
+        filename = filename.replace("\\", "/").rsplit("/", 1)[-1][:255]
+        if not filename:
+            extension = {
+                "jpeg": "jpg",
+                "jpg": "jpg",
+                "png": "png",
+                "webp": "webp",
+                "gif": "gif",
+                "avif": "avif",
+            }.get(mime.removeprefix("image/"), "bin")
+            filename = f"upload-{uuid.uuid4().hex}.{extension}"
+        attachments.append({
+            "type": "image",
+            "file_name": filename,
+            "mime_type": mime,
+            "file_md5": hashlib.md5(content).hexdigest(),
+            "data_url": source,
+        })
+    return attachments
+
+
+def _boolean_option(value: Any, fallback: bool) -> bool:
+    return value if isinstance(value, bool) else fallback
+
+
+def _select_agent(response: dict[str, Any], role: str) -> str:
+    try:
+        body = json.loads(str(response.get("body") or ""))
+    except json.JSONDecodeError as error:
+        raise RuntimeError("MinMax agent list returned invalid JSON") from error
+    for agent in body.get("agents", []) if isinstance(body, dict) else []:
+        if isinstance(agent, dict) and str(agent.get("agent_role") or "").lower() == role.lower():
+            value = str(agent.get("name") or "").strip()
+            if value:
+                return value
+    raise RuntimeError(f"MinMax agent list has no role {role}")
+
+
+def _session_id(response: dict[str, Any]) -> str:
+    status = int(response.get("status") or 502)
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"MinMax session creation returned HTTP {status}")
+    try:
+        body = json.loads(str(response.get("body") or ""))
+    except json.JSONDecodeError as error:
+        raise RuntimeError("MinMax session creation returned invalid JSON") from error
+    value = str(body.get("session_id") or "") if isinstance(body, dict) else ""
+    if not value:
+        raise RuntimeError("MinMax session creation returned no session_id")
+    return value
+
+
+def _minmax_catalog_available(body: str) -> bool:
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(value, dict) and (
+        isinstance(value.get("models"), list)
+        or isinstance(value.get("data"), (dict, list))
+        or isinstance(value.get("statusInfo"), dict)
+    )
 
 
 def _account_browser_flow(page, context, backend, mail, mailbox, password) -> BrowserResult:
@@ -603,6 +885,7 @@ def _official_profile(
     proxy_url: str, current: dict[str, Any] | None = None
 ) -> tuple[str, str, str]:
     global _profile_cache
+    del proxy_url
     config = settings()
     configured = (
         config.minmax_signature_salt,
@@ -613,45 +896,9 @@ def _official_profile(
         return configured
     if _profile_cache and time.monotonic() - _profile_cache[0] < 21_600:
         return _profile_cache[1]
-    allowed = {
-        urlparse(config.minmax_base_url).hostname,
-        *(host.strip().lower() for host in config.minmax_profile_asset_hosts.split(",")),
-    }
-    try:
-        with httpx.Client(proxy=proxy_url or None, timeout=35, follow_redirects=True) as client:
-            page = client.get(
-                config.minmax_base_url,
-                headers={"user-agent": core_settings().provider_user_agent},
-            )
-            page.raise_for_status()
-        scripts = _script_urls(str(page.url), page.text, allowed)
-
-        def fetch(url: str) -> httpx.Response | Exception:
-            try:
-                with httpx.Client(
-                    proxy=proxy_url or None, timeout=25, follow_redirects=True
-                ) as client:
-                    return client.get(
-                        url,
-                        headers={"user-agent": core_settings().provider_user_agent},
-                    )
-            except httpx.HTTPError as error:
-                return error
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            responses = list(executor.map(fetch, scripts))
-    except httpx.HTTPError:
-        responses = []
     signature = config.minmax_signature_salt
     yy_salt = config.minmax_yy_salt
     version = config.minmax_version_code
-    for response in responses:
-        if not isinstance(response, httpx.Response) or not response.is_success:
-            continue
-        signature = signature or _signature_salt(response.text)
-        yy_salt = yy_salt or _yy_salt(response.text)
-        match = re.search(r'version_code\s*:\s*["\']([0-9]{3,12})["\']', response.text)
-        version = version or (match.group(1) if match else "")
     if not signature or not yy_salt or not version:
         fallback = (current or {}).get("request_profile")
         if isinstance(fallback, dict):
@@ -659,7 +906,9 @@ def _official_profile(
             yy_salt = yy_salt or str(fallback.get("yy_salt") or "")
             version = version or str(fallback.get("version_code") or "")
     if not signature or not yy_salt or not version:
-        raise RuntimeError("official MinMax frontend exposed an incomplete request profile")
+        raise RuntimeError(
+            "MinMax request profile is unavailable; use the Camoufox page bridge to refresh it"
+        )
     _profile_cache = (time.monotonic(), (signature, yy_salt, version))
     return _profile_cache[1]
 
@@ -698,6 +947,22 @@ def _valid_literal(value: str, minimum: int, maximum: int) -> bool:
     )
 
 
+def _script_urls(base_url: str, html: str, allowed: set[str | None]) -> list[str]:
+    scripts = [
+        urljoin(base_url, source)
+        for source in re.findall(
+            r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',
+            html,
+            re.IGNORECASE,
+        )
+    ]
+    return [
+        url
+        for url in scripts[:40]
+        if urlparse(url).scheme == "https" and urlparse(url).hostname in allowed
+    ]
+
+
 def _profile_from_browser(context, page) -> dict[str, str]:
     config = settings()
     allowed = {
@@ -723,22 +988,6 @@ def _profile_from_browser(context, page) -> dict[str, str]:
         if signature and yy_salt and version:
             return {"signature_salt": signature, "yy_salt": yy_salt, "version_code": version}
     return {}
-
-
-def _script_urls(base_url: str, html: str, allowed: set[str | None]) -> list[str]:
-    scripts = [
-        urljoin(base_url, source)
-        for source in re.findall(
-            r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',
-            html,
-            re.IGNORECASE,
-        )
-    ]
-    return [
-        url
-        for url in scripts[:40]
-        if urlparse(url).scheme == "https" and urlparse(url).hostname in allowed
-    ]
 
 
 official_browser_transport = MinmaxOfficialBrowserTransport(settings().minmax_base_url)

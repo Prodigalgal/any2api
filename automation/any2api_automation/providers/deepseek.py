@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -35,8 +36,11 @@ from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_paramete
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import correlation_id
 from .base import AutomationProvider, AutomationProviderManifest
+from .deepseek_browser import DeepseekOfficialBrowserTransport
 from .deepseek_challenge import DeepseekHcaptchaChallenge
 from .deepseek_settings import settings
+from .runtime_rules import parse_runtime_plan
+from .transport_support import transport_frame, transport_proxy_lease
 
 logger = logging.getLogger("any2api_automation.providers.deepseek")
 
@@ -58,8 +62,21 @@ class DeepseekAutomationProvider(AutomationProvider):
         ),
         operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
+        inference_transport=True,
+        inference_runtime="camoufox_browser_runtime",
         registration_attempt_mode="single_identity",
     )
+
+    def __init__(self) -> None:
+        self._transports: dict[str, DeepseekOfficialBrowserTransport] = {}
+
+    def _transport(self, payload: dict[str, Any]) -> DeepseekOfficialBrowserTransport:
+        base_url = _runtime_base_url(payload)
+        transport = self._transports.get(base_url)
+        if transport is None:
+            transport = DeepseekOfficialBrowserTransport(base_url)
+            self._transports[base_url] = transport
+        return transport
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace = RegistrationTrace(self.manifest.id)
@@ -120,7 +137,140 @@ class DeepseekAutomationProvider(AutomationProvider):
         }
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
+        current = credential(payload)
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        transport = self._transport(payload)
+        base_url = _runtime_base_url(payload)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            result = await transport.models(
+                current,
+                proxy_url,
+                plan,
+                runtime_options=_runtime_options(payload),
+            )
+        status = int(result.get("status") or 502)
+        patch = result.get("credential_patch")
+        if status in {401, 403}:
+            response: dict[str, Any] = {
+                "healthy": False,
+                "auth_expired": True,
+                "ready_for_inference": False,
+                "error_class": "deepseek_credentials_rejected",
+            }
+        else:
+            body = _decode_json_body(str(result.get("body") or ""))
+            healthy = _catalog_available(body)
+            response = {
+                "healthy": healthy,
+                "auth_expired": False,
+                "ready_for_inference": healthy,
+                "error_class": "" if healthy else "deepseek_profile_unavailable",
+            }
+        if isinstance(patch, dict) and patch:
+            response["credential_patch"] = patch
+        reports = result.get("runtime_reports")
+        if isinstance(reports, list) and reports:
+            response["runtime_reports"] = reports
+        return response
+
+    async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if str(payload.get("operation") or "") != "models":
+            raise ValueError("DeepSeek transport operation is not allowlisted")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        base_url = _runtime_base_url(payload)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            return await self._transport(payload).models(
+                current,
+                proxy_url,
+                plan,
+                runtime_options=_runtime_options(payload),
+            )
+
+    async def transport_stream(self, payload: dict[str, Any]):
+        if str(payload.get("operation") or "") != "chat":
+            raise ValueError("DeepSeek transport operation is not allowlisted")
+        command = payload.get("semantic_command")
+        if not isinstance(command, dict):
+            raise TypeError("DeepSeek semantic command must be an object")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        base_url = _runtime_base_url(payload)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            try:
+                async for event in self._transport(payload).chat_stream(
+                    current,
+                    command,
+                    proxy_url,
+                    plan,
+                    runtime_options=_runtime_options(payload),
+                ):
+                    event_type = str(event.get("type") or "error")
+                    yield transport_frame(
+                        event_type,
+                        **{key: value for key, value in event.items() if key != "type"},
+                    )
+            except Exception as error:  # noqa: BLE001 - normalized stream boundary
+                yield transport_frame(
+                    "error", data=f"official browser stream failed ({type(error).__name__})"
+                )
+
+    async def close(self) -> None:
+        transports = tuple(self._transports.values())
+        self._transports.clear()
+        for transport in transports:
+            await transport.close()
+
+
+def _runtime_base_url(payload: dict[str, Any]) -> str:
+    options = payload.get("runtime_options")
+    value = str(options.get("base_url") or "") if isinstance(options, dict) else ""
+    value = (value or settings().deepseek_base_url).rstrip("/")
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().lstrip(".")
+    if parsed.scheme != "https" or not (host == "deepseek.com" or host.endswith(".deepseek.com")):
+        raise ValueError("DeepSeek runtime base URL is not allowlisted")
+    return value
+
+
+def _runtime_options(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("runtime_options")
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value[key]
+        for key in (
+            "bundle_id",
+            "platform",
+            "client_version",
+            "locale",
+            "timezone_offset",
+        )
+        if value.get(key) is not None
+    }
+
+
+def _decode_json_body(body: str) -> dict[str, Any]:
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("DeepSeek upstream returned invalid JSON") from error
+    if not isinstance(value, dict):
+        raise TypeError("DeepSeek upstream returned an invalid envelope")
+    return value
+
+
+def _catalog_available(body: dict[str, Any]) -> bool:
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return False
+    if int(body.get("code") or 0) != 0 or int(data.get("biz_code") or 0) != 0:
+        return False
+    settings_value = data.get("biz_data")
+    if not isinstance(settings_value, dict):
+        return False
+    models = settings_value.get("settings", {}).get("model_configs")
+    return isinstance(models, dict)
 
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile(
@@ -443,38 +593,6 @@ def _reauthenticate_browser(page: Any, current: dict[str, Any]) -> BrowserResult
         metadata={"reauthentication_transport": "browser"},
         ready_for_inference=False,
     )
-
-
-def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    token = required(current, "token", "access_token")
-    device_id = required(current, "device_id")
-    with _session(payload, current) as client:
-        response = client.get(
-            f"{settings().deepseek_base_url.rstrip('/')}/api/v0/client/settings",
-            headers=_headers(current, with_token=True, token=token),
-            params={"did": device_id, "scope": "model"},
-            timeout=60,
-        )
-    if response.status_code in {401, 403}:
-        return {"healthy": False, "auth_expired": True, "ready_for_inference": False}
-    response.raise_for_status()
-    body = response.json()
-    healthy = (
-        int(body.get("code") or 0) == 0
-        and int((body.get("data") or {}).get("biz_code") or 0) == 0
-        and isinstance(
-            (((body.get("data") or {}).get("biz_data") or {}).get("settings") or {}).get(
-                "model_configs"
-            ),
-            dict,
-        )
-    )
-    return {
-        "healthy": healthy,
-        "auth_expired": False,
-        "ready_for_inference": healthy,
-        "error_class": "" if healthy else "deepseek_profile_unavailable",
-    }
 
 
 class _SessionLease:

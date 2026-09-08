@@ -1,14 +1,12 @@
 import asyncio
 import hashlib
+import json
 import re
 import time
 from dataclasses import replace
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
-import httpx
-
-from ..config import settings as core_settings
 from ..lifecycle.account import (
     credential,
     flow_max_attempts,
@@ -25,11 +23,13 @@ from ..lifecycle.browser import (
     run_browser_flow,
 )
 from ..lifecycle.mail import Mailbox
-from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
+from .longcat_browser import LongcatOfficialBrowserTransport
 from .longcat_challenge import solve_yoda_if_present, yoda_visible
 from .longcat_settings import settings
+from .runtime_rules import parse_runtime_plan
+from .transport_support import transport_frame, transport_proxy_lease
 
 
 class LongcatAutomationProvider(AutomationProvider):
@@ -40,7 +40,21 @@ class LongcatAutomationProvider(AutomationProvider):
         isolation="process",
         challenge_types=("slider", "tap", "dots"),
         operations=("register", "reauthenticate", "keepalive"),
+        realtime=True,
+        inference_transport=True,
+        inference_runtime="camoufox_browser_runtime",
     )
+
+    def __init__(self) -> None:
+        self._transports: dict[str, LongcatOfficialBrowserTransport] = {}
+
+    def _transport(self, payload: dict[str, Any]) -> LongcatOfficialBrowserTransport:
+        base_url = _runtime_base_url(payload)
+        transport = self._transports.get(base_url)
+        if transport is None:
+            transport = LongcatOfficialBrowserTransport(base_url)
+            self._transports[base_url] = transport
+        return transport
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_failure: RuntimeError | None = None
@@ -121,9 +135,6 @@ class LongcatAutomationProvider(AutomationProvider):
         )
         return {"healthy": True, "credential_patch": result.credential}
 
-    async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(_keepalive_sync, payload, credential(payload))
-
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile(
             locale="en-US",
@@ -159,58 +170,136 @@ class LongcatAutomationProvider(AutomationProvider):
             launch_timeout_ms=120_000,
         )
 
+    async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        current = credential(payload)
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        base_url = _runtime_base_url(payload)
+        agent_id = str(payload.get("agent_id") or settings().longcat_keepalive_agent_id)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            result = await self._transport(payload).session_request(
+                current,
+                proxy_url,
+                plan,
+                agent_id,
+                runtime_options=_runtime_options(payload),
+            )
+        status = int(result.get("status") or 502)
+        if status in {401, 403}:
+            return {
+                "healthy": False,
+                "auth_expired": True,
+                "ready_for_inference": False,
+                "error_class": "longcat_credentials_rejected",
+            }
+        try:
+            _conversation_id(result)
+        except Exception as error:  # noqa: BLE001 - normalize probe failure
+            return {
+                "healthy": False,
+                "auth_expired": False,
+                "ready_for_inference": False,
+                "error_class": type(error).__name__,
+            }
+        response: dict[str, Any] = {
+            "healthy": True,
+            "auth_expired": False,
+            "ready_for_inference": True,
+        }
+        patch = result.get("credential_patch")
+        if isinstance(patch, dict) and patch:
+            response["credential_patch"] = patch
+        reports = result.get("runtime_reports")
+        if isinstance(reports, list) and reports:
+            response["runtime_reports"] = reports
+        return response
 
-def _keepalive_sync(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    config = settings()
-    cookie = _cookie(current)
-    base_url = str(payload.get("base_url") or config.longcat_base_url).rstrip("/")
-    with (
-        proxy_lease(check_url=base_url, **proxy_parameters(payload)) as proxy_url,
-        httpx.Client(timeout=60, proxy=proxy_url or None) as client,
-    ):
-        response = client.post(
-            f"{base_url}/api/v1/session-create",
-            headers={
-                "Accept": "application/json",
-                "Cookie": cookie,
-                "Origin": base_url,
-                "Referer": f"{base_url}/t",
-                "m-appkey": config.longcat_app_key,
-                "x-client-language": config.longcat_language,
-                "x-requested-with": config.longcat_requested_with,
-                "User-Agent": core_settings().provider_user_agent,
-            },
-            json={
-                "model": "",
-                "agentId": str(payload.get("agent_id") or config.longcat_keepalive_agent_id),
-            },
-        )
-    if response.status_code in {401, 403}:
-        return {"healthy": False, "auth_expired": True}
-    response.raise_for_status()
-    body = response.json()
-    healthy = body.get("code") == 0 and bool((body.get("data") or {}).get("conversationId"))
-    return {"healthy": healthy, "auth_expired": not healthy}
+    async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if str(payload.get("operation") or "") != "session":
+            raise ValueError("LongCat transport operation is not allowlisted")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        base_url = _runtime_base_url(payload)
+        agent_id = str(payload.get("agent_id") or settings().longcat_keepalive_agent_id)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            return await self._transport(payload).session_request(
+                current,
+                proxy_url,
+                plan,
+                agent_id,
+                runtime_options=_runtime_options(payload),
+            )
+
+    async def transport_stream(self, payload: dict[str, Any]):
+        if str(payload.get("operation") or "") != "chat":
+            raise ValueError("LongCat transport operation is not allowlisted")
+        command = payload.get("semantic_command")
+        if not isinstance(command, dict):
+            raise TypeError("LongCat semantic command must be an object")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
+        current = credential(payload)
+        base_url = _runtime_base_url(payload)
+        async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
+            try:
+                async for event in self._transport(payload).chat_stream(
+                    current,
+                    command,
+                    proxy_url,
+                    plan,
+                    runtime_options=_runtime_options(payload),
+                ):
+                    event_type = str(event.get("type") or "error")
+                    yield transport_frame(
+                        event_type,
+                        **{key: value for key, value in event.items() if key != "type"},
+                    )
+            except Exception as error:  # noqa: BLE001 - normalized stream boundary
+                yield transport_frame(
+                    "error", data=f"official browser stream failed ({type(error).__name__})"
+                )
+
+    async def close(self) -> None:
+        transports = tuple(self._transports.values())
+        self._transports.clear()
+        for transport in transports:
+            await transport.close()
 
 
-def _cookie(credential: dict[str, Any]) -> str:
-    raw = str(credential.get("cookie") or "").strip()
-    if raw:
-        return raw
-    aliases = (
-        ("passport_token_key", "passport_token"),
-        ("_lxsdk_cuid", "lxsdk_cuid"),
-        ("_lxsdk_s", "lxsdk_s"),
-    )
-    values: list[str] = []
-    for cookie_name, alias in aliases:
-        value = str(credential.get(cookie_name) or credential.get(alias) or "").strip()
-        if value:
-            values.append(f"{cookie_name}={value}")
-    if not any(value.startswith("passport_token_key=") for value in values):
-        raise ValueError("credential requires passport_token_key")
-    return "; ".join(values)
+def _runtime_base_url(payload: dict[str, Any]) -> str:
+    options = payload.get("runtime_options")
+    value = str(options.get("base_url") or "") if isinstance(options, dict) else ""
+    value = (value or settings().longcat_base_url).rstrip("/")
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().lstrip(".")
+    if parsed.scheme != "https" or not (host == "longcat.chat" or host.endswith(".longcat.chat")):
+        raise ValueError("LongCat runtime base URL is not allowlisted")
+    return value
 
+
+def _runtime_options(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("runtime_options")
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value[key]
+        for key in ("app_key", "language", "requested_with", "trace_id")
+        if value.get(key) is not None
+    }
+
+
+def _conversation_id(result: dict[str, Any]) -> str:
+    status = int(result.get("status") or 502)
+    if status >= 400:
+        raise RuntimeError(f"LongCat session-create returned HTTP {status}")
+    try:
+        body = json.loads(str(result.get("body") or ""))
+    except json.JSONDecodeError as error:
+        raise RuntimeError("LongCat session-create returned invalid JSON") from error
+    if not isinstance(body, dict) or int(body.get("code") or -1) != 0:
+        raise RuntimeError("LongCat session-create was rejected")
+    value = str((body.get("data") or {}).get("conversationId") or "").strip()
+    if not value:
+        raise RuntimeError("LongCat session-create returned no conversationId")
+    return value
 
 def _email_browser_flow(
     page, context, backend, mail, mailbox, password, trace: RegistrationTrace

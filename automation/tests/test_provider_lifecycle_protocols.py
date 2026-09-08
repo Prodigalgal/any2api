@@ -1,5 +1,6 @@
 import base64
 from contextlib import contextmanager
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -272,8 +273,12 @@ async def test_mimo_reauthentication_falls_back_when_exchanged_token_is_rejected
     )
     monkeypatch.setattr(
         mimo,
-        "_keepalive_sync",
-        lambda _payload, current: {"healthy": current.get("service_token") == "password-valid"},
+        "_browser_keepalive",
+        AsyncMock(
+            side_effect=lambda _payload, current: {
+                "healthy": current.get("service_token") == "password-valid"
+            }
+        ),
     )
 
     result = await mimo.MimoAutomationProvider().reauthenticate(
@@ -320,8 +325,12 @@ async def test_mimo_reauthentication_skips_pass_token_after_inference_rejection(
     )
     monkeypatch.setattr(
         mimo,
-        "_keepalive_sync",
-        lambda _payload, current: {"healthy": current.get("service_token") == "password-valid"},
+        "_browser_keepalive",
+        AsyncMock(
+            side_effect=lambda _payload, current: {
+                "healthy": current.get("service_token") == "password-valid"
+            }
+        ),
     )
 
     result = await mimo.MimoAutomationProvider().reauthenticate(
@@ -729,67 +738,6 @@ def test_grok_saved_sso_supports_legacy_credential_shapes() -> None:
     assert _saved_sso({"sso_cookie": "sso=direct"}) == "direct"
     assert _saved_sso({"cookies": {"sso-rw": "nested"}}) == "nested"
     assert _saved_sso({"cookie": "other=1; sso-rw=header; tail=2"}) == "header"
-
-
-def test_grok_keepalive_uses_a_completed_responses_probe() -> None:
-    from any2api_automation.providers.grok import _probe_grok_inference
-
-    class Response:
-        status_code = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args) -> None:
-            return None
-
-        def raise_for_status(self) -> None:
-            return None
-
-        def iter_lines(self):
-            return iter(
-                ('data: {"type":"response.created"}', 'data: {"type":"response.completed"}')
-            )
-
-    class Client:
-        request: tuple[str, str, dict] | None = None
-
-        def stream(self, method: str, url: str, **kwargs):
-            self.request = (method, url, kwargs)
-            return Response()
-
-    client = Client()
-    assert _probe_grok_inference(client, "https://grok.example/v1", "token", "grok-test") == 200
-    assert client.request is not None
-    assert client.request[0:2] == ("POST", "https://grok.example/v1/responses")
-    assert client.request[2]["json"]["model"] == "grok-test"
-    assert client.request[2]["json"]["stream"] is True
-
-
-def test_grok_keepalive_rejects_an_incomplete_stream() -> None:
-    from any2api_automation.providers.grok import _probe_grok_inference
-
-    class Response:
-        status_code = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args) -> None:
-            return None
-
-        def raise_for_status(self) -> None:
-            return None
-
-        def iter_lines(self):
-            return iter(('data: {"type":"response.created"}',))
-
-    class Client:
-        def stream(self, *_args, **_kwargs):
-            return Response()
-
-    with pytest.raises(RuntimeError, match="without a completion event"):
-        _probe_grok_inference(Client(), "https://grok.example/v1", "token", "grok-test")
 
 
 def test_grok_castle_policy_deny_is_never_treated_as_registered() -> None:

@@ -9,6 +9,8 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.BrowserClearanceCoordinator;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,7 +49,9 @@ class GrokWebStatsigLiveInteropTest {
         var protocol = new GrokWebProtocolClient(
             transport, mock(BrowserClearanceCoordinator.class),
             new GrokWebStatsigSigner(mapper, properties), properties, mapper);
-        var handler = new GrokWebLifecycleHandler(protocol);
+        var handler = new GrokWebLifecycleHandler(
+            mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper));
         var credential = mapper.createObjectNode().put(
             "sso", System.getenv("ANY2API_LIVE_GROK_SSO"));
         var proxyJson = new String(Base64.getDecoder().decode(

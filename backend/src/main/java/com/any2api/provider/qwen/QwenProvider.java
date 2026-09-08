@@ -17,9 +17,8 @@ import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
-import com.any2api.transport.BrowserTransportClient;
-import com.any2api.transport.SseDataDecoder;
-import java.net.URI;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -48,30 +47,23 @@ public final class QwenProvider implements InferenceProvider {
             "enable_thinking", "thinking_budget", "web_search", "enable_search", "search",
             "tools", "tool_choice"),
         Set.of("web_search", "web_search_preview", "search"));
-    private final BrowserTransportClient transport;
+    private final OfficialBrowserTransportClient transport;
+    private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final QwenProperties properties;
-    private final QwenRequestMapper requestMapper;
-    private final QwenTransportRequests requests;
-    private final QwenMediaUploader mediaUploader;
     private final ObjectMapper mapper;
-    private final QwenExecutionGate executionGate = new QwenExecutionGate();
 
     public QwenProvider(
-        BrowserTransportClient transport,
+        OfficialBrowserTransportClient transport,
+        OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         QwenProperties properties,
-        QwenRequestMapper requestMapper,
-        QwenTransportRequests requests,
-        QwenMediaUploader mediaUploader,
         ObjectMapper mapper
     ) {
         this.transport = transport;
+        this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.properties = properties;
-        this.requestMapper = requestMapper;
-        this.requests = requests;
-        this.mediaUploader = mediaUploader;
         this.mapper = mapper;
     }
 
@@ -108,6 +100,7 @@ public final class QwenProvider implements InferenceProvider {
 
     @Override
     public void validate(CanonicalRequest request) {
+        ProviderRequestValidation.requireInlineImageUploads(request, "Qwen");
         ProviderRequestValidation.requireStringParameters(request, "thinking_mode");
         ProviderRequestValidation.requireBooleanParameters(
             request, "enable_thinking", "web_search", "enable_search", "search");
@@ -178,64 +171,53 @@ public final class QwenProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        return executionGate.flux(() -> generateSerialized(request, context, account));
-    }
-
-    private Flux<CanonicalEvent> generateSerialized(
-        CanonicalRequest request,
-        ProviderExecutionContext context,
-        LeasedProviderAccount account
-    ) {
-        var credential = QwenCredential.from(account);
-        var affinityKey = account.accountId().toString();
-        return Flux.usingWhen(
-            transport.open(sessionCommand(credential, affinityKey)),
-            session -> mediaUploader.prepare(
-                    session, request.messages(), credential, context)
-                .flatMapMany(preparedMessages -> createChat(
-                        credential, request.model(), context, session.id())
-                    .flatMapMany(chatId -> {
-                        var body = requestMapper.prepare(request, chatId, preparedMessages);
-                        var path = "/api/v2/chat/completions?chat_id=" + chatId;
-                        var bodyText = mapper.writeValueAsString(body);
-                        var decoder = new QwenEventDecoder(request.requestId());
-                        var sse = new SseDataDecoder();
-                        return requests.browserFetch(
-                                "POST", path, bodyText, credential, context,
-                                session.id(), "/c/" + chatId, 300)
-                            .flatMapMany(response -> browserResponse(response))
-                            .concatMapIterable(sse::decode)
-                            .concatWith(Flux.defer(() -> Flux.fromIterable(sse.finish())))
-                            .concatMapIterable(decoder::decode)
-                            .concatWith(Flux.defer(() -> Flux.fromIterable(decoder.finish())));
-                    })),
-            this::close,
-            (session, ignored) -> close(session),
-            this::close);
+        var decoder = new QwenEventDecoder(request.requestId());
+        var status = new java.util.concurrent.atomic.AtomicInteger(-1);
+        return transport.stream(
+                manifest().id(),
+                "chat",
+                semanticCommands.chat(request),
+                account.credential(),
+                proxyPool(),
+                proxyAffinityKey(account),
+                runtimeOptions())
+            .handle((frame, sink) -> {
+                var type = frame.path("type").asText("");
+                if ("status".equals(type)) {
+                    status.set(frame.path("status").asInt(502));
+                } else if ("error".equals(type)) {
+                    var code = status.get() < 0 ? 502 : status.get();
+                    sink.error(new QwenUpstreamException(
+                        code, summarize(code, frame.path("data").asText(""))));
+                } else if ("data".equals(type) && status.get() < 400) {
+                    sink.next(frame.path("data").asText(""));
+                } else if ("credential_patch".equals(type)) {
+                    context.acceptCredentialPatch(frame.path("data"));
+                }
+            })
+            .cast(String.class)
+            .takeUntil(data -> "[DONE]".equals(data.trim()))
+            .concatMapIterable(decoder::decode)
+            .concatWith(Flux.defer(() -> status.get() >= 400
+                ? Flux.error(new QwenUpstreamException(
+                    status.get(), "Qwen upstream returned HTTP " + status.get()))
+                : Flux.fromIterable(decoder.finish())));
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        return executionGate.mono(() -> discoverModelsSerialized(account));
-    }
-
-    private Mono<List<DiscoveredModel>> discoverModelsSerialized(
-        LeasedProviderAccount account
-    ) {
-        var credential = QwenCredential.from(account);
-        var path = "/api/v2/models/";
-        return Mono.usingWhen(
-            transport.open(sessionCommand(credential, account.accountId().toString())),
-            session -> requests.browserFetch(
-                    "GET", path, "", credential, account.accountId().toString(),
-                    session.id(), "/", 120)
-                .flatMap(response -> response.successful()
-                    ? Mono.just(parseModels(json(response.text())))
-                    : Mono.error(new QwenUpstreamException(response.status(),
-                        summarize(response.status(), response.text())))),
-            this::close,
-            (session, ignored) -> close(session),
-            this::close);
+        return transport.request(
+                manifest().id(),
+                "models",
+                semanticCommands.models(),
+                account.credential(),
+                proxyPool(),
+                proxyAffinityKey(account),
+                runtimeOptions())
+            .flatMap(response -> response.status() >= 200 && response.status() < 300
+                ? Mono.just(parseModels(json(response.body())))
+                : Mono.error(new QwenUpstreamException(
+                    response.status(), summarize(response.status(), response.body()))));
     }
 
     static List<DiscoveredModel> parseModels(JsonNode root) {
@@ -278,92 +260,12 @@ public final class QwenProvider implements InferenceProvider {
         return "";
     }
 
-    private Mono<String> createChat(
-        QwenCredential credential,
-        String model,
-        ProviderExecutionContext context,
-        String transportSessionId
-    ) {
-        var body = mapper.createObjectNode()
-            .put("chatId", "")
-            .put("project_id", "")
-            .put("timestamp", System.currentTimeMillis())
-            .put("chat_type", "t2t")
-            .put("chat_mode", "normal");
-        body.putArray("models").add(model);
-        var bodyText = mapper.writeValueAsString(body);
-        var path = "/api/v2/chats/new";
-        return requests.browserFetch(
-                "POST", path, bodyText, credential, context,
-                transportSessionId, "/c/new-chat", 120)
-            .flatMap(response -> {
-                if (!response.successful()) {
-                    return Mono.error(new QwenUpstreamException(response.status(),
-                        summarize(response.status(), response.text())));
-                }
-                if (response.contentType().toLowerCase().contains("text/html")) {
-                    return Mono.error(new QwenUpstreamException(
-                        403, "Qwen native browser was redirected to an anti-bot challenge"));
-                }
-                var json = json(response.text());
-                var id = json.path("id").asText(json.path("data").path("id").asText(
-                    json.path("chat_id").asText(""))).trim();
-                return id.isBlank()
-                    ? Mono.error(new QwenUpstreamException(502,
-                        "Qwen chats/new returned no chat id"))
-                    : Mono.just(id);
-            });
-    }
-
-    private Flux<byte[]> browserResponse(QwenRiskHeaderClient.BrowserResponse response) {
-        if (!response.successful()) {
-            return Flux.error(new QwenUpstreamException(
-                response.status(), summarize(response.status(), response.text())));
-        }
-        if (response.contentType().toLowerCase().contains("text/html")) {
-            return Flux.error(new QwenUpstreamException(
-                403, "Qwen native browser was redirected to an anti-bot challenge"));
-        }
-        return Flux.just(response.body());
-    }
-
-    private BrowserTransportClient.OpenCommand sessionCommand(
-        QwenCredential credential,
-        String fallbackAffinityKey
-    ) {
-        var origin = URI.create(properties.getBaseUrl());
-        var proxyPool = proxyPools.runtimeForProvider(
-            manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
-        var userAgent = credential.userAgent().isBlank()
-            ? properties.getUserAgent() : credential.userAgent();
-        var browserProfile = credential.browserProfile().isBlank()
-            ? "chrome146" : credential.browserProfile();
-        var affinityKey = credential.proxyAffinityKey().isBlank()
-            ? fallbackAffinityKey : credential.proxyAffinityKey();
-        return new BrowserTransportClient.OpenCommand(
-            origin, Map.of(), List.of("." + origin.getHost()), userAgent,
-            browserProfile, "v2", proxyPool, 300, List.of(), affinityKey,
-            !proxyPool.isEmpty(), "", credential.token());
-    }
-
-    private JsonNode json(BrowserTransportClient.BufferedResponse response) {
-        try {
-            return mapper.readTree(response.text());
-        } catch (RuntimeException error) {
-            throw new QwenUpstreamException(502, "Qwen upstream returned invalid JSON");
-        }
-    }
-
     private JsonNode json(String response) {
         try {
             return mapper.readTree(response);
         } catch (RuntimeException error) {
             throw new QwenUpstreamException(502, "Qwen upstream returned invalid JSON");
         }
-    }
-
-    private Mono<Void> close(BrowserTransportClient.Session session) {
-        return transport.close(session.id()).then();
     }
 
     @Override
@@ -382,17 +284,6 @@ public final class QwenProvider implements InferenceProvider {
             return new ProviderFailure(type, upstream.getMessage(), retryable,
                 Map.of("status", upstream.status()));
         }
-        if (error instanceof BrowserTransportClient.BrowserTransportException upstream) {
-            var retryable = upstream.status() >= 500
-                || List.of(408, 409, 425, 429).contains(upstream.status());
-            var type = switch (upstream.status()) {
-                case 401, 403 -> "credential_rejected";
-                case 429 -> "rate_limited";
-                default -> "provider_transport_error";
-            };
-            return new ProviderFailure(type, upstream.getMessage(), retryable,
-                Map.of("status", upstream.status()));
-        }
         return new ProviderFailure("provider_transport_error",
             error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
             true, Map.of());
@@ -403,5 +294,22 @@ public final class QwenProvider implements InferenceProvider {
         if (compact.length() > 1000) compact = compact.substring(0, 1000);
         return compact.isBlank() ? "Qwen upstream returned HTTP " + status
             : "Qwen upstream returned HTTP " + status + ": " + compact;
+    }
+
+    private Map<String, Object> proxyPool() {
+        return proxyPools.runtimeForProvider(manifest().id(), ProxyTrafficScope.INFERENCE)
+            .orElse(Map.of());
+    }
+
+    private String proxyAffinityKey(LeasedProviderAccount account) {
+        var persisted = account.credential().path("proxy_affinity_key").asText("").trim();
+        return persisted.isBlank() ? account.accountId().toString() : persisted;
+    }
+
+    private Map<String, Object> runtimeOptions() {
+        return Map.of(
+            "base_url", properties.getBaseUrl(),
+            "source", properties.getSource(),
+            "request_version", properties.getRequestVersion());
     }
 }

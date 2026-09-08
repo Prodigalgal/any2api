@@ -64,7 +64,8 @@ def _stream_request_script(binding_name: str) -> str:
       body: request.body === '' ? undefined : request.body,
       signal: controller.signal
     }});
-    await emit({{type: 'status', status: response.status}});
+    await emit({{type: 'status', status: response.status,
+      contentType: response.headers.get('content-type') || ''}});
     if (!response.ok) {{
       await emit({{type: 'error', data: (await response.text()).slice(0, 16384)}});
       return;
@@ -228,6 +229,8 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
             pending_error: dict[str, Any] | None = None
             status = -1
             data_seen = False
+            data_events = 0
+            data_bytes = 0
             try:
                 while True:
                     event = await queue.get()
@@ -245,9 +248,26 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                         continue
                     if event_type == "status":
                         status = int(event.get("status") or 502)
+                        self._logger.info(
+                            "official_browser_stream_status endpoint=%s status=%s content_type=%s",
+                            endpoint_key or target_path,
+                            status,
+                            str(event.get("contentType") or "")[:120],
+                        )
                     if event_type == "data" and str(event.get("data") or ""):
                         data_seen = True
+                        data_events += 1
+                        data_bytes += len(str(event.get("data") or "").encode("utf-8"))
                     yield event
+                self._logger.info(
+                    "official_browser_stream_complete endpoint=%s status=%s "
+                    "data_events=%s data_bytes=%s error=%s",
+                    endpoint_key or target_path,
+                    status,
+                    data_events,
+                    data_bytes,
+                    pending_error is not None,
+                )
                 if pending_error is None and data_seen and 200 <= status < 300:
                     success_report = successful_canary(plan, selection, session.build_id)
                     if success_report is not None:

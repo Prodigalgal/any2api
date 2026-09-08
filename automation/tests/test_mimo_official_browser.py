@@ -172,9 +172,10 @@ async def test_concurrent_accounts_receive_only_their_own_stream_events(monkeypa
     runtime._select_session = AsyncMock(side_effect=selection)
 
     async def consume(account):
-        return [event async for event in runtime.stream(
-            {"user_id": account}, _semantic_command(), "", None
-        )]
+        return [
+            event
+            async for event in runtime.stream({"user_id": account}, _semantic_command(), "", None)
+        ]
 
     a, b = await asyncio.wait_for(asyncio.gather(consume("a"), consume("b")), 2)
     assert [event["data"] for event in a if event["type"] == "data"] == ["a"]

@@ -7,18 +7,15 @@ from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Generic, TypeVar
-
-T = TypeVar("T")
 
 
 @dataclass
-class SessionSlot(Generic[T]):
+class SessionSlot[T]:
     key: str
     value: T | None = None
 
 
-class AccountSessionPool(Generic[T]):
+class AccountSessionPool[T]:
     """One operation per account; only idle sessions may be evicted."""
 
     def __init__(self, capacity: int, dispose: Callable[[T], Awaitable[None]]) -> None:

@@ -128,8 +128,14 @@ async def test_switching_accounts_reuses_sessions_and_only_refreshes_changed_ide
 
     async def create(key, _credential, proxy, digest):
         return _Session(
-            key=key, browser=object(), context=object(), page=object(), backend="camoufox",
-            state_digest=digest, input_digest=digest, proxy_url=proxy,
+            key=key,
+            browser=object(),
+            context=object(),
+            page=object(),
+            backend="camoufox",
+            state_digest=digest,
+            input_digest=digest,
+            proxy_url=proxy,
         )
 
     transport._new_session = AsyncMock(side_effect=create)

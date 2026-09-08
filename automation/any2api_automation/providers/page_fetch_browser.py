@@ -156,6 +156,12 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
             )
             if not isinstance(response, dict):
                 raise TypeError(f"{self.provider_id} official browser returned invalid response")
+            self._logger.info(
+                "official_browser_request endpoint=%s status=%s response_bytes=%s",
+                endpoint_key or target_path,
+                response.get("status"),
+                len(str(response.get("body") or "").encode("utf-8")),
+            )
             return {
                 "status": int(response.get("status") or 502),
                 "body": str(response.get("body") or ""),
@@ -205,8 +211,9 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                     )
                 except Exception as error:  # noqa: BLE001 - stream boundary
                     self._logger.warning(
-                        "official_browser_stream_failed error_type=%s",
+                        "official_browser_stream_failed error_type=%s reason=%s",
                         type(error).__name__,
+                        _error_reason(error),
                     )
                     await queue.put(
                         {
@@ -229,6 +236,12 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                         break
                     if event_type == "error":
                         pending_error = event
+                        self._logger.warning(
+                            "official_browser_stream_error endpoint=%s status=%s error_bytes=%s",
+                            endpoint_key or target_path,
+                            status,
+                            len(str(event.get("data") or "").encode("utf-8")),
+                        )
                         continue
                     if event_type == "status":
                         status = int(event.get("status") or 502)
@@ -323,6 +336,13 @@ def _method(value: str) -> str:
     if normalized not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
         raise ValueError("official browser method is not allowlisted")
     return normalized
+
+
+def _error_reason(error: BaseException) -> str:
+    value = " ".join(str(error).split())
+    if not value:
+        return "<empty>"
+    return value[:200]
 
 
 def _path(value: str) -> str:

@@ -162,7 +162,15 @@ def _conversation_id(result: dict[str, Any]) -> str:
     except json.JSONDecodeError as error:
         raise RuntimeError("LongCat session-create returned invalid JSON") from error
     if not isinstance(body, dict) or int(body.get("code") or -1) != 0:
-        raise RuntimeError("LongCat session-create was rejected")
+        if not isinstance(body, dict):
+            raise RuntimeError("LongCat session-create was rejected: invalid response object")
+        code = str(body.get("code") if body.get("code") is not None else "missing")
+        message = str(body.get("message") or body.get("msg") or body.get("error") or "")
+        message = " ".join(message.split())[:160]
+        detail = f" code={code}"
+        if message:
+            detail += f" message={message}"
+        raise RuntimeError(f"LongCat session-create was rejected{detail}")
     value = str((body.get("data") or {}).get("conversationId") or "").strip()
     if not value:
         raise RuntimeError("LongCat session-create returned no conversationId")

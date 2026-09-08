@@ -32,6 +32,7 @@ from any2api_automation.providers.grok_protocol.device_flow import (
 )
 from any2api_automation.providers.grok_settings import settings as grok_settings
 from any2api_automation.providers.longcat import _login_url, _longcat_proxy_affinity
+from any2api_automation.providers.longcat_browser import _conversation_id
 from any2api_automation.providers.longcat_settings import settings as longcat_settings
 from any2api_automation.providers.mimo_protocol import (
     XiaomiProtocolClient,
@@ -187,6 +188,16 @@ def test_longcat_proxy_affinity_is_stable_per_identity_and_attempt() -> None:
     assert first == _longcat_proxy_affinity("user@example.com", 1)
     assert first != _longcat_proxy_affinity("user@example.com", 2)
     assert first.startswith("longcat-")
+
+
+def test_longcat_session_rejection_keeps_safe_upstream_reason() -> None:
+    with pytest.raises(RuntimeError, match="code=1001 message=account unavailable"):
+        _conversation_id(
+            {
+                "status": 200,
+                "body": '{"code":1001,"message":"account unavailable"}',
+            }
+        )
 
 
 def test_minmax_official_asset_hosts_include_current_and_legacy_cdn() -> None:

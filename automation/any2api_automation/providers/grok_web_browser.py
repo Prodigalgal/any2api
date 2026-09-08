@@ -198,15 +198,10 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
         if operation not in {"keepalive", "models"}:
             raise ValueError("Grok Web request operation is not allowlisted")
         async with self.account_operation(credential):
-            session, _selection, reports = await self._select_session(
-                credential, proxy_url, plan
-            )
+            session, _selection, reports = await self._select_session(credential, proxy_url, plan)
             if operation == "models":
                 body = json.dumps(
-                    {"data": [
-                        {"id": model, "object": "model"}
-                        for model in _MODEL_IDS
-                    ]},
+                    {"data": [{"id": model, "object": "model"} for model in _MODEL_IDS]},
                     separators=(",", ":"),
                 )
                 return {
@@ -236,9 +231,7 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
     ) -> AsyncIterator[dict[str, Any]]:
         request = build_grok_web_request(command)
         async with self.account_operation(credential):
-            session, selection, reports = await self._select_session(
-                credential, proxy_url, plan
-            )
+            session, selection, reports = await self._select_session(credential, proxy_url, plan)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
             request_id = uuid4().hex
@@ -249,22 +242,27 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
                 try:
                     await session.page.evaluate(
                         _STREAM_REQUEST,
-                        {"requestId": request_id, **request,
-                         "timeoutMs": max(
-                             30_000,
-                             plan.active.rules.canary_timeout_seconds * 1000,
-                             core_settings().registration_timeout_seconds * 1000,
-                         )},
+                        {
+                            "requestId": request_id,
+                            **request,
+                            "timeoutMs": max(
+                                30_000,
+                                plan.active.rules.canary_timeout_seconds * 1000,
+                                core_settings().registration_timeout_seconds * 1000,
+                            ),
+                        },
                     )
                 except Exception as error:  # noqa: BLE001 - stream boundary
                     logger.warning(
                         "grok_web_official_browser_stream_failed error_type=%s",
                         type(error).__name__,
                     )
-                    await queue.put({
-                        "type": "error",
-                        "data": f"official browser stream failed ({type(error).__name__})",
-                    })
+                    await queue.put(
+                        {
+                            "type": "error",
+                            "data": f"official browser stream failed ({type(error).__name__})",
+                        }
+                    )
                 finally:
                     await queue.put({"type": "done"})
 
@@ -394,8 +392,7 @@ def _prompt(messages: Any) -> str:
             continue
         if message_type == "function_call_output":
             blocks.append(
-                f"[tool result for {message.get('call_id', '')}]\n"
-                f"{_text(message.get('output'))}"
+                f"[tool result for {message.get('call_id', '')}]\n{_text(message.get('output'))}"
             )
             continue
         role = str(message.get("role") or "user")
@@ -431,13 +428,15 @@ def _supported_tools(value: Any) -> list[dict[str, Any]]:
         if name in names:
             raise ValueError(f"duplicate Grok Web function tool: {name}")
         names.add(name)
-        output.append({
-            "name": name,
-            "description": str(function.get("description") or "").strip(),
-            "parameters": function.get("parameters")
-            if isinstance(function.get("parameters"), dict)
-            else {"type": "object", "properties": {}},
-        })
+        output.append(
+            {
+                "name": name,
+                "description": str(function.get("description") or "").strip(),
+                "parameters": function.get("parameters")
+                if isinstance(function.get("parameters"), dict)
+                else {"type": "object", "properties": {}},
+            }
+        )
     return output
 
 

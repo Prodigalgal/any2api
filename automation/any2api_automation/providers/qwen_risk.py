@@ -850,9 +850,7 @@ class QwenNativeBrowserTransport:
                         desired.path,
                     )
                 elif "NS_ERROR_FAILURE" in error_text:
-                    await self._recover_failed_same_origin_navigation(
-                        session, target, desired
-                    )
+                    await self._recover_failed_same_origin_navigation(session, target, desired)
                 else:
                     raise
             await session.page.wait_for_function(

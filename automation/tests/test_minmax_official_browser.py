@@ -101,7 +101,9 @@ async def test_minmax_stream_persists_context_before_forwarding_an_error() -> No
 @pytest.mark.asyncio
 async def test_minmax_media_upload_rejects_incomplete_results() -> None:
     class Page:
-        async def evaluate(self, _script: str, _payload: dict[str, object]) -> list[dict[str, object]]:
+        async def evaluate(
+            self, _script: str, _payload: dict[str, object]
+        ) -> list[dict[str, object]]:
             return [{"data_url": "oss://one"}]
 
     session = _Session(

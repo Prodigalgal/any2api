@@ -185,9 +185,7 @@ def build_deepseek_request(command: dict[str, Any], session_id: str) -> dict[str
 def solve_pow(challenge: dict[str, Any]) -> int:
     _validate_challenge(challenge)
     difficulty = int(challenge["difficulty"])
-    prefix = (
-        f"{challenge['salt']}_{int(challenge['expire_at'])}_".encode()
-    )
+    prefix = f"{challenge['salt']}_{int(challenge['expire_at'])}_".encode()
     target = bytes.fromhex(str(challenge["challenge"]))
     for answer in range(difficulty):
         if _hash_matches(prefix, answer, target):
@@ -223,10 +221,7 @@ def _permute(state: list[int]) -> None:
             state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20]
             for x in range(5)
         ]
-        deltas = [
-            columns[(x + 4) % 5] ^ _rotl(columns[(x + 1) % 5], 1)
-            for x in range(5)
-        ]
+        deltas = [columns[(x + 4) % 5] ^ _rotl(columns[(x + 1) % 5], 1) for x in range(5)]
         for y in range(5):
             for x in range(5):
                 state[x + 5 * y] = (state[x + 5 * y] ^ deltas[x]) & _MASK
@@ -239,8 +234,7 @@ def _permute(state: list[int]) -> None:
         for y in range(5):
             for x in range(5):
                 state[x + 5 * y] = (
-                    moved[x + 5 * y]
-                    ^ ((~moved[(x + 1) % 5 + 5 * y]) & moved[(x + 2) % 5 + 5 * y])
+                    moved[x + 5 * y] ^ ((~moved[(x + 1) % 5 + 5 * y]) & moved[(x + 2) % 5 + 5 * y])
                 ) & _MASK
         state[0] = (state[0] ^ round_constant) & _MASK
 
@@ -288,10 +282,7 @@ def _session_id(result: dict[str, Any]) -> str:
     _require_success(result, "create session")
     value = _json_body(result)
     session_id = (
-        value.get("data", {})
-        .get("biz_data", {})
-        .get("chat_session", {})
-        .get("id", "")
+        value.get("data", {}).get("biz_data", {}).get("chat_session", {}).get("id", "")
         if isinstance(value.get("data"), dict)
         else ""
     )
@@ -332,9 +323,7 @@ def _require_success(result: dict[str, Any], operation: str) -> None:
     data = value.get("data") or {}
     biz_code = int(data.get("biz_code") or 0) if isinstance(data, dict) else -1
     if code != 0 or biz_code != 0:
-        raise RuntimeError(
-            f"DeepSeek {operation} was rejected code={code} biz_code={biz_code}"
-        )
+        raise RuntimeError(f"DeepSeek {operation} was rejected code={code} biz_code={biz_code}")
 
 
 def _prompt(messages: Any) -> str:

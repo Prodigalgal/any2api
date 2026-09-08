@@ -428,12 +428,10 @@ def build_qwen_request(
     unsupported_media = sorted({kind for _, kind, _ in media if kind != "image"})
     if unsupported_media:
         raise ValueError(
-            "Qwen browser upload does not support media types: "
-            + ", ".join(unsupported_media)
+            "Qwen browser upload does not support media types: " + ", ".join(unsupported_media)
         )
     if any(
-        str(command["messages"][index].get("role") or "user").lower()
-        in {"system", "developer"}
+        str(command["messages"][index].get("role") or "user").lower() in {"system", "developer"}
         for index, _, _ in media
     ):
         raise ValueError("Qwen image input is supported only in user messages")
@@ -466,12 +464,10 @@ def build_qwen_request(
         role = _qwen_role(source.get("role"))
         content = _qwen_content(source.get("content"))
         if role == "assistant" and isinstance(source.get("tool_calls"), list):
-            content += "\n" + json.dumps(source["tool_calls"], ensure_ascii=False, separators=(",", ":"))
-        file_count = sum(
-            1
-            for _, kind, _ in iter_media_blocks([source], "Qwen")
-            if kind == "image"
-        )
+            content += "\n" + json.dumps(
+                source["tool_calls"], ensure_ascii=False, separators=(",", ":")
+            )
+        file_count = sum(1 for _, kind, _ in iter_media_blocks([source], "Qwen") if kind == "image")
         files = uploaded_files[file_index : file_index + file_count]
         if any(not isinstance(item, dict) for item in files):
             raise TypeError("Qwen uploadedFiles entries must be objects")
@@ -493,7 +489,9 @@ def build_qwen_request(
             "feature_config": feature,
             "parentId": None if index == 0 else message_ids[index - 1],
             "parent_id": None if index == 0 else message_ids[index - 1],
-            "childrenIds": [message_ids[index + 1] if index + 1 < len(messages) else response_placeholder],
+            "childrenIds": [
+                message_ids[index + 1] if index + 1 < len(messages) else response_placeholder
+            ],
             "files": [json.loads(json.dumps(item, ensure_ascii=True)) for item in merged_files],
             "models": [str(command.get("model") or "")] if role == "user" else [],
             "extra": {"meta": {"subChatType": "t2t"}},
@@ -563,7 +561,9 @@ def _qwen_feature_config(command: dict[str, Any]) -> dict[str, Any]:
     reasoning = command.get("reasoning") or {}
     effort = str(reasoning.get("effort") or controls.get("reasoning_effort") or "auto").lower()
     raw_mode = str(options.get("thinking_mode") or "").strip()
-    mode = raw_mode or ("Fast" if effort in {"none", "minimal"} else "Auto" if effort == "auto" else "Thinking")
+    mode = raw_mode or (
+        "Fast" if effort in {"none", "minimal"} else "Auto" if effort == "auto" else "Thinking"
+    )
     if mode.lower() in {"fast", "disabled", "off", "false", "none"}:
         mode = "Fast"
     elif mode.lower() == "auto":
@@ -574,7 +574,8 @@ def _qwen_feature_config(command: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(explicit_search, bool):
         explicit_search = any(
             isinstance(tool, dict)
-            and str(tool.get("type") or "").lower() in {"web_search", "web_search_preview", "search"}
+            and str(tool.get("type") or "").lower()
+            in {"web_search", "web_search_preview", "search"}
             for tool in command.get("tools") or []
         )
     result: dict[str, Any] = {
@@ -594,7 +595,13 @@ def _qwen_feature_config(command: dict[str, Any]) -> dict[str, Any]:
 
 def _qwen_role(value: Any) -> str:
     role = str(value or "user").lower()
-    return "system" if role == "developer" else role if role in {"assistant", "system", "tool"} else "user"
+    return (
+        "system"
+        if role == "developer"
+        else role
+        if role in {"assistant", "system", "tool"}
+        else "user"
+    )
 
 
 def _qwen_content(value: Any) -> str:
@@ -630,12 +637,14 @@ def _qwen_media_sources(messages: Any) -> list[dict[str, Any]]:
                 "avif": "avif",
             }.get(mime.removeprefix("image/"), "bin")
             filename = f"upload-{uuid4().hex}.{extension}"
-        sources.append({
-            "data_url": source,
-            "filename": filename,
-            "mime_type": mime,
-            "size": len(content),
-        })
+        sources.append(
+            {
+                "data_url": source,
+                "filename": filename,
+                "mime_type": mime,
+                "size": len(content),
+            }
+        )
     return sources
 
 
@@ -655,7 +664,11 @@ def _qwen_cookie_map(current: dict[str, Any]) -> dict[str, str]:
     source = current.get("cookies")
     if not isinstance(source, dict):
         return {}
-    return {str(key): str(value) for key, value in source.items() if str(key).strip() and str(value).strip()}
+    return {
+        str(key): str(value)
+        for key, value in source.items()
+        if str(key).strip() and str(value).strip()
+    }
 
 
 def _decode_qwen_body(result: dict[str, Any]) -> bytes:

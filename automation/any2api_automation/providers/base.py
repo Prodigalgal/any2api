@@ -33,9 +33,7 @@ class AutomationProviderManifest:
                 f"unsupported inference runtime for {self.id}: {self.inference_runtime}"
             )
         if self.inference_transport and self.inference_runtime != CAMOUFOX_BROWSER_RUNTIME:
-            raise ValueError(
-                f"inference provider {self.id} must use {CAMOUFOX_BROWSER_RUNTIME}"
-            )
+            raise ValueError(f"inference provider {self.id} must use {CAMOUFOX_BROWSER_RUNTIME}")
         if not self.inference_transport and self.inference_runtime != NO_INFERENCE_RUNTIME:
             raise ValueError(
                 f"provider {self.id} cannot declare an inference runtime without transport"

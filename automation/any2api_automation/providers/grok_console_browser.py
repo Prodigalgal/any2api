@@ -124,9 +124,7 @@ class GrokConsoleOfficialBrowserTransport(OfficialBrowserRuntime):
             identity_fields=("email", "sso", "sso-rw", "sso_rw"),
         )
         self._stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
-        self._logger = logging.getLogger(
-            "any2api_automation.providers.grok_console_browser"
-        )
+        self._logger = logging.getLogger("any2api_automation.providers.grok_console_browser")
 
     async def request(
         self,
@@ -137,9 +135,7 @@ class GrokConsoleOfficialBrowserTransport(OfficialBrowserRuntime):
         cluster: str,
     ) -> dict[str, Any]:
         async with self.account_operation(credential):
-            session, selection, reports = await self._select_session(
-                credential, proxy_url, plan
-            )
+            session, selection, reports = await self._select_session(credential, proxy_url, plan)
             response = await session.page.evaluate(
                 _BUFFERED_REQUEST,
                 {
@@ -171,9 +167,7 @@ class GrokConsoleOfficialBrowserTransport(OfficialBrowserRuntime):
     ) -> AsyncIterator[dict[str, Any]]:
         body = build_grok_console_request(semantic_command)
         async with self.account_operation(credential):
-            session, selection, reports = await self._select_session(
-                credential, proxy_url, plan
-            )
+            session, selection, reports = await self._select_session(credential, proxy_url, plan)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
             request_id = uuid4().hex
@@ -200,10 +194,7 @@ class GrokConsoleOfficialBrowserTransport(OfficialBrowserRuntime):
                     await queue.put(
                         {
                             "type": "error",
-                            "data": (
-                                "official browser stream failed "
-                                f"({type(error).__name__})"
-                            ),
+                            "data": (f"official browser stream failed ({type(error).__name__})"),
                         }
                     )
                 finally:
@@ -290,9 +281,7 @@ class GrokConsoleOfficialBrowserTransport(OfficialBrowserRuntime):
                 session = await self.session_for(credential, proxy_url, plan.candidate)
                 return session, plan.candidate, reports
             except RuntimeRuleDiscoveryError as error:
-                reports.append(
-                    runtime_canary(plan.candidate, "", "FAILED", str(error))
-                )
+                reports.append(runtime_canary(plan.candidate, "", "FAILED", str(error)))
         session = await self.session_for(credential, proxy_url, plan.active)
         return session, plan.active, reports
 
@@ -369,13 +358,17 @@ def _copy_generation(payload: dict[str, Any], command: dict[str, Any]) -> None:
         "tool_choice",
     ):
         if field in generation:
-            payload[field] = _copy_object(generation[field]) if isinstance(
-                generation[field], (dict, list)
-            ) else generation[field]
+            payload[field] = (
+                _copy_object(generation[field])
+                if isinstance(generation[field], (dict, list))
+                else generation[field]
+            )
         elif field in controls:
-            payload[field] = _copy_object(controls[field]) if isinstance(
-                controls[field], (dict, list)
-            ) else controls[field]
+            payload[field] = (
+                _copy_object(controls[field])
+                if isinstance(controls[field], (dict, list))
+                else controls[field]
+            )
     if command["reasoning"]:
         payload["reasoning"] = _copy_object(command["reasoning"])
 
@@ -405,7 +398,11 @@ def _normalize_reasoning(payload: dict[str, Any], command: dict[str, Any]) -> No
         effort = (
             provider_options.get("reasoning_effort")
             or controls.get("reasoning_effort")
-            or (command["reasoning"].get("effort") if isinstance(command["reasoning"], dict) else None)
+            or (
+                command["reasoning"].get("effort")
+                if isinstance(command["reasoning"], dict)
+                else None
+            )
         )
         if effort:
             reasoning["effort"] = str(effort)

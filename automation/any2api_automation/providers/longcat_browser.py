@@ -109,9 +109,7 @@ class LongcatOfficialBrowserTransport(PageFetchBrowserRuntime):
 def build_longcat_request(command: dict[str, Any]) -> dict[str, Any]:
     _validate_command(command)
     model = str(command["model"])
-    default_agent, default_reason, default_search = _MODEL_MODES.get(
-        model, ("1", False, False)
-    )
+    default_agent, default_reason, default_search = _MODEL_MODES.get(model, ("1", False, False))
     options = command["providerOptions"]
     raw = command.get("rawRequest") if isinstance(command.get("rawRequest"), dict) else {}
     agent_id = _string(options.get("agent_id"), str(raw.get("agent_id") or default_agent))
@@ -151,9 +149,7 @@ def _headers(runtime_options: dict[str, Any] | None) -> dict[str, str]:
         "m-appkey": str(options.get("app_key") or config.longcat_app_key),
         "m-traceid": str(options.get("trace_id") or int(time.time() * 1000)),
         "x-client-language": str(options.get("language") or config.longcat_language),
-        "x-requested-with": str(
-            options.get("requested_with") or config.longcat_requested_with
-        ),
+        "x-requested-with": str(options.get("requested_with") or config.longcat_requested_with),
     }
 
 
@@ -243,8 +239,7 @@ def _normalize_tools(value: Any) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "description": str(definition.get("description") or ""),
-                "parameters": definition.get("parameters")
-                or {"type": "object", "properties": {}},
+                "parameters": definition.get("parameters") or {"type": "object", "properties": {}},
             }
         )
     return output

@@ -230,9 +230,7 @@ class MimoAutomationProvider(AutomationProvider):
         await official_browser_transport.close()
 
 
-async def _browser_keepalive(
-    payload: dict[str, Any], current: dict[str, Any]
-) -> dict[str, Any]:
+async def _browser_keepalive(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     plan_value = payload.get("runtime_plan")
     plan = (
         parse_runtime_plan(plan_value, "mimo")

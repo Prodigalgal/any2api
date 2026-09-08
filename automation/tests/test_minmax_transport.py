@@ -102,13 +102,19 @@ def test_request_fingerprint_follows_the_account_browser() -> None:
 
 
 def test_minmax_media_is_prepared_for_browser_upload() -> None:
-    attachments = _minmax_attachments([{
-        "role": "user",
-        "content": [{
-            "type": "input_image",
-            "image_url": "data:image/png;base64,aGVsbG8=",
-        }],
-    }])
+    attachments = _minmax_attachments(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,aGVsbG8=",
+                    }
+                ],
+            }
+        ]
+    )
 
     assert attachments[0]["mime_type"] == "image/png"
     assert len(attachments[0]["file_md5"]) == 32

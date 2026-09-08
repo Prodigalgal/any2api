@@ -155,7 +155,11 @@ class MinmaxAutomationProvider(AutomationProvider):
         if operation and operation not in {"models", "agents", "files_policy", "files_callback"}:
             raise ValueError("MinMax transport operation is not allowlisted")
         plan_value = payload.get("runtime_plan")
-        plan = parse_runtime_plan(plan_value, self.manifest.id) if isinstance(plan_value, dict) else None
+        plan = (
+            parse_runtime_plan(plan_value, self.manifest.id)
+            if isinstance(plan_value, dict)
+            else None
+        )
         if operation:
             method, path, body = _semantic_request_input(payload, plan)
         else:
@@ -169,7 +173,11 @@ class MinmaxAutomationProvider(AutomationProvider):
         if operation and operation != "chat":
             raise ValueError("MinMax transport operation is not allowlisted")
         plan_value = payload.get("runtime_plan")
-        plan = parse_runtime_plan(plan_value, self.manifest.id) if isinstance(plan_value, dict) else None
+        plan = (
+            parse_runtime_plan(plan_value, self.manifest.id)
+            if isinstance(plan_value, dict)
+            else None
+        )
         async with _transport_proxy_lease(payload) as proxy_url:
             if operation:
                 command = payload.get("semantic_command")
@@ -345,8 +353,7 @@ def _minmax_prompt(messages: Any) -> str:
     unsupported_media = sorted({kind for _, kind, _ in media_blocks if kind != "image"})
     if unsupported_media:
         raise ValueError(
-            "MinMax browser upload does not support media types: "
-            + ", ".join(unsupported_media)
+            "MinMax browser upload does not support media types: " + ", ".join(unsupported_media)
         )
     blocks: list[str] = []
     for message in messages:
@@ -394,13 +401,15 @@ def _minmax_attachments(messages: Any) -> list[dict[str, Any]]:
                 "avif": "avif",
             }.get(mime.removeprefix("image/"), "bin")
             filename = f"upload-{uuid.uuid4().hex}.{extension}"
-        attachments.append({
-            "type": "image",
-            "file_name": filename,
-            "mime_type": mime,
-            "file_md5": hashlib.md5(content).hexdigest(),
-            "data_url": source,
-        })
+        attachments.append(
+            {
+                "type": "image",
+                "file_name": filename,
+                "mime_type": mime,
+                "file_md5": hashlib.md5(content).hexdigest(),
+                "data_url": source,
+            }
+        )
     return attachments
 
 

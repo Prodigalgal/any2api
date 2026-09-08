@@ -301,6 +301,7 @@ def _conversation_id(result: dict[str, Any]) -> str:
         raise RuntimeError("LongCat session-create returned no conversationId")
     return value
 
+
 def _email_browser_flow(
     page, context, backend, mail, mailbox, password, trace: RegistrationTrace
 ) -> BrowserResult:

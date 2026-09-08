@@ -124,9 +124,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         self.require_cookie = require_cookie
         self._stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
         self._binding_name = f"__any2api_{provider_id.replace('-', '_')}_emit"
-        self._logger = logging.getLogger(
-            f"any2api_automation.providers.{provider_id}_page_fetch"
-        )
+        self._logger = logging.getLogger(f"any2api_automation.providers.{provider_id}_page_fetch")
 
     async def request(
         self,
@@ -144,13 +142,9 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         method = _method(method)
         path = _path(path)
         async with self.account_operation(credential):
-            session, selection, reports = await self._select_session(
-                credential, proxy_url, plan
-            )
+            session, selection, reports = await self._select_session(credential, proxy_url, plan)
             target_path = _path(
-                selection.rules.endpoint_paths.get(endpoint_key, path)
-                if endpoint_key
-                else path
+                selection.rules.endpoint_paths.get(endpoint_key, path) if endpoint_key else path
             )
             response = await session.page.evaluate(
                 _buffered_request_script(),
@@ -190,13 +184,9 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         method = _method(method)
         path = _path(path)
         async with self.account_operation(credential):
-            session, selection, reports = await self._select_session(
-                credential, proxy_url, plan
-            )
+            session, selection, reports = await self._select_session(credential, proxy_url, plan)
             target_path = _path(
-                selection.rules.endpoint_paths.get(endpoint_key, path)
-                if endpoint_key
-                else path
+                selection.rules.endpoint_paths.get(endpoint_key, path) if endpoint_key else path
             )
             for report in reports:
                 yield {"type": "runtime_canary", **report}
@@ -376,7 +366,14 @@ def _credential_cookies(
     cookie_fields: tuple[str, ...],
 ) -> dict[str, str]:
     values: dict[str, str] = {}
-    for field in ("cookies", "cookie", "session_cookies", "cloudflare_cookies", "cf_cookies", *cookie_fields):
+    for field in (
+        "cookies",
+        "cookie",
+        "session_cookies",
+        "cloudflare_cookies",
+        "cf_cookies",
+        *cookie_fields,
+    ):
         source = credential.get(field)
         if isinstance(source, dict):
             pairs = source.items()

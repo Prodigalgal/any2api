@@ -157,9 +157,7 @@ class GrokAutomationProvider(AutomationProvider):
         runtime_options = _runtime_options(payload)
         async with transport_proxy_lease(payload, check_url=base_url) as proxy_url:
             if operation == "models":
-                return await transport.models_request(
-                    current, proxy_url, plan, runtime_options
-                )
+                return await transport.models_request(current, proxy_url, plan, runtime_options)
             if operation == "chat":
                 command = payload.get("semantic_command")
                 if not isinstance(command, dict):
@@ -506,9 +504,7 @@ def _runtime_base_url(payload: dict[str, Any]) -> str:
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().lstrip(".")
     if parsed.scheme != "https" or not (
-        host == "x.ai"
-        or host.endswith((".x.ai", ".grok.com"))
-        or host == "grok.com"
+        host == "x.ai" or host.endswith((".x.ai", ".grok.com")) or host == "grok.com"
     ):
         raise ValueError("Grok runtime base URL is not allowlisted")
     return value

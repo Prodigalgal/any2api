@@ -21,6 +21,7 @@ from .transport_support import transport_frame, transport_proxy_lease
 _DEFAULT_BASE_URL = "https://console.x.ai"
 _DEFAULT_CLUSTER = "https://us-east-1.api.x.ai"
 
+
 class GrokConsoleAutomationProvider(AutomationProvider):
     manifest = AutomationProviderManifest(
         id="grok_console",
@@ -155,9 +156,7 @@ def _base_url(payload: dict[str, Any]) -> str:
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().lstrip(".")
     if parsed.scheme != "https" or not (
-        host == "x.ai"
-        or host.endswith((".x.ai", ".grok.com"))
-        or host == "grok.com"
+        host == "x.ai" or host.endswith((".x.ai", ".grok.com")) or host == "grok.com"
     ):
         raise ValueError("Grok Console runtime base URL is not allowlisted")
     return value

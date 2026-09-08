@@ -10,14 +10,16 @@ def test_grok_web_builds_gateway_command_from_semantic_request() -> None:
         "schemaVersion": 1,
         "model": "grok-chat-fast",
         "messages": [{"role": "user", "content": "hello"}],
-        "tools": [{
-            "type": "function",
-            "function": {
-                "name": "lookup",
-                "description": "Look up a value",
-                "parameters": {"type": "object"},
-            },
-        }],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Look up a value",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
         "providerOptions": {},
         "controls": {"tool_choice": "required"},
         "previousConversationId": "conversation-1",

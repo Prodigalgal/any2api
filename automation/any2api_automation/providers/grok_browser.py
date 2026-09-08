@@ -162,9 +162,7 @@ def _request_headers(
         "Accept": "text/event-stream",
         "Content-Type": "application/json",
         "x-xai-token-auth": str(options.get("token_auth") or config.grok_token_auth),
-        "x-grok-client-version": str(
-            options.get("client_version") or config.grok_client_version
-        ),
+        "x-grok-client-version": str(options.get("client_version") or config.grok_client_version),
         "x-grok-client-identifier": str(
             options.get("client_identifier") or config.grok_client_identifier
         ),
@@ -240,9 +238,7 @@ def _input(messages: Any) -> list[dict[str, Any]]:
                     }
                 )
         normalized_role = "developer" if role == "system" else role
-        content = xai_input_content(
-            message.get("content", ""), "Grok", role=normalized_role
-        )
+        content = xai_input_content(message.get("content", ""), "Grok", role=normalized_role)
         if not content or all(
             block.get("type") in {"input_text", "output_text"}
             and not str(block.get("text") or "").strip()

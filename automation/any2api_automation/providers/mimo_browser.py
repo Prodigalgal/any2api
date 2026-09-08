@@ -371,9 +371,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                 "uploadInfoPath": rule.endpoint_paths.get(
                     "uploadInfo", "/open-apis/resource/genUploadInfo"
                 ),
-                "parsePath": rule.endpoint_paths.get(
-                    "parse", "/open-apis/resource/parse"
-                ),
+                "parsePath": rule.endpoint_paths.get("parse", "/open-apis/resource/parse"),
                 "maximumBytes": 25 * 1024 * 1024,
             },
         )
@@ -473,8 +471,7 @@ def build_mimo_chat_request(
     unsupported_media = sorted({kind for _, kind, _ in media_blocks if kind != "image"})
     if unsupported_media:
         raise ValueError(
-            "MiMo browser upload does not support media types: "
-            + ", ".join(unsupported_media)
+            "MiMo browser upload does not support media types: " + ", ".join(unsupported_media)
         )
     controls = command.get("controls") or {}
     generation = command.get("generation") or {}
@@ -579,10 +576,12 @@ def _mimo_media_sources(messages: Any) -> list[dict[str, str]]:
             expected_prefix="image/",
         )
         extension = extensions.get(mime.removeprefix("image/"), "bin")
-        sources.append({
-            "dataUrl": source,
-            "filename": f"upload-{uuid4().hex}.{extension}",
-        })
+        sources.append(
+            {
+                "dataUrl": source,
+                "filename": f"upload-{uuid4().hex}.{extension}",
+            }
+        )
     return sources
 
 

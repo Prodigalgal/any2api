@@ -67,20 +67,26 @@ def test_mimo_builds_provider_body_from_semantic_command() -> None:
 def test_mimo_media_is_validated_before_browser_upload() -> None:
     source = "data:image/png;base64,aW1hZ2U="
     command = _semantic_command()
-    command["messages"] = [{
-        "role": "user",
-        "content": [{"type": "input_image", "image_url": {"url": source}}],
-    }]
+    command["messages"] = [
+        {
+            "role": "user",
+            "content": [{"type": "input_image", "image_url": {"url": source}}],
+        }
+    ]
 
     sources = _mimo_media_sources(command["messages"])
     assert sources[0]["dataUrl"] == source
     assert sources[0]["filename"].endswith(".png")
 
     with pytest.raises(ValueError, match="inline base64"):
-        _mimo_media_sources([{
-            "role": "user",
-            "content": [{"type": "image_url", "image_url": "https://example.test/a.png"}],
-        }])
+        _mimo_media_sources(
+            [
+                {
+                    "role": "user",
+                    "content": [{"type": "image_url", "image_url": "https://example.test/a.png"}],
+                }
+            ]
+        )
 
 
 @pytest.mark.asyncio

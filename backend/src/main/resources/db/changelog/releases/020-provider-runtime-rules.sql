@@ -66,9 +66,7 @@ SELECT id, 1, 1,
           },
           "endpointPaths": {
             "chat": "/open-apis/bot/chat",
-            "models": "/open-apis/bot/config",
-            "uploadInfo": "/open-apis/resource/genUploadInfo",
-            "parse": "/open-apis/resource/parse"
+            "models": "/open-apis/bot/config"
           }
         }'::jsonb
         ELSE '{

@@ -289,8 +289,8 @@ async def _qwen_chat_request(
     if session_status < 200 or session_status >= 300:
         return session
     try:
-        session_json = json.loads(str(session.get("body") or ""))
-    except json.JSONDecodeError:
+        session_json = _qwen_json_body(session)
+    except (UnicodeDecodeError, json.JSONDecodeError, RuntimeError):
         return {**session, "status": 502, "body": "Qwen chats/new returned invalid JSON"}
     chat_id = _qwen_chat_id(session_json)
     if not chat_id:
@@ -676,6 +676,10 @@ def _decode_qwen_body(result: dict[str, Any]) -> bytes:
         return base64.b64decode(str(result.get("body_base64") or ""), validate=True)
     except ValueError as error:
         raise RuntimeError("Qwen browser returned invalid response bytes") from error
+
+
+def _qwen_json_body(result: dict[str, Any]) -> Any:
+    return json.loads(_decode_qwen_body(result).decode("utf-8"))
 
 
 def _qwen_sse_data(body: bytes) -> list[str]:

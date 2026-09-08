@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
+from any2api_automation.providers.qwen import _qwen_json_body
 from any2api_automation.providers.qwen_fingerprint import (
     new_qwen_fingerprint,
     qwen_fingerprint_digest,
@@ -38,6 +39,14 @@ def test_qwen_native_browser_request_accepts_provider_scoped_paths() -> None:
 
     assert request.path.endswith("chat_id=chat-1")
     assert request.referer_path == "/c/chat-1"
+
+
+def test_qwen_json_body_decodes_native_browser_response() -> None:
+    encoded = base64.b64encode(
+        b'{"success":true,"request_id":"request-1","data":{"id":"chat-1"}}'
+    ).decode()
+
+    assert _qwen_json_body({"body_base64": encoded})["data"]["id"] == "chat-1"
 
 
 @pytest.mark.asyncio

@@ -115,7 +115,8 @@ def _stream_request(rule: RuntimeRule) -> str:
     if (!(response instanceof Response)) {{
       throw new Error('MiMo official completion did not return a Response');
     }}
-    await emit({{type: 'status', status: response.status}});
+    await emit({{type: 'status', status: response.status,
+      contentType: response.headers.get('content-type') || ''}});
     if (!response.ok) {{
       await emit({{type: 'error', data: (await response.text()).slice(0, 16384)}});
       return;
@@ -241,10 +242,18 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
             session, selection, reports = await self._select_session(
                 credential, proxy_url, plan or default_runtime_plan()
             )
-            result = await session.page.evaluate(
-                _config_request(selection.rules),
-                {"maximumBytes": core_settings().browser_transport_max_buffered_bytes},
-            )
+            try:
+                result = await session.page.evaluate(
+                    _config_request(selection.rules),
+                    {"maximumBytes": core_settings().browser_transport_max_buffered_bytes},
+                )
+            except Exception as error:
+                logger.warning(
+                    "mimo_official_browser_request_failed error_type=%s reason=%s",
+                    type(error).__name__,
+                    _error_reason(error),
+                )
+                raise
             if not isinstance(result, dict):
                 raise TypeError("MiMo official browser returned an invalid response")
             try:
@@ -295,8 +304,9 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                     )
                 except Exception as error:  # noqa: BLE001 - normalized stream boundary
                     logger.warning(
-                        "mimo_official_browser_stream_failed error_type=%s",
+                        "mimo_official_browser_stream_failed error_type=%s reason=%s",
                         type(error).__name__,
+                        _error_reason(error),
                     )
                     await queue.put(
                         {
@@ -312,6 +322,8 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
             terminal_data: dict[str, Any] | None = None
             status = -1
             data_seen = False
+            data_events = 0
+            data_bytes = 0
             try:
                 while True:
                     event = await queue.get()
@@ -319,9 +331,19 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                         break
                     if event.get("type") == "error":
                         pending_error = event
+                        logger.warning(
+                            "mimo_official_browser_stream_error status=%s error_bytes=%s",
+                            status,
+                            len(str(event.get("data") or "").encode("utf-8")),
+                        )
                         continue
                     if event.get("type") == "status":
                         status = int(event.get("status") or 502)
+                        logger.info(
+                            "mimo_official_browser_stream_status status=%s content_type=%s",
+                            status,
+                            str(event.get("contentType") or "")[:120],
+                        )
                     if (
                         event.get("type") == "data"
                         and str(event.get("data") or "").strip() == "[DONE]"
@@ -330,7 +352,17 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                         continue
                     if event.get("type") == "data" and str(event.get("data") or ""):
                         data_seen = True
+                        data_events += 1
+                        data_bytes += len(str(event.get("data") or "").encode("utf-8"))
                     yield event
+                logger.info(
+                    "mimo_official_browser_stream_complete status=%s data_events=%s "
+                    "data_bytes=%s error=%s",
+                    status,
+                    data_events,
+                    data_bytes,
+                    pending_error is not None,
+                )
                 if pending_error is None and data_seen and 200 <= status < 300:
                     success_report = successful_canary(plan, selection, session.build_id)
                     if success_report is not None:
@@ -662,3 +694,10 @@ def _number(value: Any, fallback: float) -> float:
         if isinstance(value, (int, float)) and not isinstance(value, bool)
         else fallback
     )
+
+
+def _error_reason(error: BaseException) -> str:
+    value = " ".join(str(error).split())
+    if not value:
+        return "<empty>"
+    return value[:200]

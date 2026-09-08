@@ -456,7 +456,21 @@ _UPLOAD_MEDIA = r"""async input => {
       },
       body: decoded.bytes
     });
-    if (!response.ok) throw new Error('Qwen OSS upload was rejected');
+    if (!response.ok) {
+      const responseText = await response.text();
+      let errorCode = '';
+      try {
+        const responseBody = new DOMParser().parseFromString(responseText, 'application/xml');
+        errorCode = String(responseBody?.querySelector('Code')?.textContent || '')
+          .replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+      } catch (_) {
+        errorCode = '';
+      }
+      throw new Error(
+        'Qwen OSS upload was rejected with HTTP ' + response.status
+        + (errorCode ? ' code ' + errorCode : '')
+      );
+    }
   };
   const fileObject = (sts, source, decoded) => {
     const now = Date.now();

@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 from ..config import settings as core_settings
@@ -28,127 +29,85 @@ from .runtime_rules import (
 logger = logging.getLogger("any2api_automation.providers.mimo_browser")
 
 
-def _locate_bridge(rule: RuntimeRule) -> str:
-    markers = json.dumps(rule.discovery_markers.get("requestModule", ()))
-    chat_capability = json.dumps(rule.capabilities.get("chat", ""))
-    models_capability = json.dumps(rule.capabilities.get("models", ""))
-    template = r"""() => {
-  const markers = __MARKERS__;
-  const chatCapability = __CHAT_CAPABILITY__;
-  const modelsCapability = __MODELS_CAPABILITY__;
-  const cached = window.__any2apiMimoOfficialBridge;
-  if (typeof cached?.chat?.[chatCapability] === 'function' &&
-      typeof cached?.config?.[modelsCapability] === 'function') return cached;
-  const chunkNames = Object.getOwnPropertyNames(window)
-    .filter(name => name.startsWith('rspackChunk'));
-  for (const chunkName of chunkNames) {
-    const chunks = window[chunkName];
-    if (!Array.isArray(chunks)) continue;
-    let runtime;
-    chunks.push([['any2api-' + Date.now()], {}, require => { runtime = require; }]);
-    if (!runtime?.m) continue;
-    for (const [id, factory] of Object.entries(runtime.m)) {
-      const source = String(factory);
-      if (!markers.length || !markers.every(marker => source.includes(marker))) {
-        continue;
-      }
-      let exports;
-      try { exports = runtime(id); } catch (_) { continue; }
-      try {
-        const values = Object.values(exports || {});
-        const chat = values.find(value => value && typeof value === 'object' &&
-          typeof value[chatCapability] === 'function');
-        const config = values.find(value => value && typeof value === 'object' &&
-          typeof value[modelsCapability] === 'function');
-        if (chat && config) {
-          window.__any2apiMimoOfficialBridge = {chat, config, diagnosticModuleId: id};
-          return window.__any2apiMimoOfficialBridge;
-        }
-      } catch (_) { continue; }
-    }
-  }
-  throw new Error('MiMo official request bridge was not found');
-}"""
-    return (
-        template.replace("__MARKERS__", markers)
-        .replace("__CHAT_CAPABILITY__", chat_capability)
-        .replace("__MODELS_CAPABILITY__", models_capability)
-    )
-
-
 def _config_request(rule: RuntimeRule) -> str:
-    locate = _locate_bridge(rule)
-    capability = json.dumps(rule.capabilities.get("models", ""))
-    return rf"""async request => {{
-  const locate = {locate};
-  const bridge = locate();
-  const result = await bridge.config[{capability}]();
-  const data = Array.isArray(result) ? result[0] : result;
-  const error = Array.isArray(result) ? result[1] : null;
-  if (error) throw error;
-  const encoded = new TextEncoder().encode(JSON.stringify({{code: 0, data}}));
-  if (encoded.length > request.maximumBytes) {{
-    throw new Error('MiMo browser response exceeds the buffered byte limit');
-  }}
-  let binary = '';
-  for (let index = 0; index < encoded.length; index += 32768) {{
-    binary += String.fromCharCode(...encoded.subarray(index, index + 32768));
-  }}
-  return {{status: 200, bodyBase64: btoa(binary), moduleLocated: true}};
-}}"""
+    del rule
+    return r"""async request => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+  try {
+    const response = await fetch(request.url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: request.headers,
+      signal: controller.signal
+    });
+    const body = await response.text();
+    const encoded = new TextEncoder().encode(body);
+    if (encoded.length > request.maximumBytes) {
+      throw new Error('MiMo browser response exceeds the buffered byte limit');
+    }
+    let binary = '';
+    for (let index = 0; index < encoded.length; index += 32768) {
+      binary += String.fromCharCode(...encoded.subarray(index, index + 32768));
+    }
+    return {
+      status: response.status,
+      bodyBase64: btoa(binary),
+      contentType: response.headers.get('content-type') || ''
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}"""
 
 
 def _stream_request(rule: RuntimeRule) -> str:
-    locate = _locate_bridge(rule)
-    capability = json.dumps(rule.capabilities.get("chat", ""))
-    return rf"""async request => {{
-  const locate = {locate};
-  const bridge = locate();
-  const emit = event => window.__any2apiMimoEmit({{requestId: request.requestId, ...event}});
+    del rule
+    return r"""async request => {
+  const emit = event => window.__any2apiMimoEmit({requestId: request.requestId, ...event});
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
-  try {{
-    const result = await bridge.chat[{capability}](request.body, controller);
-    const response = Array.isArray(result) ? result[0] : result;
-    const error = Array.isArray(result) ? result[1] : null;
-    if (error) throw error;
-    if (!(response instanceof Response)) {{
-      throw new Error('MiMo official completion did not return a Response');
-    }}
-    await emit({{type: 'status', status: response.status,
-      contentType: response.headers.get('content-type') || ''}});
-    if (!response.ok) {{
-      await emit({{type: 'error', data: (await response.text()).slice(0, 16384)}});
+  try {
+    const response = await fetch(request.url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: request.headers,
+      body: JSON.stringify(request.body),
+      signal: controller.signal
+    });
+    await emit({type: 'status', status: response.status,
+      contentType: response.headers.get('content-type') || ''});
+    if (!response.ok) {
+      await emit({type: 'error', data: (await response.text()).slice(0, 16384)});
       return;
-    }}
+    }
     const reader = response.body?.getReader();
-    if (!reader) throw new Error('MiMo official response has no stream body');
+    if (!reader) throw new Error('MiMo browser response has no stream body');
     const decoder = new TextDecoder();
     let pending = '';
-    while (true) {{
-      const {{done, value}} = await reader.read();
-      if (done) break;
-      pending += decoder.decode(value, {{stream: true}});
+    const consume = async text => {
+      pending += text;
       const frames = pending.split(/\r?\n\r?\n/);
       pending = frames.pop() || '';
-      for (const frame of frames) {{
-        for (const line of frame.split(/\r?\n/)) {{
-          if (line.startsWith('data:') && line.slice(5).trim()) {{
-            await emit({{type: 'data', data: line.slice(5).trim()}});
-          }}
-        }}
-      }}
-    }}
-    pending += decoder.decode();
-    for (const line of pending.split(/\r?\n/)) {{
-      if (line.startsWith('data:') && line.slice(5).trim()) {{
-        await emit({{type: 'data', data: line.slice(5).trim()}});
-      }}
-    }}
-  }} finally {{
+      for (const frame of frames) {
+        for (const line of frame.split(/\r?\n/)) {
+          if (line.startsWith('data:') && line.slice(5).trim()) {
+            await emit({type: 'data', data: line.slice(5).trim()});
+          }
+        }
+      }
+    };
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      await consume(decoder.decode(value, {stream: true}));
+    }
+    await consume(decoder.decode());
+    if (pending.trim()) await consume('\n\n');
+  } finally {
     clearTimeout(timeout);
-  }}
-    }}"""
+  }
+}"""
 
 
 _UPLOAD_MEDIA = r"""async input => {
@@ -245,7 +204,20 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
             try:
                 result = await session.page.evaluate(
                     _config_request(selection.rules),
-                    {"maximumBytes": core_settings().browser_transport_max_buffered_bytes},
+                    {
+                        "url": self._endpoint(
+                            selection,
+                            _with_phase(
+                                selection.rules.endpoint_paths.get(
+                                    "models", "/open-apis/bot/config"
+                                ),
+                                credential,
+                            ),
+                        ),
+                        "headers": _headers(),
+                        "timeoutMs": selection.rules.canary_timeout_seconds * 1000,
+                        "maximumBytes": core_settings().browser_transport_max_buffered_bytes,
+                    },
                 )
             except Exception as error:
                 logger.warning(
@@ -298,6 +270,16 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                         _stream_request(selection.rules),
                         {
                             "requestId": request_id,
+                            "url": self._endpoint(
+                                selection,
+                                _with_phase(
+                                    selection.rules.endpoint_paths.get(
+                                        "chat", "/open-apis/bot/chat"
+                                    ),
+                                    credential,
+                                ),
+                            ),
+                            "headers": _headers(),
                             "body": body,
                             "timeoutMs": core_settings().registration_timeout_seconds * 1000,
                         },
@@ -452,23 +434,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         )
 
     async def wait_until_ready(self, page: Any, rule: RuntimeRule) -> None:
-        await page.wait_for_function(
-            """() => Object.getOwnPropertyNames(window)
-              .some(name => name.startsWith('rspackChunk'))""",
-            timeout=rule.canary_timeout_seconds * 1000,
-        )
-        deadline = asyncio.get_running_loop().time() + rule.canary_timeout_seconds
-        last_error: Exception | None = None
-        while asyncio.get_running_loop().time() < deadline:
-            try:
-                await page.evaluate(_locate_bridge(rule))
-                return
-            except Exception as error:
-                if "official request bridge was not found" not in str(error):
-                    raise
-                last_error = error
-                await page.wait_for_timeout(1_000)
-        raise RuntimeError("MiMo official request bridge did not load in time") from last_error
+        del page, rule
 
     async def _select_session(
         self,
@@ -493,6 +459,10 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
         if queue is None:
             return
         queue.put_nowait({key: value for key, value in event.items() if key != "requestId"})
+
+    def _endpoint(self, selection: RuntimeRuleSelection, path: str) -> str:
+        del selection
+        return f"{self.base_url}{path}"
 
 
 def build_mimo_chat_request(
@@ -582,10 +552,6 @@ def build_mimo_chat_request(
     }
 
 
-def official_bridge_script(rule: RuntimeRule | None = None) -> str:
-    return _locate_bridge(rule or default_runtime_plan().active.rules)
-
-
 def _mimo_media_sources(messages: Any) -> list[dict[str, str]]:
     media_blocks = list(iter_media_blocks(messages, "MiMo"))
     sources: list[dict[str, str]] = []
@@ -633,6 +599,22 @@ def default_runtime_plan() -> RuntimePlan:
         },
     )
     return RuntimePlan(RuntimeRuleSelection("mimo", 1, rule), None, "", "")
+
+
+def _headers() -> dict[str, str]:
+    return {
+        "Accept": "*/*",
+        "Content-Type": "application/json",
+        "x-timezone": "Asia/Shanghai",
+    }
+
+
+def _with_phase(path: str, credential: dict[str, Any]) -> str:
+    phase = str(credential.get("xiaomichatbot_ph") or "").strip()
+    if not phase:
+        raise ValueError("MiMo browser request requires xiaomichatbot_ph")
+    separator = "&" if "?" in path else "?"
+    return f"{path}{separator}xiaomichatbot_ph={quote(phase, safe='')}"
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:

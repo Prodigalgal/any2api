@@ -10,21 +10,24 @@ from any2api_automation.providers import mimo as mimo_module
 from any2api_automation.providers.mimo import MimoAutomationProvider
 from any2api_automation.providers.mimo_browser import (
     MimoOfficialBrowserTransport,
+    _config_request,
     _mimo_media_sources,
+    _stream_request,
     build_mimo_chat_request,
-    official_bridge_script,
+    default_runtime_plan,
 )
 
 
-def test_mimo_bridge_discovers_official_runtime_without_fixed_module_ids() -> None:
-    script = official_bridge_script()
+def test_mimo_uses_same_origin_browser_fetch_for_config_and_chat() -> None:
+    rule = default_runtime_plan().active.rules
+    config_script = _config_request(rule)
+    stream_script = _stream_request(rule)
 
-    assert "rspackChunk" in script
-    assert "/open-apis/bot/chat" in script
-    assert "genUploadInfo" in script
-    assert "completions" in script
-    assert "getConfig" in script
-    assert "80032" not in script
+    assert "fetch(request.url" in config_script
+    assert "fetch(request.url" in stream_script
+    assert "credentials: 'include'" in config_script
+    assert "credentials: 'include'" in stream_script
+    assert "rspackChunk" not in stream_script
 
 
 def test_mimo_storage_injection_rejects_cross_provider_state() -> None:
@@ -193,14 +196,19 @@ async def test_concurrent_accounts_receive_only_their_own_stream_events(monkeypa
 
     async def selection(credential, proxy, plan):
         session, _, reports = await select(credential, proxy, plan)
-        return session, SimpleNamespace(rules=None), reports
+        return session, SimpleNamespace(rules=default_runtime_plan().active.rules), reports
 
     runtime._select_session = AsyncMock(side_effect=selection)
 
     async def consume(account):
         return [
             event
-            async for event in runtime.stream({"user_id": account}, _semantic_command(), "", None)
+            async for event in runtime.stream(
+                {"user_id": account, "xiaomichatbot_ph": "phase"},
+                _semantic_command(),
+                "",
+                None,
+            )
         ]
 
     a, b = await asyncio.wait_for(asyncio.gather(consume("a"), consume("b")), 2)

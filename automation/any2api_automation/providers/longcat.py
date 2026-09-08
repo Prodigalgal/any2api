@@ -253,8 +253,13 @@ class LongcatAutomationProvider(AutomationProvider):
                         **{key: value for key, value in event.items() if key != "type"},
                     )
             except Exception as error:  # noqa: BLE001 - normalized stream boundary
+                reason = " ".join(str(error).split())[:240]
                 yield transport_frame(
-                    "error", data=f"official browser stream failed ({type(error).__name__})"
+                    "error",
+                    data=(
+                        f"official browser stream failed ({type(error).__name__})"
+                        + (f": {reason}" if reason else "")
+                    ),
                 )
 
     async def close(self) -> None:

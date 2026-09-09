@@ -136,6 +136,23 @@ class OpenAiResponseWriterTest {
     }
 
     @Test
+    void mapsReactiveRequestValidationFailuresToBadRequest() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+            "/alpha/v1/chat/completions").build());
+        var failure = Flux.<CanonicalEvent>error(OpenAiRequestException.unsupported(
+            "max_tokens", "unsupported standard parameter for alpha: max_tokens"));
+
+        writer.write(request(CanonicalRequest.Protocol.CHAT_COMPLETIONS, false), failure, exchange)
+            .block();
+
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(400);
+        assertThat(exchange.getResponse().getBodyAsString().block())
+            .contains("unsupported_parameter")
+            .contains("max_tokens")
+            .contains("unsupported standard parameter");
+    }
+
+    @Test
     void mapsProviderRateLimitsToOpenAiCompatibleHttpStatus() {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
             "/alpha/v1/responses").build());

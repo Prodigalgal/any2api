@@ -36,27 +36,43 @@ public class OpenAiResponseWriter {
         Flux<CanonicalEvent> events,
         ServerWebExchange exchange
     ) {
-        var guarded = events.onErrorResume(error -> Flux.just(new CanonicalEvent.Failed(
-            1,
-            request.requestId(),
-            1,
-            error instanceof AccountUnavailableException
-                ? "account_unavailable"
-                : error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException
-                    || error instanceof ModelAvailabilityGuard.ModelUnavailableException
-                    ? "model_unavailable" : "gateway_execution_error",
-            error instanceof AccountUnavailableException
-                ? error.getMessage()
-                : error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException rejected
-                    ? rejected.reason()
-                    : error instanceof ModelAvailabilityGuard.ModelUnavailableException
-                        ? error.getMessage() : "gateway execution failed",
-            Map.of(
-                "exception", error.getClass().getSimpleName(),
-                "retryable", !(error instanceof ModelAvailabilityGuard.ModelUnavailableException)))));
+        var guarded = events.onErrorResume(error -> Flux.just(normalizeFailure(request, error)));
         return request.stream()
             ? writeStream(request, guarded, exchange)
             : writeCollected(request, guarded, exchange);
+    }
+
+    private CanonicalEvent.Failed normalizeFailure(
+        CanonicalRequest request,
+        Throwable error
+    ) {
+        if (error instanceof OpenAiRequestException requestError) {
+            var detail = new LinkedHashMap<String, Object>();
+            detail.put("param", requestError.parameter());
+            if (!requestError.acceptedParameters().isEmpty()) {
+                detail.put("accepted_parameters", requestError.acceptedParameters());
+            }
+            return new CanonicalEvent.Failed(
+                1, request.requestId(), 1, requestError.type(), requestError.getMessage(), detail);
+        }
+        if (error instanceof AccountUnavailableException unavailable) {
+            return new CanonicalEvent.Failed(
+                1, request.requestId(), 1, "account_unavailable", unavailable.getMessage(),
+                Map.of("exception", error.getClass().getSimpleName(), "retryable", true));
+        }
+        if (error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException rejected) {
+            return new CanonicalEvent.Failed(
+                1, request.requestId(), 1, "model_unavailable", rejected.reason(),
+                Map.of("exception", error.getClass().getSimpleName(), "retryable", true));
+        }
+        if (error instanceof ModelAvailabilityGuard.ModelUnavailableException) {
+            return new CanonicalEvent.Failed(
+                1, request.requestId(), 1, "model_unavailable", error.getMessage(),
+                Map.of("exception", error.getClass().getSimpleName(), "retryable", false));
+        }
+        return new CanonicalEvent.Failed(
+            1, request.requestId(), 1, "gateway_execution_error", "gateway execution failed",
+            Map.of("exception", error.getClass().getSimpleName(), "retryable", true));
     }
 
     private Mono<Void> writeStream(
@@ -446,7 +462,11 @@ public class OpenAiResponseWriter {
                 ? HttpStatus.TOO_MANY_REQUESTS
                 : Set.of("account_unavailable", "model_unavailable")
                     .contains(failure.errorType())
-                    ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY;
+                    ? HttpStatus.SERVICE_UNAVAILABLE
+                    : Set.of("invalid_request_error", "unsupported_parameter",
+                        "unknown_provider_option", "parameter_conflict")
+                        .contains(failure.errorType())
+                        ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY;
         }
 
         private ObjectNode chatResponse() {

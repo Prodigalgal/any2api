@@ -15,7 +15,7 @@
 | `credential` | Encrypted provider credentials and credential-version invalidation |
 | `session` | Tenant-isolated provider stickiness and upstream conversation state |
 | `registration` | Durable campaigns, attempts, steps, callbacks, and account insertion |
-| `lifecycle` | Probe, refresh, reauth, keepalive, recovery funnel, and state transitions |
+| `lifecycle` | Probe, refresh, reauth, keepalive, daily account actions, recovery funnel, and state transitions |
 | `scheduling` | Durable actions, jitter, backoff, catch-up, budgets, and circuit breakers |
 | `usage` | Request events, token accounting, aggregation, and quota input |
 | `audit` | Secret-silent operator and system actions |
@@ -42,7 +42,7 @@ modules or sibling-provider references.
 |---|---|
 | `lifecycle.browser` | Camoufox/Patchright processes, isolated contexts/profiles, realtime and batch lanes |
 | `captcha` | Provider-neutral ddddocr, captcha-recognizer, OpenCV, preprocessing, fusion, and confidence |
-| `providers` | Isolated registration, browser reauthentication, and interactive challenges |
+| `providers` | Isolated registration, browser reauthentication, daily account actions, and interactive challenges |
 | `browser_runtime` | Camoufox-first account-isolated contexts, storage/fingerprint restoration, page execution, official frontend functions, page fetch/WebSocket, raw event capture, and credential patches |
 | `browser_transport` | Bounded compatibility port for legacy account/media lifecycle code; no text-inference, model-discovery, or keepalive path may depend on it |
 | `lifecycle.proxy` | sing-box children, node health, flow-affine leases, and cleanup |

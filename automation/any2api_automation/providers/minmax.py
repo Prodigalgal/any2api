@@ -35,6 +35,7 @@ from ..lifecycle.mail import Mailbox
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
 from .base import AutomationProvider, AutomationProviderManifest
 from .minmax_browser import MinmaxOfficialBrowserTransport
+from .minmax_daily_checkin import MinmaxDailyCheckin
 from .minmax_settings import settings
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .runtime_rules import RuntimePlan, parse_runtime_plan
@@ -48,7 +49,7 @@ class MinmaxAutomationProvider(AutomationProvider):
         fallback_backend="patchright",
         isolation="process",
         challenge_types=("slider",),
-        operations=("register", "reauthenticate", "keepalive"),
+        operations=("register", "reauthenticate", "keepalive", "daily_checkin"),
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
     )
@@ -149,6 +150,9 @@ class MinmaxAutomationProvider(AutomationProvider):
             response["credential_patch"] = patch
         return response
 
+    async def daily_checkin(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await minmax_daily_checkin.execute(payload)
+
     async def transport_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
         operation = str(payload.get("operation") or "")
@@ -218,6 +222,8 @@ def _default_runtime_plan() -> RuntimePlan:
             "agents": "/archon/api/v1/agent?limit=20",
             "filesPolicy": "/v1/api/files/request_policy",
             "filesCallback": "/v1/api/files/policy_callback",
+            "signinStatus": "/minimax-cloud/api/v1/signin/status",
+            "signinClaim": "/minimax-cloud/api/v1/signin/claim",
         },
     )
     return RuntimePlan(RuntimeRuleSelection("minmax", 1, rule), None, "", "")
@@ -1020,6 +1026,10 @@ def _profile_from_browser(context, page) -> dict[str, str]:
 
 
 official_browser_transport = MinmaxOfficialBrowserTransport(settings().minmax_base_url)
+minmax_daily_checkin = MinmaxDailyCheckin(
+    lambda: official_browser_transport,
+    lambda payload: _transport_proxy_lease(payload),
+)
 
 
 def _minmax_proxy_affinity(email: str, attempt: int) -> str:

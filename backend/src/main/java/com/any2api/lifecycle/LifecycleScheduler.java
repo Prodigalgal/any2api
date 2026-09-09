@@ -8,6 +8,8 @@ import com.any2api.coordination.AccountCapacityException;
 import com.any2api.coordination.AccountLease;
 import com.any2api.coordination.AccountLeaseService;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.ProviderCapability;
+import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.observability.OperationContext;
@@ -225,8 +227,11 @@ public class LifecycleScheduler {
                 action.providerId(), action.action(), task.credential(),
                 task.account().getMetadata(), task.proxyPool(), context)
             .flatMap(result -> {
-                var probe = !requiresReadinessProbe(
-                        action.action(), task.account().getStatus(), result.healthy())
+                var dailyCheckinSupported = supportsDailyCheckin(action.providerId());
+                var readinessRequired = requiresReadinessProbe(
+                        action.action(), task.account().getStatus(), result.healthy(),
+                        dailyCheckinSupported);
+                var probe = !readinessRequired
                     ? reactor.core.publisher.Mono.just(
                         InferenceReadinessProbe.Result.notRequired())
                     : readiness.probe(
@@ -237,10 +242,17 @@ public class LifecycleScheduler {
                 return probe.flatMap(probeResult -> renewOwnership(action, owner, lease)
                     .then(reactor.core.publisher.Mono.<Void>fromRunnable(() -> {
                     transactions.executeWithoutResult(ignored ->
-                        complete(action, owner, task, result, probeResult));
-                    if (result.healthy() && probeResult.ready()) {
+                        complete(action, owner, task, result, probeResult,
+                            readinessRequired));
+                    var inferenceReady = result.healthy() && probeResult.ready()
+                        && (readinessRequired
+                            || (task.account().getStatus() == AccountStatus.ACTIVE
+                                && task.account().isEnabled()));
+                    if (inferenceReady) {
                         observability.succeed(observed, probeResult.model().isBlank()
                             ? "lifecycle_completed" : "inference_probe_ready");
+                    } else if (result.healthy() && probeResult.ready()) {
+                        observability.succeed(observed, "daily_checkin_completed");
                     } else {
                         var code = !probeResult.ready()
                             ? probeResult.errorClass() : result.errorClass();
@@ -261,7 +273,8 @@ public class LifecycleScheduler {
         String owner,
         AccountTask task,
         LifecycleResult result,
-        InferenceReadinessProbe.Result probe
+        InferenceReadinessProbe.Result probe,
+        boolean readinessRequired
     ) {
         var completedAt = Instant.now();
         var credentialExpiresAt = result.credentialExpiresAt();
@@ -296,11 +309,13 @@ public class LifecycleScheduler {
             }
         }
         var healthy = result.healthy() && probe.ready();
+        var inferenceReady = probe.ready() && (readinessRequired
+            || (task.account().getStatus() == AccountStatus.ACTIVE && task.account().isEnabled()));
         var authExpired = result.authExpired();
-        var inferenceCredentialRejected = result.healthy()
+        var inferenceCredentialRejected = result.healthy() && readinessRequired
             && !probe.ready()
             && "credential_rejected".equals(probe.errorClass());
-        if (healthy) {
+        if (healthy && inferenceReady) {
             if (task.account().getStatus() != AccountStatus.ACTIVE) {
                 task.account().updateState(AccountStatus.ACTIVE, true);
                 accounts.save(task.account());
@@ -326,7 +341,8 @@ public class LifecycleScheduler {
         }
         var nextGeneration = action.generation() + 1;
         var nextAction = nextAction(
-            action.action(), result.healthy(), authExpired, inferenceCredentialRejected);
+            action.action(), result.healthy(), authExpired, inferenceCredentialRejected,
+            task.account().getStatus(), task.account().isEnabled(), dailyCheckinSupported);
         if (result.healthy() || authExpired) {
             jdbc.sql("""
                 UPDATE scheduled_actions SET status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
@@ -339,12 +355,22 @@ public class LifecycleScheduler {
         }
         var reauthenticationRequired = authExpired || inferenceCredentialRejected;
         var keepalivePolicy = runtimeSettings.keepalivePolicy(action.providerId());
-        var interval = healthy ? healthyInterval(
+        var activationFollowup = dailyCheckinSupported && result.healthy()
+            && ("reauthenticate".equals(action.action())
+                || ("daily_checkin".equals(action.action())
+                    && (task.account().getStatus() != AccountStatus.ACTIVE
+                        || !task.account().isEnabled())));
+        var nextDailyCheckin = dailyCheckinSupported && "daily_checkin".equals(nextAction);
+        var interval = activationFollowup ? Duration.ofMinutes(1)
+            : healthy && nextDailyCheckin ? Duration.ofHours(24)
+            : healthy ? healthyInterval(
                 credentialExpiresAt, completedAt,
                 Duration.ofMinutes(keepalivePolicy.intervalMinutes()))
             : reauthenticationRequired ? Duration.ofMinutes(15)
             : retryDelay(action.attempts() + 1);
-        var jitterWindow = healthy
+        var jitterWindow = activationFollowup ? Duration.ZERO
+            : healthy && nextDailyCheckin ? Duration.ofMinutes(30)
+            : healthy
             ? Duration.ofMinutes(keepalivePolicy.jitterMinutes()) : Duration.ofMinutes(20);
         var dueAt = completedAt.plus(interval).plus(LifecycleScheduleService.deterministicJitter(
             task.account().getId(), nextGeneration, jitterWindow));
@@ -408,6 +434,12 @@ public class LifecycleScheduler {
         return Duration.ofSeconds(Math.min(21_600, 30L * (1L << exponent)));
     }
 
+    private boolean supportsDailyCheckin(String providerId) {
+        return providers.require(providerId).manifest().capabilities().getOrDefault(
+            ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.UNSUPPORTED)
+            != SupportLevel.UNSUPPORTED;
+    }
+
     private static tools.jackson.databind.JsonNode mergedCredential(
         tools.jackson.databind.JsonNode credential,
         tools.jackson.databind.JsonNode patch
@@ -442,6 +474,16 @@ public class LifecycleScheduler {
         AccountStatus status,
         boolean operationHealthy
     ) {
+        return requiresReadinessProbe(action, status, operationHealthy, false);
+    }
+
+    static boolean requiresReadinessProbe(
+        String action,
+        AccountStatus status,
+        boolean operationHealthy,
+        boolean dailyCheckinSupported
+    ) {
+        if (dailyCheckinSupported && "daily_checkin".equals(action)) return false;
         return operationHealthy && (status == AccountStatus.PENDING
             || status == AccountStatus.EXPIRED
             || "reauthenticate".equals(action));
@@ -453,7 +495,29 @@ public class LifecycleScheduler {
         boolean authExpired,
         boolean inferenceCredentialRejected
     ) {
+        return nextAction(
+            current, operationHealthy, authExpired, inferenceCredentialRejected,
+            AccountStatus.ACTIVE, true, false);
+    }
+
+    static String nextAction(
+        String current,
+        boolean operationHealthy,
+        boolean authExpired,
+        boolean inferenceCredentialRejected,
+        AccountStatus status,
+        boolean enabled,
+        boolean dailyCheckinSupported
+    ) {
         if (authExpired || inferenceCredentialRejected) return "reauthenticate";
+        if (dailyCheckinSupported && operationHealthy
+            && "reauthenticate".equals(current)) return "daily_checkin";
+        if (dailyCheckinSupported && operationHealthy
+            && "daily_checkin".equals(current)
+            && (status != AccountStatus.ACTIVE || !enabled)) return "keepalive";
+        if (dailyCheckinSupported && operationHealthy && "keepalive".equals(current)) {
+            return "daily_checkin";
+        }
         if (operationHealthy && "reauthenticate".equals(current)) return "keepalive";
         return current;
     }

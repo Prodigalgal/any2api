@@ -69,6 +69,7 @@ public final class MinmaxProvider implements InferenceProvider {
                 ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
                 ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
+                ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.NATIVE,
                 ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
             Map.of(RandomModelRole.TOP_TEXT, List.of("MiniMax-M3")), true);

@@ -57,4 +57,27 @@ class LifecycleSchedulerTest {
         assertEquals(false, LifecycleScheduler.requiresReadinessProbe(
             "keepalive", AccountStatus.ACTIVE, true));
     }
+
+    @Test
+    void dailyCheckinRunsBeforeInferenceReadinessForMinmax() {
+        assertEquals(false, LifecycleScheduler.requiresReadinessProbe(
+            "daily_checkin", AccountStatus.PENDING, true, true));
+        assertEquals(true, LifecycleScheduler.requiresReadinessProbe(
+            "reauthenticate", AccountStatus.EXPIRED, true, true));
+        assertEquals(true, LifecycleScheduler.requiresReadinessProbe(
+            "keepalive", AccountStatus.PENDING, true, true));
+    }
+
+    @Test
+    void dailyCheckinTransitionsPendingAccountsToKeepaliveAndActiveAccountsBackToDaily() {
+        assertEquals("keepalive", LifecycleScheduler.nextAction(
+            "daily_checkin", true, false, false,
+            AccountStatus.PENDING, false, true));
+        assertEquals("daily_checkin", LifecycleScheduler.nextAction(
+            "keepalive", true, false, false,
+            AccountStatus.ACTIVE, true, true));
+        assertEquals("daily_checkin", LifecycleScheduler.nextAction(
+            "reauthenticate", true, false, false,
+            AccountStatus.ACTIVE, true, true));
+    }
 }

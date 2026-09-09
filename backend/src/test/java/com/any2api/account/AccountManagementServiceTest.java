@@ -130,6 +130,30 @@ class AccountManagementServiceTest {
     }
 
     @Test
+    void dailyCheckinProvidersScheduleTheSharedAccountActionOnImport() {
+        var repository = mock(AccountRepository.class);
+        var vault = mock(CredentialVault.class);
+        when(repository.findByProviderIdAndExternalId(any(), any())).thenReturn(Optional.empty());
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(vault.store(any(), any(), any(), any())).thenAnswer(invocation ->
+            new DecryptedCredential("provider-session", 1, invocation.getArgument(3),
+                invocation.getArgument(2)));
+        var schedules = mock(LifecycleScheduleService.class);
+        var service = new AccountManagementService(
+            repository, vault, ProviderRegistry.allEnabled(List.of(provider("minmax", true))),
+            schedules, List.of());
+
+        var imported = service.importAccount(new ImportCommand(
+            "minmax", "pending-account", "same@example.com", null, null,
+            Map.of("inference_readiness_pending", true), null, null, null,
+            AccountStatus.PENDING, false, mapper.createObjectNode().put("token", "session"), true));
+
+        verify(schedules).scheduleDailyCheckin(imported.account().id(), "minmax");
+        verify(schedules, never()).scheduleInitialProbe(imported.account().id(), "minmax");
+        verify(schedules, never()).scheduleReauthentication(imported.account().id(), "minmax");
+    }
+
+    @Test
     void accountDetailIncludesOnlyTheCredentialSummary() {
         var repository = mock(AccountRepository.class);
         var vault = mock(CredentialVault.class);
@@ -241,11 +265,17 @@ class AccountManagementServiceTest {
     }
 
     private InferenceProvider provider(String id) {
+        return provider(id, false);
+    }
+
+    private InferenceProvider provider(String id, boolean dailyCheckin) {
         var capabilities = Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE);
+                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE,
+                ProviderCapability.ACCOUNT_DAILY_CHECKIN,
+                dailyCheckin ? SupportLevel.NATIVE : SupportLevel.UNSUPPORTED);
         return new InferenceProvider() {
             @Override public ProviderManifest manifest() {
                 return new ProviderManifest(

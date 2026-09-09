@@ -24,7 +24,7 @@ class OperationContext(BaseModel):
 
 
 class ProviderOperationRequest(BaseModel):
-    operation: Literal["register", "reauthenticate", "keepalive"]
+    operation: Literal["register", "reauthenticate", "keepalive", "daily_checkin"]
     payload: dict[str, Any] = Field(default_factory=dict)
     context: OperationContext
 

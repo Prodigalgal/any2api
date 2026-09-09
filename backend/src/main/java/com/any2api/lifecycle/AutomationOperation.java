@@ -5,7 +5,8 @@ import java.util.Arrays;
 public enum AutomationOperation {
     REGISTER("register"),
     REAUTHENTICATE("reauthenticate"),
-    KEEPALIVE("keepalive");
+    KEEPALIVE("keepalive"),
+    DAILY_CHECKIN("daily_checkin");
 
     private final String externalName;
 

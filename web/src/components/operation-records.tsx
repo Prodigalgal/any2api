@@ -57,4 +57,4 @@ function duration(value: number) { return value < 1000 ? `${value} ms` : `${(val
 function formatTime(value: string) { return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
 function statusLabel(value: string) { return ({ RUNNING: "执行中", SUCCEEDED: "成功", FAILED: "失败", CANCELLED: "已取消" } as Record<string, string>)[value] ?? "未知"; }
 function domainLabel(value: string) { return ({ REGISTRATION: "注册", LIFECYCLE: "生命周期", INFERENCE: "推理" } as Record<string, string>)[value] ?? "其他"; }
-function operationLabel(value: string) { return ({ register: "注册", keepalive: "保活", reauthenticate: "重新认证", probe: "测活" } as Record<string, string>)[value] ?? value; }
+function operationLabel(value: string) { return ({ register: "注册", keepalive: "保活", daily_checkin: "每日签到", reauthenticate: "重新认证", probe: "测活" } as Record<string, string>)[value] ?? value; }

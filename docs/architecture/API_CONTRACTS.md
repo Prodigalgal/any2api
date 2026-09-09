@@ -293,7 +293,7 @@ payload
 
 ```text
 POST /internal/v1/providers/{provider_id}/execute
-operation = register | reauthenticate | keepalive
+operation = register | reauthenticate | keepalive | daily_checkin
 ```
 
 Python has no domain-table access. Java persists a successful registration or credential patch only after the internal call returns. Provider exceptions are reduced to a non-sensitive error class at the service boundary.

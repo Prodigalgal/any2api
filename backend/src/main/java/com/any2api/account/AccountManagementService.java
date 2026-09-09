@@ -116,9 +116,14 @@ public class AccountManagementService {
                 AccountView.from(account), credential.version(), credential.expiresAt());
         }
         var capabilities = provider.manifest().capabilities();
+        var dailyCheckin = capabilities.getOrDefault(
+            ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.UNSUPPORTED);
         var inferenceReadinessPending = Boolean.TRUE.equals(
             command.metadata().get("inference_readiness_pending"));
-        if (account.getStatus() == AccountStatus.PENDING && inferenceReadinessPending
+        if (dailyCheckin != SupportLevel.UNSUPPORTED
+            && account.getStatus() != AccountStatus.BANNED) {
+            schedules.scheduleDailyCheckin(account.getId(), command.providerId());
+        } else if (account.getStatus() == AccountStatus.PENDING && inferenceReadinessPending
             && capabilities.getOrDefault(
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.UNSUPPORTED)
                 != SupportLevel.UNSUPPORTED) {

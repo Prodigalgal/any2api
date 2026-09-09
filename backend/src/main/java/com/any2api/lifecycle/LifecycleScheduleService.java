@@ -60,6 +60,31 @@ public class LifecycleScheduleService {
     }
 
     @Transactional
+    public void scheduleDailyCheckin(UUID accountId, String providerId) {
+        scheduleDailyCheckin(accountId, providerId, Duration.ofMinutes(5));
+    }
+
+    @Transactional
+    public void scheduleDailyCheckin(
+        UUID accountId,
+        String providerId,
+        Duration spread
+    ) {
+        lifecycleLock(accountId, providerId);
+        jdbc.sql("""
+            UPDATE scheduled_actions SET status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
+            WHERE provider_id = :providerId AND entity_type = 'ACCOUNT' AND entity_id = :entityId
+              AND action_family IN ('keepalive', 'reauthenticate') AND status = 'PENDING'
+            """).param("providerId", providerId).param("entityId", accountId.toString())
+            .update();
+        if (activeCount(accountId, providerId, "daily_checkin") > 0
+            || activeCount(accountId, providerId, null) > 0) return;
+        var generation = nextGeneration(accountId, providerId);
+        schedule(accountId, providerId, "daily_checkin", generation,
+            Instant.now().plus(deterministicJitter(accountId, generation, spread)));
+    }
+
+    @Transactional
     public void scheduleReauthentication(UUID accountId, String providerId) {
         scheduleReauthentication(accountId, providerId, Duration.ofMinutes(5));
     }
@@ -76,7 +101,7 @@ public class LifecycleScheduleService {
         jdbc.sql("""
             UPDATE scheduled_actions SET status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
             WHERE provider_id = :providerId AND entity_type = 'ACCOUNT' AND entity_id = :entityId
-              AND action_family = 'keepalive' AND status = 'PENDING'
+              AND action_family IN ('keepalive', 'daily_checkin') AND status = 'PENDING'
             """).param("providerId", providerId).param("entityId", accountId.toString())
             .update();
         var generation = nextGeneration(accountId, providerId);
@@ -94,7 +119,7 @@ public class LifecycleScheduleService {
         jdbc.sql("""
             UPDATE scheduled_actions SET status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
             WHERE provider_id = :providerId AND entity_type = 'ACCOUNT' AND entity_id = :entityId
-              AND action_family = 'reauthenticate' AND status = 'PENDING'
+              AND action_family IN ('reauthenticate', 'daily_checkin') AND status = 'PENDING'
             """).param("providerId", providerId).param("entityId", accountId.toString())
             .update();
         var generation = nextGeneration(accountId, providerId);

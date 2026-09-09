@@ -5,7 +5,7 @@ from dataclasses import asdict
 from .base import AutomationProvider
 
 _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
-_PROVIDER_OPERATIONS = frozenset({"register", "reauthenticate", "keepalive"})
+_PROVIDER_OPERATIONS = frozenset({"register", "reauthenticate", "keepalive", "daily_checkin"})
 _REGISTRATION_ATTEMPT_MODES = frozenset({"new_identity", "single_identity"})
 
 

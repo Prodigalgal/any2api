@@ -142,13 +142,18 @@ MinMax is overseas-only. Its lifecycle flow uses `account.minimax.io` and `agent
 
 MinMax's inference request `user_id` is a protocol field and is not an account identity. Registration accepts an account only after the official `/v1/api/user/info` response matches the registration mailbox. The stable `realUserID` (falling back to `userID`) becomes the provider account's external identity, while the request `user_id` remains isolated in the credential for upstream signing.
 
-The six full-lifecycle plugins for GLM, Grok, LongCat, MiMo, MinMax, and Qwen expose the same
-operations. Channel-only plugins such as Grok Console may advertise a strict subset:
+The common provider lifecycle contract includes a `daily_checkin` operation for providers whose Web or CLI account requires a daily account action before inference. The Python side exposes the shared `DailyCheckinStrategy` contract; each provider owns its protocol, parser, endpoint paths, and credential-patch handling in a separate concrete strategy module. MinMax is the first implementation: it reads the official Web check-in panel through `GET /minimax-cloud/api/v1/signin/status` and claims the current day through `POST /minimax-cloud/api/v1/signin/claim` when the day is claimable. An already-claimed day is idempotently successful. Newly imported or manually activated accounts with this capability execute the operation before the real inference probe so a zero-credit account is not misclassified as an invalid credential.
+
+The six full-lifecycle plugins for GLM, Grok, LongCat, MiMo, MinMax, and Qwen expose the common
+registration, reauthentication, and keepalive operations. A provider may additionally advertise
+the common `daily_checkin` operation when its account lifecycle requires it; channel-only plugins
+such as Grok Console may advertise a strict subset:
 
 ```text
 register -> external_id + email + encrypted credential input
 reauthenticate -> merged credential_patch or terminal auth failure
 keepalive -> healthy, auth_expired, optional credential_patch
+daily_checkin -> healthy, auth_expired, idempotent claim metadata, optional credential_patch
 ```
 
 ## Challenge pipeline
@@ -173,7 +178,7 @@ Only attempt metadata is durable by default. Raw challenge artifacts are opt-in,
 
 ## Successful completion
 
-Python returns extracted results to Java over the internal authenticated API. Java inserts or updates the provider-owned account, stores the full credential through AES-GCM, appends only the account ID to the registration job result, and schedules the next lifecycle action. Inference-ready accounts are `ACTIVE` and receive a keepalive probe; registered accounts that still need provider authorization are `PENDING`, disabled, and receive a reauthentication action. Passwords, OTPs, mailbox JWTs, cookies, proxy nodes, and tokens are never stored in `registration_jobs`.
+Python returns extracted results to Java over the internal authenticated API. Java inserts or updates the provider-owned account, stores the full credential through AES-GCM, appends only the account ID to the registration job result, and schedules the next lifecycle action. Inference-ready accounts are `ACTIVE` and receive a keepalive probe; registered MinMax accounts that still need inference readiness are `PENDING`, disabled, and receive `daily_checkin` before the probe. Other registered accounts retain their provider-specific reauthentication path. Passwords, OTPs, mailbox JWTs, cookies, proxy nodes, and tokens are never stored in `registration_jobs`.
 Worker-reported readiness is diagnostic only. Every newly registered account is staged as `PENDING`
 and disabled; Java must complete a real provider model probe before promoting it to `ACTIVE`.
 

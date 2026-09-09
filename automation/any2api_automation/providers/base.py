@@ -40,6 +40,14 @@ class AutomationProviderManifest:
             )
 
 
+class DailyCheckinStrategy(ABC):
+    """Provider-specific implementation of the shared daily-checkin semantic."""
+
+    @abstractmethod
+    async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+
 class AutomationProvider(ABC):
     @property
     @abstractmethod
@@ -54,6 +62,9 @@ class AutomationProvider(ABC):
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError(f"keepalive is not implemented for {self.manifest.id}")
+
+    async def daily_checkin(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError(f"daily_checkin is not implemented for {self.manifest.id}")
 
     def transport_request(
         self, payload: dict[str, Any]

@@ -69,6 +69,22 @@ class AccountActivationServiceTest {
     }
 
     @Test
+    void dailyCheckinCapabilityTakesPriorityOverReauthenticationAndProbe() {
+        var fixture = fixture(AccountStatus.PENDING, false, true, true, true);
+        var spread = Duration.ofHours(2);
+
+        var result = fixture.service().activate(fixture.account().getId(), spread);
+
+        assertThat(result.action()).isEqualTo(AccountActivationService.Action.DAILY_CHECKIN);
+        verify(fixture.schedules()).scheduleDailyCheckin(
+            fixture.account().getId(), "alpha", spread);
+        verify(fixture.schedules(), never()).scheduleReauthentication(
+            fixture.account().getId(), "alpha", spread);
+        verify(fixture.schedules(), never()).scheduleInitialProbe(
+            fixture.account().getId(), "alpha", spread);
+    }
+
+    @Test
     void bannedAccountsAndUnboundedSpreadsAreRejected() {
         var banned = fixture(AccountStatus.BANNED, false, true, true);
         assertThatThrownBy(() -> banned.service().activate(
@@ -91,18 +107,36 @@ class AccountActivationServiceTest {
         boolean reauthentication,
         boolean keepalive
     ) {
+        return fixture(status, enabled, reauthentication, keepalive, false);
+    }
+
+    private Fixture fixture(
+        AccountStatus status,
+        boolean enabled,
+        boolean reauthentication,
+        boolean keepalive,
+        boolean dailyCheckin
+    ) {
         var account = AccountEntity.create("alpha", "upstream", null, null, Map.of());
         account.updateState(status, enabled);
         var repository = mock(AccountRepository.class);
         when(repository.findById(account.getId())).thenReturn(Optional.of(account));
         var schedules = mock(LifecycleScheduleService.class);
         var providers = ProviderRegistry.allEnabled(List.of(provider(
-            reauthentication, keepalive)));
+            reauthentication, keepalive, dailyCheckin)));
         return new Fixture(account, schedules,
             new AccountActivationService(repository, providers, schedules));
     }
 
     private InferenceProvider provider(boolean reauthentication, boolean keepalive) {
+        return provider(reauthentication, keepalive, false);
+    }
+
+    private InferenceProvider provider(
+        boolean reauthentication,
+        boolean keepalive,
+        boolean dailyCheckin
+    ) {
         var capabilities = new java.util.EnumMap<ProviderCapability, SupportLevel>(
             ProviderCapability.class);
         capabilities.put(ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE);
@@ -112,6 +146,9 @@ class AccountActivationServiceTest {
         }
         if (keepalive) {
             capabilities.put(ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE);
+        }
+        if (dailyCheckin) {
+            capabilities.put(ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.NATIVE);
         }
         return new InferenceProvider() {
             @Override

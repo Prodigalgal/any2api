@@ -44,11 +44,18 @@ public class AccountActivationService {
                 "provider is not configured: " + account.getProviderId());
         }
         var capabilities = provider.manifest().capabilities();
+        var dailyCheckin = capabilities.getOrDefault(
+            ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.UNSUPPORTED);
         var reauthentication = capabilities.getOrDefault(
             ProviderCapability.REAUTHENTICATION, SupportLevel.UNSUPPORTED);
         var keepalive = capabilities.getOrDefault(
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.UNSUPPORTED);
 
+        if (dailyCheckin != SupportLevel.UNSUPPORTED) {
+            schedules.scheduleDailyCheckin(accountId, account.getProviderId(), spread);
+            return new Result(accountId, account.getProviderId(), Action.DAILY_CHECKIN,
+                spread.toSeconds());
+        }
         if (requiresReauthentication(account.getStatus(), account.isEnabled())
             && reauthentication != SupportLevel.UNSUPPORTED) {
             schedules.scheduleReauthentication(accountId, account.getProviderId(), spread);
@@ -83,7 +90,8 @@ public class AccountActivationService {
 
     public enum Action {
         PROBE,
-        REAUTHENTICATE
+        REAUTHENTICATE,
+        DAILY_CHECKIN
     }
 
     public record Result(

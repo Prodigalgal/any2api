@@ -30,7 +30,7 @@ def test_capabilities_include_all_providers() -> None:
     assert provider_ids == sorted(provider_ids)
     assert len(provider_ids) == len(set(provider_ids))
     assert all(
-        set(item["operations"]) <= {"register", "reauthenticate", "keepalive"}
+        set(item["operations"]) <= {"register", "reauthenticate", "keepalive", "daily_checkin"}
         and item["operations"]
         for item in providers
     )

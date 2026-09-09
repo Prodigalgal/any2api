@@ -23,12 +23,14 @@ Each stage has independent global, provider, action, egress, and mailbox-domain 
 - Expired durable leases consume an attempt and return with a delay; they cannot reset forever.
 - Manual reauthentication uses a PostgreSQL advisory lock and coalesces an existing pending/leased action.
 - Keepalive authentication failure transforms the same action into delayed reauthentication.
+- Providers with a daily account-credit action run `daily_checkin` before the first inference
+  probe and repeat it once per day; an already-claimed day is idempotently successful.
 - An explicit public-inference `credential_rejected` result immediately marks the account
   `EXPIRED`, disables selection, and coalesces a reauthentication action. Provider-classified
   anti-bot challenges remain separate, cool the affected account for five minutes so retries can
   select another identity, and do not expire the account.
 - Reauthentication and recovery of a pending or expired account must pass a real inference probe;
-  a successful profile/config request alone cannot promote the account.
+  a successful profile/config or daily-check-in request alone cannot promote the account.
 - Qwen reauthentication reuses the persisted browser identity by default. Only a confirmed
   Patchright host-fingerprint drift, unavailable persisted backend, or explicit operator rotation
   discards browser state and creates a fresh backend-specific identity before credential login.

@@ -49,3 +49,5 @@ databaseChangeLog:
       file: db/changelog/releases/024-browser-runtime-provider-rules.sql
   - include:
       file: db/changelog/releases/025-grok-web-browser-runtime.sql
+  - include:
+      file: db/changelog/releases/026-minmax-daily-checkin.sql

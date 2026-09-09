@@ -20,6 +20,7 @@ def test_minmax_bridge_discovers_the_official_runtime_without_fixed_module_ids()
     assert "x-signature" in script
     assert "hasSearchParamsPath" in script
     assert "return fetch(" in script
+    assert "typeof exports === 'function'" in script
     assert "97516" not in script
     assert "I*7Cf" not in script
 

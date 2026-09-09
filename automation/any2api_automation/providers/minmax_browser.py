@@ -47,10 +47,17 @@ _LOCATE_BRIDGE = r"""() => {
       fetchFactoryCount++;
       let exports;
       try { exports = runtime(id); } catch (_) { continue; }
-      const candidates = [
-        ...Object.values(exports || {}),
-        ...Object.values(exports?.default || {})
-      ];
+      const candidates = [];
+      if (typeof exports === 'function') {
+        candidates.push(exports);
+      } else if (exports && typeof exports === 'object') {
+        candidates.push(...Object.values(exports));
+        const defaultExport = exports.default;
+        if (typeof defaultExport === 'function') candidates.push(defaultExport);
+        else if (defaultExport && typeof defaultExport === 'object') {
+          candidates.push(...Object.values(defaultExport));
+        }
+      }
       for (const candidate of candidates) {
         if (typeof candidate !== 'function') continue;
         const candidateSource = String(candidate);

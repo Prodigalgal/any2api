@@ -243,7 +243,7 @@ public class LifecycleScheduler {
                     .then(reactor.core.publisher.Mono.<Void>fromRunnable(() -> {
                     transactions.executeWithoutResult(ignored ->
                         complete(action, owner, task, result, probeResult,
-                            readinessRequired));
+                            readinessRequired, dailyCheckinSupported));
                     var inferenceReady = result.healthy() && probeResult.ready()
                         && (readinessRequired
                             || (task.account().getStatus() == AccountStatus.ACTIVE
@@ -274,7 +274,8 @@ public class LifecycleScheduler {
         AccountTask task,
         LifecycleResult result,
         InferenceReadinessProbe.Result probe,
-        boolean readinessRequired
+        boolean readinessRequired,
+        boolean dailyCheckinSupported
     ) {
         var completedAt = Instant.now();
         var credentialExpiresAt = result.credentialExpiresAt();

@@ -8,6 +8,7 @@ from any2api_automation.providers.minmax_browser import (
     MinmaxOfficialBrowserTransport,
     _filter_storage_state,
     _Session,
+    _upstream_request_target,
     official_bridge_script,
 )
 
@@ -46,6 +47,13 @@ def test_minmax_storage_injection_rejects_cross_provider_state() -> None:
 
     assert [cookie["name"] for cookie in result["cookies"]] == ["minmax"]
     assert [origin["origin"] for origin in result["origins"]] == ["https://agent.minimax.io"]
+
+
+def test_minmax_upstream_network_diagnostics_strip_query_parameters() -> None:
+    assert _upstream_request_target(
+        "https://agent-stream.minimax.io/archon/api/v1/session/1/message?token=secret"
+    ) == ("agent-stream.minimax.io", "/archon/api/v1/session/1/message")
+    assert _upstream_request_target("https://example.com/archon/api/v1/config") is None
 
 
 @pytest.mark.asyncio

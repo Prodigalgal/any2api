@@ -491,6 +491,8 @@ class MinmaxOfficialBrowserTransport:
                     script=_patchright_fingerprint_script(execution.get("runtime_fingerprint"))
                 )
             page = await context.new_page()
+            page.on("request", _log_upstream_request)
+            page.on("response", _log_upstream_response)
             session = _Session(
                 key=key,
                 browser=browser,
@@ -713,6 +715,44 @@ def _context_options(execution: dict[str, Any], backend: str) -> dict[str, Any]:
         }
     )
     return options
+
+
+def _upstream_request_target(value: str) -> tuple[str, str] | None:
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if host not in {"agent.minimax.io", "agent-stream.minimax.io"}:
+        return None
+    if not parsed.path.startswith(("/archon/", "/v1/", "/api/v0/")):
+        return None
+    return host, parsed.path
+
+
+def _log_upstream_request(request: Any) -> None:
+    target = _upstream_request_target(str(request.url))
+    if target is None:
+        return
+    host, path = target
+    logger.info(
+        "minmax_official_browser_upstream_request method=%s host=%s path=%s",
+        str(request.method or "GET").upper(),
+        host,
+        path,
+    )
+
+
+def _log_upstream_response(response: Any) -> None:
+    target = _upstream_request_target(str(response.url))
+    if target is None:
+        return
+    host, path = target
+    content_type = str(response.headers.get("content-type") or "")[:120]
+    logger.info(
+        "minmax_official_browser_upstream_response host=%s path=%s status=%s content_type=%s",
+        host,
+        path,
+        int(response.status),
+        content_type,
+    )
 
 
 def _patchright_fingerprint_script(value: Any) -> str:

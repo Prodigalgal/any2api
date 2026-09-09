@@ -31,6 +31,7 @@ def test_minmax_media_upload_stays_inside_the_browser_runtime() -> None:
     assert "policy_callback" not in _UPLOAD_MEDIA
     assert "bridge(input.callbackPath" in _UPLOAD_MEDIA
     assert "fetch(objectUrl" in _UPLOAD_MEDIA
+    assert "MinMax object upload was rejected' + await responseError" in _UPLOAD_MEDIA
 
 
 def test_minmax_storage_injection_rejects_cross_provider_state() -> None:

@@ -194,6 +194,16 @@ _UPLOAD_MEDIA = r"""async input => {
     parsed.pathname = prefix + '/' + encodedPath(objectName);
     return parsed.toString();
   };
+  const responseError = async response => {
+    const text = await response.text();
+    let code = '';
+    try {
+      const xml = new DOMParser().parseFromString(text, 'application/xml');
+      code = String(xml?.querySelector('Code')?.textContent || '')
+        .replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+    } catch (_) {}
+    return ' HTTP ' + response.status + (code ? ' code ' + code : '');
+  };
   const output = [];
   for (const source of input.images) {
     const match = /^data:([^;]+);base64,(.+)$/s.exec(String(source.data_url || ''));
@@ -240,7 +250,9 @@ _UPLOAD_MEDIA = r"""async input => {
       },
       body: bytes
     });
-    if (!uploadResponse.ok) throw new Error('MinMax object upload was rejected');
+    if (!uploadResponse.ok) {
+      throw new Error('MinMax object upload was rejected' + await responseError(uploadResponse));
+    }
     const callbackBody = {
       fileName: objectName.slice(objectName.lastIndexOf('/') + 1),
       originFileName: filename,

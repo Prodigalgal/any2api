@@ -30,6 +30,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api, type Account } from "@/lib/api";
 import { OperationEventsTable } from "@/components/operation-events-dialog";
+import { accountActivationActionLabel } from "@/components/lifecycle-labels";
 
 const hiddenMetadataKey = /(authorization|cookie|credential|key|password|secret|session|sso|token)/i;
 
@@ -98,7 +99,7 @@ export function AccountDetailDialog({ account, providerName, reauthenticationSup
         {error ? <Alert severity="error" sx={{ m: 2 }}>{error.message}</Alert> : null}
         {activate.data ? (
           <Alert severity="info" sx={{ m: 2 }}>
-            激活任务已排队：{activate.data.action === "PROBE" ? "真实探测" : "重新认证后探测"}
+            激活任务已排队：{accountActivationActionLabel(activate.data.action)}
           </Alert>
         ) : null}
         {!detail.isLoading && tab === 0 && detail.data ? (

@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderFailureDisposition;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ModelCatalogCache;
+import com.any2api.provider.ModelProbeService;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -34,6 +35,7 @@ public final class AccountProbeService {
     private final TransactionTemplate transactions;
     private final ExecutorService databaseExecutor;
     private final ModelCatalogCache modelCatalog;
+    private final ModelProbeService modelProbes;
 
     public AccountProbeService(
         AccountRepository repository,
@@ -44,7 +46,8 @@ public final class AccountProbeService {
         OperationEventService observability,
         PlatformTransactionManager transactionManager,
         ExecutorService databaseExecutor,
-        ModelCatalogCache modelCatalog
+        ModelCatalogCache modelCatalog,
+        ModelProbeService modelProbes
     ) {
         this.repository = repository;
         this.accounts = accounts;
@@ -55,6 +58,7 @@ public final class AccountProbeService {
         this.transactions = new TransactionTemplate(transactionManager);
         this.databaseExecutor = databaseExecutor;
         this.modelCatalog = modelCatalog;
+        this.modelProbes = modelProbes;
     }
 
     public Mono<Result> probe(UUID accountId) {
@@ -106,7 +110,7 @@ public final class AccountProbeService {
                             account, result.credentialPatch())
                         .onErrorReturn(false)
                         .then(applyDisposition(account, result))
-                        .then(persist(accountId, result))),
+                        .then(persist(accountId, providerId, result))),
                 accounts::release,
                 (account, ignored) -> accounts.release(account),
                 accounts::release)
@@ -136,7 +140,11 @@ public final class AccountProbeService {
             result.errorClass(), result.errorClass(), false, Map.of("source", "manual_probe")));
     }
 
-    private Mono<Result> persist(UUID accountId, InferenceReadinessProbe.Result result) {
+    private Mono<Result> persist(
+        UUID accountId,
+        String providerId,
+        InferenceReadinessProbe.Result result
+    ) {
         return Mono.fromCallable(() -> Objects.requireNonNull(transactions.execute(ignored -> {
                 var account = require(accountId);
                 var completedAt = Instant.now();
@@ -151,6 +159,10 @@ public final class AccountProbeService {
                     account.markSuccess(completedAt);
                 }
                 account = repository.save(account);
+                if (result.ready()) {
+                    modelProbes.recordReadyEvidence(
+                        providerId, result.model(), accountId, result.durationMs(), completedAt);
+                }
                 return new Result(
                     result.ready(), result.model(), result.errorClass(), result.output(),
                     result.durationMs(), completedAt,

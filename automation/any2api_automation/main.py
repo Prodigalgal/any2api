@@ -38,7 +38,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Any2API Automation",
-    version="0.10.1",
+    version="0.10.2",
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,

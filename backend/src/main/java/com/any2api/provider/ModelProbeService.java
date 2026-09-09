@@ -53,6 +53,29 @@ public final class ModelProbeService {
                 .flatMap(this::persist)));
     }
 
+    /**
+     * Records a successful account-level inference probe as model-level readiness evidence.
+     * The caller may invoke this inside its own transaction so account and model state commit together.
+     */
+    public void recordReadyEvidence(
+        String providerId,
+        String modelId,
+        UUID accountId,
+        long durationMs,
+        Instant probedAt
+    ) {
+        var result = new Result(
+            required(providerId, "provider_id"),
+            required(modelId, "model_id"),
+            "READY",
+            "",
+            accountId,
+            Math.max(0, durationMs),
+            probedAt == null ? Instant.now() : probedAt);
+        writeResult(result);
+        catalog.invalidateAfterCommit();
+    }
+
     private Mono<Void> requireCataloged(String providerId, String modelId) {
         return Mono.fromCallable(() -> jdbc.sql("""
                 SELECT COUNT(*)
@@ -117,31 +140,35 @@ public final class ModelProbeService {
 
     private Mono<Result> persist(Result result) {
         return Mono.fromCallable(() -> {
-                jdbc.sql("""
-                    INSERT INTO model_probe_results(
-                        provider_id, model_id, account_id, status, error_class,
-                        duration_ms, probed_at)
-                    VALUES (:providerId, :modelId, :accountId, :status, :errorClass,
-                            :durationMs, :probedAt)
-                    ON CONFLICT (provider_id, model_id) DO UPDATE SET
-                        account_id = EXCLUDED.account_id,
-                        status = EXCLUDED.status,
-                        error_class = EXCLUDED.error_class,
-                        duration_ms = EXCLUDED.duration_ms,
-                        probed_at = EXCLUDED.probed_at
-                    """)
-                    .param("providerId", result.providerId())
-                    .param("modelId", result.modelId())
-                    .param("accountId", result.accountId())
-                    .param("status", result.status())
-                    .param("errorClass", result.errorClass().isBlank() ? null : result.errorClass())
-                    .param("durationMs", result.durationMs())
-                    .param("probedAt", PostgresResultValues.timestamp(result.probedAt()))
-                    .update();
+                writeResult(result);
                 return result;
             })
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
             .flatMap(resultValue -> catalog.invalidate().thenReturn(resultValue));
+    }
+
+    private void writeResult(Result result) {
+        jdbc.sql("""
+                INSERT INTO model_probe_results(
+                    provider_id, model_id, account_id, status, error_class,
+                    duration_ms, probed_at)
+                VALUES (:providerId, :modelId, :accountId, :status, :errorClass,
+                        :durationMs, :probedAt)
+                ON CONFLICT (provider_id, model_id) DO UPDATE SET
+                    account_id = EXCLUDED.account_id,
+                    status = EXCLUDED.status,
+                    error_class = EXCLUDED.error_class,
+                    duration_ms = EXCLUDED.duration_ms,
+                    probed_at = EXCLUDED.probed_at
+                """)
+            .param("providerId", result.providerId())
+            .param("modelId", result.modelId())
+            .param("accountId", result.accountId())
+            .param("status", result.status())
+            .param("errorClass", result.errorClass().isBlank() ? null : result.errorClass())
+            .param("durationMs", result.durationMs())
+            .param("probedAt", PostgresResultValues.timestamp(result.probedAt()))
+            .update();
     }
 
     private static String required(String value, String field) {

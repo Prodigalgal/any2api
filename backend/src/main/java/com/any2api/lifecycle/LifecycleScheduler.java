@@ -9,6 +9,7 @@ import com.any2api.coordination.AccountLease;
 import com.any2api.coordination.AccountLeaseService;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ProviderCapability;
+import com.any2api.provider.ModelProbeService;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
@@ -54,6 +55,7 @@ public class LifecycleScheduler {
     private final OperationEventService observability;
     private final RuntimeSettingsService runtimeSettings;
     private final List<CredentialPropagationPolicy> credentialPropagationPolicies;
+    private final ModelProbeService modelProbes;
 
     public LifecycleScheduler(
         JdbcClient jdbc,
@@ -68,7 +70,8 @@ public class LifecycleScheduler {
         ObjectMapper mapper,
         OperationEventService observability,
         RuntimeSettingsService runtimeSettings,
-        List<CredentialPropagationPolicy> credentialPropagationPolicies
+        List<CredentialPropagationPolicy> credentialPropagationPolicies,
+        ModelProbeService modelProbes
     ) {
         this.jdbc = jdbc;
         this.transactions = transactions;
@@ -83,6 +86,7 @@ public class LifecycleScheduler {
         this.observability = observability;
         this.runtimeSettings = runtimeSettings;
         this.credentialPropagationPolicies = List.copyOf(credentialPropagationPolicies);
+        this.modelProbes = modelProbes;
     }
 
     @Scheduled(fixedDelayString = "${any2api.lifecycle.poll-interval:10s}")
@@ -303,6 +307,11 @@ public class LifecycleScheduler {
                 "inference_probe_error", probe.errorClass(),
                 "inference_readiness_pending", !probe.ready()));
             accounts.save(task.account());
+        }
+        if (result.healthy() && probe.ready() && !probe.model().isBlank()) {
+            modelProbes.recordReadyEvidence(
+                action.providerId(), probe.model(), task.account().getId(),
+                probe.durationMs(), completedAt);
         }
         if (result.healthy() && "reauthenticate".equals(action.action())) {
             for (var policy : credentialPropagationPolicies) {

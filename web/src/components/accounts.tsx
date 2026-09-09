@@ -59,6 +59,7 @@ import {
 import { OperationEventsDialog } from "@/components/operation-events-dialog";
 import { AccountDetailDialog } from "@/components/account-detail-dialog";
 import { AccountProbeDialog } from "@/components/account-probe-dialog";
+import { accountActivationActionLabel } from "@/components/lifecycle-labels";
 
 const pageSizes = [25, 50, 100];
 const statusOptions = [
@@ -151,7 +152,7 @@ export function Accounts() {
     mutationFn: (id: string) => api.activateAccount(id),
     onSuccess: async (result) => {
       setActivationNotice(
-        `${result.providerId} 激活任务已排队：${result.action === "PROBE" ? "真实探测" : "重新认证后探测"}`,
+        `${result.providerId} 激活任务已排队：${accountActivationActionLabel(result.action)}`,
       );
       await invalidateAccounts();
     },

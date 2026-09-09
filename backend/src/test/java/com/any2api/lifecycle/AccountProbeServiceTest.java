@@ -2,6 +2,7 @@ package com.any2api.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
@@ -16,6 +17,7 @@ import com.any2api.account.LeasedProviderAccount;
 import com.any2api.coordination.AccountLease;
 import com.any2api.observability.OperationEventService;
 import com.any2api.provider.InferenceProvider;
+import com.any2api.provider.ModelProbeService;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderFailureDisposition;
 import com.any2api.provider.ProviderManifest;
@@ -86,6 +88,9 @@ class AccountProbeServiceTest {
             assertThat(fixture.account().getMetadata())
                 .containsEntry("inference_probe_status", "READY")
                 .containsEntry("inference_readiness_pending", false);
+            verify(fixture.modelProbes()).recordReadyEvidence(
+                eq("alpha"), eq("alpha-top"), eq(fixture.account().getId()),
+                anyLong(), any(Instant.class));
             verify(fixture.observability()).succeed(
                 any(OperationEventService.Started.class), eq("inference_probe_ready"));
         }
@@ -167,6 +172,7 @@ class AccountProbeServiceTest {
             .thenReturn(mock(TransactionStatus.class));
         var executor = Executors.newVirtualThreadPerTaskExecutor();
         var modelCatalog = mock(com.any2api.provider.ModelCatalogCache.class);
+        var modelProbes = mock(ModelProbeService.class);
         var service = new AccountProbeService(
             repository,
             accounts,
@@ -177,9 +183,10 @@ class AccountProbeServiceTest {
             observability,
             transactionManager,
             executor,
-            modelCatalog);
+            modelCatalog,
+            modelProbes);
         return new Fixture(
-            service, repository, accounts, failures, readiness, observability,
+            service, repository, accounts, failures, readiness, observability, modelProbes,
             account, leased, executor);
     }
 
@@ -204,6 +211,7 @@ class AccountProbeServiceTest {
         ProviderFailureDisposition failures,
         InferenceReadinessProbe readiness,
         OperationEventService observability,
+        ModelProbeService modelProbes,
         AccountEntity account,
         LeasedProviderAccount leased,
         java.util.concurrent.ExecutorService executor

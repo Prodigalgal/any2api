@@ -142,7 +142,7 @@ export type AccountProbeResult = {
 export type AccountActivationResult = {
   accountId: string;
   providerId: string;
-  action: "PROBE" | "REAUTHENTICATE";
+  action: "PROBE" | "REAUTHENTICATE" | "DAILY_CHECKIN";
   spreadSeconds: number;
 };
 

@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
 
+from ...browser_budget import browser_process_budget
 from .castle_service import (
     _MINT_JS,
     MIN_CASTLE_LEN,
@@ -141,7 +142,10 @@ def _close_pool_entry(ent: Optional[dict[str, Any]], log_fn=None, reason: str = 
     if not ent:
         return
     cm = ent.get("cm")
+    browser_lease = ent.get("browser_lease")
     if cm is None:
+        if browser_lease is not None:
+            browser_lease.release()
         return
     try:
         cm.__exit__(None, None, None)
@@ -159,6 +163,8 @@ def _close_pool_entry(ent: Optional[dict[str, Any]], log_fn=None, reason: str = 
                 log_fn(f"camoufox 已关闭 · {reason}")
             except Exception:
                 pass
+        if browser_lease is not None:
+            browser_lease.release()
 
 
 def _get_thread_ent() -> Optional[dict[str, Any]]:
@@ -209,9 +215,9 @@ def _acquire_camoufox_pooled(
     pw_proxy: Optional[dict[str, str]],
     timezone_id: str,
     log_fn,
-) -> tuple[Any, Any, Any, bool, float]:
+) -> tuple[Any, Any, Any, bool, float, Any | None]:
     """
-    返回 (camoufox_cm_or_None, ctx, page, from_pool, launch_s)
+    返回 (camoufox_cm_or_None, ctx, page, from_pool, launch_s, browser_lease)
     from_pool=True：只关 context，browser 留在本线程池。
 
     硬规则：本线程同时最多 1 个存活 Camoufox/Playwright Sync。
@@ -271,7 +277,7 @@ def _acquire_camoufox_pooled(
                     f"camoufox 池复用 · tid={tid} · gen={ent.get('gen')} · "
                     f"{fp_os_val}/{locale} · #{uses_now}/{max_uses} · {launch_s}s"
                 )
-                return None, ctx, page, True, launch_s
+                return None, ctx, page, True, launch_s, None
         except Exception as e:
             log_fn(f"camoufox 池失效 · {_compact_log(e, 80)}")
             _drop_thread_pool(log_fn, reason="复用失败")
@@ -285,6 +291,7 @@ def _acquire_camoufox_pooled(
         _clear_thread_event_loop()
 
     from camoufox.sync_api import Camoufox
+    browser_lease = browser_process_budget.acquire_sync("provider:grok-same-session")
 
     gen = _next_gen(tid)
     log_fn(
@@ -333,22 +340,36 @@ def _acquire_camoufox_pooled(
                 _clear_thread_event_loop()
                 time.sleep(0.15 * attempt)
                 continue
+            if camoufox_cm is not None:
+                try:
+                    camoufox_cm.__exit__(None, None, None)
+                except Exception:
+                    pass
+            browser_lease.release()
             raise
     if last_err is not None or camoufox_cm is None or camoufox_browser is None:
         _clear_thread_event_loop()
+        browser_lease.release()
         raise last_err or RuntimeError("camoufox 启动失败")
 
-    is_browser = hasattr(camoufox_browser, "new_context")
-    if is_browser:
-        ctx = camoufox_browser.new_context(
-            viewport={"width": int(vp["width"]), "height": int(vp["height"])},
-            locale=locale,
-            timezone_id=timezone_id,
-        )
-        page = ctx.new_page()
-    else:
-        ctx = camoufox_browser
-        page = ctx.new_page()
+    try:
+        is_browser = hasattr(camoufox_browser, "new_context")
+        if is_browser:
+            ctx = camoufox_browser.new_context(
+                viewport={"width": int(vp["width"]), "height": int(vp["height"])},
+                locale=locale,
+                timezone_id=timezone_id,
+            )
+            page = ctx.new_page()
+        else:
+            ctx = camoufox_browser
+            page = ctx.new_page()
+    except BaseException:
+        try:
+            camoufox_cm.__exit__(None, None, None)
+        finally:
+            browser_lease.release()
+        raise
     launch_s = round(time.time() - t_launch, 2)
     log_fn(f"camoufox 就绪 · tid={tid} · gen={gen} · {launch_s}s")
 
@@ -365,12 +386,13 @@ def _acquire_camoufox_pooled(
                 "proxy": proxy_s,
                 "gen": gen,
                 "born": time.time(),
+                "browser_lease": browser_lease,
             }
         )
         # 池接管生命周期；本号只关 ctx
-        return None, ctx, page, True, launch_s
+        return None, ctx, page, True, launch_s, None
 
-    return camoufox_cm, ctx, page, False, launch_s
+    return camoufox_cm, ctx, page, False, launch_s, browser_lease
 
 
 def _compact_log(msg: Any, max_len: int = 160) -> str:
@@ -1326,6 +1348,7 @@ def same_session_register(
     camoufox_cm = None
     camoufox_browser = None
     from_pool = False
+    browser_budget_lease = None
     try:
         # ---------- 启动浏览器：Camoufox 真无头 or Chrome ----------
         if browser_engine == "camoufox":
@@ -1335,7 +1358,14 @@ def same_session_register(
                 out["error"] = f"camoufox 不可用: {e}"
                 return out
             try:
-                camoufox_cm, ctx, page, from_pool, launch_s = _acquire_camoufox_pooled(
+                (
+                    camoufox_cm,
+                    ctx,
+                    page,
+                    from_pool,
+                    launch_s,
+                    browser_budget_lease,
+                ) = _acquire_camoufox_pooled(
                     fp_os_val=fp_os_val,
                     locale=locale,
                     humanize_val=bool(humanize_val),
@@ -1353,6 +1383,7 @@ def same_session_register(
                 f"engine:camoufox-headless:os={fp_os_val}:hum={int(bool(humanize_val))}"
                 f":pool={int(bool(from_pool))}:launch={launch_s}s"
             )
+            out["_browser_budget_lease"] = browser_budget_lease
         else:
             try:
                 from playwright.sync_api import sync_playwright
@@ -1360,6 +1391,10 @@ def same_session_register(
                 out["error"] = f"playwright 不可用: {e}"
                 return out
             _log(f"启动 chrome · {display_mode}")
+            browser_budget_lease = browser_process_budget.acquire_sync(
+                "provider:grok-same-session"
+            )
+            out["_browser_budget_lease"] = browser_budget_lease
             p = sync_playwright().start()
             out["_pw"] = p
             chrome_args = [
@@ -2207,6 +2242,9 @@ def same_session_register(
             except Exception:
                 pass
     finally:
+        browser_budget_lease = out.pop("_browser_budget_lease", None)
+        if browser_budget_lease is not None:
+            browser_budget_lease.release()
         out["elapsed_s"] = round(time.time() - t0, 2)
         # 恢复业务代理环境（多账号循环下一号还要读 GROK_PROXY）
         for k, v in _saved_biz.items():

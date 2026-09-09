@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
+from .browser_budget import browser_process_budget
 from .browser_transport import manager as browser_session_manager
 from .browser_transport import router as browser_transport_router
 from .captcha.api import router as captcha_router
@@ -38,7 +39,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Any2API Automation",
-    version="0.10.2",
+    version="0.10.3",
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
@@ -73,5 +74,8 @@ async def platform_capabilities() -> dict[str, object]:
         "ok": True,
         "providers": public_provider_manifests(),
         "solvers": registry.capabilities(),
-        "resources": lanes.snapshot.__dict__,
+        "resources": {
+            **lanes.snapshot.__dict__,
+            "browser_process": browser_process_budget.snapshot().__dict__,
+        },
     }

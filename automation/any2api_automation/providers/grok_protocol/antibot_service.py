@@ -18,6 +18,8 @@ from typing import Any, Optional
 
 from curl_cffi import requests
 
+from ...browser_budget import browser_process_budget
+
 DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -1051,7 +1053,7 @@ class AntibotService:
             "events": [],
         }
         try:
-            with sync_playwright() as p:
+            with browser_process_budget.acquire_sync("provider:grok-antibot"), sync_playwright() as p:
                 ctx = p.chromium.launch_persistent_context(
                     user_data_dir=str(pdir),
                     channel="chrome",

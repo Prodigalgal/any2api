@@ -19,6 +19,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+from ...browser_budget import browser_process_budget
+
 CASTLE_PK = "pk_p8GGWvD3TmFJZRsX3BQcqAv9aFVispNz"
 SITE = "https://accounts.x.ai"
 # 真 Chrome 抓包 / 成功 fiber mint 约 16k；npm 短 token ~700 必 invalid_token
@@ -363,7 +365,7 @@ def mint_castle_from_browser(
     out["profile"] = str(profile)
 
     try:
-        with sync_playwright() as p:
+        with browser_process_budget.acquire_sync("provider:grok-castle"), sync_playwright() as p:
             args = [
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",

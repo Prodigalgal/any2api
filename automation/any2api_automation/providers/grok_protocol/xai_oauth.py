@@ -33,6 +33,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
+from ...browser_budget import browser_process_budget
+
 
 ISSUER = "https://auth.x.ai"
 AUTHORIZATION_ENDPOINT = f"{ISSUER}/oauth2/authorize"
@@ -533,7 +535,7 @@ def login_with_playwright(
         if proxy:
             launch_kwargs["proxy"] = {"server": proxy}
 
-        with sync_playwright() as p:
+        with browser_process_budget.acquire_sync("provider:grok-oauth"), sync_playwright() as p:
             browser = p.chromium.launch(**launch_kwargs)
             try:
                 context = browser.new_context(

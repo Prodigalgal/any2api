@@ -22,6 +22,7 @@ from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
+from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..browser_transport import manager as browser_session_manager
 from ..config import settings as global_settings
 from ..security import require_internal_token
@@ -227,29 +228,33 @@ class QwenRiskHeaderProvider:
         try:
             with sync_playwright() as playwright:
                 config = settings()
-                browser = playwright.chromium.launch(headless=config.qwen_risk_headless)
-                context = browser.new_context(
-                    locale="zh-CN",
-                    timezone_id="Asia/Shanghai",
-                    viewport={"width": 1440, "height": 900},
-                    user_agent=config.qwen_risk_user_agent,
-                    extra_http_headers={
-                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                        **_client_hints(config.qwen_risk_browser_profile),
-                    },
-                )
-                fingerprint_script = _fingerprint_script(config.qwen_risk_browser_profile)
-                context.add_init_script(fingerprint_script)
-                page = context.new_page()
-                page.add_init_script(fingerprint_script)
-                cdp = context.new_cdp_session(page)
-                cdp.send(
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    {"source": fingerprint_script},
-                )
-                page.set_default_timeout(45_000)
-                self._load(page)
-                self._serve(page, context, browser)
+                browser_lease = browser_process_budget.acquire_sync("provider:qwen-risk")
+                try:
+                    browser = playwright.chromium.launch(headless=config.qwen_risk_headless)
+                    context = browser.new_context(
+                        locale="zh-CN",
+                        timezone_id="Asia/Shanghai",
+                        viewport={"width": 1440, "height": 900},
+                        user_agent=config.qwen_risk_user_agent,
+                        extra_http_headers={
+                            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                            **_client_hints(config.qwen_risk_browser_profile),
+                        },
+                    )
+                    fingerprint_script = _fingerprint_script(config.qwen_risk_browser_profile)
+                    context.add_init_script(fingerprint_script)
+                    page = context.new_page()
+                    page.add_init_script(fingerprint_script)
+                    cdp = context.new_cdp_session(page)
+                    cdp.send(
+                        "Page.addScriptToEvaluateOnNewDocument",
+                        {"source": fingerprint_script},
+                    )
+                    page.set_default_timeout(45_000)
+                    self._load(page)
+                    self._serve(page, context, browser)
+                finally:
+                    browser_lease.release()
         except Exception as exc:
             logger.exception("Qwen risk browser thread stopped")
             self._fail_pending(exc)
@@ -370,6 +375,7 @@ class _AccountBrowserSession:
     proxy_url: str = ""
     proxy_binding_id: str = ""
     browser_manager: Any | None = None
+    browser_lease: BrowserProcessLease | None = None
     request_count: int = 0
 
 
@@ -563,6 +569,7 @@ class QwenNativeBrowserTransport:
         self._request_lock = asyncio.Lock()
         self._playwright: Any | None = None
         self._browser: Any | None = None
+        self._browser_lease: BrowserProcessLease | None = None
         self._browser_profile = ""
         self._user_agent = ""
         self._challenge_solver = QwenInferenceChallengeSolver()
@@ -1151,6 +1158,7 @@ class QwenNativeBrowserTransport:
             options["storage_state"] = storage_state
         browser_manager = None
         browser = None
+        browser_lease: BrowserProcessLease | None = None
         if backend == "patchright":
             await self._ensure_ready()
             browser = self._browser
@@ -1182,6 +1190,7 @@ class QwenNativeBrowserTransport:
         else:
             from camoufox.async_api import AsyncCamoufox
 
+            browser_lease = await browser_process_budget.acquire_async("provider:qwen-camoufox")
             prepared = await asyncio.to_thread(
                 camoufox_launch_options,
                 normalized_fingerprint,
@@ -1222,14 +1231,21 @@ class QwenNativeBrowserTransport:
                 proxy_url=proxy_url,
                 proxy_binding_id=proxy_binding_id,
                 browser_manager=browser_manager,
+                browser_lease=browser_lease,
             )
             await self._load_page_runtime(session)
             return session
-        except Exception:
-            if context is not None:
-                await context.close()
-            if browser_manager is not None:
-                await browser_manager.__aexit__(None, None, None)
+        except BaseException:
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                try:
+                    if browser_manager is not None:
+                        await browser_manager.__aexit__(None, None, None)
+                finally:
+                    if browser_lease is not None:
+                        browser_lease.release()
             raise
 
     async def _proxy_binding(self, transport_session_id: str) -> tuple[str, str]:
@@ -1266,34 +1282,44 @@ class QwenNativeBrowserTransport:
 
     async def _close_session(self, session: _AccountBrowserSession) -> None:
         try:
-            await session.context.close()
-        except Exception:
-            logger.exception("Qwen account browser context cleanup failed")
-        if session.browser_manager is not None:
             try:
-                await session.browser_manager.__aexit__(None, None, None)
+                await session.context.close()
             except Exception:
-                logger.exception("Qwen Camoufox runtime cleanup failed")
+                logger.exception("Qwen account browser context cleanup failed")
+            if session.browser_manager is not None:
+                try:
+                    await session.browser_manager.__aexit__(None, None, None)
+                except Exception:
+                    logger.exception("Qwen Camoufox runtime cleanup failed")
+        finally:
+            if session.browser_lease is not None:
+                session.browser_lease.release()
 
     async def _close_unlocked(self) -> None:
         sessions = list(self._sessions.values())
         self._sessions.clear()
         for session in sessions:
             await self._close_session(session)
-        if self._browser is not None:
-            try:
-                await self._browser.close()
-            except Exception:
-                logger.exception("Qwen native browser cleanup failed")
-        if self._playwright is not None:
-            try:
-                await self._playwright.stop()
-            except Exception:
-                logger.exception("Qwen native Playwright cleanup failed")
-        self._playwright = None
-        self._browser = None
-        self._browser_profile = ""
-        self._user_agent = ""
+        browser_lease = self._browser_lease
+        self._browser_lease = None
+        try:
+            if self._browser is not None:
+                try:
+                    await self._browser.close()
+                except Exception:
+                    logger.exception("Qwen native browser cleanup failed")
+            if self._playwright is not None:
+                try:
+                    await self._playwright.stop()
+                except Exception:
+                    logger.exception("Qwen native Playwright cleanup failed")
+        finally:
+            if browser_lease is not None:
+                browser_lease.release()
+            self._playwright = None
+            self._browser = None
+            self._browser_profile = ""
+            self._user_agent = ""
 
     async def _ensure_ready(self) -> None:
         if self._browser is not None and self._browser.is_connected():
@@ -1305,16 +1331,20 @@ class QwenNativeBrowserTransport:
             try:
                 if self._browser is not None or self._playwright is not None or self._sessions:
                     await self._close_unlocked()
+                browser_lease = await browser_process_budget.acquire_async("provider:qwen-native")
                 self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
                     headless=config.qwen_risk_headless
                 )
+                self._browser_lease = browser_lease
                 logger.info(
                     "qwen_native_browser_started engine_version=%s",
                     self._browser.version,
                 )
-            except Exception:
+            except BaseException:
                 await self._close_unlocked()
+                if "browser_lease" in locals() and self._browser_lease is None:
+                    browser_lease.release()
                 raise
 
     async def _load_page_runtime(self, session: _AccountBrowserSession) -> None:

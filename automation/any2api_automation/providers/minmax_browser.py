@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from patchright.async_api import async_playwright
 
+from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
 from ..session_pool import AccountSessionPool, SessionSlot
@@ -279,6 +280,7 @@ class _Session:
     browser_manager: Any | None = None
     playwright: Any | None = None
     camoufox_config: dict[str, Any] | None = None
+    browser_lease: BrowserProcessLease | None = None
     active_stream_id: str = ""
     active_stream_queue: asyncio.Queue[dict[str, Any]] | None = None
 
@@ -492,27 +494,28 @@ class MinmaxOfficialBrowserTransport:
         playwright = None
         browser = None
         camoufox_config = None
-        if backend == "camoufox":
-            from camoufox.async_api import AsyncCamoufox
-
-            exact_config = execution.get("camoufox_config")
-            prepared = await asyncio.to_thread(
-                _camoufox_launch_options,
-                exact_config if isinstance(exact_config, dict) else {},
-                proxy_url,
-            )
-            camoufox_config = camoufox_config_from_options(prepared)
-            browser_manager = AsyncCamoufox(from_options=prepared)
-            browser = await browser_manager.__aenter__()
-        else:
-            backend = "patchright"
-            playwright = await async_playwright().start()
-            options: dict[str, Any] = {"headless": core_settings().registration_headless}
-            if proxy_url:
-                options["proxy"] = {"server": proxy_url}
-            browser = await playwright.chromium.launch(**options)
+        browser_lease = await browser_process_budget.acquire_async("provider:minmax")
         context = None
         try:
+            if backend == "camoufox":
+                from camoufox.async_api import AsyncCamoufox
+
+                exact_config = execution.get("camoufox_config")
+                prepared = await asyncio.to_thread(
+                    _camoufox_launch_options,
+                    exact_config if isinstance(exact_config, dict) else {},
+                    proxy_url,
+                )
+                camoufox_config = camoufox_config_from_options(prepared)
+                browser_manager = AsyncCamoufox(from_options=prepared)
+                browser = await browser_manager.__aenter__()
+            else:
+                backend = "patchright"
+                playwright = await async_playwright().start()
+                options: dict[str, Any] = {"headless": core_settings().registration_headless}
+                if proxy_url:
+                    options["proxy"] = {"server": proxy_url}
+                browser = await playwright.chromium.launch(**options)
             context_options = _context_options(execution, backend)
             if storage_state:
                 context_options["storage_state"] = storage_state
@@ -536,6 +539,7 @@ class MinmaxOfficialBrowserTransport:
                 browser_manager=browser_manager,
                 playwright=playwright,
                 camoufox_config=camoufox_config,
+                browser_lease=browser_lease,
             )
             await page.expose_binding(
                 "__any2apiMinmaxEmit",
@@ -554,14 +558,21 @@ class MinmaxOfficialBrowserTransport:
             )
             return session
         except BaseException:
-            if context is not None:
-                await context.close()
-            if browser_manager is not None:
-                await browser_manager.__aexit__(None, None, None)
-            elif browser is not None:
-                await browser.close()
-            if playwright is not None:
-                await playwright.stop()
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                try:
+                    if browser_manager is not None:
+                        await browser_manager.__aexit__(None, None, None)
+                    elif browser is not None:
+                        await browser.close()
+                finally:
+                    try:
+                        if playwright is not None:
+                            await playwright.stop()
+                    finally:
+                        browser_lease.release()
             raise
 
     async def _wait_for_bridge(self, page: Any) -> None:
@@ -629,12 +640,18 @@ class MinmaxOfficialBrowserTransport:
         try:
             await session.context.close()
         finally:
-            if session.browser_manager is not None:
-                await session.browser_manager.__aexit__(None, None, None)
-            else:
-                await session.browser.close()
-            if session.playwright is not None:
-                await session.playwright.stop()
+            try:
+                if session.browser_manager is not None:
+                    await session.browser_manager.__aexit__(None, None, None)
+                else:
+                    await session.browser.close()
+            finally:
+                try:
+                    if session.playwright is not None:
+                        await session.playwright.stop()
+                finally:
+                    if session.browser_lease is not None:
+                        session.browser_lease.release()
 
 
 def _execution_context(credential: dict[str, Any]) -> dict[str, Any]:

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from patchright.sync_api import sync_playwright
 
+from ..browser_budget import browser_process_budget
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
 from .glm_challenge import GlmAliyunChallenge
@@ -314,31 +315,55 @@ def _launch_browser(
     execution: dict[str, Any],
     proxy_url: str,
 ) -> Iterator[tuple[str, Any, dict[str, Any] | None]]:
+    browser_lease = None
     if backend == "camoufox":
         from camoufox.sync_api import Camoufox
 
-        exact = execution.get("camoufox_config")
-        prepared = camoufox_launch_options(
-            exact if isinstance(exact, dict) else {},
-            proxy_url,
-        )
-        manager = Camoufox(from_options=prepared)
-        browser = manager.__enter__()
+        browser_lease = browser_process_budget.acquire_sync(f"provider:glm:{backend}")
+        manager = None
+        try:
+            exact = execution.get("camoufox_config")
+            prepared = camoufox_launch_options(
+                exact if isinstance(exact, dict) else {},
+                proxy_url,
+            )
+            manager = Camoufox(from_options=prepared)
+            browser = manager.__enter__()
+        except BaseException:
+            try:
+                if manager is not None:
+                    manager.__exit__(None, None, None)
+            finally:
+                browser_lease.release()
+            raise
         try:
             yield "camoufox", browser, camoufox_config_from_options(prepared)
         finally:
-            manager.__exit__(None, None, None)
+            try:
+                manager.__exit__(None, None, None)
+            finally:
+                browser_lease.release()
         return
-    playwright = sync_playwright().start()
-    options: dict[str, Any] = {"headless": core_settings().registration_headless}
-    if proxy_url:
-        options["proxy"] = {"server": proxy_url}
-    browser = playwright.chromium.launch(**options)
+    playwright = None
+    browser = None
+    browser_lease = browser_process_budget.acquire_sync(f"provider:glm:{backend}")
     try:
+        playwright = sync_playwright().start()
+        options: dict[str, Any] = {"headless": core_settings().registration_headless}
+        if proxy_url:
+            options["proxy"] = {"server": proxy_url}
+        browser = playwright.chromium.launch(**options)
         yield "patchright", browser, None
     finally:
-        browser.close()
-        playwright.stop()
+        try:
+            if browser is not None:
+                browser.close()
+        finally:
+            try:
+                if playwright is not None:
+                    playwright.stop()
+            finally:
+                browser_lease.release()
 
 
 def _load_official_runtime(

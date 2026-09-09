@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..config import settings
 from .proxy import proxy_lease, proxy_parameters
 
@@ -378,9 +379,12 @@ def launch_browser(
     for backend in order:
         if backend == "camoufox":
             manager = None
+            browser_lease: BrowserProcessLease | None = None
             try:
                 from camoufox.sync_api import Camoufox
                 from camoufox.utils import get_env_vars, get_target_os, launch_options
+
+                browser_lease = browser_process_budget.acquire_sync("lifecycle:camoufox")
 
                 manager_options: dict[str, Any] = {
                     "headless": headless,
@@ -447,8 +451,11 @@ def launch_browser(
                 if manager is not None:
                     with suppress(Exception):
                         manager.__exit__(None, None, None)
+                if browser_lease is not None:
+                    browser_lease.release()
                 errors.append(f"camoufox: {type(exc).__name__}")
                 continue
+            driver_processes: tuple[int, ...] = ()
             try:
                 driver_pid = _driver_pid(browser)
                 driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
@@ -469,13 +476,17 @@ def launch_browser(
                         )
                     finally:
                         _CAMOUFOX_RUNTIME_CONFIGS.pop(id(browser), None)
+                        if browser_lease is not None:
+                            browser_lease.release()
             return
         if backend == "patchright":
             runtime = None
             browser = None
+            browser_lease: BrowserProcessLease | None = None
             try:
                 from patchright.sync_api import sync_playwright
 
+                browser_lease = browser_process_budget.acquire_sync("lifecycle:patchright")
                 runtime = sync_playwright().start()
                 options: dict[str, Any] = {"headless": headless}
                 if proxy_url:
@@ -496,8 +507,11 @@ def launch_browser(
                 if runtime is not None:
                     with suppress(Exception):
                         runtime.stop()
+                if browser_lease is not None:
+                    browser_lease.release()
                 errors.append(f"patchright: {type(exc).__name__}")
                 continue
+            driver_processes: tuple[int, ...] = ()
             try:
                 driver_pid = _driver_pid(browser)
                 driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
@@ -514,10 +528,14 @@ def launch_browser(
                         finally:
                             runtime.stop()
                 finally:
-                    terminate_residual_browser_process(
-                        driver_processes,
-                        label="patchright runtime cleanup",
-                    )
+                    try:
+                        terminate_residual_browser_process(
+                            driver_processes,
+                            label="patchright runtime cleanup",
+                        )
+                    finally:
+                        if browser_lease is not None:
+                            browser_lease.release()
             return
     raise RuntimeError("no browser backend available: " + "; ".join(errors))
 

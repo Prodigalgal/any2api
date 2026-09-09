@@ -489,10 +489,7 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
             body = response.json()
             code = str((body.get("statusInfo") or {}).get("code", ""))
             if parsed.path == "/v1/api/user/info":
-                try:
-                    profile_identity.update(_verified_profile_identity(body, mailbox.address))
-                except (RuntimeError, TypeError) as error:
-                    profile_error[:] = [str(error)]
+                _observe_profile_identity(body, mailbox.address, profile_identity, profile_error)
             elif parsed.path == "/v1/api/user/renewal":
                 _extract_session_values(body, session_values)
         except Exception:  # noqa: BLE001,S110 - diagnostics never require a response body
@@ -557,17 +554,13 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
             f"events={','.join(account_events[-6:])}"
         )
     session_deadline = time.monotonic() + 45
-    while (
-        time.monotonic() < session_deadline
-        and not profile_error
-        and not (
-            session_values.get("token")
-            and session_values.get("user_id")
-            and profile_identity.get("external_id")
-        )
+    while time.monotonic() < session_deadline and not (
+        session_values.get("token")
+        and session_values.get("user_id")
+        and profile_identity.get("external_id")
     ):
         page.wait_for_timeout(500)
-    if profile_error:
+    if profile_error and not profile_identity.get("external_id"):
         raise RuntimeError(profile_error[0])
     if not profile_identity.get("external_id"):
         raise RuntimeError("MinMax overseas login did not expose a verified account profile")
@@ -588,6 +581,19 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
     if not value.get("token") or not value.get("user_id"):
         raise RuntimeError("MinMax overseas login completed without token and user_id")
     return BrowserResult(profile_identity["external_id"], mailbox.address, value)
+
+
+def _observe_profile_identity(
+    body: Any,
+    expected_email: str,
+    profile_identity: dict[str, str],
+    profile_error: list[str],
+) -> None:
+    try:
+        profile_identity.update(_verified_profile_identity(body, expected_email))
+        profile_error.clear()
+    except (RuntimeError, TypeError) as error:
+        profile_error[:] = [str(error)]
 
 
 def _verified_profile_identity(value: Any, expected_email: str) -> dict[str, str]:

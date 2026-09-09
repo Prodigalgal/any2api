@@ -42,7 +42,11 @@ from any2api_automation.providers.mimo_protocol import (
     _select_registration_public_key,
     _webpack_crypto_assets,
 )
-from any2api_automation.providers.minmax import _script_urls, _verified_profile_identity
+from any2api_automation.providers.minmax import (
+    _observe_profile_identity,
+    _script_urls,
+    _verified_profile_identity,
+)
 from any2api_automation.providers.minmax_settings import settings as minmax_settings
 from any2api_automation.providers.qwen_challenge import (
     _drag_slider_to_piece_target,
@@ -267,6 +271,32 @@ def test_minmax_registration_rejects_a_profile_for_another_mailbox() -> None:
             },
             "mail@example.test",
         )
+
+
+def test_minmax_registration_allows_a_later_verified_profile_response() -> None:
+    identity: dict[str, str] = {}
+    errors: list[str] = []
+    rejected = {
+        "data": {"userInfo": {"email": "other@example.test"}},
+        "statusInfo": {"code": 0},
+    }
+    accepted = {
+        "data": {
+            "userInfo": {
+                "userID": "account-user",
+                "realUserID": "stable-real-user",
+                "email": "mail@example.test",
+            }
+        },
+        "statusInfo": {"code": 0},
+    }
+
+    _observe_profile_identity(rejected, "mail@example.test", identity, errors)
+    assert errors
+    _observe_profile_identity(accepted, "mail@example.test", identity, errors)
+
+    assert identity["external_id"] == "stable-real-user"
+    assert errors == []
 
 
 @pytest.mark.asyncio

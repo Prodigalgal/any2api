@@ -39,7 +39,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-const drawerWidth = 224;
+const shellMetrics = {
+  drawerWidth: 240,
+  headerHeight: 60,
+} as const;
+
 const navigation = [
   ["运行概览", DashboardOutlined, "/"],
   ["账号池", AccountTreeOutlined, "/accounts"],
@@ -80,17 +84,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (session.isLoading || session.isError || !session.data?.authenticated) return <SessionGate />;
 
   const drawer = (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#0b1733", color: "#dce8f8" }}>
-      <Box sx={{ px: 2, height: 64, display: "flex", alignItems: "center", borderBottom: "1px solid #1b2d4d" }}>
-        <Box sx={{ width: 30, height: 30, borderRadius: 1, bgcolor: "primary.main", display: "grid", placeItems: "center", mr: 1.25 }}>
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#0a1630", color: "#dce8f8" }}>
+      <Box sx={{ px: 2.25, height: shellMetrics.headerHeight, display: "flex", alignItems: "center", borderBottom: "1px solid #1b2d4d" }}>
+        <Box sx={{ width: 32, height: 32, borderRadius: 1.5, bgcolor: "primary.main", display: "grid", placeItems: "center", mr: 1.25, boxShadow: "0 5px 16px rgba(20, 110, 245, 0.28)" }}>
           <ApiOutlined sx={{ fontSize: 19, color: "white" }} />
         </Box>
         <Box sx={{ minWidth: 0 }}>
-          <Typography noWrap sx={{ color: "white", fontWeight: 760, fontSize: 15 }}>Any2API</Typography>
-          <Typography noWrap sx={{ color: "#91a5c1", fontSize: 10.5 }}>模型运维</Typography>
+          <Typography noWrap sx={{ color: "white", fontWeight: 760, fontSize: 15.5, letterSpacing: "-0.01em" }}>Any2API</Typography>
+          <Typography noWrap sx={{ color: "#91a5c1", fontSize: 10.5, letterSpacing: "0.02em" }}>模型运维</Typography>
         </Box>
       </Box>
-      <List aria-label="主导航" sx={{ px: 1.25, py: 1.5 }}>
+      <List aria-label="主导航" sx={{ px: 1.5, py: 2 }}>
         {navigation.map(([label, Icon, href]) => {
           const selected = activeNavigation?.[2] === href;
           return (
@@ -101,20 +105,23 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={() => setMobileOpen(false)}
               selected={selected}
               sx={{
-                minHeight: 40,
-                mb: 0.5,
-                borderRadius: 1,
+                minHeight: 42,
+                mb: 0.75,
+                px: 1.5,
+                borderRadius: 1.5,
                 color: "#b9c8dc",
                 position: "relative",
+                transition: "background-color 160ms ease, color 160ms ease",
                 "& .MuiListItemIcon-root": { color: "inherit" },
+                "&:hover": { bgcolor: "rgba(76, 139, 229, 0.10)", color: "#e8f1ff" },
                 "&.Mui-selected": {
-                  bgcolor: "#12346b",
+                  bgcolor: "#153b78",
                   color: "#c6ddff",
                   "&:before": {
                     content: '\"\"', position: "absolute", left: 0, top: 9, bottom: 9,
                     width: 3, borderRadius: "0 2px 2px 0", bgcolor: "#3b82f6",
                   },
-                  "&:hover": { bgcolor: "#17417e" },
+                  "&:hover": { bgcolor: "#194786" },
                 },
               }}
             >
@@ -124,7 +131,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           );
         })}
       </List>
-      <Box sx={{ mt: "auto", px: 2, py: 1.75, borderTop: "1px solid #1b2d4d" }}>
+      <Box sx={{ mt: "auto", px: 2.25, py: 2, borderTop: "1px solid #1b2d4d" }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "#47bf87" }} />
           <Typography sx={{ color: "#9db0ca", fontSize: 10.5 }}>控制平台在线</Typography>
@@ -140,14 +147,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         sx={{
           zIndex: (value) => value.zIndex.drawer + 1,
           borderBottom: 1,
-          borderColor: { xs: "#1b2d4d", md: "divider" },
-          bgcolor: { xs: "#0b1733", md: "rgba(255, 255, 255, 0.96)" },
+          borderColor: { xs: "#1b2d4d", md: "rgba(215, 224, 236, 0.9)" },
+          bgcolor: { xs: "#0a1630", md: "rgba(255, 255, 255, 0.94)" },
           color: { xs: "#ffffff", md: "text.primary" },
-          ml: compact ? 0 : `${drawerWidth}px`,
-          width: compact ? "100%" : `calc(100% - ${drawerWidth}px)`,
+          ml: compact ? 0 : `${shellMetrics.drawerWidth}px`,
+          width: compact ? "100%" : `calc(100% - ${shellMetrics.drawerWidth}px)`,
+          boxShadow: { xs: "none", md: "0 1px 0 rgba(20, 33, 61, 0.03), 0 6px 18px rgba(20, 33, 61, 0.04)" },
         }}
       >
-        <Toolbar sx={{ minHeight: "56px !important", px: { xs: 1.5, sm: 2.5 } }}>
+        <Toolbar sx={{ minHeight: `${shellMetrics.headerHeight}px !important`, px: { xs: 1.5, sm: 2.5 } }}>
           {compact ? (
             <Tooltip title="打开导航">
               <IconButton aria-label="打开导航" onClick={() => setMobileOpen(true)} sx={{ mr: 1, color: "inherit" }}>
@@ -186,7 +194,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             open={mobileOpen}
             onClose={() => setMobileOpen(false)}
             ModalProps={{ keepMounted: true }}
-            sx={{ "& .MuiDrawer-paper": { width: drawerWidth, border: 0 } }}
+            sx={{ "& .MuiDrawer-paper": { width: shellMetrics.drawerWidth, border: 0 } }}
           >
             {drawer}
           </Drawer>
@@ -194,13 +202,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Drawer
             variant="permanent"
             open
-            sx={{ width: drawerWidth, flexShrink: 0, "& .MuiDrawer-paper": { width: drawerWidth, border: 0 } }}
+            sx={{ width: shellMetrics.drawerWidth, flexShrink: 0, "& .MuiDrawer-paper": { width: shellMetrics.drawerWidth, border: 0, borderRight: "1px solid #1b2d4d" } }}
           >
             {drawer}
           </Drawer>
         )}
       </Box>
-      <Box component="main" sx={{ flex: 1, minWidth: 0, pt: "56px", bgcolor: "background.default" }}>
+      <Box component="main" sx={{ flex: 1, minWidth: 0, minHeight: "100vh", pt: `${shellMetrics.headerHeight}px`, bgcolor: "background.default" }}>
         {children}
       </Box>
     </Box>

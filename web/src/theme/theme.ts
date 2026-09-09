@@ -9,10 +9,10 @@ const colors = {
   blue: "#146ef5",
   blueDark: "#0b5ed7",
   steel: "#405c86",
-  canvas: "#f4f7fb",
+  canvas: "#f3f6fb",
   border: "#d7e0ec",
   grid: "#e3e9f2",
-  text: "#14213d",
+  text: "#17243d",
   muted: "#5f6f86",
 };
 
@@ -29,7 +29,7 @@ export const theme = createTheme({
     text: { primary: colors.text, secondary: colors.muted },
     divider: colors.border,
   },
-  shape: { borderRadius: 6 },
+  shape: { borderRadius: 8 },
   typography: {
     fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", sans-serif',
     h4: { fontSize: "1.5rem", fontWeight: 760, lineHeight: 1.25, letterSpacing: 0 },
@@ -68,7 +68,7 @@ export const theme = createTheme({
     },
     MuiAppBar: {
       defaultProps: { color: "inherit", elevation: 0 },
-      styleOverrides: { root: { backgroundColor: alpha("#ffffff", 0.96), backdropFilter: "blur(12px)" } },
+      styleOverrides: { root: { backgroundColor: alpha("#ffffff", 0.94), backdropFilter: "blur(14px)" } },
     },
     MuiButton: {
       defaultProps: { disableElevation: true },
@@ -81,7 +81,7 @@ export const theme = createTheme({
     MuiPaper: {
       styleOverrides: {
         root: { backgroundImage: "none" },
-        outlined: { borderColor: colors.border },
+        outlined: { borderColor: colors.border, borderRadius: 8 },
       },
     },
     MuiIconButton: {
@@ -143,6 +143,17 @@ export const theme = createTheme({
           fontWeight: 740,
           backgroundColor: "#f7f9fc",
           whiteSpace: "nowrap",
+        },
+      },
+    },
+    MuiTableContainer: {
+      styleOverrides: {
+        root: {
+          scrollbarColor: `${colors.border} transparent`,
+          scrollbarWidth: "thin",
+          "&::-webkit-scrollbar": { height: 8, width: 8 },
+          "&::-webkit-scrollbar-thumb": { backgroundColor: colors.border, borderRadius: 8 },
+          "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
         },
       },
     },

@@ -17,8 +17,8 @@ export function PageContainer({
         maxWidth,
         minWidth: 0,
         mx: "auto",
-        px: { xs: 2, sm: 2.5, xl: 3.5 },
-        py: { xs: 2, sm: 2.5, xl: 3 },
+        px: { xs: 2, sm: 3, xl: 3.5 },
+        py: { xs: 2.25, sm: 2.75, xl: 3.25 },
       }}
     >
       {children}
@@ -39,8 +39,8 @@ export function PageHeader({
     <Stack
       direction={{ xs: "column", sm: "row" }}
       sx={{
-        minHeight: 52,
-        mb: { xs: 2, sm: 2.5 },
+        minHeight: 60,
+        mb: { xs: 2.25, sm: 2.75 },
         alignItems: "flex-start",
         justifyContent: "space-between",
         gap: { xs: 1.5, sm: 3 },
@@ -66,7 +66,7 @@ export function ToolbarSurface({ children }: { children: ReactNode }) {
     <Paper
       component="section"
       variant="outlined"
-      sx={{ mb: 2, p: { xs: 1.25, sm: 1.5 }, bgcolor: "background.paper", overflow: "hidden" }}
+      sx={{ mb: 2, p: { xs: 1.25, sm: 1.5 }, bgcolor: "background.paper", overflow: "hidden", borderRadius: 2 }}
     >
       {children}
     </Paper>
@@ -84,7 +84,7 @@ export function DataSurface({
     <Paper
       component="section"
       variant="outlined"
-      sx={[{ overflow: "hidden", position: "relative" }, ...(Array.isArray(sx) ? sx : [sx])]}
+      sx={[{ overflow: "hidden", position: "relative", borderRadius: 2, boxShadow: "0 2px 10px rgba(20, 33, 61, 0.025)" }, ...(Array.isArray(sx) ? sx : [sx])]}
     >
       {children}
     </Paper>

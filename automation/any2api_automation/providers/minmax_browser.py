@@ -32,6 +32,8 @@ _LOCATE_BRIDGE = r"""() => {
   let runtimeCount = 0;
   let markerFactoryCount = 0;
   let fetchFactoryCount = 0;
+  let functionCandidateCount = 0;
+  let fallback = null;
   for (const chunkName of chunkNames) {
     const chunks = window[chunkName];
     if (!Array.isArray(chunks)) continue;
@@ -60,19 +62,26 @@ _LOCATE_BRIDGE = r"""() => {
       }
       for (const candidate of candidates) {
         if (typeof candidate !== 'function') continue;
+        functionCandidateCount++;
         const candidateSource = String(candidate);
         if (candidateSource.includes('return fetch(') || /\bfetch\s*\(/.test(candidateSource)) {
           window.__any2apiMinmaxOfficialBridge = candidate;
           return candidate;
         }
+        fallback = fallback || candidate;
       }
     }
+  }
+  if (typeof fallback === 'function') {
+    window.__any2apiMinmaxOfficialBridge = fallback;
+    return fallback;
   }
   throw new Error('MinMax official request bridge was not found'
     + ' chunks=' + chunkNames.length
     + ' runtimes=' + runtimeCount
     + ' marker_factories=' + markerFactoryCount
-    + ' fetch_factories=' + fetchFactoryCount);
+    + ' fetch_factories=' + fetchFactoryCount
+    + ' function_candidates=' + functionCandidateCount);
 }"""
 
 _BUFFERED_REQUEST = rf"""async request => {{

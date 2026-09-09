@@ -182,7 +182,12 @@ _UPLOAD_MEDIA = r"""async input => {
   };
   const encodedPath = value => value.split('/').map(encodeURIComponent).join('/');
   const objectUrl = (endpoint, bucket, objectName) => {
-    const parsed = new URL(endpoint);
+    const normalizedEndpoint = endpoint.replace(/^\/+/, '');
+    const parsed = new URL(
+      /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedEndpoint)
+        ? normalizedEndpoint
+        : 'https://' + normalizedEndpoint
+    );
     const originalHost = parsed.hostname;
     if (!originalHost.startsWith(bucket + '.')) parsed.hostname = bucket + '.' + originalHost;
     const prefix = parsed.pathname.replace(/\/+$/, '');

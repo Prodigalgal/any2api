@@ -331,6 +331,13 @@ def test_minmax_image_attachment_preserves_order_and_rejects_other_media() -> No
         )
 
 
+def test_minmax_upload_normalizes_host_only_oss_endpoint() -> None:
+    from any2api_automation.providers.minmax_browser import _UPLOAD_MEDIA
+
+    assert "'https://' + normalizedEndpoint" in _UPLOAD_MEDIA
+    assert "endpoint.replace(/^\\/+/, '')" in _UPLOAD_MEDIA
+
+
 def test_qwen_image_file_is_attached_without_flattening_the_image_into_text() -> None:
     command = _command(
         [

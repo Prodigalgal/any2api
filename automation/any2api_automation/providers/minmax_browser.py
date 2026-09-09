@@ -29,28 +29,43 @@ _LOCATE_BRIDGE = r"""() => {
   const cached = window.__any2apiMinmaxOfficialBridge;
   if (typeof cached === 'function') return cached;
   const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
+  let runtimeCount = 0;
+  let markerFactoryCount = 0;
+  let fetchFactoryCount = 0;
   for (const chunkName of chunkNames) {
     const chunks = window[chunkName];
     if (!Array.isArray(chunks)) continue;
     let runtime;
     chunks.push([['any2api-' + Date.now()], {}, require => { runtime = require; }]);
     if (!runtime?.m) continue;
+    runtimeCount++;
     for (const [id, factory] of Object.entries(runtime.m)) {
       const source = String(factory);
       if (!source.includes('x-signature') || !source.includes('hasSearchParamsPath')) continue;
+      markerFactoryCount++;
+      if (!/\bfetch\s*\(/.test(source)) continue;
+      fetchFactoryCount++;
       let exports;
       try { exports = runtime(id); } catch (_) { continue; }
-      for (const candidate of Object.values(exports || {})) {
+      const candidates = [
+        ...Object.values(exports || {}),
+        ...Object.values(exports?.default || {})
+      ];
+      for (const candidate of candidates) {
         if (typeof candidate !== 'function') continue;
         const candidateSource = String(candidate);
-        if (candidateSource.includes('return fetch(')) {
+        if (candidateSource.includes('return fetch(') || /\bfetch\s*\(/.test(candidateSource)) {
           window.__any2apiMinmaxOfficialBridge = candidate;
           return candidate;
         }
       }
     }
   }
-  throw new Error('MinMax official request bridge was not found');
+  throw new Error('MinMax official request bridge was not found'
+    + ' chunks=' + chunkNames.length
+    + ' runtimes=' + runtimeCount
+    + ' marker_factories=' + markerFactoryCount
+    + ' fetch_factories=' + fetchFactoryCount);
 }"""
 
 _BUFFERED_REQUEST = rf"""async request => {{
@@ -545,6 +560,12 @@ class MinmaxOfficialBrowserTransport:
                     raise
                 last_error = error
                 await page.wait_for_timeout(1_000)
+        if last_error is not None:
+            logger.warning(
+                "minmax_official_browser_bridge_unavailable error_type=%s reason=%s",
+                type(last_error).__name__,
+                " ".join(str(last_error).split())[:240],
+            )
         raise RuntimeError("MinMax official request bridge did not load in time") from last_error
 
     async def _inject_context(self, session: _Session, credential: dict[str, Any]) -> None:

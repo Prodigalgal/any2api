@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Self
 
@@ -60,6 +61,34 @@ class BrowserProcessBudget:
         self._in_use = 0
         self._condition = threading.Condition()
         self._logger = logger or logging.getLogger("any2api_automation.browser_budget")
+        self._async_evictors: list[Callable[[], Awaitable[bool]]] = []
+        self._sync_evictors: list[Callable[[], bool]] = []
+        self._evictor_lock = threading.Lock()
+
+    def register_evictors(
+        self,
+        async_evictor: Callable[[], Awaitable[bool]],
+        sync_evictor: Callable[[], bool],
+    ) -> Callable[[], None]:
+        with self._evictor_lock:
+            self._async_evictors.append(async_evictor)
+            self._sync_evictors.append(sync_evictor)
+        removed = False
+        removal_lock = threading.Lock()
+
+        def unregister() -> None:
+            nonlocal removed
+            with removal_lock:
+                if removed:
+                    return
+                removed = True
+            with self._evictor_lock:
+                if async_evictor in self._async_evictors:
+                    self._async_evictors.remove(async_evictor)
+                if sync_evictor in self._sync_evictors:
+                    self._sync_evictors.remove(sync_evictor)
+
+        return unregister
 
     def acquire_sync(self, label: str) -> BrowserProcessLease:
         waited_at: float | None = None
@@ -76,6 +105,11 @@ class BrowserProcessBudget:
                         label,
                         self._capacity,
                     )
+            if self._evict_one_sync_idle(label):
+                continue
+            with self._condition:
+                if self._in_use < self._capacity:
+                    continue
                 self._condition.wait(timeout=_WAIT_INTERVAL_SECONDS)
         self._log_acquired(label, waited_at)
         return lease
@@ -95,6 +129,8 @@ class BrowserProcessBudget:
                         label,
                         self._capacity,
                     )
+            if await self._evict_one_async_idle(label):
+                continue
             await asyncio.sleep(_WAIT_INTERVAL_SECONDS)
         self._log_acquired(label, waited_at)
         return lease
@@ -114,6 +150,30 @@ class BrowserProcessBudget:
                 raise RuntimeError("browser process budget released without an active lease")
             self._in_use -= 1
             self._condition.notify_all()
+
+    async def _evict_one_async_idle(self, label: str) -> bool:
+        with self._evictor_lock:
+            evictors = tuple(self._async_evictors)
+        for evictor in evictors:
+            try:
+                if await evictor():
+                    self._logger.info("browser_process_budget_evicted label=%s mode=async", label)
+                    return True
+            except Exception:
+                self._logger.exception("browser_process_budget_evictor_failed mode=async")
+        return False
+
+    def _evict_one_sync_idle(self, label: str) -> bool:
+        with self._evictor_lock:
+            evictors = tuple(self._sync_evictors)
+        for evictor in evictors:
+            try:
+                if evictor():
+                    self._logger.info("browser_process_budget_evicted label=%s mode=sync", label)
+                    return True
+            except Exception:
+                self._logger.exception("browser_process_budget_evictor_failed mode=sync")
+        return False
 
     def _log_acquired(self, label: str, waited_at: float | None) -> None:
         if waited_at is None:

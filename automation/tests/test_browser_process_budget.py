@@ -63,3 +63,28 @@ async def test_cancelled_async_acquire_does_not_leak_capacity() -> None:
     replacement.release()
 
     assert budget.snapshot().in_use == 0
+
+
+@pytest.mark.asyncio
+async def test_async_acquire_can_evict_an_idle_owner() -> None:
+    budget = BrowserProcessBudget(1)
+    held = budget.acquire_sync("idle-owner")
+    evicted = False
+
+    async def evict_idle() -> bool:
+        nonlocal evicted
+        if evicted:
+            return False
+        evicted = True
+        held.release()
+        return True
+
+    unregister = budget.register_evictors(evict_idle, lambda: False)
+    try:
+        replacement = await budget.acquire_async("replacement")
+        replacement.release()
+    finally:
+        unregister()
+
+    assert evicted
+    assert budget.snapshot().in_use == 0

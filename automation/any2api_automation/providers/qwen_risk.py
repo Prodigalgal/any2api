@@ -567,6 +567,7 @@ class QwenNativeBrowserTransport:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._request_lock = asyncio.Lock()
+        self._event_loop: asyncio.AbstractEventLoop | None = None
         self._playwright: Any | None = None
         self._browser: Any | None = None
         self._browser_lease: BrowserProcessLease | None = None
@@ -574,8 +575,13 @@ class QwenNativeBrowserTransport:
         self._user_agent = ""
         self._challenge_solver = QwenInferenceChallengeSolver()
         self._sessions: OrderedDict[str, _AccountBrowserSession] = OrderedDict()
+        self._unregister_budget_evictors = browser_process_budget.register_evictors(
+            self._evict_idle_for_budget,
+            self._evict_idle_for_budget_sync,
+        )
 
     async def fetch(self, request: NativeBrowserRequest) -> dict[str, Any]:
+        self._event_loop = asyncio.get_running_loop()
         proxy_context = (
             self._transport_proxy_lease(request.transport_session_id)
             if request.transport_session_id
@@ -626,6 +632,7 @@ class QwenNativeBrowserTransport:
         *,
         user_id: str = "",
     ) -> dict[str, Any]:
+        self._event_loop = asyncio.get_running_loop()
         if not sources:
             return {"files": []}
         if len(sources) > 16:
@@ -1277,8 +1284,46 @@ class QwenNativeBrowserTransport:
             await asyncio.to_thread(lease.__exit__, None, None, None)
 
     async def close(self) -> None:
+        self._unregister_budget_evictors()
         async with self._lock:
             await self._close_unlocked()
+
+    async def _evict_idle_for_budget(self) -> bool:
+        if self._request_lock.locked() or self._lock.locked():
+            return False
+        async with self._lock:
+            if self._request_lock.locked():
+                return False
+            for key, session in tuple(self._sessions.items()):
+                if session.backend != "camoufox":
+                    continue
+                self._sessions.pop(key, None)
+                await self._close_session(session)
+                return True
+            if self._browser_lease is not None:
+                await self._close_unlocked()
+                return True
+        return False
+
+    def _evict_idle_for_budget_sync(self) -> bool:
+        loop = self._event_loop
+        if loop is None or not loop.is_running():
+            return False
+        try:
+            if asyncio.get_running_loop() is loop:
+                return False
+        except RuntimeError:
+            pass
+        future = asyncio.run_coroutine_threadsafe(self._evict_idle_for_budget(), loop)
+        try:
+            return bool(future.result(timeout=10))
+        except TimeoutError:
+            future.cancel()
+            logger.warning("qwen_native_browser_idle_eviction_timed_out")
+            return False
+        except Exception:
+            logger.exception("qwen_native_browser_idle_eviction_failed")
+            return False
 
     async def _close_session(self, session: _AccountBrowserSession) -> None:
         try:

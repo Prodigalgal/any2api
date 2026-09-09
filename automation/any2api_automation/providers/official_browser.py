@@ -78,12 +78,18 @@ class OfficialBrowserRuntime:
         self._operation: ContextVar[SessionSlot[OfficialBrowserSession]] = ContextVar(
             f"{provider_id}_browser_operation"
         )
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._unregister_budget_evictors = browser_process_budget.register_evictors(
+            self._evict_idle_for_budget,
+            self._evict_idle_for_budget_sync,
+        )
         self.logger = logging.getLogger(
             f"any2api_automation.providers.{provider_id}_official_browser"
         )
 
     @asynccontextmanager
     async def account_operation(self, credential: dict[str, Any]):
+        self._event_loop = asyncio.get_running_loop()
         async with self._sessions.borrow(self._account_key(credential)) as slot:
             token = self._operation.set(slot)
             try:
@@ -139,7 +145,31 @@ class OfficialBrowserRuntime:
         return current
 
     async def close(self) -> None:
+        self._unregister_budget_evictors()
         await self._sessions.close()
+
+    async def _evict_idle_for_budget(self) -> bool:
+        return await self._sessions.evict_idle()
+
+    def _evict_idle_for_budget_sync(self) -> bool:
+        loop = self._event_loop
+        if loop is None or not loop.is_running():
+            return False
+        try:
+            if asyncio.get_running_loop() is loop:
+                return False
+        except RuntimeError:
+            pass
+        future = asyncio.run_coroutine_threadsafe(self._sessions.evict_idle(), loop)
+        try:
+            return bool(future.result(timeout=10))
+        except TimeoutError:
+            future.cancel()
+            self.logger.warning("official_browser_idle_eviction_timed_out")
+            return False
+        except Exception:
+            self.logger.exception("official_browser_idle_eviction_failed")
+            return False
 
     async def credential_patch(
         self,

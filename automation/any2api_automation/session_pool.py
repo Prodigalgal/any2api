@@ -85,6 +85,20 @@ class AccountSessionPool[T]:
             self._closing = asyncio.create_task(self._close())
         await asyncio.shield(self._closing)
 
+    async def evict_idle(self) -> bool:
+        async with self._condition:
+            if self._closed:
+                return False
+            idle = next((item for item in self._slots if item not in self._busy), None)
+            if idle is None:
+                return False
+            value = self._slots.pop(idle).value
+            self._condition.notify_all()
+        if value is None:
+            return False
+        await self._dispose_safely(value)
+        return True
+
     async def _close(self) -> None:
         async with self._condition:
             self._condition.notify_all()

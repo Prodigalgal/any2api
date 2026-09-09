@@ -294,9 +294,15 @@ class MinmaxOfficialBrowserTransport:
             core_settings().official_browser_session_pool_size, self._close_session
         )
         self._operation: ContextVar[SessionSlot[_Session]] = ContextVar("minmax_browser_operation")
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._unregister_budget_evictors = browser_process_budget.register_evictors(
+            self._evict_idle_for_budget,
+            self._evict_idle_for_budget_sync,
+        )
 
     @asynccontextmanager
     async def _account_operation(self, credential: dict[str, Any]):
+        self._event_loop = asyncio.get_running_loop()
         async with self._sessions.borrow(_account_key(credential)) as slot:
             token = self._operation.set(slot)
             try:
@@ -446,7 +452,31 @@ class MinmaxOfficialBrowserTransport:
                 await asyncio.gather(task, return_exceptions=True)
 
     async def close(self) -> None:
+        self._unregister_budget_evictors()
         await self._sessions.close()
+
+    async def _evict_idle_for_budget(self) -> bool:
+        return await self._sessions.evict_idle()
+
+    def _evict_idle_for_budget_sync(self) -> bool:
+        loop = self._event_loop
+        if loop is None or not loop.is_running():
+            return False
+        try:
+            if asyncio.get_running_loop() is loop:
+                return False
+        except RuntimeError:
+            pass
+        future = asyncio.run_coroutine_threadsafe(self._sessions.evict_idle(), loop)
+        try:
+            return bool(future.result(timeout=10))
+        except TimeoutError:
+            future.cancel()
+            logger.warning("minmax_official_browser_idle_eviction_timed_out")
+            return False
+        except Exception:
+            logger.exception("minmax_official_browser_idle_eviction_failed")
+            return False
 
     async def _session_for(self, credential: dict[str, Any], proxy_url: str) -> _Session:
         key = _account_key(credential)

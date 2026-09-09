@@ -32,6 +32,16 @@ class AccountSessionPoolTest(unittest.IsolatedAsyncioTestCase):
                 slot.value = key
         self.assertEqual(self.closed, ["b"])
 
+    async def test_evict_idle_removes_the_least_recently_used_session(self):
+        for key in ("a", "b", "a"):
+            async with self.pool.borrow(key) as slot:
+                slot.value = key
+        self.assertTrue(await self.pool.evict_idle())
+        self.assertEqual(self.closed, ["b"])
+        self.assertTrue(await self.pool.evict_idle())
+        self.assertEqual(self.closed, ["b", "a"])
+        self.assertFalse(await self.pool.evict_idle())
+
     async def test_same_account_waits_but_other_account_can_run(self):
         entered = asyncio.Event()
 

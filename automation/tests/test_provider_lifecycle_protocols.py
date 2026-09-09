@@ -257,7 +257,7 @@ def test_minmax_registration_uses_verified_profile_identity_not_request_user_id(
 
 
 def test_minmax_registration_rejects_a_profile_for_another_mailbox() -> None:
-    with pytest.raises(RuntimeError, match="does not match"):
+    with pytest.raises(RuntimeError, match="does not match") as error:
         _verified_profile_identity(
             {
                 "data": {
@@ -271,6 +271,9 @@ def test_minmax_registration_rejects_a_profile_for_another_mailbox() -> None:
             },
             "mail@example.test",
         )
+    assert "mail@example.test" not in str(error.value)
+    assert "expected=present=True" in str(error.value)
+    assert "actual=present=True" in str(error.value)
 
 
 def test_minmax_registration_allows_a_later_verified_profile_response() -> None:

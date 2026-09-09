@@ -608,7 +608,10 @@ def _verified_profile_identity(value: Any, expected_email: str) -> dict[str, str
         raise TypeError("MinMax account profile response is incomplete")
     actual_email = str(user_info.get("email") or "").strip()
     if not actual_email or actual_email.casefold() != expected_email.strip().casefold():
-        raise RuntimeError("MinMax account profile email does not match the registration mailbox")
+        raise RuntimeError(
+            "MinMax account profile email does not match the registration mailbox "
+            f"(expected={_email_shape(expected_email)}, actual={_email_shape(actual_email)})"
+        )
     account_user_id = str(
         user_info.get("userID") or user_info.get("userId") or user_info.get("user_id") or ""
     ).strip()
@@ -626,6 +629,17 @@ def _verified_profile_identity(value: Any, expected_email: str) -> dict[str, str
         "account_user_id": account_user_id,
         "real_user_id": real_user_id,
     }
+
+
+def _email_shape(value: str) -> str:
+    normalized = value.strip().casefold()
+    local, separator, domain = normalized.partition("@")
+    return (
+        f"present={bool(normalized)} length={len(normalized)} "
+        f"local_length={len(local)} domain_length={len(domain) if separator else 0} "
+        f"local_hash={hashlib.sha256(local.encode()).hexdigest()[:10]} "
+        f"domain_hash={hashlib.sha256(domain.encode()).hexdigest()[:10]}"
+    )
 
 
 def _extract_session_values(value: Any, target: dict[str, str]) -> None:

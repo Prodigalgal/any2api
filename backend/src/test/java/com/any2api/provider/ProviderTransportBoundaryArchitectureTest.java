@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 class ProviderTransportBoundaryArchitectureTest {
     @Test
-    void allInferenceProvidersDelegatePhysicalTransportToCamoufoxRuntime() throws IOException {
+    void allInferenceProvidersDelegatePhysicalTransportToSharedActionClient() throws IOException {
         var providers = List.of(
             "deepseek/DeepseekProvider.java",
             "glm/GlmProvider.java",

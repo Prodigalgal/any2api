@@ -12,6 +12,7 @@ import com.any2api.observability.RequestCorrelation;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ public class InferenceCoordinator {
     private final ModelAvailabilityGuard availability;
     private final ModelCatalogCache catalog;
     private final ModelRequestLimitGuard requestLimits;
+    private final ProviderTransportModeService transportModes;
 
     public InferenceCoordinator(
         ProviderRegistry providers,
@@ -42,7 +44,8 @@ public class InferenceCoordinator {
         UsageNormalizer usage,
         ModelAvailabilityGuard availability,
         ModelCatalogCache catalog,
-        ModelRequestLimitGuard requestLimits
+        ModelRequestLimitGuard requestLimits,
+        ProviderTransportModeService transportModes
     ) {
         this.providers = providers;
         this.accounts = accounts;
@@ -53,6 +56,7 @@ public class InferenceCoordinator {
         this.availability = availability;
         this.catalog = catalog;
         this.requestLimits = requestLimits;
+        this.transportModes = transportModes;
     }
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request) {
@@ -73,13 +77,15 @@ public class InferenceCoordinator {
         String requestKind
     ) {
         var provider = providers.require(request.providerId());
+        var transportPlan = transportModes.plan(provider);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             validateRequest(request, provider);
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
                 request, entry.capabilities()));
             var execution = runtime.execute(request, admission -> executeWithRetries(
                 request, provider, accountLease(request, provider), false, 1, apiKeyId,
-                requestKind, admission.queueMs()));
+                requestKind, admission.queueMs(), transportPlan.primary(),
+                transportPlan.fallback()));
             return "PROBE".equals(requestKind) ? execution
                 : availability.requireCallable(request.providerId(), request.model())
                     .thenMany(execution);
@@ -120,12 +126,14 @@ public class InferenceCoordinator {
                     "random route account provider does not match the request")));
         }
         var provider = providers.require(request.providerId());
+        var transportPlan = transportModes.plan(provider);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
                 request, entry.capabilities()));
             var execution = runtime.execute(request, admission ->
                     executeWithRetries(request, provider, reactor.core.publisher.Mono.just(account),
-                        true, 1, apiKeyId, requestKind, admission.queueMs()))
+                        true, 1, apiKeyId, requestKind, admission.queueMs(),
+                        transportPlan.primary(), transportPlan.fallback()))
                 .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
                     error -> accounts.release(account).thenMany(Flux.error(error)));
             if ("PROBE".equals(requestKind)) return execution;
@@ -163,7 +171,9 @@ public class InferenceCoordinator {
         int attempt,
         UUID apiKeyId,
         String requestKind,
-        long queueMs
+        long queueMs,
+        ProviderTransportMode transportMode,
+        ProviderTransportMode fallbackTransportMode
     ) {
         var attemptEvents = Flux.defer(() -> {
             var observed = telemetry.start(new InferenceTelemetryService.InferenceTrace(
@@ -171,7 +181,8 @@ public class InferenceCoordinator {
                 request.protocol().name(), apiKeyId, requestKind, request.rawRequest()),
                 attempt, queueMs);
             return usage.normalize(request,
-                    executeWithLease(request, provider, lease, validateInsideLease, observed))
+                    executeWithLease(
+                        request, provider, lease, validateInsideLease, observed, transportMode))
                 .doOnNext(event -> recordTelemetry(observed, event))
                 .doOnError(observed::recordError)
                 .doFinally(observed::finish);
@@ -182,11 +193,18 @@ public class InferenceCoordinator {
                     .filter(CanonicalEvent.Failed.class::isInstance)
                     .map(CanonicalEvent.Failed.class::cast)
                     .findFirst();
+                if (failure.isPresent() && fallbackTransportMode != null
+                    && shouldFallbackToRuntime(failure.get().errorType())) {
+                    return executeWithRetries(
+                        request, provider, accountLease(request, provider), false, 1,
+                        apiKeyId, requestKind, 0, fallbackTransportMode, null);
+                }
                 if (failure.isPresent()
                     && provider.retryPolicy().shouldRetry(failure.get().errorType(), attempt)) {
                     return executeWithRetries(
                         request, provider, accountLease(request, provider), false,
-                        attempt + 1, apiKeyId, requestKind, 0);
+                        attempt + 1, apiKeyId, requestKind, 0,
+                        transportMode, fallbackTransportMode);
                 }
                 return Flux.fromIterable(events);
             });
@@ -194,10 +212,19 @@ public class InferenceCoordinator {
         return attemptEvents.switchOnFirst((signal, events) -> {
                 if (signal.hasValue()
                     && signal.get() instanceof CanonicalEvent.Failed failure
+                    && fallbackTransportMode != null
+                    && shouldFallbackToRuntime(failure.errorType())) {
+                    return events.thenMany(executeWithRetries(
+                        request, provider, accountLease(request, provider), false, 1,
+                        apiKeyId, requestKind, 0, fallbackTransportMode, null));
+                }
+                if (signal.hasValue()
+                    && signal.get() instanceof CanonicalEvent.Failed failure
                     && provider.retryPolicy().shouldRetry(failure.errorType(), attempt)) {
                     return events.thenMany(executeWithRetries(
                         request, provider, accountLease(request, provider), false,
-                        attempt + 1, apiKeyId, requestKind, 0));
+                        attempt + 1, apiKeyId, requestKind, 0,
+                        transportMode, fallbackTransportMode));
                 }
                 return events;
             });
@@ -225,7 +252,8 @@ public class InferenceCoordinator {
         InferenceProvider provider,
         reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> lease,
         boolean validateInsideLease,
-        InferenceTelemetryService.Started observed
+        InferenceTelemetryService.Started observed,
+        ProviderTransportMode transportMode
     ) {
         return Flux.usingWhen(
             lease.map(account -> new ExecutionLease(account, new ProviderExecutionContext(
@@ -234,7 +262,7 @@ public class InferenceCoordinator {
                 Long.toString(account.credentialVersion()),
                 account.lease().ownerToken(),
                 account.lease().fencingToken(),
-                Instant.now().plus(REQUEST_DEADLINE)))),
+                Instant.now().plus(REQUEST_DEADLINE), transportMode))),
             execution -> {
                 var account = execution.account();
                 var context = execution.context();
@@ -331,4 +359,10 @@ public class InferenceCoordinator {
         com.any2api.account.LeasedProviderAccount account,
         ProviderExecutionContext context
     ) {}
+
+    private boolean shouldFallbackToRuntime(String failureType) {
+        return Set.of(
+            "provider_transport_error", "provider_upstream_error", "upstream_unavailable",
+            "network_error", "upstream_5xx").contains(failureType);
+    }
 }

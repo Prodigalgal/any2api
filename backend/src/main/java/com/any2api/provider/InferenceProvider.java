@@ -4,6 +4,7 @@ import com.any2api.account.LeasedProviderAccount;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import java.time.Duration;
+import java.util.Set;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.JsonNode;
@@ -28,6 +29,14 @@ public interface InferenceProvider {
 
     default ProviderRetryPolicy retryPolicy() {
         return ProviderRetryPolicy.standard();
+    }
+
+    default Set<ProviderTransportMode> supportedTransportModes() {
+        return Set.of(ProviderTransportMode.RUNTIME);
+    }
+
+    default ProviderTransportMode defaultTransportMode() {
+        return ProviderTransportMode.RUNTIME;
     }
 
     default Duration modelProbeTimeout() {

@@ -1,8 +1,8 @@
-# 厂商闭环与 Runtime 内存治理
+# 厂商闭环、Action Channel 与 Runtime 内存治理
 
 ## 目标
 
-在保持统一 Camoufox/浏览器 Runtime 方案的前提下，逐厂商完成真实 Web/CLI 反代验收，并消除 Automation Pod 因多棵浏览器进程树并存导致的 OOMKilled。
+在统一 Action/Runtime/API Channel 边界下，逐厂商完成真实 Web/CLI 反代验收，并消除 Automation Pod 因多棵浏览器进程树并存导致的 OOMKilled。Runtime 仍是默认渠道，API 只按 Action binding 逐项验证和启用。
 
 ## 范围
 
@@ -13,7 +13,7 @@
 
 ## 非目标
 
-- 不切换到官方渠道 API，不新增与现有 Runtime 平行的直连实现。
+- 不接入厂商公开渠道 API；API Channel 只承载已审核的 Web/CLI API 反代实现，不能绕过统一 Action、账号隔离和额度/风控状态。
 - 不在没有有效账号、额度或真实上游响应的情况下启用 Grok 或宣称多模态就绪。
 - 不删除现有分发密钥、账号或历史文档；旧报告只在有新证据后归档或补充当前结论。
 

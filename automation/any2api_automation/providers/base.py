@@ -10,8 +10,10 @@ from ..lifecycle.browser import (
 )
 
 CAMOUFOX_BROWSER_RUNTIME = "camoufox_browser_runtime"
+API_TRANSPORT = "api"
 NO_INFERENCE_RUNTIME = "none"
 _INFERENCE_RUNTIMES = frozenset({NO_INFERENCE_RUNTIME, CAMOUFOX_BROWSER_RUNTIME})
+_INFERENCE_MODES = frozenset({API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME})
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,7 @@ class AutomationProviderManifest:
     realtime: bool = False
     inference_transport: bool = False
     inference_runtime: str = NO_INFERENCE_RUNTIME
+    inference_modes: tuple[str, ...] = (CAMOUFOX_BROWSER_RUNTIME,)
     registration_attempt_mode: str = "new_identity"
 
     def __post_init__(self) -> None:
@@ -38,6 +41,12 @@ class AutomationProviderManifest:
             raise ValueError(
                 f"provider {self.id} cannot declare an inference runtime without transport"
             )
+        if not self.inference_modes or any(
+            mode not in _INFERENCE_MODES for mode in self.inference_modes
+        ):
+            raise ValueError(f"provider {self.id} declares an unsupported inference mode")
+        if self.inference_transport and self.inference_runtime not in self.inference_modes:
+            raise ValueError(f"provider {self.id} runtime is not included in inference modes")
 
 
 class DailyCheckinStrategy(ABC):
@@ -73,6 +82,17 @@ class AutomationProvider(ABC):
 
     def transport_stream(self, payload: dict[str, Any]) -> Iterator[bytes] | AsyncIterator[bytes]:
         raise NotImplementedError(f"stream transport is not implemented for {self.manifest.id}")
+
+    def action_bindings(self):
+        """Return explicit business-action bindings for the provider channels.
+
+        Existing providers get a compatibility Runtime binding until their concrete
+        channel implementation is migrated. Providers with an API implementation
+        override this method and register it separately.
+        """
+        from .actions import default_action_bindings
+
+        return default_action_bindings(self)
 
     def routers(self) -> tuple[Any, ...]:
         return ()

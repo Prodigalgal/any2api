@@ -13,7 +13,7 @@ Java Spring Boot Modular Monolith ---- PostgreSQL
     |          |                       Redis
     +---- Python Automation Platform
               browser, registration, captcha, proxy, mail,
-              official browser runtime transport
+               Action Dispatcher / RuntimeChannel / ApiChannel
                          |
                          +---- provider upstreams
 ```
@@ -29,7 +29,7 @@ validate standard parameters and provider_options schema
 acquire session lock when needed
 acquire account lease with fencing token
 load a versioned credential snapshot
-execute provider adapter
+  build semantic Action and dispatch to the selected Channel
 map upstream data to versioned canonical events
 render Chat Completions or Responses
 record usage and release the lease
@@ -39,14 +39,15 @@ Provider-specific paths use the discovered provider ID, for example `/acme/v1`. 
 route requires a namespaced model such as `acme/acme-ultra`. A conflict between path and model
 namespace returns HTTP 400. Cross-provider fallback is never implicit.
 
-All nine provider text-inference, model-discovery, and keepalive paths use the Python Camoufox
-Browser Runtime as their single upstream boundary. Java still owns the semantic request and
-canonical event contract, account leases, credential versions, and state decisions; Python
-restores the encrypted account browser context and performs the physical page/API/WebSocket
-operation. Calling a page `fetch` or official frontend function is a Runtime strategy, not a
-second top-level transport. UI clicks remain a last-resort strategy inside the Runtime. See ADR
-0006. The legacy `browser_transport` port remains only for provider lifecycle/media compatibility
-code and is not an approved text-inference path.
+All provider actions use a shared Action vocabulary and are dispatched to Python's
+`RuntimeChannel` or `ApiChannel`. Runtime remains the default: it restores the encrypted account
+browser context and performs the physical page/API/WebSocket operation. ApiChannel is an opt-in
+Web API/CLI API implementation and is not a public vendor channel API. Java still owns the
+semantic request, channel policy, canonical event contract, account leases, credential versions,
+and state decisions; Python owns provider-specific physical details. A page `fetch` or official
+frontend function remains a Runtime strategy, while a verified direct Web API is an API strategy.
+UI clicks remain a last-resort strategy inside Runtime. See ADR-0007; ADR-0006 records the Runtime
+default and historical migration boundary.
 
 ## High-level and low-level boundaries
 
@@ -69,8 +70,8 @@ OpenAI controllers / schedulers / catalog / lifecycle
 ```
 
 Spring discovers Java `InferenceProvider` beans. Python discovers `AutomationProvider` subclasses
-from the provider package. The registries validate IDs, capabilities, lifecycle operation names, and
-duplicates before serving traffic.
+from the provider package. The registries validate IDs, capabilities, lifecycle operation names,
+Action bindings, and duplicates before serving traffic.
 
 ## Persistence and coordination
 

@@ -15,18 +15,24 @@ The repository is a deliberately small distributed system:
 - Java adapters are semantic-only: they validate, route, lease accounts, and decode the canonical
   event stream. They do not contain a provider's physical upstream URL, signature, cookie, or
   streaming transport.
-- All nine providers use the Python Camoufox Browser Runtime as the single upstream boundary for
-  text inference, model discovery, and account keepalive. The Runtime executes the vendor web
-  frontend/CLI's page bridge, same-origin `fetch`, or page WebSocket in the account's isolated
-  browser context; it is not a call to the vendor's public channel API and not a simulated button
-  click.
+- Provider business actions use one shared vocabulary: lifecycle (`register`, `reauthenticate`,
+  `keepalive`, `daily_checkin`), `model_discovery`, `chat`, provider queries, and controlled media
+  steps. An Action Dispatcher selects a concrete channel; providers register Action bindings instead
+  of branching on `API` versus `Runtime` inside business methods.
+- `RuntimeChannel` is the default upstream boundary. It executes the vendor Web/CLI frontend's page
+  bridge, same-origin `fetch`, or page WebSocket in the account's isolated Camoufox context; it is
+  not a call to the vendor's public channel API and not a simulated button click.
+- `ApiChannel` is an independent, opt-in Web API/CLI API implementation. It is not an official
+  public channel API. MinMax currently has the first separated API bindings for text/model/query
+  actions; its media upload remains Runtime-only. The other providers remain Runtime-only until
+  their API bindings pass real account and K8S acceptance.
 - Both `/v1/chat/completions` and `/v1/responses`, with provider-path equivalents, render from one
   canonical event contract in streaming and collected modes.
 - PostgreSQL owns provider-scoped accounts, AES-GCM encrypted credentials, sessions, jobs, schedules,
   usage, and audit state. Liquibase is the only schema migration mechanism.
 - Redis provides fenced account leases and rebuildable concurrency coordination.
-- The Python service owns shared browser, registration, captcha, temporary-mail, proxy, provider
-  runtime rules, account context isolation, and raw upstream event handling.
+- The Python service owns shared Action/Channel dispatch, browser, registration, captcha, temporary-
+  mail, proxy, provider runtime rules, account context isolation, and raw upstream event handling.
 - Multiple AES-GCM encrypted automation proxy pools can be managed independently. Each provider binds
   to at most one pool; pools accept an HTTPS subscription or VLESS/HTTP/SOCKS node lists and never
   return their stored source through the API.
@@ -90,9 +96,10 @@ Provider and model onboarding is specified in
 [Provider Extension Contract](docs/architecture/PROVIDER_EXTENSION.md).
 Proxy pool security and flow behavior are defined in
 [Proxy Pools](docs/architecture/PROXY_POOLS.md).
-The current migration decision and runtime contract are recorded in
-[ADR-0006](docs/adr/0006-unified-camoufox-inference-runtime.md); superseded documents are under
-[docs/archive](docs/archive/README.md).
+The current Action/Channel boundary and migration policy are recorded in
+[ADR-0007](docs/adr/0007-action-channel-boundaries.md). Runtime history and the default browser
+boundary are in [ADR-0006](docs/adr/0006-unified-camoufox-inference-runtime.md); superseded
+documents are under [docs/archive](docs/archive/README.md).
 
 Production container images target `linux/arm64`; GitHub Actions publishes one immutable tag per
 component and source commit.

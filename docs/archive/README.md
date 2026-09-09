@@ -2,8 +2,8 @@
 
 这里保存已被现行架构决策取代、但仍需保留历史上下文的文档。归档内容不作为当前实现规范。
 
-当前统一方案以 [ADR-0006](../adr/0006-unified-camoufox-inference-runtime.md) 和
-[统一 Camoufox Runtime 任务规格](../requirements/UNIFIED_CAMOUFOX_RUNTIME.md) 为准。
+当前统一方案以 [ADR-0007](../adr/0007-action-channel-boundaries.md) 为准；Runtime 默认和
+历史迁移背景仍见 [ADR-0006](../adr/0006-unified-camoufox-inference-runtime.md)。
 
 | 归档内容 | 取代原因 |
 |---|---|

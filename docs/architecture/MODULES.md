@@ -22,7 +22,7 @@
 | `persistence` | Spring Data JPA, JdbcClient, Liquibase, projections, and converters |
 | `coordination` | Redis leases, locks, token buckets, Streams, and cache invalidation |
 | `automation` | Typed client and event consumer for the Python service |
-| `transport` | Provider-neutral client for the internal Camoufox Browser Runtime command/event contract |
+| `transport` | Provider-neutral Action client for the internal Runtime/API Channel command/event contract |
 | `media` | Provider media SPI, account orchestration, private asset storage, and model cooldown integration |
 | `observability` | Request ID propagation, paged request/operation records, full admin snapshots, telemetry, and metrics |
 | `settings` | Encrypted typed runtime settings and provider-neutral registration defaults |
@@ -43,18 +43,19 @@ modules or sibling-provider references.
 | `lifecycle.browser` | Camoufox/Patchright processes, isolated contexts/profiles, realtime and batch lanes |
 | `captcha` | Provider-neutral ddddocr, captcha-recognizer, OpenCV, preprocessing, fusion, and confidence |
 | `providers` | Isolated registration, browser reauthentication, daily account actions, and interactive challenges |
-| `browser_runtime` | Camoufox-first account-isolated contexts, storage/fingerprint restoration, page execution, official frontend functions, page fetch/WebSocket, raw event capture, and credential patches |
+| `browser_runtime` | Camoufox-first account-isolated contexts, storage/fingerprint restoration, page execution, official frontend functions, page fetch/WebSocket, raw event capture, and credential patches for RuntimeChannel |
 | `browser_transport` | Bounded compatibility port for legacy account/media lifecycle code; no text-inference, model-discovery, or keepalive path may depend on it |
 | `lifecycle.proxy` | sing-box children, node health, flow-affine leases, and cleanup |
 | `lifecycle.mail` | Temporary mailbox acquisition, OTP polling, and credential handoff |
-| `provider_api` | Provider-neutral execution endpoint and operation dispatch |
+| `provider_api` | Provider-neutral Action endpoint, Channel dispatch, and lifecycle compatibility conversion |
 
-Python owns the physical upstream boundary for inference and model discovery/keepalive: browser process/context,
-storage and fingerprint restoration, proxy affinity, provider page execution, upstream request
-construction, raw stream/frame handling, and runtime diagnostics. Java still owns model selection,
+Python owns the physical upstream boundary for inference and model discovery/keepalive through
+Action bindings: RuntimeChannel owns browser process/context, storage and fingerprint restoration,
+page execution, raw stream/frame handling, and runtime diagnostics; ApiChannel owns only explicitly
+verified Web API/CLI API request construction and framing. Java still owns model selection,
 canonical semantics, quota, leases, credential versioning, and account state transitions. The
-internal command contains a typed semantic command and a constrained runtime plan; it does not
-contain arbitrary JavaScript, arbitrary upstream URLs, or unchecked headers. The legacy
+internal command contains a typed Action, semantic command, channel, and constrained runtime plan;
+it does not contain arbitrary JavaScript, arbitrary upstream URLs, or unchecked headers. The legacy
 `browser_transport` port is confined to explicitly scoped lifecycle/media compatibility adapters
 and must not receive new inference implementations.
 

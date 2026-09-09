@@ -1,6 +1,6 @@
 # ADR-0006：统一 Camoufox Browser Runtime 作为上游出站边界
 
-- 状态：Accepted
+- 状态：部分取代（推理通道选择由 ADR-0007 接管）
 - 日期：2026-09-08
 - 取代：`ADR-0003` 关于 Java 持有厂商物理路径、header、签名和请求体的部分约定；`ADR-0005` 关于仅部分 provider 使用 Official Browser Runtime 的范围约定
 
@@ -12,7 +12,7 @@
 
 ## 决策
 
-所有上游厂商的文本推理、模型发现和账号保活，统一通过 Python Camoufox Browser Runtime 出站。Java 不直接调用这些推理上游域名。注册、密码登录、OAuth/token 交换等身份恢复步骤仍属于 provider 生命周期 adapter，可以保留其自身的认证协议或页面流程，但不能回流为 Java 推理旁路。
+当时的决策是所有上游厂商的文本推理、模型发现和账号保活统一通过 Python Camoufox Browser Runtime 出站。该决策保留为 Runtime 默认和历史迁移背景；当前 Action/Channel 选择、API binding 和 AUTO 策略以 ADR-0007 为准。Java 仍不直接调用推理上游域名。
 
 “统一 Runtime”是顶层边界统一，不是强制所有厂商共享同一物理实现。Runtime 内允许以下按厂商选择的策略：
 

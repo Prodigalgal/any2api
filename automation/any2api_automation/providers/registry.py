@@ -3,6 +3,7 @@ import re
 from dataclasses import asdict
 
 from .base import AutomationProvider
+from .channels import ActionBindingRegistry, ProviderActionDispatcher
 
 _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 _PROVIDER_OPERATIONS = frozenset({"register", "reauthenticate", "keepalive", "daily_checkin"})
@@ -28,6 +29,7 @@ class AutomationProviderRegistry:
             if provider_id in self._providers:
                 raise ValueError(f"duplicate automation provider id: {provider_id}")
             self._providers[provider_id] = provider
+        self._action_bindings = ActionBindingRegistry(self._providers.values())
 
     def require(self, provider_id: str) -> AutomationProvider:
         try:
@@ -36,7 +38,15 @@ class AutomationProviderRegistry:
             raise ValueError(f"unknown automation provider: {provider_id}") from error
 
     def public_manifests(self) -> list[dict[str, object]]:
-        return [asdict(provider.manifest) for provider in self._providers.values()]
+        manifests: list[dict[str, object]] = []
+        for provider in self._providers.values():
+            manifest = asdict(provider.manifest)
+            manifest["actions"] = self._action_bindings.describe(provider.manifest.id)
+            manifests.append(manifest)
+        return manifests
+
+    def action_dispatcher(self) -> ProviderActionDispatcher:
+        return ProviderActionDispatcher(self, self._action_bindings)
 
     def routers(self) -> list[object]:
         return [router for provider in self._providers.values() for router in provider.routers()]

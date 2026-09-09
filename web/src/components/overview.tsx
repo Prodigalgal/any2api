@@ -12,7 +12,9 @@ import {
   CircularProgress,
   Divider,
   IconButton,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Switch,
   Table,
@@ -25,7 +27,7 @@ import {
   Typography
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ProviderDescriptor, type ProviderModel, type ProviderRuntime } from "@/lib/api";
+import { api, type ProviderDescriptor, type ProviderModel, type ProviderRuntime, type ProviderTransportMode } from "@/lib/api";
 import { PageContainer, PageHeader } from "@/components/page-layout";
 
 export function Overview() {
@@ -38,7 +40,7 @@ export function Overview() {
   const modelRows = models.data?.data ?? [];
   const enabledAccounts = rows.reduce((total, row) => total + row.enabledAccountCount, 0);
   const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateProvider(id, enabled),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateProvider(id, { enabled }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin-providers"] }),
@@ -47,6 +49,14 @@ export function Overview() {
         queryClient.invalidateQueries({ queryKey: ["accounts"] }),
         queryClient.invalidateQueries({ queryKey: ["registration-jobs"] }),
       ]);
+    },
+  });
+  const transportMode = useMutation({
+    mutationFn: ({ id, mode }: { id: string; mode: ProviderTransportMode }) => (
+      api.updateProvider(id, { transportMode: mode })
+    ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-providers"] });
     },
   });
 
@@ -70,6 +80,7 @@ export function Overview() {
 
       {(catalog.error || runtime.error || models.error) && <Alert severity="warning" sx={{ mb: 2 }}>后端尚未连接，启动 Java 服务后将显示真实厂商目录。</Alert>}
       {toggle.error && <Alert severity="error" sx={{ mb: 2 }}>{toggle.error.message}</Alert>}
+      {transportMode.error && <Alert severity="error" sx={{ mb: 2 }}>{transportMode.error.message}</Alert>}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, border: 1, borderColor: "divider", bgcolor: "background.paper", mb: 2.5 }}>
         <StatusMetric label="控制面" value={health.data?.status ?? "未连接"} healthy={health.data?.status === "UP"} />
@@ -86,9 +97,9 @@ export function Overview() {
           <Divider />
           <TableContainer>
             <Table size="small">
-              <TableHead><TableRow><TableCell>厂商</TableCell><TableCell>接入</TableCell><TableCell>状态</TableCell><TableCell>账号</TableCell><TableCell>默认模型</TableCell><TableCell>工具</TableCell><TableCell>多模态</TableCell></TableRow></TableHead>
+              <TableHead><TableRow><TableCell>厂商</TableCell><TableCell>接入</TableCell><TableCell>状态</TableCell><TableCell>推理通道</TableCell><TableCell>账号</TableCell><TableCell>默认模型</TableCell><TableCell>工具</TableCell><TableCell>多模态</TableCell></TableRow></TableHead>
               <TableBody>
-                {(catalog.isLoading || runtime.isLoading || models.isLoading) && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}><CircularProgress size={24} /></TableCell></TableRow>}
+                {(catalog.isLoading || runtime.isLoading || models.isLoading) && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5 }}><CircularProgress size={24} /></TableCell></TableRow>}
                 {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.map((row) => (
                   <TableRow key={row.id} hover>
                     <TableCell><Typography sx={{ fontWeight: 700, fontSize: 13 }}>{row.displayName}</Typography></TableCell>
@@ -105,13 +116,14 @@ export function Overview() {
                       />
                     </TableCell>
                     <TableCell><Chip size="small" variant="outlined" color={row.available ? "success" : "default"} label={!row.enabled ? "已拔出" : row.available ? "可用" : row.configured ? "待账号" : "待配置"} /></TableCell>
+                    <TableCell><TransportSelector row={row} disabled={transportMode.isPending} onChange={(mode) => transportMode.mutate({ id: row.id, mode })} /></TableCell>
                     <TableCell><Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{row.enabledAccountCount} / {row.accountCount}</Typography></TableCell>
                     <TableCell><Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{row.models.join(", ") || "-"}</Typography></TableCell>
                     <TableCell>{formatCapability(row.capabilities.FUNCTION_TOOLS)}</TableCell>
                     <TableCell>{hasMultimodal(row.capabilities) ? "支持" : "文本"}</TableCell>
                   </TableRow>
                 ))}
-                {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: "text.secondary" }}>等待后端厂商目录</TableCell></TableRow>}
+                {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.length === 0 && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5, color: "text.secondary" }}>等待后端厂商目录</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
@@ -165,7 +177,7 @@ function Protection({ label }: { label: string }) {
 
 function groupProviders(runtime: ProviderRuntime[], providers: ProviderDescriptor[], models: ProviderModel[]) {
   const catalog = new Map(providers.map((provider) => [provider.id, provider]));
-  const rows = new Map<string, { id: string; displayName: string; configured: boolean; installed: boolean; enabled: boolean; accountCount: number; enabledAccountCount: number; available: boolean; models: string[]; capabilities: Record<string, string> }>();
+  const rows = new Map<string, { id: string; displayName: string; configured: boolean; installed: boolean; enabled: boolean; accountCount: number; enabledAccountCount: number; available: boolean; models: string[]; capabilities: Record<string, string>; requestedTransportMode: ProviderTransportMode; primaryTransportMode: Exclude<ProviderTransportMode, "AUTO">; supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">> }>();
   for (const provider of runtime) {
     const active = catalog.get(provider.id);
     rows.set(provider.id, {
@@ -179,6 +191,9 @@ function groupProviders(runtime: ProviderRuntime[], providers: ProviderDescripto
       available: false,
       models: provider.enabled ? [] : provider.defaultModels,
       capabilities: active?.capabilities ?? provider.capabilities,
+      requestedTransportMode: provider.requestedTransportMode,
+      primaryTransportMode: provider.primaryTransportMode,
+      supportedTransportModes: provider.supportedTransportModes,
     });
   }
   for (const model of models) {
@@ -188,6 +203,25 @@ function groupProviders(runtime: ProviderRuntime[], providers: ProviderDescripto
     current.models.push(model.id.includes("/") ? model.id.split("/").slice(1).join("/") : model.id);
   }
   return [...rows.values()];
+}
+
+function TransportSelector({ row, disabled, onChange }: {
+  row: { requestedTransportMode: ProviderTransportMode; supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">> };
+  disabled: boolean;
+  onChange: (mode: ProviderTransportMode) => void;
+}) {
+  const options: ProviderTransportMode[] = ["AUTO", ...row.supportedTransportModes];
+  return <Select
+    size="small"
+    variant="standard"
+    value={row.requestedTransportMode}
+    disabled={disabled}
+    onChange={(event) => onChange(event.target.value as ProviderTransportMode)}
+    sx={{ minWidth: 112, fontSize: 12 }}
+    inputProps={{ "aria-label": "推理通道" }}
+  >
+    {[...new Set(options)].map((mode) => <MenuItem key={mode} value={mode} sx={{ fontSize: 12 }}>{mode === "AUTO" ? "自动（API优先）" : mode === "API" ? "API" : "Runtime"}</MenuItem>)}
+  </Select>;
 }
 
 function formatCapability(level?: string) {

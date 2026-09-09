@@ -12,6 +12,7 @@ import com.any2api.coordination.PostgresAdvisoryLocks;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.RowMapper;
@@ -27,6 +28,7 @@ class ProviderRuntimeServiceTest {
         var installations = mock(ProviderInstallationCatalog.class);
         var locks = mock(PostgresAdvisoryLocks.class);
         var jdbc = mock(JdbcClient.class);
+        var transportModes = mock(ProviderTransportModeService.class);
         var statement = mock(JdbcClient.StatementSpec.class);
         var query = (JdbcClient.MappedQuerySpec<ProviderRuntimeService.ProviderRuntimeView>)
             mock(JdbcClient.MappedQuerySpec.class);
@@ -35,18 +37,23 @@ class ProviderRuntimeServiceTest {
             "alpha", "Alpha", "test-v1", "1", List.of("alpha-model"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE), true);
+        var modeView = new ProviderTransportModeService.ModeView(
+            ProviderTransportMode.RUNTIME, ProviderTransportMode.RUNTIME, null,
+            Set.of(ProviderTransportMode.RUNTIME));
         var expected = new ProviderRuntimeService.ProviderRuntimeView(
             "alpha", "Alpha", "test-v1", List.of("alpha-model"), manifest.capabilities(),
-            true, false, 3, 0, 1);
+            true, false, 3, 0, 1, modeView.requested(), modeView.primary(),
+            modeView.fallback(), modeView.supported());
         when(provider.manifest()).thenReturn(manifest);
         when(registry.requirePlugin("alpha")).thenReturn(provider);
+        when(transportModes.view(provider)).thenReturn(modeView);
         when(jdbc.sql(anyString())).thenReturn(statement);
         when(statement.param(anyString(), any())).thenReturn(statement);
         when(statement.update()).thenReturn(1);
         when(statement.query(any(RowMapper.class))).thenReturn((JdbcClient.MappedQuerySpec) query);
         when(query.optional()).thenReturn(Optional.of(expected));
         var service = new ProviderRuntimeService(
-            registry, installations, locks, jdbc, mock(ModelCatalogCache.class));
+            registry, installations, locks, jdbc, mock(ModelCatalogCache.class), transportModes);
 
         TransactionSynchronizationManager.initSynchronization();
         try {

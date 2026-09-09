@@ -1,6 +1,7 @@
 package com.any2api.api.admin;
 
 import com.any2api.provider.ProviderRuntimeService;
+import com.any2api.provider.ProviderTransportMode;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -28,11 +29,11 @@ public class AdminProviderController {
         @PathVariable String providerId,
         @RequestBody StateRequest request
     ) {
-        if (request.enabled() == null) {
-            throw new IllegalArgumentException("enabled is required");
+        if (request.enabled() == null && request.transportMode() == null) {
+            throw new IllegalArgumentException("enabled or transport_mode is required");
         }
-        return providers.setEnabled(providerId, request.enabled());
+        return providers.setState(providerId, request.enabled(), request.transportMode());
     }
 
-    public record StateRequest(Boolean enabled) {}
+    public record StateRequest(Boolean enabled, ProviderTransportMode transportMode) {}
 }

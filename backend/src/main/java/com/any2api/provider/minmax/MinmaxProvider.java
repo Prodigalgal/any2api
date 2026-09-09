@@ -14,6 +14,7 @@ import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -21,6 +22,7 @@ import com.any2api.transport.OfficialBrowserTransportClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -81,6 +83,11 @@ public final class MinmaxProvider implements InferenceProvider {
     }
 
     @Override
+    public Set<ProviderTransportMode> supportedTransportModes() {
+        return Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
     public ProviderRetryPolicy retryPolicy() {
         return ProviderRetryPolicy.standardWith(3, "quota_exhausted");
     }
@@ -116,7 +123,9 @@ public final class MinmaxProvider implements InferenceProvider {
                     semanticCommands.chat(request),
                     account.credential(),
                     proxyPool,
-                    affinityKey)
+                    affinityKey,
+                    Map.of(),
+                    context.transportMode())
                 .handle((frame, sink) -> {
                     var type = frame.path("type").asText("");
                     if ("status".equals(type)) {

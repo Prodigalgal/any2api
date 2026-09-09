@@ -29,16 +29,18 @@ One Python service and image contains Camoufox, Patchright, Xvfb, provider plugi
 
 Each attempt receives an isolated browser process/context and one node from the proxy pool bound to that provider. The node is held for the entire provider flow and cannot be shared by another flow. Pools can be backed by an HTTPS subscription or an operator-managed node list, including VLESS, HTTP(S), and SOCKS5 nodes. PostgreSQL leases the durable registration job; Redis `SET NX` leases the proxy node across Python replicas. Subscription fetches, Redis, temporary mail, Java calls, and local captcha solvers bypass the provider proxy. Only vendor browser/HTTP traffic uses the leased egress.
 
-Proxy bindings are traffic-scoped. Every provider's `LIFECYCLE` or `INFERENCE` Runtime receives
-the account's Camoufox Browser Runtime and proxy affinity; an operator setting only controls
-whether that Runtime receives a proxy lease. Core schedulers request a scope and never infer
-policy from a provider identifier.
+Proxy bindings are traffic-scoped. Every provider Action receives an account-scoped proxy
+affinity; RuntimeChannel additionally receives the account's Camoufox Browser Runtime, while
+ApiChannel receives only the minimum API request context. An operator setting controls whether a
+channel receives a proxy lease. Core schedulers request a scope and never infer policy from a
+provider identifier.
 
-Every public provider uses one Camoufox Browser Runtime session per leased account for model
-discovery, inference, and keepalive, with account cookies/storage, fingerprint, and the optional
-`INFERENCE` proxy lease shared by control and streaming calls. One-time object-storage uploads
-use the provider-issued signed URL or temporary policy inside the same page/session and do not
-send account cookies to the storage host.
+Runtime-enabled providers use one Camoufox Browser Runtime session per leased account for model
+discovery, inference, keepalive, and other browser-bound lifecycle actions, with account
+cookies/storage, fingerprint, and the optional `INFERENCE` proxy lease shared by control and
+streaming calls. ApiChannel never reuses that browser state; it uses a separately verified Web
+API/CLI API binding. One-time object-storage uploads use the provider-issued signed URL or
+temporary policy inside the selected channel and do not send account cookies to the storage host.
 
 Qwen additionally persists versioned `browser_state` and `browser_fingerprint` objects inside the
 AES-GCM provider credential.

@@ -255,6 +255,9 @@ class InferenceCoordinatorTest {
         var catalog = mock(ModelCatalogCache.class);
         when(catalog.find(anyString(), anyString()))
             .thenReturn(Mono.just(java.util.Optional.empty()));
+        var transportModes = mock(ProviderTransportModeService.class);
+        when(transportModes.plan(any())).thenReturn(new ProviderTransportModeService.TransportPlan(
+            ProviderTransportMode.RUNTIME, ProviderTransportMode.RUNTIME, null));
         return new InferenceCoordinator(
             ProviderRegistry.allEnabled(List.of(provider)),
             accounts,
@@ -265,7 +268,7 @@ class InferenceCoordinatorTest {
                 new Any2ApiProperties(),
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
             new UsageNormalizer(), callableAvailability(), catalog,
-            new ModelRequestLimitGuard());
+            new ModelRequestLimitGuard(), transportModes);
     }
 
     private ModelAvailabilityGuard callableAvailability() {

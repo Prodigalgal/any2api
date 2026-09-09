@@ -19,6 +19,25 @@
     "inference_runtime": {
       "enum": ["none", "camoufox_browser_runtime"]
     },
+    "inference_modes": {
+      "type": "array",
+      "items": { "enum": ["api", "camoufox_browser_runtime"] },
+      "uniqueItems": true
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "channel", "stream", "request"],
+        "properties": {
+          "action": { "type": "string" },
+          "channel": { "enum": ["api", "camoufox_browser_runtime"] },
+          "stream": { "type": "boolean" },
+          "request": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
     "capabilities": {
       "type": "object",
       "additionalProperties": { "enum": ["NATIVE", "EMULATED", "UNSUPPORTED"] }

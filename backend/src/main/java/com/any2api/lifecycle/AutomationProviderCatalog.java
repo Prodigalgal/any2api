@@ -1,6 +1,8 @@
 package com.any2api.lifecycle;
 
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.provider.ProviderAction;
+import com.any2api.provider.ProviderTransportMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -61,6 +63,19 @@ public class AutomationProviderCatalog {
         return operationsFor(providerId).contains(operation);
     }
 
+    public Set<ProviderActionBinding> actionsFor(String providerId) {
+        return current.get().actions().getOrDefault(providerId, Set.of());
+    }
+
+    public boolean supportsAction(
+        String providerId,
+        ProviderAction action,
+        ProviderTransportMode channel
+    ) {
+        return actionsFor(providerId).stream().anyMatch(binding ->
+            binding.action() == action && binding.channel() == channel);
+    }
+
     public RegistrationAttemptMode registrationAttemptMode(String providerId) {
         return current.get().registrationAttemptModes()
             .getOrDefault(providerId, RegistrationAttemptMode.NEW_IDENTITY);
@@ -76,6 +91,7 @@ public class AutomationProviderCatalog {
         }
         var parsed = new LinkedHashMap<String, Set<AutomationOperation>>();
         var attemptModes = new LinkedHashMap<String, RegistrationAttemptMode>();
+        var actionBindings = new LinkedHashMap<String, Set<ProviderActionBinding>>();
         for (var provider : response.path("providers")) {
             var providerId = provider.path("id").asText("");
             if (!PROVIDER_ID.matcher(providerId).matches()) {
@@ -96,18 +112,51 @@ public class AutomationProviderCatalog {
             var attemptMode = RegistrationAttemptMode.fromExternalName(
                 provider.path("registration_attempt_mode").asText("new_identity"));
             attemptModes.put(providerId, attemptMode);
+            actionBindings.put(providerId, parseActions(providerId, provider.path("actions")));
         }
         current.set(new Snapshot(
-            Map.copyOf(parsed), Map.copyOf(attemptModes), Instant.now()));
+            Map.copyOf(parsed), Map.copyOf(attemptModes), Map.copyOf(actionBindings), Instant.now()));
+    }
+
+    private Set<ProviderActionBinding> parseActions(String providerId, JsonNode values) {
+        if (!values.isArray()) return Set.of();
+        var parsed = new java.util.LinkedHashSet<ProviderActionBinding>();
+        for (var value : values) {
+            var action = ProviderAction.fromExternalName(value.path("action").asText(""));
+            var channel = ProviderTransportMode.parse(value.path("channel").asText(""));
+            if (channel == ProviderTransportMode.AUTO) {
+                throw new IllegalArgumentException(
+                    "automation action channel cannot be AUTO: " + providerId);
+            }
+            var stream = value.path("stream").asBoolean(false);
+            var request = value.path("request").asBoolean(false);
+            if (!stream && !request) {
+                throw new IllegalArgumentException(
+                    "automation action has no execution shape: " + providerId);
+            }
+            if (!parsed.add(new ProviderActionBinding(action, channel, stream, request))) {
+                throw new IllegalArgumentException(
+                    "duplicate automation action binding: " + providerId);
+            }
+        }
+        return Set.copyOf(parsed);
     }
 
     private record Snapshot(
         Map<String, Set<AutomationOperation>> operations,
         Map<String, RegistrationAttemptMode> registrationAttemptModes,
+        Map<String, Set<ProviderActionBinding>> actions,
         Instant refreshedAt
     ) {
         static Snapshot empty() {
-            return new Snapshot(Map.of(), Map.of(), null);
+            return new Snapshot(Map.of(), Map.of(), Map.of(), null);
         }
     }
+
+    public record ProviderActionBinding(
+        ProviderAction action,
+        ProviderTransportMode channel,
+        boolean stream,
+        boolean request
+    ) {}
 }

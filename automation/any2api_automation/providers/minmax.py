@@ -33,7 +33,12 @@ from ..lifecycle.browser import (
 )
 from ..lifecycle.mail import Mailbox
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
-from .base import AutomationProvider, AutomationProviderManifest
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from .minmax_browser import MinmaxOfficialBrowserTransport
 from .minmax_daily_checkin import MinmaxDailyCheckin
 from .minmax_settings import settings
@@ -51,8 +56,14 @@ class MinmaxAutomationProvider(AutomationProvider):
         challenge_types=("slider",),
         operations=("register", "reauthenticate", "keepalive", "daily_checkin"),
         inference_transport=True,
-        inference_runtime="camoufox_browser_runtime",
+        inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
     )
+
+    def action_bindings(self):
+        from .minmax_api_actions import action_bindings
+
+        return action_bindings(self)
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = settings()

@@ -277,16 +277,19 @@ provider bindings. Each binding selects one or more traffic scopes: `REGISTRATIO
 are interpreted as registration-only. New clients send `bindingScopes`, for example
 `{"minmax":["REGISTRATION"]}`. An empty update source preserves the current encrypted value. Read
 responses expose metadata, node count, and scoped bindings, never the subscription URL or nodes.
-Migrated providers consume `INFERENCE` through the Camoufox Browser Runtime. The legacy
-browser-shaped transport remains only for providers still in migration; removing an `INFERENCE`
-binding changes the Runtime's proxy lease policy without changing the public API.
+Inference providers consume a stable Action contract through either RuntimeChannel or ApiChannel.
+Runtime remains the default and the legacy browser-shaped transport is only a compatibility adapter;
+removing an Action binding changes the channel capability, not the public API. A provider may expose
+different channel support per Action, so provider-level API availability must not be used to infer
+media support.
 
-## Java/Python operation contract
+## Java/Python Action contract
 
-Java owns durable state and calls the single Python automation service with:
+Java owns durable state and calls the Python automation service with a stable Action contract:
 
 ```text
-operation
+action
+channel
 provider path parameter
 payload
 ```
@@ -298,27 +301,32 @@ operation = register | reauthenticate | keepalive | daily_checkin
 
 Python has no domain-table access. Java persists a successful registration or credential patch only after the internal call returns. Provider exceptions are reduced to a non-sensitive error class at the service boundary.
 
-## Camoufox Browser Runtime contract
+## Action Channel contract
 
-For migrated inference providers, Java calls the Runtime with a typed semantic command rather than
-a provider URL or prebuilt upstream body:
+Lifecycle compatibility uses the operation endpoint, but it is converted to the same Action
+Dispatcher before reaching a provider. New inference calls use the explicit channel endpoint:
 
 ```text
-POST /internal/v1/providers/{provider_id}/transport/request
-POST /internal/v1/providers/{provider_id}/transport/stream
+POST /internal/v1/providers/{provider_id}/actions/request
+POST /internal/v1/providers/{provider_id}/actions/stream
 
-runtime_mode = camoufox_browser_runtime
-operation
+action = model_discovery | chat | provider_query | media_policy | media_callback | raw_request
+channel = camoufox_browser_runtime | api
+operation = legacy compatibility name, when required
 semantic_command
 runtime_plan
 payload = credential + optional proxy pool/affinity + constrained runtime options
 ```
 
-The stream endpoint returns newline-delimited Runtime events: `status`, `data`, `error`,
-`credential_patch` and `runtime_canary`. The Runtime owns provider URL/path, browser headers,
-official frontend/page request details and raw upstream framing. `runtime_plan` contains only
-bounded declarative revision data; it cannot carry executable JavaScript, arbitrary URLs or
-credentials outside the execution payload.
+The stream endpoint returns newline-delimited channel events: `status`, `data`, `error`,
+`credential_patch` and `runtime_canary`. RuntimeChannel owns browser/context and official
+frontend/page request details; ApiChannel owns the provider's verified Web API/CLI API request
+details. Neither channel accepts arbitrary JavaScript or unrestricted upstream URLs. `runtime_plan`
+contains only bounded declarative Runtime revision data and cannot carry credentials outside the
+execution payload.
+
+The old `/transport/request` and `/transport/stream` routes remain as compatibility adapters. They
+convert `runtime_mode + operation` to the Action contract and are not a second business path.
 
 ## Internal synchronous APIs
 
@@ -329,6 +337,8 @@ POST /internal/v1/captcha/solve
 POST /internal/v1/providers/qwen/risk-headers
 POST /internal/v1/providers/glm/browser-sessions/{session_id}/captcha
 POST /internal/v1/providers/{provider_id}/execute
+POST /internal/v1/providers/{provider_id}/actions/request
+POST /internal/v1/providers/{provider_id}/actions/stream
 ```
 
 Internal APIs require a separate service credential and are never exposed by the public HTTPRoute.

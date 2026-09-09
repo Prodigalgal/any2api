@@ -2,6 +2,8 @@ package com.any2api.transport;
 
 import com.any2api.config.Any2ApiProperties;
 import com.any2api.observability.RequestCorrelation;
+import com.any2api.provider.ProviderAction;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.runtime.ProviderRuntimeRuleService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -16,6 +18,7 @@ import reactor.core.scheduler.Schedulers;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+/** Gateway-side client for the stable provider Action/Channel contract. */
 @Component
 public final class OfficialBrowserTransportClient {
     private final WebClient client;
@@ -48,7 +51,8 @@ public final class OfficialBrowserTransportClient {
         String affinityKey
     ) {
         return request(
-            providerId, operation, semanticCommand, credential, proxyPool, affinityKey, Map.of());
+            providerId, operation, semanticCommand, credential, proxyPool, affinityKey,
+            Map.of(), ProviderTransportMode.RUNTIME);
     }
 
     public Mono<TransportResponse> request(
@@ -60,19 +64,54 @@ public final class OfficialBrowserTransportClient {
         String affinityKey,
         Map<String, Object> runtimeOptions
     ) {
-        return runtimePlan(providerId).flatMap(plan -> client.post()
-                .uri("/internal/v1/providers/{providerId}/transport/request", providerId)
-                .headers(this::headers)
-                .bodyValue(command(
-                    operation, semanticCommand, plan, credential, proxyPool, affinityKey,
-                    runtimeOptions))
-                .retrieve()
-                .bodyToMono(JsonNode.class))
+        return request(
+            providerId, operation, semanticCommand, credential, proxyPool, affinityKey,
+            runtimeOptions, ProviderTransportMode.RUNTIME);
+    }
+
+    public Mono<TransportResponse> request(
+        String providerId,
+        String operation,
+        JsonNode semanticCommand,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions,
+        ProviderTransportMode transportMode
+    ) {
+        var request = transportMode == ProviderTransportMode.API
+            ? request(providerId, null, operation, semanticCommand, credential, proxyPool,
+                affinityKey, runtimeOptions, transportMode)
+            : runtimePlan(providerId).flatMap(plan -> request(
+                providerId, plan, operation, semanticCommand, credential, proxyPool,
+                affinityKey, runtimeOptions, transportMode));
+        return request
             .flatMap(value -> acceptReports(providerId, value.path("runtime_reports"))
                 .thenReturn(new TransportResponse(
                     value.path("status").asInt(502),
                     value.path("body").asText(""),
                     value.path("credential_patch").deepCopy())));
+    }
+
+    private Mono<JsonNode> request(
+        String providerId,
+        ProviderRuntimeRuleService.RuntimePlan plan,
+        String operation,
+        JsonNode semanticCommand,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions,
+        ProviderTransportMode transportMode
+    ) {
+        return client.post()
+                .uri("/internal/v1/providers/{providerId}/actions/request", providerId)
+                .headers(this::headers)
+                .bodyValue(command(
+                    operation, semanticCommand, plan, credential, proxyPool, affinityKey,
+                    runtimeOptions, transportMode))
+                .retrieve()
+                .bodyToMono(JsonNode.class);
     }
 
     public Flux<JsonNode> stream(
@@ -84,7 +123,8 @@ public final class OfficialBrowserTransportClient {
         String affinityKey
     ) {
         return stream(
-            providerId, operation, semanticCommand, credential, proxyPool, affinityKey, Map.of());
+            providerId, operation, semanticCommand, credential, proxyPool, affinityKey,
+            Map.of(), ProviderTransportMode.RUNTIME);
     }
 
     public Flux<JsonNode> stream(
@@ -96,17 +136,52 @@ public final class OfficialBrowserTransportClient {
         String affinityKey,
         Map<String, Object> runtimeOptions
     ) {
-        return runtimePlan(providerId).flatMapMany(plan -> client.post()
-                .uri("/internal/v1/providers/{providerId}/transport/stream", providerId)
-                .headers(this::headers)
-                .bodyValue(command(
-                    operation, semanticCommand, plan, credential, proxyPool, affinityKey,
-                    runtimeOptions))
-                .retrieve()
-                .bodyToFlux(JsonNode.class))
+        return stream(
+            providerId, operation, semanticCommand, credential, proxyPool, affinityKey,
+            runtimeOptions, ProviderTransportMode.RUNTIME);
+    }
+
+    public Flux<JsonNode> stream(
+        String providerId,
+        String operation,
+        JsonNode semanticCommand,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions,
+        ProviderTransportMode transportMode
+    ) {
+        var stream = transportMode == ProviderTransportMode.API
+            ? stream(providerId, null, operation, semanticCommand, credential, proxyPool,
+                affinityKey, runtimeOptions, transportMode)
+            : runtimePlan(providerId).flatMapMany(plan -> stream(
+                providerId, plan, operation, semanticCommand, credential, proxyPool,
+                affinityKey, runtimeOptions, transportMode));
+        return stream
             .concatMap(frame -> "runtime_canary".equals(frame.path("type").asText(""))
                 ? acceptReport(providerId, frame).then(Mono.empty())
                 : Mono.just(frame));
+    }
+
+    private Flux<JsonNode> stream(
+        String providerId,
+        ProviderRuntimeRuleService.RuntimePlan plan,
+        String operation,
+        JsonNode semanticCommand,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions,
+        ProviderTransportMode transportMode
+    ) {
+        return client.post()
+                .uri("/internal/v1/providers/{providerId}/actions/stream", providerId)
+                .headers(this::headers)
+                .bodyValue(command(
+                    operation, semanticCommand, plan, credential, proxyPool, affinityKey,
+                    runtimeOptions, transportMode))
+                .retrieve()
+                .bodyToFlux(JsonNode.class);
     }
 
     private Map<String, Object> command(
@@ -118,7 +193,8 @@ public final class OfficialBrowserTransportClient {
         String affinityKey
     ) {
         return command(
-            operation, semanticCommand, runtimePlan, credential, proxyPool, affinityKey, Map.of());
+            operation, semanticCommand, runtimePlan, credential, proxyPool, affinityKey,
+            Map.of(), ProviderTransportMode.RUNTIME);
     }
 
     private Map<String, Object> command(
@@ -129,6 +205,21 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> proxyPool,
         String affinityKey,
         Map<String, Object> runtimeOptions
+    ) {
+        return command(
+            operation, semanticCommand, runtimePlan, credential, proxyPool, affinityKey,
+            runtimeOptions, ProviderTransportMode.RUNTIME);
+    }
+
+    private Map<String, Object> command(
+        String operation,
+        JsonNode semanticCommand,
+        ProviderRuntimeRuleService.RuntimePlan runtimePlan,
+        JsonNode credential,
+        Map<String, Object> proxyPool,
+        String affinityKey,
+        Map<String, Object> runtimeOptions,
+        ProviderTransportMode transportMode
     ) {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("credential", credential);
@@ -147,10 +238,12 @@ public final class OfficialBrowserTransportClient {
             payload.put("runtime_options", Map.copyOf(runtimeOptions));
         }
         var command = new LinkedHashMap<String, Object>();
-        command.put("runtime_mode", "camoufox_browser_runtime");
-        command.put("operation", operation);
+        command.put("action", ProviderAction.fromLegacyOperation(operation).externalName());
+        command.put("channel", transportMode.externalName());
+        if (operation != null && !operation.isBlank()) command.put("operation", operation);
         command.put("semantic_command", semanticCommand);
-        command.put("runtime_plan", mapper.valueToTree(runtimePlan));
+        command.put("runtime_plan", runtimePlan == null
+            ? mapper.createObjectNode() : mapper.valueToTree(runtimePlan));
         command.put("payload", payload);
         return command;
     }

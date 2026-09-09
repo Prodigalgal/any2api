@@ -222,13 +222,13 @@ automation/.../providers/
 The Java provider is a Spring bean implementing `InferenceProvider`; the Python provider is a
 discoverable `AutomationProvider` subclass. Each runtime manifest is authoritative for the
 capabilities it executes: Java owns canonical inference semantics and domain orchestration, while
-Python owns the Camoufox Browser Runtime physical operation and browser requirements. Shared
+Python owns Action bindings and the Runtime/API Channel physical operation and browser requirements. Shared
 controllers and frontend selectors consume
 `/api/catalog/v1/providers`; they never infer the set of providers from models and never contain
 provider ID branches.
 
 Java periodically reads Python's authenticated `/internal/v1/capabilities` manifest and atomically
-caches the last valid lifecycle operation set. The public provider directory merges that set with
+caches the last valid lifecycle operation and Action binding set. The public provider directory merges that set with
 the Java inference manifest. Registration creation fails closed until Python explicitly advertises
 `register`; a malformed or unavailable refresh never replaces the last valid snapshot.
 

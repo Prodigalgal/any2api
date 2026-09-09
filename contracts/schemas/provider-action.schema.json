@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://any2api.local/schemas/provider-action.schema.json",
+  "title": "Provider Action Envelope",
+  "description": "Stable semantic action sent to a provider Runtime or API channel.",
+  "type": "object",
+  "required": ["action", "channel", "semantic_command", "runtime_plan", "payload"],
+  "properties": {
+    "action": {
+      "enum": [
+        "register", "reauthenticate", "keepalive", "daily_checkin",
+        "model_discovery", "chat", "provider_query", "media_policy",
+        "media_callback", "raw_request"
+      ]
+    },
+    "channel": { "enum": ["api", "camoufox_browser_runtime"] },
+    "operation": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "semantic_command": { "type": "object" },
+    "runtime_plan": { "type": "object" },
+    "method": { "enum": ["GET", "POST", null] },
+    "path": { "type": "string", "maxLength": 1024 },
+    "body": { "type": "string", "maxLength": 2097152 },
+    "payload": {
+      "type": "object",
+      "required": ["credential"],
+      "properties": {
+        "credential": { "type": "object" },
+        "proxy_pool": { "type": "object" },
+        "proxy_affinity_key": { "type": "string", "maxLength": 255 },
+        "strict_proxy_affinity": { "type": "boolean" },
+        "proxy_node_offset": { "type": "integer", "minimum": 0 },
+        "runtime_options": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,5 +1,3 @@
-import asyncio
-import inspect
 import logging
 import time
 from typing import Any, Literal
@@ -11,7 +9,9 @@ from pydantic import BaseModel, Field
 from .captcha.policy import CaptchaAiPolicy, bind_captcha_policy
 from .observability import OperationFailure, bind_operation, failure_details
 from .providers import provider_registry
+from .providers.actions import ProviderAction, ProviderActionRequest
 from .providers.base import CAMOUFOX_BROWSER_RUNTIME
+from .providers.channels import ActionNotSupported
 from .resources import lanes
 from .security import require_internal_token
 
@@ -30,7 +30,21 @@ class ProviderOperationRequest(BaseModel):
 
 
 class ProviderTransportRequest(BaseModel):
-    runtime_mode: Literal["camoufox_browser_runtime"] = CAMOUFOX_BROWSER_RUNTIME
+    runtime_mode: Literal["api", "camoufox_browser_runtime"] = CAMOUFOX_BROWSER_RUNTIME
+    operation: str | None = Field(default=None, min_length=1, max_length=64)
+    semantic_command: dict[str, Any] = Field(default_factory=dict)
+    runtime_plan: dict[str, Any] = Field(default_factory=dict)
+    method: Literal["GET", "POST"] | None = None
+    path: str = Field(default="", max_length=1024)
+    body: str = Field(default="", max_length=2 * 1024 * 1024)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderActionEnvelope(BaseModel):
+    """统一 Action 契约；旧 transport 请求由下方兼容路由转换到这里。"""
+
+    action: str = Field(min_length=1, max_length=64)
+    channel: Literal["api", "runtime", "camoufox_browser_runtime"] = CAMOUFOX_BROWSER_RUNTIME
     operation: str | None = Field(default=None, min_length=1, max_length=64)
     semantic_command: dict[str, Any] = Field(default_factory=dict)
     runtime_plan: dict[str, Any] = Field(default_factory=dict)
@@ -45,6 +59,7 @@ router = APIRouter(
     dependencies=[Depends(require_internal_token)],
 )
 logger = logging.getLogger("any2api_automation.provider_api")
+action_dispatcher = provider_registry.action_dispatcher()
 
 
 @router.post("/{provider_id}/execute")
@@ -74,7 +89,6 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
                 retryable=False,
             )
             raise _http_failure(error, correlation, provider_id, request.operation, 501, started)
-        operation = getattr(provider, request.operation)
         logger.info(
             "automation_operation_started correlation_id=%s provider=%s operation=%s "
             "aggregate_type=%s aggregate_id=%s attempt=%s",
@@ -89,7 +103,15 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
             captcha_policy = CaptchaAiPolicy.from_payload(request.payload)
             with bind_captcha_policy(captcha_policy):
                 async with lanes.batch:
-                    result = await operation(request.payload)
+                    result = await action_dispatcher.execute(
+                        ProviderActionRequest(
+                            provider_id=provider_id,
+                            action=ProviderAction.from_legacy_operation(request.operation),
+                            channel=CAMOUFOX_BROWSER_RUNTIME,
+                            operation=request.operation,
+                            payload=request.payload,
+                        )
+                    )
             duration_ms = round((time.monotonic() - started) * 1000)
             logger.info(
                 "automation_operation_finished correlation_id=%s provider=%s operation=%s "
@@ -112,6 +134,8 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
             }
         except (TypeError, ValueError) as exc:
             raise _http_failure(exc, correlation, provider_id, request.operation, 400, started)
+        except ActionNotSupported as exc:
+            raise _http_failure(exc, correlation, provider_id, request.operation, 501, started)
         except NotImplementedError as exc:
             raise _http_failure(exc, correlation, provider_id, request.operation, 501, started)
         except Exception as exc:  # noqa: BLE001 - normalize failures at the provider boundary
@@ -156,62 +180,104 @@ def _http_failure(
 
 @router.post("/{provider_id}/transport/request")
 async def transport_request(provider_id: str, request: ProviderTransportRequest) -> dict[str, Any]:
-    provider = _transport_provider(provider_id)
-    payload = {
-        **request.payload,
-        "runtime_mode": request.runtime_mode,
-        "operation": request.operation,
-        "semantic_command": request.semantic_command,
-        "runtime_plan": request.runtime_plan,
-    }
-    if request.method is not None:
-        payload.update(method=request.method, path=request.path, body=request.body)
-    try:
-        if inspect.iscoroutinefunction(provider.transport_request):
-            return await provider.transport_request(payload)
-        return await asyncio.to_thread(provider.transport_request, payload)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"provider transport failed ({type(exc).__name__})",
-        ) from exc
+    return await _execute_action(
+        _legacy_action_request(provider_id, request, stream=False),
+    )
 
 
 @router.post("/{provider_id}/transport/stream")
 async def transport_stream(
     provider_id: str, request: ProviderTransportRequest
 ) -> StreamingResponse:
-    provider = _transport_provider(provider_id)
-    payload = {
-        **request.payload,
-        "runtime_mode": request.runtime_mode,
-        "operation": request.operation,
-        "semantic_command": request.semantic_command,
-        "runtime_plan": request.runtime_plan,
-    }
-    if request.method is not None:
-        payload.update(method=request.method, path=request.path, body=request.body)
+    return await _stream_action(_legacy_action_request(provider_id, request, stream=True))
+
+
+@router.post("/{provider_id}/actions/request")
+async def action_request(provider_id: str, request: ProviderActionEnvelope) -> dict[str, Any]:
+    return await _execute_action(_action_request(provider_id, request, stream=False))
+
+
+@router.post("/{provider_id}/actions/stream")
+async def action_stream(provider_id: str, request: ProviderActionEnvelope) -> StreamingResponse:
+    return await _stream_action(_action_request(provider_id, request, stream=True))
+
+
+def _legacy_action_request(
+    provider_id: str, request: ProviderTransportRequest, *, stream: bool
+) -> ProviderActionRequest:
+    return ProviderActionRequest.from_legacy(
+        provider_id,
+        request.runtime_mode,
+        request.operation,
+        payload=request.payload,
+        semantic_command=request.semantic_command,
+        runtime_plan=request.runtime_plan,
+        method=request.method,
+        path=request.path,
+        body=request.body,
+        stream=stream,
+    )
+
+
+def _action_request(
+    provider_id: str, request: ProviderActionEnvelope, *, stream: bool
+) -> ProviderActionRequest:
     try:
-        stream = provider.transport_stream(payload)
-        if inspect.isawaitable(stream):
-            stream = await stream
+        action = ProviderAction.parse(request.action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ProviderActionRequest(
+        provider_id=provider_id,
+        action=action,
+        channel=request.channel,
+        operation=request.operation,
+        payload=request.payload,
+        semantic_command=request.semantic_command,
+        runtime_plan=request.runtime_plan,
+        method=request.method,
+        path=request.path,
+        body=request.body,
+        stream=stream,
+    )
+
+
+async def _execute_action(request: ProviderActionRequest) -> dict[str, Any]:
+    try:
+        _require_action_provider(request)
+        return await action_dispatcher.execute(request)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ActionNotSupported as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"provider action failed ({type(exc).__name__})",
+        ) from exc
+
+
+async def _stream_action(request: ProviderActionRequest) -> StreamingResponse:
+    try:
+        _require_action_provider(request)
+        stream = await action_dispatcher.stream(request)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ActionNotSupported as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"provider action failed ({type(exc).__name__})",
+        ) from exc
     return StreamingResponse(stream, media_type="application/x-ndjson")
 
 
-def _transport_provider(provider_id: str):
+def _require_action_provider(request: ProviderActionRequest) -> None:
     try:
-        provider = provider_registry.require(provider_id)
+        provider_registry.require(request.provider_id)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if not provider.manifest.inference_transport:
-        raise HTTPException(status_code=501, detail="provider transport is not implemented")
-    if provider.manifest.inference_runtime != CAMOUFOX_BROWSER_RUNTIME:
-        raise HTTPException(
-            status_code=500,
-            detail="provider transport is not bound to the Camoufox Browser Runtime",
-        )
-    return provider
+        raise LookupError(str(exc)) from exc

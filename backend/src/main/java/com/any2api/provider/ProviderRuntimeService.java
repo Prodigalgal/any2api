@@ -5,6 +5,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,19 +19,22 @@ public class ProviderRuntimeService {
     private final PostgresAdvisoryLocks locks;
     private final JdbcClient jdbc;
     private final ModelCatalogCache modelCatalog;
+    private final ProviderTransportModeService transportModes;
 
     public ProviderRuntimeService(
         ProviderRegistry providers,
         ProviderInstallationCatalog installations,
         PostgresAdvisoryLocks locks,
         JdbcClient jdbc,
-        ModelCatalogCache modelCatalog
+        ModelCatalogCache modelCatalog,
+        ProviderTransportModeService transportModes
     ) {
         this.providers = providers;
         this.installations = installations;
         this.locks = locks;
         this.jdbc = jdbc;
         this.modelCatalog = modelCatalog;
+        this.transportModes = transportModes;
     }
 
     @Transactional(readOnly = true)
@@ -42,19 +46,52 @@ public class ProviderRuntimeService {
 
     @Transactional
     public ProviderRuntimeView setEnabled(String providerId, boolean enabled) {
+        return update(providerId, enabled, null);
+    }
+
+    @Transactional
+    public ProviderRuntimeView setTransportMode(
+        String providerId,
+        ProviderTransportMode transportMode
+    ) {
+        return update(providerId, null, transportMode);
+    }
+
+    @Transactional
+    public ProviderRuntimeView setState(
+        String providerId,
+        Boolean enabled,
+        ProviderTransportMode transportMode
+    ) {
+        if (enabled == null && transportMode == null) {
+            throw new IllegalArgumentException("enabled or transport mode is required");
+        }
+        return update(providerId, enabled, transportMode);
+    }
+
+    private ProviderRuntimeView update(
+        String providerId,
+        Boolean enabled,
+        ProviderTransportMode transportMode
+    ) {
         var manifest = providers.requirePlugin(providerId).manifest();
         locks.lockTransaction("provider:" + providerId + ":runtime");
-        var updated = jdbc.sql("""
-            UPDATE providers SET enabled = :enabled, updated_at = CURRENT_TIMESTAMP
-            WHERE id = :providerId AND installed = TRUE
-            """)
-            .param("enabled", enabled)
-            .param("providerId", providerId)
-            .update();
-        if (updated != 1) {
-            throw new IllegalStateException("provider plugin is not installed: " + providerId);
+        if (transportMode != null) {
+            transportModes.set(providers.requirePlugin(providerId), transportMode);
         }
-        if (!enabled) quarantine(providerId);
+        if (enabled != null) {
+            var updated = jdbc.sql("""
+                UPDATE providers SET enabled = :enabled, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :providerId AND installed = TRUE
+                """)
+                .param("enabled", enabled)
+                .param("providerId", providerId)
+                .update();
+            if (updated != 1) {
+                throw new IllegalStateException("provider plugin is not installed: " + providerId);
+            }
+            if (!enabled) quarantine(providerId);
+        }
         modelCatalog.invalidateAfterCommit();
         TransactionSynchronizationManager.registerSynchronization(
             new TransactionSynchronization() {
@@ -102,20 +139,27 @@ public class ProviderRuntimeService {
             .param("providerId", manifest.id())
             .query((row, ignored) -> map(row, manifest))
             .optional()
-            .orElse(new ProviderRuntimeView(
-                manifest.id(), manifest.displayName(), manifest.adapterVersion(),
-                manifest.defaultModels(), manifest.capabilities(),
-                false, false, 0, 0, 0));
+            .orElseGet(() -> runtimeViewWithoutRow(manifest));
     }
 
-    private static ProviderRuntimeView map(ResultSet row, ProviderManifest manifest)
+    private ProviderRuntimeView map(ResultSet row, ProviderManifest manifest)
         throws SQLException {
+        var mode = transportModes.view(providers.requirePlugin(manifest.id()));
         return new ProviderRuntimeView(
             manifest.id(), manifest.displayName(), manifest.adapterVersion(),
             manifest.defaultModels(), manifest.capabilities(),
             row.getBoolean("installed"), row.getBoolean("enabled"),
             row.getLong("account_count"), row.getLong("enabled_account_count"),
-            row.getLong("model_count"));
+            row.getLong("model_count"), mode.requested(), mode.primary(), mode.fallback(),
+            mode.supported());
+    }
+
+    private ProviderRuntimeView runtimeViewWithoutRow(ProviderManifest manifest) {
+        var mode = transportModes.view(providers.requirePlugin(manifest.id()));
+        return new ProviderRuntimeView(
+            manifest.id(), manifest.displayName(), manifest.adapterVersion(),
+            manifest.defaultModels(), manifest.capabilities(), false, false, 0, 0, 0,
+            mode.requested(), mode.primary(), mode.fallback(), mode.supported());
     }
 
     public record ProviderRuntimeView(
@@ -128,6 +172,11 @@ public class ProviderRuntimeService {
         boolean enabled,
         long accountCount,
         long enabledAccountCount,
-        long modelCount
-    ) {}
+        long modelCount,
+        ProviderTransportMode requestedTransportMode,
+        ProviderTransportMode primaryTransportMode,
+        ProviderTransportMode fallbackTransportMode,
+        Set<ProviderTransportMode> supportedTransportModes
+    ) {
+    }
 }

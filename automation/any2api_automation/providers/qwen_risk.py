@@ -873,18 +873,30 @@ class QwenNativeBrowserTransport:
             except Exception as error:
                 error_text = str(error)
                 if "NS_BINDING_ABORTED" in error_text:
-                    await session.page.wait_for_url(
-                        target,
-                        wait_until="domcontentloaded",
-                        timeout=10_000,
-                    )
-                    logger.info(
-                        "qwen_native_browser_navigation_superseded target_path=%s",
-                        desired.path,
-                    )
+                    try:
+                        await session.page.wait_for_url(
+                            target,
+                            wait_until="domcontentloaded",
+                            timeout=10_000,
+                        )
+                    except Exception as navigation_wait_error:
+                        if not self._is_navigation_timeout(navigation_wait_error):
+                            raise
+                        await self._recover_failed_same_origin_navigation(
+                            session,
+                            target,
+                            desired,
+                            error_label="NS_BINDING_ABORTED/TimeoutError",
+                            wait_for_load=True,
+                        )
+                    else:
+                        logger.info(
+                            "qwen_native_browser_navigation_superseded target_path=%s",
+                            desired.path,
+                        )
                 elif "NS_ERROR_FAILURE" in error_text:
                     await self._recover_failed_same_origin_navigation(session, target, desired)
-                elif type(error).__name__ == "TimeoutError" or "timeout" in error_text.lower():
+                elif self._is_navigation_timeout(error):
                     await self._recover_failed_same_origin_navigation(
                         session,
                         target,
@@ -900,6 +912,10 @@ class QwenNativeBrowserTransport:
             )
             await session.page.wait_for_timeout(750)
         await self._ensure_baxia_ready(session)
+
+    @staticmethod
+    def _is_navigation_timeout(error: BaseException) -> bool:
+        return type(error).__name__ == "TimeoutError" or "timeout" in str(error).lower()
 
     async def _recover_failed_same_origin_navigation(
         self,

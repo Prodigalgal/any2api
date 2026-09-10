@@ -50,6 +50,8 @@ jobs:
           enable-cache: true
       - name: Test automation
         working-directory: automation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           uv sync --frozen
           uv run ruff format --check .

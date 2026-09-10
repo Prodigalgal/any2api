@@ -24,6 +24,20 @@
       "items": { "enum": ["api", "camoufox_browser_runtime"] },
       "uniqueItems": true
     },
+    "inference_actions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "model_discovery",
+          "chat",
+          "provider_query",
+          "media_policy",
+          "media_callback",
+          "raw_request"
+        ]
+      },
+      "uniqueItems": true
+    },
     "actions": {
       "type": "array",
       "items": {

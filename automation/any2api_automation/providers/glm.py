@@ -51,6 +51,7 @@ class GlmAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_actions=("model_discovery", "chat"),
         registration_attempt_mode="single_identity",
     )
 

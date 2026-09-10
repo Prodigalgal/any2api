@@ -14,6 +14,16 @@ API_TRANSPORT = "api"
 NO_INFERENCE_RUNTIME = "none"
 _INFERENCE_RUNTIMES = frozenset({NO_INFERENCE_RUNTIME, CAMOUFOX_BROWSER_RUNTIME})
 _INFERENCE_MODES = frozenset({API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME})
+_INFERENCE_ACTIONS = frozenset(
+    {
+        "model_discovery",
+        "chat",
+        "provider_query",
+        "media_policy",
+        "media_callback",
+        "raw_request",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,7 @@ class AutomationProviderManifest:
     inference_transport: bool = False
     inference_runtime: str = NO_INFERENCE_RUNTIME
     inference_modes: tuple[str, ...] = (CAMOUFOX_BROWSER_RUNTIME,)
+    inference_actions: tuple[str, ...] = ()
     registration_attempt_mode: str = "new_identity"
 
     def __post_init__(self) -> None:
@@ -47,6 +58,21 @@ class AutomationProviderManifest:
             raise ValueError(f"provider {self.id} declares an unsupported inference mode")
         if self.inference_transport and self.inference_runtime not in self.inference_modes:
             raise ValueError(f"provider {self.id} runtime is not included in inference modes")
+        declared_actions = tuple(str(action).strip().lower() for action in self.inference_actions)
+        if len(set(declared_actions)) != len(declared_actions):
+            raise ValueError(f"provider {self.id} declares duplicate inference actions")
+        unsupported_actions = set(declared_actions) - _INFERENCE_ACTIONS
+        if unsupported_actions:
+            names = ", ".join(sorted(unsupported_actions))
+            raise ValueError(f"provider {self.id} declares unsupported inference actions: {names}")
+        if not self.inference_transport and declared_actions:
+            raise ValueError(
+                f"provider {self.id} cannot declare inference actions without inference transport"
+            )
+        if self.inference_transport and not declared_actions:
+            raise ValueError(f"inference provider {self.id} must declare inference actions")
+        if self.inference_transport and "chat" not in declared_actions:
+            raise ValueError(f"inference provider {self.id} must declare the chat action")
 
 
 class DailyCheckinStrategy(ABC):

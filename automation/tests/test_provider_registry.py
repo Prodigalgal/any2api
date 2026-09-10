@@ -1,7 +1,11 @@
 import pytest
 
 from any2api_automation.providers import provider_registry
-from any2api_automation.providers.base import AutomationProvider, AutomationProviderManifest
+from any2api_automation.providers.base import (
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from any2api_automation.providers.registry import AutomationProviderRegistry
 
 
@@ -93,6 +97,29 @@ def test_provider_manifest_rejects_mixed_inference_transport_modes() -> None:
             isolation="context",
             challenge_types=(),
             inference_runtime="camoufox_browser_runtime",
+        )
+
+    with pytest.raises(ValueError, match="must declare inference actions"):
+        AutomationProviderManifest(
+            id="missing-actions",
+            browser_backend="camoufox",
+            fallback_backend=None,
+            isolation="context",
+            challenge_types=(),
+            inference_transport=True,
+            inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
+        )
+
+    with pytest.raises(ValueError, match="must declare the chat action"):
+        AutomationProviderManifest(
+            id="missing-chat",
+            browser_backend="camoufox",
+            fallback_backend=None,
+            isolation="context",
+            challenge_types=(),
+            inference_transport=True,
+            inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
+            inference_actions=("model_discovery",),
         )
 
 

@@ -32,6 +32,7 @@ class DummyProvider(AutomationProvider):
         operations=("keepalive",),
         inference_transport=True,
         inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
+        inference_actions=("model_discovery", "chat"),
     )
 
     async def keepalive(self, payload: dict[str, object]) -> dict[str, object]:
@@ -94,6 +95,48 @@ def test_minmax_exposes_api_and_runtime_actions_separately() -> None:
     assert (CAMOUFOX_BROWSER_RUNTIME, "chat") in actions
     assert ("api", "daily_checkin") not in actions
     assert (CAMOUFOX_BROWSER_RUNTIME, "daily_checkin") in actions
+
+
+def test_runtime_action_matrix_matches_each_provider_manifest() -> None:
+    expected = {
+        "deepseek": {"model_discovery", "chat"},
+        "glm": {"model_discovery", "chat"},
+        "grok": {"model_discovery", "chat"},
+        "grok_console": {"chat"},
+        "grok_web": {"model_discovery", "chat"},
+        "longcat": {"chat"},
+        "mimo": {"model_discovery", "chat"},
+        "minmax": {
+            "model_discovery",
+            "chat",
+            "provider_query",
+            "media_policy",
+            "media_callback",
+            "raw_request",
+        },
+        "qwen": {"model_discovery", "chat"},
+    }
+
+    for manifest in provider_registry.public_manifests():
+        provider_id = str(manifest["id"])
+        if not manifest["inference_transport"]:
+            continue
+        actions = {(str(item["channel"]), str(item["action"])) for item in manifest["actions"]}
+        runtime_actions = {
+            action for channel, action in actions if channel == CAMOUFOX_BROWSER_RUNTIME
+        }
+        lifecycle_actions = {str(operation) for operation in manifest["operations"]}
+        assert runtime_actions - lifecycle_actions == expected[provider_id]
+        assert set(manifest["inference_actions"]) == expected[provider_id]
+
+
+def test_lifecycle_actions_are_runtime_only_for_all_installed_providers() -> None:
+    for manifest in provider_registry.public_manifests():
+        actions = {(str(item["channel"]), str(item["action"])) for item in manifest["actions"]}
+        for operation in manifest["operations"]:
+            action = ProviderAction.from_legacy_operation(str(operation)).value
+            assert (CAMOUFOX_BROWSER_RUNTIME, action) in actions
+            assert ("api", action) not in actions
 
 
 def test_unsupported_action_channel_is_rejected_before_provider_execution() -> None:

@@ -103,7 +103,8 @@ class ActionBindingRegistry:
                     f"provider={provider.manifest.id} operation={operation}"
                 )
         if getattr(provider.manifest, "inference_transport", False):
-            for action in (ProviderAction.MODEL_DISCOVERY, ProviderAction.CHAT):
+            for declared_action in provider.manifest.inference_actions:
+                action = ProviderAction.parse(declared_action)
                 if (CAMOUFOX_BROWSER_RUNTIME, action) not in indexed:
                     raise ValueError(
                         f"inference provider has no Runtime action binding: "

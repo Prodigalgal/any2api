@@ -43,6 +43,7 @@ class LongcatAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_actions=("chat",),
     )
 
     def __init__(self) -> None:

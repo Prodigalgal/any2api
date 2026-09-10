@@ -58,6 +58,14 @@ class MinmaxAutomationProvider(AutomationProvider):
         inference_transport=True,
         inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
         inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
+        inference_actions=(
+            "model_discovery",
+            "chat",
+            "provider_query",
+            "media_policy",
+            "media_callback",
+            "raw_request",
+        ),
     )
 
     def action_bindings(self):

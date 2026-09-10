@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.any2api"
-version = "0.11.0"
+version = "0.12.0"
 
 java {
     toolchain {

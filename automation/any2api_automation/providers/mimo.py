@@ -50,6 +50,7 @@ class MimoAutomationProvider(AutomationProvider):
         operations=("register", "reauthenticate", "keepalive"),
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_actions=("model_discovery", "chat"),
     )
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:

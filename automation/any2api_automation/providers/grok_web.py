@@ -24,6 +24,7 @@ class GrokWebAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
+        inference_actions=("model_discovery", "chat"),
     )
 
     def __init__(self) -> None:

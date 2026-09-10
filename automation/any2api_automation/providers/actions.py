@@ -236,25 +236,58 @@ def legacy_inference_action_bindings(provider: AutomationProvider) -> tuple[Acti
     def chat_stream(action_request: ProviderActionRequest):
         return stream(action_request, "chat")
 
-    return (
-        ActionBinding(
-            action=ProviderAction.MODEL_DISCOVERY,
-            channel=CAMOUFOX_BROWSER_RUNTIME,
-            execute=discover,
-            legacy_operation="models",
-        ),
-        ActionBinding(
-            action=ProviderAction.CHAT,
-            channel=CAMOUFOX_BROWSER_RUNTIME,
-            stream=chat_stream,
-            legacy_operation="chat",
-        ),
-        ActionBinding(
-            action=ProviderAction.RAW_REQUEST,
-            channel=CAMOUFOX_BROWSER_RUNTIME,
-            execute=raw_request,
-        ),
-    )
+    bindings: list[ActionBinding] = []
+    operation_defaults = {
+        ProviderAction.PROVIDER_QUERY: "agents",
+        ProviderAction.MEDIA_POLICY: "files_policy",
+        ProviderAction.MEDIA_CALLBACK: "files_callback",
+    }
+    for declared_action in provider.manifest.inference_actions:
+        action = ProviderAction.parse(declared_action)
+        if action is ProviderAction.MODEL_DISCOVERY:
+            bindings.append(
+                ActionBinding(
+                    action=action,
+                    channel=CAMOUFOX_BROWSER_RUNTIME,
+                    execute=discover,
+                    legacy_operation="models",
+                )
+            )
+        elif action is ProviderAction.CHAT:
+            bindings.append(
+                ActionBinding(
+                    action=action,
+                    channel=CAMOUFOX_BROWSER_RUNTIME,
+                    stream=chat_stream,
+                    legacy_operation="chat",
+                )
+            )
+        elif action in operation_defaults:
+            default_operation = operation_defaults[action]
+
+            async def execute_operation(
+                action_request: ProviderActionRequest,
+                operation: str = default_operation,
+            ) -> ActionResult:
+                return await request(action_request, operation)
+
+            bindings.append(
+                ActionBinding(
+                    action=action,
+                    channel=CAMOUFOX_BROWSER_RUNTIME,
+                    execute=execute_operation,
+                    legacy_operation=default_operation,
+                )
+            )
+        elif action is ProviderAction.RAW_REQUEST:
+            bindings.append(
+                ActionBinding(
+                    action=action,
+                    channel=CAMOUFOX_BROWSER_RUNTIME,
+                    execute=raw_request,
+                )
+            )
+    return tuple(bindings)
 
 
 def default_action_bindings(provider: AutomationProvider) -> tuple[ActionBinding, ...]:

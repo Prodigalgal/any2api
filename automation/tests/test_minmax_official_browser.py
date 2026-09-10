@@ -34,6 +34,8 @@ def test_minmax_media_upload_stays_inside_the_browser_runtime() -> None:
     assert "object_key" in _UPLOAD_MEDIA
     assert "uploaded.cdnUrl" in _UPLOAD_MEDIA
     assert "objectKeyFromUrl" in _UPLOAD_MEDIA
+    assert "policy_callback" in _UPLOAD_MEDIA
+    assert "payload.dir" in _UPLOAD_MEDIA
     assert "official media uploader" in _UPLOAD_MEDIA
     assert "crypto.subtle" not in _UPLOAD_MEDIA
 

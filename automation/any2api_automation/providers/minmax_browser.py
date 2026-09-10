@@ -180,6 +180,45 @@ _UPLOAD_MEDIA = r"""async input => {
   };
   const uploader = locateUploader();
   const output = [];
+  const objectKeys = [];
+  const rememberPolicyCallback = body => {
+    let payload = body;
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); } catch (_) { return; }
+    }
+    if (!payload || typeof payload !== 'object') return;
+    const directory = String(payload.dir || '').trim().replace(/\/+$/, '');
+    const filename = String(payload.fileName || '').trim().replace(/^\/+/, '');
+    if (directory && filename) objectKeys.push(`${directory}/${filename}`);
+  };
+  const originalFetch = window.fetch;
+  const xhrPrototype = window.XMLHttpRequest?.prototype;
+  const originalXhrOpen = xhrPrototype?.open;
+  const originalXhrSend = xhrPrototype?.send;
+  if (typeof originalFetch === 'function') {
+    window.fetch = function(...args) {
+      const input = args[0];
+      const url = typeof input === 'string' ? input : input?.url || '';
+      if (String(url).includes('/v1/api/files/policy_callback')) {
+        rememberPolicyCallback(args[1]?.body);
+      }
+      return originalFetch.apply(this, args);
+    };
+  }
+  if (xhrPrototype && typeof originalXhrOpen === 'function' &&
+      typeof originalXhrSend === 'function') {
+    xhrPrototype.open = function(method, url, ...args) {
+      this.__any2apiMinmaxUrl = String(url || '');
+      return originalXhrOpen.call(this, method, url, ...args);
+    };
+    xhrPrototype.send = function(body) {
+      if (String(this.__any2apiMinmaxUrl || '').includes('/v1/api/files/policy_callback')) {
+        rememberPolicyCallback(body);
+      }
+      return originalXhrSend.call(this, body);
+    };
+  }
+  try {
   for (const source of input.images) {
     const match = /^data:([^;]+);base64,(.+)$/s.exec(String(source.data_url || ''));
     if (!match) throw new Error('MinMax media must be an inline base64 data URL');
@@ -214,7 +253,7 @@ _UPLOAD_MEDIA = r"""async input => {
         return text.split('?', 1)[0].replace(/^\/+/, '');
       }
     };
-    const objectKey = explicitObjectKey || objectKeyFromUrl(cdnUrl);
+    const objectKey = explicitObjectKey || objectKeys.shift() || objectKeyFromUrl(cdnUrl);
     if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }
@@ -232,6 +271,15 @@ _UPLOAD_MEDIA = r"""async input => {
     });
   }
   return output;
+  } finally {
+    if (typeof originalFetch === 'function') window.fetch = originalFetch;
+    if (xhrPrototype && typeof originalXhrOpen === 'function') {
+      xhrPrototype.open = originalXhrOpen;
+    }
+    if (xhrPrototype && typeof originalXhrSend === 'function') {
+      xhrPrototype.send = originalXhrSend;
+    }
+  }
 }"""
 
 

@@ -80,4 +80,14 @@ class LifecycleSchedulerTest {
             "reauthenticate", true, false, false,
             AccountStatus.ACTIVE, true, true));
     }
+
+    @Test
+    void includesTheAccountProbeModelAndErrorInTheLifecycleFailureDetail() {
+        var probe = InferenceReadinessProbe.Result.failed("longcat-pro", "TimeoutException");
+        var result = LifecycleResult.healthy(null, null);
+
+        assertEquals(
+            "inference readiness probe failed model=longcat-pro error=TimeoutException",
+            LifecycleScheduler.readinessFailureDetail(probe, result));
+    }
 }

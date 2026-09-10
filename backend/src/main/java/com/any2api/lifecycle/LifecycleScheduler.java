@@ -28,6 +28,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -41,6 +43,9 @@ public class LifecycleScheduler {
     private static final int MAX_ATTEMPTS = 12;
     private static final Duration LEASE_TTL = Duration.ofMinutes(5);
     private static final Duration HEALTHY_INTERVAL = Duration.ofHours(6);
+    private static final Duration EXHAUSTED_REARM_COOLDOWN = Duration.ofMinutes(30);
+    private static final Duration EXHAUSTED_REARM_DELAY = Duration.ofMinutes(5);
+    private static final Logger LOGGER = LoggerFactory.getLogger(LifecycleScheduler.class);
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transactions;
@@ -102,6 +107,10 @@ public class LifecycleScheduler {
     }
 
     private List<Action> claim(String owner) {
+        var rearmed = reactivateExhaustedActions();
+        if (rearmed > 0) {
+            LOGGER.info("lifecycle_exhausted_actions_rearmed count={}", rearmed);
+        }
         jdbc.sql("""
             UPDATE operation_events event SET
                 status = 'FAILED', stage = 'scheduler', error_code = 'action_expired',
@@ -171,6 +180,57 @@ public class LifecycleScheduler {
             .param("leaseSeconds", Long.toString(LEASE_TTL.toSeconds()))
             .query(LifecycleScheduler::mapAction)
             .list();
+    }
+
+    private int reactivateExhaustedActions() {
+        return jdbc.sql("""
+            WITH eligible AS (
+                SELECT action.id,
+                       COALESCE(MAX(history.generation), 0) + 1 AS next_generation
+                FROM scheduled_actions action
+                JOIN accounts account ON account.id::text = action.entity_id
+                LEFT JOIN scheduled_actions history
+                  ON history.provider_id = action.provider_id
+                 AND history.entity_type = action.entity_type
+                 AND history.entity_id = action.entity_id
+                WHERE action.status = 'EXHAUSTED'
+                  AND action.entity_type = 'ACCOUNT'
+                  AND action.action_family IN ('keepalive', 'reauthenticate', 'daily_checkin')
+                  AND account.status = 'ACTIVE'
+                  AND account.enabled = TRUE
+                  AND (action.expires_at IS NULL OR action.expires_at > CURRENT_TIMESTAMP)
+                  AND action.updated_at <= CURRENT_TIMESTAMP
+                      - CAST(:rearmCooldownSeconds || ' seconds' AS interval)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM scheduled_actions active
+                      WHERE active.provider_id = action.provider_id
+                        AND active.entity_type = action.entity_type
+                        AND active.entity_id = action.entity_id
+                        AND active.status IN ('PENDING', 'LEASED')
+                  )
+                GROUP BY action.id
+            )
+            UPDATE scheduled_actions action
+            SET status = 'PENDING',
+                generation = eligible.next_generation,
+                attempts = 0,
+                due_at = CURRENT_TIMESTAMP + CAST(:rearmDelaySeconds || ' seconds' AS interval)
+                    + (MOD(ABS(hashtext(action.entity_id)::bigint), :jitterSeconds)
+                        * INTERVAL '1 second'),
+                idempotency_key = 'account:' || action.entity_id || ':'
+                    || action.action_family || ':' || eligible.next_generation,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                last_error_class = 'ExhaustedActionRearmed',
+                updated_at = CURRENT_TIMESTAMP
+            FROM eligible
+            WHERE action.id = eligible.id
+            """)
+            .param("rearmCooldownSeconds", EXHAUSTED_REARM_COOLDOWN.toSeconds())
+            .param("rearmDelaySeconds", EXHAUSTED_REARM_DELAY.toSeconds())
+            .param("jitterSeconds", 900)
+            .update();
     }
 
     private reactor.core.publisher.Mono<Void> execute(Action action, String owner) {
@@ -264,7 +324,7 @@ public class LifecycleScheduler {
                             observed,
                             code == null || code.isBlank() ? "lifecycle_unhealthy" : code,
                             !probeResult.ready() ? "inference_probe" : "lifecycle_operation",
-                            "lifecycle operation did not establish inference readiness");
+                            readinessFailureDetail(probeResult, result));
                     }
                 }).subscribeOn(Schedulers.boundedElastic())));
             }))
@@ -442,6 +502,27 @@ public class LifecycleScheduler {
     private static Duration retryDelay(int attempts) {
         var exponent = Math.min(10, Math.max(0, attempts));
         return Duration.ofSeconds(Math.min(21_600, 30L * (1L << exponent)));
+    }
+
+    static String readinessFailureDetail(
+        InferenceReadinessProbe.Result probe,
+        LifecycleResult result
+    ) {
+        if (!probe.ready()) {
+            return "inference readiness probe failed model="
+                + boundedLabel(probe.model()) + " error=" + boundedLabel(probe.errorClass());
+        }
+        return "lifecycle operation reported unhealthy error="
+            + boundedLabel(result.errorClass());
+    }
+
+    private static String boundedLabel(String value) {
+        var normalized = value == null ? "" : value
+            .replaceAll("[\\p{Cntrl}]+", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
+        if (normalized.isBlank()) return "unknown";
+        return normalized.substring(0, Math.min(120, normalized.length()));
     }
 
     private boolean supportsDailyCheckin(String providerId) {

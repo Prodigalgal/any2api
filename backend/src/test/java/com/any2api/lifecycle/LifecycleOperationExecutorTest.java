@@ -79,7 +79,7 @@ class LifecycleOperationExecutorTest {
         var plan = new ProviderRuntimeRuleService.RuntimePlan(selection, null, null, null);
         when(registry.handler("mimo", AutomationOperation.KEEPALIVE))
             .thenReturn(Optional.empty());
-        when(runtimeRules.findPlan("mimo")).thenReturn(Optional.of(plan));
+        when(runtimeRules.plan("mimo")).thenReturn(plan);
         when(automation.execute(
             eq("mimo"), eq("keepalive"), anyMap(), any(OperationContext.class)))
             .thenReturn(Mono.just(mapper.createObjectNode().put("healthy", true)));

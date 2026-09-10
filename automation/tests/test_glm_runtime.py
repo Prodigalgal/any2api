@@ -8,7 +8,9 @@ import pytest
 from any2api_automation.providers import glm as glm_module
 from any2api_automation.providers.glm import GlmAutomationProvider
 from any2api_automation.providers.glm_runtime import (
+    _UPLOAD_FILE,
     _filter_storage_state,
+    _upload_glm_images,
     _validate_semantic_command,
     build_glm_command,
     discover_runtime_names,
@@ -74,6 +76,88 @@ def test_glm_builds_current_chat_envelopes_in_automation() -> None:
     assert command["completion"]["features"]["auto_web_search"] is True
     assert command["completion"]["features"]["preview_mode"] is False
     assert command["completion"]["features"]["reasoning_effort"] == "high"
+
+
+def test_glm_attaches_uploaded_images_to_the_official_vlm_message_shape() -> None:
+    command = _semantic_command()
+    command["messages"] = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "describe"},
+                {"type": "input_image", "image_url": "data:image/png;base64,YQ=="},
+            ],
+        }
+    ]
+    uploaded = [
+        {
+            "message_index": 0,
+            "file": {
+                "type": "image",
+                "id": "file-1",
+                "media": "image",
+                "status": "uploaded",
+            },
+        }
+    ]
+
+    result = build_glm_command(
+        command,
+        "user@example.test",
+        timestamp_ms=1_785_337_442_000,
+        uploaded_files=uploaded,
+        user_message_id="message-1",
+    )
+
+    assert result["chat"]["history"]["currentId"] == "message-1"
+    assert result["chat"]["history"]["messages"]["message-1"]["files"][0]["id"] == "file-1"
+    content = result["completion"]["messages"][0]["content"]
+    assert content == [
+        {"type": "text", "text": "describe"},
+        {"type": "image_url", "image_url": {"url": "file-1"}},
+    ]
+    assert result["completion"]["files"][0]["id"] == "file-1"
+
+
+def test_glm_uploads_inline_images_through_the_authenticated_page() -> None:
+    class FakePage:
+        def evaluate(self, script: str, payload: dict[str, str]) -> dict[str, object]:
+            assert script == _UPLOAD_FILE
+            assert payload["filename"] == "any2api-image.png"
+            assert payload["dataUrl"] == "data:image/png;base64,YQ=="
+            return {"status": 201, "body": json.dumps({"id": "file-1"})}
+
+    command = _semantic_command()
+    command["messages"] = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,YQ==",
+                }
+            ],
+        }
+    ]
+
+    uploaded = _upload_glm_images(FakePage(), command, "message-1", "https://chat.z.ai")
+
+    assert uploaded == [
+        {
+            "message_index": 0,
+            "file": {
+                "type": "image",
+                "file": {"id": "file-1"},
+                "id": "file-1",
+                "url": "https://chat.z.ai/api/v1/files/file-1",
+                "name": "any2api-image.png",
+                "media": "image",
+                "status": "uploaded",
+                "size": 1,
+                "ref_user_msg_id": "message-1",
+            },
+        }
+    ]
 
 
 @pytest.mark.asyncio

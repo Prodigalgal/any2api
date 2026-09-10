@@ -35,6 +35,26 @@ class ProviderRequestValidationTest {
     }
 
     @Test
+    void usesEffectiveModelCapabilitiesWhenTheyAreAvailable() {
+        var request = requestWith("input_image");
+        var modelCapabilities = mapper.createObjectNode();
+        modelCapabilities.putObject("multimodal").putArray("input")
+            .add("text").add("image");
+
+        assertThatCode(() -> ProviderRequestValidation.requireSupportedContent(
+            request, manifest(Map.of()), modelCapabilities))
+            .doesNotThrowAnyException();
+
+        var textOnly = mapper.createObjectNode();
+        textOnly.putObject("multimodal").putArray("input").add("text");
+        assertThatThrownBy(() -> ProviderRequestValidation.requireSupportedContent(
+            request, manifest(Map.of(ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE)),
+            textOnly))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("does not support content block type input_image");
+    }
+
+    @Test
     void acceptsEveryCanonicalMediaShapeWhenTheCapabilityIsDeclared() {
         var cases = Map.ofEntries(
             Map.entry("image", ProviderCapability.IMAGE_INPUT),

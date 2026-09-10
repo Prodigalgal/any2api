@@ -6,9 +6,9 @@
 
 ## 已完成
 
-- `0.13.11` 已通过 CI 并由 Argo CD 部署到 `any2api` 命名空间。
+- `0.13.13` 已通过 CI 并由 Argo CD 部署到 `any2api` 命名空间。
 - 六家选定模型的非流式和 SSE 文本请求均真实返回成功。
-- MiMo、MiniMax、Qwen 的图片输入流式请求均成功；DeepSeek、GLM、LongCat 对未声明图片能力明确返回 400。
+- MiMo、MiniMax、Qwen 的图片输入流式请求均成功；GLM 已完成“按官方模型元数据启用 vision + 同浏览器上传”的代码和单元测试，待 `0.13.14` K8S 真实图片请求验收；DeepSeek、LongCat 仍对未声明图片能力明确返回 400。
 - 最近一小时成功推理使用了 DeepSeek 3、GLM 4、LongCat 3、MiMo 9、MiniMax 1、Qwen 3 个不同账号；MiniMax 当前只有 1 个 `ACTIVE/enabled` 账号，切换验证等待第二个有效账号。
 - 生命周期调度已限制为默认并发 2、单次最多 claim 8 个动作；当前滚动观测没有新的 `OOMKilled`。
 - MiniMax 的通用 `daily_checkin` 语义和具体 Runtime 实现已保留，账号额度依赖每日打卡的规则不绕过。
@@ -18,6 +18,7 @@
 - 等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
 - 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。
 - 按真实适配器能力继续补充文件、音频、视频的边界设计和验证；不能从图片能力推导其他媒体能力。
+- GLM 图片请求只允许官方目录标记 `capabilities.vision=true` 的模型，且只接受 inline base64 图片；未完成 K8S 真实请求前不提升为 Ready。
 
 ## 非目标
 

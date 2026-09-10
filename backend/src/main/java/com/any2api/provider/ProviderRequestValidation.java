@@ -185,6 +185,14 @@ public final class ProviderRequestValidation {
         CanonicalRequest request,
         ProviderManifest manifest
     ) {
+        requireSupportedContent(request, manifest, null);
+    }
+
+    public static void requireSupportedContent(
+        CanonicalRequest request,
+        ProviderManifest manifest,
+        JsonNode modelCapabilities
+    ) {
         for (var message : request.messages()) {
             var content = message.path("content");
             if (!content.isArray()) continue;
@@ -213,9 +221,8 @@ public final class ProviderRequestValidation {
                     throw OpenAiRequestException.unsupported(
                         "input", "unsupported content block type: " + type);
                 }
-                if (capability != null && manifest.capabilities()
-                    .getOrDefault(capability, SupportLevel.UNSUPPORTED)
-                    == SupportLevel.UNSUPPORTED) {
+                if (capability != null && !supportsContent(
+                    manifest, modelCapabilities, capability)) {
                     throw OpenAiRequestException.unsupported(
                         "input", manifest.id() + " does not support content block type " + type);
                 }
@@ -323,7 +330,7 @@ public final class ProviderRequestValidation {
         CanonicalRequest request,
         ProviderManifest manifest
     ) {
-        requireSupportedCapabilities(request, manifest);
+        requireSupportedCapabilities(request, manifest, null);
     }
 
     public static void requireSupportedRequest(
@@ -331,17 +338,27 @@ public final class ProviderRequestValidation {
         ProviderManifest manifest,
         ProviderProtocolContract contract
     ) {
+        requireSupportedRequest(request, manifest, contract, null);
+    }
+
+    public static void requireSupportedRequest(
+        CanonicalRequest request,
+        ProviderManifest manifest,
+        ProviderProtocolContract contract,
+        JsonNode modelCapabilities
+    ) {
         requireKnownOptions(request, contract.providerOptions().keySet());
         requireOptionTypes(request, contract);
         requireSupportedParameters(request, contract);
         requireSupportedTools(request, manifest, contract);
         requireSupportedReasoning(request, contract);
-        requireSupportedCapabilities(request, manifest);
+        requireSupportedCapabilities(request, manifest, modelCapabilities);
     }
 
     private static void requireSupportedCapabilities(
         CanonicalRequest request,
-        ProviderManifest manifest
+        ProviderManifest manifest,
+        JsonNode modelCapabilities
     ) {
         var protocolCapability = request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS
             ? ProviderCapability.CHAT_COMPLETIONS : ProviderCapability.RESPONSES;
@@ -353,7 +370,7 @@ public final class ProviderRequestValidation {
             || request.rawRequest().hasNonNull("reasoning_effort")) {
             requireCapability(manifest, ProviderCapability.REASONING, "reasoning");
         }
-        requireSupportedContent(request, manifest);
+        requireSupportedContent(request, manifest, modelCapabilities);
         validateStreamOptions(request);
 
         var hasFunctionTools = request.tools().stream().anyMatch(tool ->
@@ -602,5 +619,29 @@ public final class ProviderRequestValidation {
             throw OpenAiRequestException.unsupported(
                 feature, manifest.id() + " does not support " + feature);
         }
+    }
+
+    private static boolean supportsContent(
+        ProviderManifest manifest,
+        JsonNode modelCapabilities,
+        ProviderCapability capability
+    ) {
+        var input = modelCapabilities == null
+            ? null : modelCapabilities.path("multimodal").path("input");
+        if (input != null && input.isArray()) {
+            var mediaType = switch (capability) {
+                case IMAGE_INPUT -> "image";
+                case AUDIO_INPUT -> "audio";
+                case VIDEO_INPUT -> "video";
+                case FILE_INPUT -> "file";
+                default -> "";
+            };
+            for (var value : input) {
+                if (mediaType.equals(value.asText(""))) return true;
+            }
+            return false;
+        }
+        return manifest.capabilities().getOrDefault(capability, SupportLevel.UNSUPPORTED)
+            != SupportLevel.UNSUPPORTED;
     }
 }

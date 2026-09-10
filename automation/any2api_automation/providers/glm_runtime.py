@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -18,7 +19,7 @@ from ..browser_budget import browser_process_budget
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
 from .glm_challenge import GlmAliyunChallenge
-from .multimodal import text_content
+from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .official_browser import (
     SCHEMA_VERSION,
     camoufox_launch_options,
@@ -35,6 +36,8 @@ from .runtime_rules import (
 )
 
 logger = logging.getLogger("any2api_automation.providers.glm_runtime")
+
+_GLM_IMAGE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 
 _CREATE_CHAT = r"""async input => {
   const runtime = window.__any2apiGlmOfficialRuntime;
@@ -113,6 +116,31 @@ _MODELS_REQUEST = r"""async input => {
   return {status: response.status, body: await response.text()};
 }"""
 
+_UPLOAD_FILE = r"""async input => {
+  const source = String(input.dataUrl || '');
+  const separator = source.indexOf(',');
+  if (!source.startsWith('data:') || separator < 0) {
+    throw new Error('GLM image upload requires a data URL');
+  }
+  const contentType = source.slice(5, separator).split(';', 1)[0] || 'application/octet-stream';
+  const encoded = source.slice(separator + 1);
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const form = new FormData();
+  form.append('file', new File([bytes], input.filename || 'image.png', {type: contentType}));
+  const token = localStorage.getItem('token') || '';
+  const response = await fetch('/api/v1/files/', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {Accept: 'application/json', Authorization: `Bearer ${token}`},
+    body: form
+  });
+  return {status: response.status, body: await response.text()};
+}"""
+
 _IMPORT_RUNTIME = r"""async input => {
   let source = input.source;
   const aliases = [
@@ -155,10 +183,6 @@ class GlmOfficialBrowserTransport:
         timeout_seconds: int,
     ) -> Iterator[dict[str, Any]]:
         _validate_semantic_command(semantic_command)
-        command = build_glm_command(
-            semantic_command,
-            _required(credential, "email", "user_id"),
-        )
         execution = _execution_context(credential)
         backend = str(
             execution.get("backend") or credential.get("registration_backend") or "camoufox"
@@ -186,6 +210,19 @@ class GlmOfficialBrowserTransport:
                 page.evaluate(
                     "token => localStorage.setItem('token', token)",
                     token,
+                )
+                user_message_id = str(uuid4())
+                uploaded_files = _upload_glm_images(
+                    page,
+                    semantic_command,
+                    user_message_id,
+                    self.base_url,
+                )
+                command = build_glm_command(
+                    semantic_command,
+                    _required(credential, "email", "user_id"),
+                    uploaded_files=uploaded_files,
+                    user_message_id=user_message_id,
                 )
                 selection, runtime_build_id, reports = _select_runtime(page, plan)
                 for report in reports:
@@ -517,19 +554,23 @@ def build_glm_command(
     command: dict[str, Any],
     email: str,
     timestamp_ms: int | None = None,
+    *,
+    uploaded_files: list[dict[str, Any]] | None = None,
+    user_message_id: str | None = None,
 ) -> dict[str, Any]:
     _validate_semantic_command(command)
     timestamp = (
         timestamp_ms if timestamp_ms is not None else round(datetime.now(UTC).timestamp() * 1000)
     )
-    user_message_id = str(uuid4())
+    current_message_id = user_message_id or str(uuid4())
+    normalized_files = _normalize_uploaded_files(uploaded_files)
     prompt = _last_user_prompt(command["messages"])
     model = str(command["model"])
     effort = _reasoning_effort(command)
     thinking = _thinking_enabled(command, effort)
     web_search = _boolean_option(command, "web_search", False)
     message = {
-        "id": user_message_id,
+        "id": current_message_id,
         "parentId": None,
         "role": "user",
         "content": prompt,
@@ -537,13 +578,20 @@ def build_glm_command(
         "childrenIds": [],
         "models": [model],
     }
+    current_files = [
+        item["file"]
+        for item in normalized_files
+        if item["message_index"] == _last_user_message_index(command["messages"])
+    ]
+    if current_files:
+        message["files"] = current_files
     chat = {
         "id": "",
         "title": "New Chat",
         "params": {},
         "history": {
-            "messages": {user_message_id: message},
-            "currentId": user_message_id,
+            "messages": {current_message_id: message},
+            "currentId": current_message_id,
         },
         "tags": [],
         "flags": [],
@@ -561,7 +609,7 @@ def build_glm_command(
     completion = {
         "stream": True,
         "model": model,
-        "messages": _canonical_messages(command),
+        "messages": _canonical_messages(command, normalized_files),
         "signature_prompt": prompt,
         "params": _generation_params(command),
         "extra": {},
@@ -580,10 +628,12 @@ def build_glm_command(
         "variables": _variables(email, timestamp),
         "chat_id": "",
         "id": str(uuid4()),
-        "current_user_message_id": user_message_id,
+        "current_user_message_id": current_message_id,
         "current_user_message_parent_id": None,
         "background_tasks": {"title_generation": True, "tags_generation": True},
     }
+    if normalized_files:
+        completion["files"] = [item["file"] for item in normalized_files]
     return {"chat": chat, "completion": completion, "prompt": prompt}
 
 
@@ -600,19 +650,24 @@ def _validate_semantic_command(command: dict[str, Any]) -> None:
 
 
 def _last_user_prompt(messages: list[Any]) -> str:
-    candidates = [
-        _content(message.get("content"))
-        for message in messages
-        if isinstance(message, dict) and _role(message.get("role")) == "user"
-    ]
-    candidates = [value for value in candidates if value]
-    if not candidates:
+    for message in reversed(messages):
+        if not isinstance(message, dict) or _role(message.get("role")) != "user":
+            continue
+        value = _content(message.get("content"), allow_media=True)
+        if value:
+            return value
+    if not any(
+        isinstance(message, dict) and _role(message.get("role")) == "user" for message in messages
+    ):
         raise ValueError("GLM request requires a user message")
-    return candidates[-1]
+    raise ValueError("GLM request requires a user text prompt")
 
 
-def _canonical_messages(command: dict[str, Any]) -> list[dict[str, str]]:
-    output: list[dict[str, str]] = []
+def _canonical_messages(
+    command: dict[str, Any],
+    uploaded_files: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
     tools = command.get("tools") or []
     if tools:
         output.append(
@@ -622,14 +677,23 @@ def _canonical_messages(command: dict[str, Any]) -> list[dict[str, str]]:
                 + json.dumps(tools, ensure_ascii=True, separators=(",", ":")),
             }
         )
-    for source in command["messages"]:
+    normalized_files = _normalize_uploaded_files(uploaded_files)
+    for message_index, source in enumerate(command["messages"]):
         if not isinstance(source, dict):
             continue
         role = _role(source.get("role"))
-        content = _content(source.get("content"))
+        attachments = [
+            item["file"] for item in normalized_files if item["message_index"] == message_index
+        ]
+        content = _content(source.get("content"), allow_media=bool(attachments))
         if role == "assistant" and isinstance(source.get("tool_calls"), list):
             content += "\n" + json.dumps(source["tool_calls"], separators=(",", ":"))
-        output.append({"role": role, "content": content})
+        if attachments:
+            content_blocks: list[dict[str, Any]] = [{"type": "text", "text": content}]
+            content_blocks.extend(_glm_media_content(item) for item in attachments)
+            output.append({"role": role, "content": content_blocks})
+        else:
+            output.append({"role": role, "content": content})
     return output
 
 
@@ -687,10 +751,122 @@ def _role(value: Any) -> str:
     return role if role in {"assistant", "system", "tool"} else "user"
 
 
-def _content(value: Any) -> str:
+def _content(value: Any, *, allow_media: bool = False) -> str:
     if value is None:
         return ""
-    return text_content(value, "GLM")
+    return text_content(value, "GLM", allow_media=allow_media)
+
+
+def _normalize_uploaded_files(
+    uploaded_files: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if uploaded_files is None:
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in uploaded_files:
+        if not isinstance(item, dict):
+            raise TypeError("GLM uploaded file metadata must be an object")
+        message_index = item.get("message_index")
+        file = item.get("file")
+        if not isinstance(message_index, int) or message_index < 0:
+            raise ValueError("GLM uploaded file metadata requires a message index")
+        if not isinstance(file, dict):
+            raise TypeError("GLM uploaded file metadata requires a file object")
+        file_id = str(file.get("id") or "").strip()
+        if not file_id:
+            raise ValueError("GLM uploaded file metadata requires a file id")
+        normalized.append({"message_index": message_index, "file": dict(file)})
+    return normalized
+
+
+def _last_user_message_index(messages: list[Any]) -> int:
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, dict) and _role(message.get("role")) == "user":
+            return index
+    raise ValueError("GLM request requires a user message")
+
+
+def _glm_media_content(file: dict[str, Any]) -> dict[str, Any]:
+    media = str(file.get("media") or file.get("type") or "").strip().lower()
+    file_id = str(file.get("id") or "").strip()
+    if media != "image" or not file_id:
+        raise ValueError("GLM runtime only supports uploaded image content")
+    return {"type": "image_url", "image_url": {"url": file_id}}
+
+
+def _upload_glm_images(
+    page: Any,
+    command: dict[str, Any],
+    user_message_id: str,
+    base_url: str,
+) -> list[dict[str, Any]]:
+    uploaded: list[dict[str, Any]] = []
+    for message_index, kind, block in iter_media_blocks(command.get("messages"), "GLM"):
+        if kind != "image":
+            raise ValueError(f"GLM Runtime does not support {kind} content blocks")
+        message = command["messages"][message_index]
+        if not isinstance(message, dict) or _role(message.get("role")) != "user":
+            raise ValueError("GLM image content must be attached to a user message")
+        content_type, content = decode_inline_data_url(
+            media_source(block),
+            "GLM image",
+            max_bytes=_GLM_IMAGE_UPLOAD_MAX_BYTES,
+            expected_prefix="image/",
+        )
+        filename = _image_filename(block, content_type)
+        result = page.evaluate(
+            _UPLOAD_FILE,
+            {
+                "dataUrl": "data:" + content_type + ";base64," + base64.b64encode(content).decode(),
+                "filename": filename,
+            },
+        )
+        file = _uploaded_file_from_response(result, filename, len(content), base_url)
+        file["ref_user_msg_id"] = user_message_id
+        uploaded.append({"message_index": message_index, "file": file})
+    return uploaded
+
+
+def _uploaded_file_from_response(
+    result: Any,
+    filename: str,
+    size: int,
+    base_url: str,
+) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise TypeError("GLM image upload returned an invalid response")
+    status = int(result.get("status") or 502)
+    body = str(result.get("body") or "")
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"GLM image upload was rejected with HTTP {status}")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("GLM image upload returned invalid JSON") from error
+    if not isinstance(payload, dict):
+        raise TypeError("GLM image upload returned an invalid file object")
+    file_id = str(payload.get("id") or payload.get("file_id") or "").strip()
+    if not file_id:
+        raise RuntimeError("GLM image upload returned no file id")
+    return {
+        "type": "image",
+        "file": payload,
+        "id": file_id,
+        "url": f"{base_url.rstrip('/')}/api/v1/files/{file_id}",
+        "name": filename,
+        "media": "image",
+        "status": "uploaded",
+        "size": size,
+    }
+
+
+def _image_filename(block: dict[str, Any], content_type: str) -> str:
+    filename = str(block.get("filename") or "").strip()
+    if filename:
+        return filename
+    extension = content_type.split("/", 1)[-1].lower()
+    return f"any2api-image.{extension or 'bin'}"
 
 
 def default_runtime_rule() -> RuntimeRule:

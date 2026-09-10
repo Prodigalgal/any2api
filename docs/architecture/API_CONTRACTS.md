@@ -174,7 +174,7 @@ completion is a separate release gate.
 | LongCat | Native | Native | Native | Emulated | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
 | MiMo | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
 | MinMax | Native | Native | Native | Unsupported | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
-| GLM | Native | Native | Native | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
+| GLM | Native | Native | Native | Unsupported | Native upload (vision models only) | Unsupported | Unsupported | Unsupported | Unsupported |
 | Grok Build | Native | Native | Native | Native | Native block | Native block | Unsupported | Unsupported | Unsupported |
 | Grok Web | Native | Native | Native output | Emulated | Separate media ops | Unsupported in chat input | Unsupported in chat input | Separate media ops | Native |
 | Grok Console | Native | Native | Native | Native | Native block | Native block | Unsupported | Unsupported | Stateless only |
@@ -187,11 +187,13 @@ provider marked `Unsupported` fails before account acquisition; the runtime must
 silently discard that content. Grok Web's separate media API is not a declaration that Gateway
 chat accepts arbitrary content blocks.
 
-Qwen, MiMo, and MinMax currently declare image input only for inline base64 data URLs because their
-page upload protocols require browser-side bytes. Their Java adapters reject remote URLs and file
-IDs before account leasing; this source restriction is part of the provider contract, not a
-fallback to text. The runtime schema records all canonical image/audio/video/file block aliases,
-while provider capability and source policy decide whether a block can proceed.
+Qwen, MiMo, MinMax, and GLM currently declare image input only for inline base64 data URLs because
+their page upload protocols require browser-side bytes. GLM exposes the capability only for models
+whose authenticated official catalog metadata contains `capabilities.vision=true`; other GLM models
+remain text-only. Their Java adapters reject remote URLs and file IDs before account leasing; this
+source restriction is part of the provider contract, not a fallback to text. The runtime schema
+records all canonical image/audio/video/file block aliases, while provider capability, model
+metadata, and source policy decide whether a block can proceed.
 
 Grok channels remain code-installed but may be administratively hot-unplugged. Disabling them does
 not weaken protocol validation for the enabled providers.

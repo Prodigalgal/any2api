@@ -4,6 +4,7 @@ import com.any2api.protocol.CanonicalRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -98,6 +99,18 @@ public record ModelCapabilityContract(
             "input", multimodal.input(),
             "output", multimodal.output()));
         return value;
+    }
+
+    public ModelCapabilityContract withInputMedia(String mediaType) {
+        var normalized = mediaType == null ? ""
+            : mediaType.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isBlank() || multimodal.input().contains(normalized)) return this;
+        var input = new ArrayList<>(multimodal.input());
+        input.add(normalized);
+        return new ModelCapabilityContract(
+            supportedParameters, providerOptions, maxContextTokens, maxInputTokens,
+            maxOutputTokens, reasoning, reasoningLevels, tools, streaming,
+            new MultimodalSupport(input, multimodal.output()));
     }
 
     private static boolean supported(ProviderManifest manifest, ProviderCapability capability) {

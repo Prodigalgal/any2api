@@ -5,6 +5,7 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.DiscoveredModel;
 import com.any2api.provider.InferenceProvider;
+import com.any2api.provider.ModelCapabilityContract;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
@@ -82,6 +83,12 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
+    @Override
+    public ModelCapabilityContract modelContract(DiscoveredModel model) {
+        var contract = ModelCapabilityContract.from(manifest(), protocolContract(), model);
+        return modelSupportsVision(model) ? contract.withInputMedia("image") : contract;
+    }
+
     @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
@@ -99,6 +106,7 @@ public final class GlmProvider implements InferenceProvider {
         ProviderRequestValidation.requireStringParameters(request, "reasoning_effort");
         ProviderRequestValidation.requireBooleanParameters(
             request, "web_search", "preview_mode");
+        ProviderRequestValidation.requireInlineImageUploads(request, "GLM");
         ProviderRequestValidation.requireReasoningBooleanConsistency(
             request, "enable_thinking", java.util.Set.of("none", "minimal", "low"));
         if (!request.tools().isEmpty()) {
@@ -200,6 +208,12 @@ public final class GlmProvider implements InferenceProvider {
             output.putIfAbsent(id, new DiscoveredModel(id, display, metadata));
         }
         return List.copyOf(output.values());
+    }
+
+    private boolean modelSupportsVision(DiscoveredModel model) {
+        var metadata = mapper.valueToTree(model.metadata());
+        return metadata.path("glm").path("capabilities").path("vision").asBoolean(false)
+            || metadata.path("vision").asBoolean(false);
     }
 
     @Override

@@ -81,4 +81,24 @@ class GlmProviderTest {
             .anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta delta
                 && delta.delta().equals("ok"));
     }
+
+    @Test
+    void exposesVisionOnlyForModelsThatOfficialMetadataMarksAsVisionCapable() throws Exception {
+        var root = mapper.readTree("""
+            {"data":{"models":[
+              {"id":"glm-4.6v","info":{"meta":{"capabilities":{"vision":true}}}},
+              {"id":"glm-5.2","info":{"meta":{"capabilities":{"vision":false}}}}
+            ]}}
+            """);
+        var models = GlmProvider.parseModels(root);
+        var provider = new GlmProvider(
+            new GlmProperties(), mock(ProxyPoolService.class), mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        assertThat(provider.modelContract(models.get(0)).multimodal().input())
+            .containsExactly("text", "image");
+        assertThat(provider.modelContract(models.get(1)).multimodal().input())
+            .containsExactly("text");
+    }
 }

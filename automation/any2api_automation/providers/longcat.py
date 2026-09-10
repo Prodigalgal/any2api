@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import json
 import re
 import time
 from dataclasses import replace
@@ -25,7 +24,7 @@ from ..lifecycle.browser import (
 from ..lifecycle.mail import Mailbox
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import AutomationProvider, AutomationProviderManifest
-from .longcat_browser import LongcatOfficialBrowserTransport
+from .longcat_browser import LongcatOfficialBrowserTransport, _conversation_id
 from .longcat_challenge import solve_yoda_if_present, yoda_visible
 from .longcat_settings import settings
 from .runtime_rules import parse_runtime_plan
@@ -290,22 +289,6 @@ def _runtime_options(payload: dict[str, Any]) -> dict[str, Any]:
         for key in ("app_key", "language", "requested_with", "trace_id")
         if value.get(key) is not None
     }
-
-
-def _conversation_id(result: dict[str, Any]) -> str:
-    status = int(result.get("status") or 502)
-    if status >= 400:
-        raise RuntimeError(f"LongCat session-create returned HTTP {status}")
-    try:
-        body = json.loads(str(result.get("body") or ""))
-    except json.JSONDecodeError as error:
-        raise RuntimeError("LongCat session-create returned invalid JSON") from error
-    if not isinstance(body, dict) or int(body.get("code") or -1) != 0:
-        raise RuntimeError("LongCat session-create was rejected")
-    value = str((body.get("data") or {}).get("conversationId") or "").strip()
-    if not value:
-        raise RuntimeError("LongCat session-create returned no conversationId")
-    return value
 
 
 def _email_browser_flow(

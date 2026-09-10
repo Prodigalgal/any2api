@@ -31,7 +31,13 @@ from any2api_automation.providers.grok_protocol.device_flow import (
     _parse_consent_page,
 )
 from any2api_automation.providers.grok_settings import settings as grok_settings
-from any2api_automation.providers.longcat import _login_url, _longcat_proxy_affinity
+from any2api_automation.providers.longcat import (
+    _conversation_id as keepalive_conversation_id,
+)
+from any2api_automation.providers.longcat import (
+    _login_url,
+    _longcat_proxy_affinity,
+)
 from any2api_automation.providers.longcat_browser import _conversation_id
 from any2api_automation.providers.longcat_settings import settings as longcat_settings
 from any2api_automation.providers.mimo_protocol import (
@@ -213,6 +219,18 @@ def test_longcat_session_accepts_success_code_zero() -> None:
             }
         )
         == "conversation-1"
+    )
+
+
+def test_longcat_keepalive_reuses_the_shared_session_parser() -> None:
+    assert (
+        keepalive_conversation_id(
+            {
+                "status": 200,
+                "body": '{"code":0,"data":{"conversationId":"conversation-2"}}',
+            }
+        )
+        == "conversation-2"
     )
 
 

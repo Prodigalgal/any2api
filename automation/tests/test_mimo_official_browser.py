@@ -9,6 +9,7 @@ import pytest
 from any2api_automation.providers import mimo as mimo_module
 from any2api_automation.providers.mimo import MimoAutomationProvider
 from any2api_automation.providers.mimo_browser import (
+    _UPLOAD_MEDIA,
     MimoOfficialBrowserTransport,
     _config_request,
     _mimo_media_sources,
@@ -90,6 +91,14 @@ def test_mimo_media_is_validated_before_browser_upload() -> None:
                 }
             ]
         )
+
+
+def test_mimo_media_upload_matches_the_current_official_request_shape() -> None:
+    assert "fetch(input.uploadInfoPath, {" in _UPLOAD_MEDIA
+    assert "headers: {'Content-Type': 'application/octet-stream'}" in _UPLOAD_MEDIA
+    assert "input.uploadInfoPath +" not in _UPLOAD_MEDIA
+    assert "input.parsePath + '?fileUrl='" in _UPLOAD_MEDIA
+    assert "xiaomichatbot_ph" not in _UPLOAD_MEDIA
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,6 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote
 from uuid import uuid4
 
 from ..config import settings as core_settings
@@ -126,8 +125,7 @@ _UPLOAD_MEDIA = r"""async input => {
   for (const source of input.images) {
     const decoded = decode(source.dataUrl);
     const filename = String(source.filename || ('upload-' + crypto.randomUUID() + '.bin'));
-    const infoResponse = await fetch(input.uploadInfoPath +
-      '?xiaomichatbot_ph=' + encodeURIComponent(input.phase), {
+    const infoResponse = await fetch(input.uploadInfoPath, {
         method: 'POST',
         credentials: 'include',
         headers: {'Content-Type': 'application/json', 'x-timezone': input.timezone},
@@ -141,6 +139,7 @@ _UPLOAD_MEDIA = r"""async input => {
     }
     const uploadResponse = await fetch(data.uploadUrl, {
       method: 'PUT',
+      headers: {'Content-Type': 'application/octet-stream'},
       body: new Blob([decoded.bytes], {type: decoded.type})
     });
     if (!uploadResponse.ok) throw new Error('MiMo object upload was rejected');
@@ -148,8 +147,7 @@ _UPLOAD_MEDIA = r"""async input => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const parseUrl = input.parsePath + '?fileUrl=' + encodeURIComponent(data.resourceUrl) +
         '&objectName=' + encodeURIComponent(data.objectName) +
-        '&model=' + encodeURIComponent(input.model) +
-        '&xiaomichatbot_ph=' + encodeURIComponent(input.phase);
+        '&model=' + encodeURIComponent(input.model);
       const parseResponse = await fetch(parseUrl, {
         method: 'POST',
         credentials: 'include',
@@ -207,12 +205,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                     {
                         "url": self._endpoint(
                             selection,
-                            _with_phase(
-                                selection.rules.endpoint_paths.get(
-                                    "models", "/open-apis/bot/config"
-                                ),
-                                credential,
-                            ),
+                            selection.rules.endpoint_paths.get("models", "/open-apis/bot/config"),
                         ),
                         "headers": _headers(),
                         "timeoutMs": selection.rules.canary_timeout_seconds * 1000,
@@ -254,9 +247,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
     ) -> AsyncIterator[dict[str, Any]]:
         async with self.account_operation(credential):
             session, selection, reports = await self._select_session(credential, proxy_url, plan)
-            uploaded_media = await self._upload_media(
-                session, credential, semantic_command, selection.rules
-            )
+            uploaded_media = await self._upload_media(session, semantic_command, selection.rules)
             body = build_mimo_chat_request(semantic_command, uploaded_media=uploaded_media)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
@@ -272,12 +263,7 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                             "requestId": request_id,
                             "url": self._endpoint(
                                 selection,
-                                _with_phase(
-                                    selection.rules.endpoint_paths.get(
-                                        "chat", "/open-apis/bot/chat"
-                                    ),
-                                    credential,
-                                ),
+                                selection.rules.endpoint_paths.get("chat", "/open-apis/bot/chat"),
                             ),
                             "headers": _headers(),
                             "body": body,
@@ -365,21 +351,16 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
     async def _upload_media(
         self,
         session: OfficialBrowserSession,
-        credential: dict[str, Any],
         command: dict[str, Any],
         rule: RuntimeRule,
     ) -> list[dict[str, Any]]:
         images = _mimo_media_sources(command.get("messages"))
         if not images:
             return []
-        phase = str(credential.get("xiaomichatbot_ph") or "").strip()
-        if not phase:
-            raise ValueError("MiMo media upload requires xiaomichatbot_ph")
         result = await session.page.evaluate(
             _UPLOAD_MEDIA,
             {
                 "images": images,
-                "phase": phase,
                 "model": str(command.get("model") or ""),
                 "timezone": "Asia/Shanghai",
                 "uploadInfoPath": rule.endpoint_paths.get(
@@ -607,14 +588,6 @@ def _headers() -> dict[str, str]:
         "Content-Type": "application/json",
         "x-timezone": "Asia/Shanghai",
     }
-
-
-def _with_phase(path: str, credential: dict[str, Any]) -> str:
-    phase = str(credential.get("xiaomichatbot_ph") or "").strip()
-    if not phase:
-        raise ValueError("MiMo browser request requires xiaomichatbot_ph")
-    separator = "&" if "?" in path else "?"
-    return f"{path}{separator}xiaomichatbot_ph={quote(phase, safe='')}"
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:

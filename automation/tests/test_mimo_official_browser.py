@@ -98,6 +98,8 @@ def test_mimo_media_upload_matches_the_current_official_request_shape() -> None:
     assert "headers: {'Content-Type': 'application/octet-stream'}" in _UPLOAD_MEDIA
     assert "input.uploadInfoPath +" not in _UPLOAD_MEDIA
     assert "input.parsePath + '?fileUrl='" in _UPLOAD_MEDIA
+    assert "info?.data ?? info" in _UPLOAD_MEDIA
+    assert "parseBody?.data ?? parseBody" in _UPLOAD_MEDIA
     assert "xiaomichatbot_ph" not in _UPLOAD_MEDIA
 
 

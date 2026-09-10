@@ -132,18 +132,23 @@ _UPLOAD_MEDIA = r"""async input => {
         body: JSON.stringify({fileName: filename})
       });
     const info = await infoResponse.json();
-    const data = info?.data || {};
-    if (!infoResponse.ok || Number(info?.code ?? -1) !== 0 ||
+    const data = info?.data ?? info;
+    if (!infoResponse.ok || (info?.code != null && Number(info.code) !== 0) ||
         !data.uploadUrl || !data.resourceUrl || !data.objectName) {
-      throw new Error('MiMo media upload information was rejected');
+      throw new Error('MiMo media upload information was rejected status=' +
+        infoResponse.status + ' code=' + String(info?.code ?? 'missing'));
     }
     const uploadResponse = await fetch(data.uploadUrl, {
       method: 'PUT',
       headers: {'Content-Type': 'application/octet-stream'},
       body: new Blob([decoded.bytes], {type: decoded.type})
     });
-    if (!uploadResponse.ok) throw new Error('MiMo object upload was rejected');
+    if (!uploadResponse.ok) {
+      throw new Error('MiMo object upload was rejected status=' + uploadResponse.status);
+    }
     let parsed = null;
+    let lastParseStatus = 0;
+    let lastParseCode = 'missing';
     for (let attempt = 0; attempt < 5; attempt++) {
       const parseUrl = input.parsePath + '?fileUrl=' + encodeURIComponent(data.resourceUrl) +
         '&objectName=' + encodeURIComponent(data.objectName) +
@@ -155,13 +160,20 @@ _UPLOAD_MEDIA = r"""async input => {
         body: '{}'
       });
       const parseBody = await parseResponse.json();
-      if (parseResponse.ok && Number(parseBody?.code ?? -1) === 0 && parseBody?.data?.id) {
-        parsed = parseBody.data;
+      const parseData = parseBody?.data ?? parseBody;
+      lastParseStatus = parseResponse.status;
+      lastParseCode = String(parseBody?.code ?? 'missing');
+      if (parseResponse.ok && (parseBody?.code == null || Number(parseBody.code) === 0) &&
+          parseData?.id) {
+        parsed = parseData;
         break;
       }
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
-    if (!parsed) throw new Error('MiMo media parsing did not complete');
+    if (!parsed) {
+      throw new Error('MiMo media parsing did not complete status=' + lastParseStatus +
+        ' code=' + lastParseCode);
+    }
     result.push({
       mediaType: 'image',
       fileUrl: data.resourceUrl,

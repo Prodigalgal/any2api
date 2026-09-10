@@ -219,8 +219,9 @@ class MimoAutomationProvider(AutomationProvider):
                     yield transport_frame(event_type, **details)
             except Exception as error:  # noqa: BLE001 - normalized stream boundary
                 logger.warning(
-                    "mimo_transport_stream_failed error_type=%s",
+                    "mimo_transport_stream_failed error_type=%s reason=%s",
                     type(error).__name__,
+                    " ".join(str(error).split())[:200] or "<empty>",
                 )
                 yield transport_frame(
                     "error",

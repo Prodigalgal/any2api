@@ -744,6 +744,10 @@ class QwenNativeBrowserTransport:
                 if (data === '[DONE]') return true;
                 try {
                   const value = JSON.parse(data);
+                  if (value?.error || value?.data?.error || value?.output?.error ||
+                      value?.response?.error ||
+                      (Array.isArray(value?.ret) && value.ret.length > 0) ||
+                      (Array.isArray(value?.data?.ret) && value.data.ret.length > 0)) return true;
                   if (value?.['response.completed']) return true;
                   const choice = value?.choices?.[0] || {};
                   const delta = choice.delta || choice.message || {};
@@ -1079,11 +1083,19 @@ class QwenNativeBrowserTransport:
                 code,
                 _qwen_completion_shape(body),
             )
-        elif "/chat/completions" in request.path and not _qwen_sse_finished(body):
-            logger.warning(
-                "qwen_native_browser_incomplete_completion shape=%s",
-                _qwen_completion_shape(body),
-            )
+        elif "/chat/completions" in request.path:
+            error_codes = _qwen_completion_error_codes(body)
+            if error_codes != "-" or _qwen_completion_has_error(body):
+                logger.warning(
+                    "qwen_native_browser_completion_error error_codes=%s shape=%s",
+                    error_codes,
+                    _qwen_completion_shape(body),
+                )
+            elif not _qwen_sse_finished(body):
+                logger.warning(
+                    "qwen_native_browser_incomplete_completion shape=%s",
+                    _qwen_completion_shape(body),
+                )
         return {
             "status": int(result.get("status") or 502),
             "content_type": content_type,
@@ -1525,11 +1537,7 @@ def _qwen_network_failure_reason(value: object) -> str:
 
 
 def _qwen_sse_finished(body: bytes) -> bool:
-    for raw_line in body.decode("utf-8", errors="replace").splitlines():
-        line = raw_line.lstrip()
-        if not line.startswith("data:"):
-            continue
-        data = line[5:].strip()
+    for data in _qwen_sse_frames(body):
         if data == "[DONE]":
             return True
         try:
@@ -1538,6 +1546,8 @@ def _qwen_sse_finished(body: bytes) -> bool:
             continue
         if not isinstance(payload, dict):
             continue
+        if _qwen_payload_has_error(payload):
+            return True
         if payload.get("response.completed"):
             return True
         choice = _first_qwen_choice(payload)
@@ -1552,6 +1562,46 @@ def _qwen_sse_finished(body: bytes) -> bool:
         if status == "finished" and phase not in {"thinking", "thinking_summary"}:
             return True
     return False
+
+
+def _qwen_payload_has_error(payload: dict[str, Any]) -> bool:
+    return any(isinstance(payload.get(key), (dict, list, str)) for key in ("error", "ret")) or any(
+        isinstance(payload.get(container), dict)
+        and (
+            isinstance(payload[container].get("error"), (dict, list, str))
+            or isinstance(payload[container].get("ret"), (dict, list, str))
+        )
+        for container in ("data", "output", "response")
+    )
+
+
+def _qwen_completion_has_error(body: bytes) -> bool:
+    for frame in _qwen_sse_frames(body):
+        if frame == "[DONE]":
+            continue
+        try:
+            payload = json.loads(frame)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict) and _qwen_payload_has_error(payload):
+            return True
+    return False
+
+
+def _qwen_sse_frames(body: bytes) -> list[str]:
+    frames: list[str] = []
+    for raw_line in body.decode("utf-8", errors="replace").splitlines():
+        line = raw_line.lstrip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data:
+            frames.append(data)
+    if not frames:
+        text = body.decode("utf-8", errors="replace").strip()
+        if text:
+            frames.append(text)
+    return frames
 
 
 def _first_qwen_choice(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1576,6 +1626,39 @@ def _qwen_failure_code(body: bytes) -> str:
         return str(values[0]) if isinstance(values, list) and values else ""
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
         return ""
+
+
+def _qwen_completion_error_codes(body: bytes) -> str:
+    """Return bounded error codes without logging provider response content."""
+
+    codes: set[str] = set()
+
+    def visit(value: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in {"code", "error_code", "errorCode", "ret"}:
+                    candidates = nested if isinstance(nested, list) else [nested]
+                    for candidate in candidates:
+                        if isinstance(candidate, str) and re.fullmatch(
+                            r"[A-Za-z0-9_.-]{1,80}", candidate.strip()
+                        ):
+                            codes.add(candidate.strip())
+                visit(nested, depth + 1)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested, depth + 1)
+
+    for frame in _qwen_sse_frames(body):
+        if frame == "[DONE]":
+            continue
+        try:
+            payload = json.loads(frame)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        visit(payload)
+    return ",".join(sorted(codes))[:240] or "-"
 
 
 def _qwen_completion_shape(body: bytes) -> str:

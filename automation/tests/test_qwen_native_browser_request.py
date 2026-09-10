@@ -23,6 +23,7 @@ from any2api_automation.providers.qwen_risk import (
     NativeBrowserRequest,
     QwenNativeBrowserTransport,
     _AccountBrowserSession,
+    _qwen_completion_error_codes,
     _qwen_completion_shape,
     _qwen_network_failure_reason,
     _qwen_punish_url,
@@ -398,6 +399,7 @@ async def test_qwen_native_transport_executes_the_real_request_in_the_page_main_
 
     assert "await fetch(request.url" in page.script
     assert "response.body?.getReader()" in page.script
+    assert "value?.error" in page.script
     assert page.payload["path"] == "/api/v2/chats/new"
     assert "token-value-that-is-long-enough" not in page.script
     assert "Authorization" not in page.script
@@ -478,6 +480,8 @@ async def test_qwen_native_transport_reports_browser_network_failure() -> None:
         b'data: {"choices":[{"finish_reason":"stop","delta":{}}]}\n\n',
         b'data: {"choices":[{"delta":{"phase":"answer","status":"finished"}}]}\n\n',
         b'data: {"response.completed":{"response_id":"response"}}\n\n',
+        b'data: {"error":{"code":"MODEL_UNAVAILABLE"}}\n\n',
+        b'data: {"ret":["FAIL_SYS_USER_VALIDATE"]}\n\n',
     ],
 )
 def test_qwen_sse_terminal_events_finish_the_browser_shaped_stream(body: bytes) -> None:
@@ -504,6 +508,18 @@ def test_qwen_completion_shape_does_not_log_response_data() -> None:
     assert "terminal=True" in shape
     assert "content" in shape
     assert "private-output" not in shape
+
+
+def test_qwen_completion_error_diagnostics_keep_only_bounded_codes() -> None:
+    body = (
+        b'data: {"error":{"code":"MODEL_UNAVAILABLE","message":"private detail"}}\n\n'
+        b'data: {"data":{"ret":["FAIL_SYS_USER_VALIDATE"]}}\n\n'
+    )
+
+    codes = _qwen_completion_error_codes(body)
+
+    assert codes == "FAIL_SYS_USER_VALIDATE,MODEL_UNAVAILABLE"
+    assert "private detail" not in codes
 
 
 @pytest.mark.asyncio

@@ -14,10 +14,11 @@
 - 最近一小时成功推理使用了 DeepSeek 3、GLM 4、LongCat 3、MiMo 9、MiniMax 1、Qwen 3 个不同账号；MiniMax 当前只有 1 个 `ACTIVE/enabled` 账号，切换验证等待第二个有效账号。
 - 生命周期调度已限制为默认并发 2、单次最多 claim 8 个动作；当前滚动观测没有新的 `OOMKilled`。namespace quota 已从 `requests.memory=6Gi/limits.memory=16Gi` 调整为 `8Gi/20Gi`，为滚动副本留出余量。
 - MiniMax 的通用 `daily_checkin` 语义和具体 Runtime 实现已保留，账号额度依赖每日打卡的规则不绕过。
+- LongCat 在当前发布上补充完成 TXT 非流式/SSE 真实 completion；两个不同 ACTIVE/enabled 账号的 `longcat-pro` 账号探针均通过，最近 30 分钟成功请求使用 9 个不同账号。`longcat-flash` 在真实成功样本补充后恢复为 `READY`。
 
 ## 当前推进
 
-- 继续观察 LongCat 的 PDF/DOCX 与账号切换稳定性，并明确 TXT 及其他扩展的拒绝或能力边界；成功后再把 LongCat 标记为完整 Ready。
+- LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；继续观察自然 keepalive、24 小时健康窗口和其他未逐项验证的文件扩展，不将其自动扩大为全部文件格式 Ready。
 - 等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
 - 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。
 - 当前多模态范围只覆盖图片和文档；音频、视频不纳入本轮 LongCat 聊天输入能力。

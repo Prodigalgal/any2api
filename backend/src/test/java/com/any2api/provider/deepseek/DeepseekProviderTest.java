@@ -1,12 +1,33 @@
 package com.any2api.provider.deepseek;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
+import com.any2api.proxy.ProxyPoolService;
+import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
+import com.any2api.transport.OfficialBrowserTransportClient;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 class DeepseekProviderTest {
     private final ObjectMapper mapper = new ObjectMapper();
+
+    @Test
+    void allowsBrowserInitializationAndPowDuringRuntimeProbes() {
+        var properties = new DeepseekProperties();
+        var provider = new DeepseekProvider(
+            mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper),
+            mock(ProxyPoolService.class), properties, mapper);
+
+        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThatThrownBy(() -> properties.setModelProbeTimeout(Duration.ZERO))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("must be positive");
+    }
 
     @Test
     void parsesEnabledOfficialModelConfigurations() {

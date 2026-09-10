@@ -111,6 +111,7 @@ any2api:
       platform: ${ANY2API_PROVIDER_DEEPSEEK_PLATFORM:web}
       locale: ${ANY2API_PROVIDER_DEEPSEEK_LOCALE:en_US}
       timezone-offset-seconds: ${ANY2API_PROVIDER_DEEPSEEK_TIMEZONE_OFFSET_SECONDS:32400}
+      model-probe-timeout: ${ANY2API_PROVIDER_DEEPSEEK_MODEL_PROBE_TIMEOUT:240s}
     grok:
       base-url: ${ANY2API_PROVIDER_GROK_BASE_URL:https://cli-chat-proxy.grok.com/v1}
       client-version: ${ANY2API_PROVIDER_GROK_CLIENT_VERSION:0.2.112}

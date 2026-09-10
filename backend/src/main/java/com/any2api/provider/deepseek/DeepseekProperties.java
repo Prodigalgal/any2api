@@ -1,5 +1,6 @@
 package com.any2api.provider.deepseek;
 
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties("any2api.provider.deepseek")
@@ -14,6 +15,7 @@ public class DeepseekProperties {
     private String clientVersion = "2.3.0";
     private String locale = "en_US";
     private int timezoneOffsetSeconds = 32400;
+    private Duration modelProbeTimeout = Duration.ofSeconds(240);
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String value) { baseUrl = trimUrl(value); }
@@ -35,6 +37,13 @@ public class DeepseekProperties {
     public void setLocale(String value) { locale = value == null ? "" : value.trim(); }
     public int getTimezoneOffsetSeconds() { return timezoneOffsetSeconds; }
     public void setTimezoneOffsetSeconds(int value) { timezoneOffsetSeconds = value; }
+    public Duration getModelProbeTimeout() { return modelProbeTimeout; }
+    public void setModelProbeTimeout(Duration value) {
+        if (value == null || value.isZero() || value.isNegative()) {
+            throw new IllegalArgumentException("modelProbeTimeout must be positive");
+        }
+        modelProbeTimeout = value;
+    }
 
     synchronized boolean applyOfficialVersion(String value) {
         var normalized = value == null ? "" : value.trim();

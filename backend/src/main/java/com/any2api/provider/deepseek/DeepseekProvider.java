@@ -19,6 +19,7 @@ import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import com.any2api.transport.OfficialBrowserTransportClient;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +81,10 @@ public final class DeepseekProvider implements InferenceProvider {
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
+
+    @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
+
+    @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override
     public void validate(CanonicalRequest request) {

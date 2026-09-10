@@ -201,11 +201,20 @@ _UPLOAD_MEDIA = r"""async input => {
     const cdnUrl = String(
       uploaded.cdnUrl || uploaded.cdn_url || uploaded.ossPath || uploaded.url || ''
     ).trim();
-    const objectKey = String(
+    const explicitObjectKey = String(
       uploaded.objectKey || uploaded.object_key || uploaded.objectName ||
-      uploaded.object_name || uploaded.ossPath || uploaded.cdnUrl ||
-      uploaded.cdn_url || ''
+      uploaded.object_name || ''
     ).trim();
+    const objectKeyFromUrl = value => {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      try {
+        return decodeURIComponent(new URL(text).pathname).replace(/^\/+/, '');
+      } catch (_) {
+        return text.split('?', 1)[0].replace(/^\/+/, '');
+      }
+    };
+    const objectKey = explicitObjectKey || objectKeyFromUrl(cdnUrl);
     if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }

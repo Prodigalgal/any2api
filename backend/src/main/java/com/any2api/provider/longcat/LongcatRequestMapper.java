@@ -4,6 +4,7 @@ import com.any2api.protocol.CanonicalRequest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -29,6 +30,9 @@ final class LongcatRequestMapper {
 
     LongcatPreparedRequest prepare(CanonicalRequest request) {
         var mode = MODEL_MODES.getOrDefault(request.model(), new ModelMode("1", false, false));
+        if (hasMedia(request.messages())) {
+            mode = new ModelMode("multiModal", mode.reason(), mode.search());
+        }
         var options = request.providerOptions();
         var agentId = string(options.get("agent_id"),
             request.rawRequest().path("agent_id").asText(mode.agentId()));
@@ -54,6 +58,20 @@ final class LongcatRequestMapper {
             if (!content.isBlank()) blocks.add("[" + role + "]\n" + content);
         }
         return String.join("\n\n", blocks);
+    }
+
+    private boolean hasMedia(List<JsonNode> messages) {
+        return messages.stream().anyMatch(message -> {
+            var content = message.path("content");
+            if (!content.isArray()) return false;
+            for (var part : content) {
+                if (!part.isObject()) continue;
+                var type = part.path("type").asText("");
+                if (Set.of("input_image", "image_url", "input_file", "file",
+                    "attachment").contains(type)) return true;
+            }
+            return false;
+        });
     }
 
     private String content(JsonNode value) {

@@ -280,6 +280,8 @@ def build_longcat_request(
     files = _normalize_uploaded_files(uploaded_files)
     model = str(command["model"])
     default_agent, default_reason, default_search = _MODEL_MODES.get(model, ("1", False, False))
+    if media_blocks:
+        default_agent = "multiModal"
     options = command["providerOptions"]
     raw = command.get("rawRequest") if isinstance(command.get("rawRequest"), dict) else {}
     agent_id = _string(options.get("agent_id"), str(raw.get("agent_id") or default_agent))

@@ -80,6 +80,24 @@ class LongcatProtocolTest {
     }
 
     @Test
+    void selectsOfficialMultimodalAgentForImageInput() {
+        var mapper = new ObjectMapper();
+        var content = mapper.createArrayNode();
+        content.addObject().put("type", "input_text").put("text", "describe");
+        content.addObject().put("type", "input_image")
+            .put("image_url", "data:image/png;base64,YQ==");
+        var message = mapper.createObjectNode().put("role", "user").set("content", content);
+        var request = new CanonicalRequest("media", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "longcat", "longcat-flash", true, List.of(message), Map.of(), Map.of(),
+            List.of(), Map.of(), mapper.createObjectNode());
+
+        var prepared = new LongcatRequestMapper(mapper, new LongcatToolProtocol(mapper))
+            .prepare(request);
+
+        assertThat(prepared.agentId()).isEqualTo("multiModal");
+    }
+
+    @Test
     void separatesPureThinkingContentFromTheFinalAnswer() {
         var mapper = new ObjectMapper();
         var tools = new LongcatToolProtocol(mapper);

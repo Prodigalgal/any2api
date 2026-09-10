@@ -388,7 +388,13 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
     )
     assert body["content"].endswith("describe")
     assert body["creation_param"] == {}
+    assert body["agent_id"] == "multiModal"
     assert body["files"][0]["fileKey"] == "image-key"
+
+    text_body = build_longcat_request(
+        _command([{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}])
+    )
+    assert text_body["agent_id"] == "1"
 
 
 def test_longcat_upload_contract_rejects_mixed_media_and_non_inline_sources() -> None:

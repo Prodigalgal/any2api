@@ -253,7 +253,7 @@ _UPLOAD_MEDIA = r"""async input => {
         return text.split('?', 1)[0].replace(/^\/+/, '');
       }
     };
-    const objectKey = explicitObjectKey || objectKeys.shift() || objectKeyFromUrl(cdnUrl);
+    const objectKey = explicitObjectKey || uploadId || objectKeys.shift() || objectKeyFromUrl(cdnUrl);
     if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }

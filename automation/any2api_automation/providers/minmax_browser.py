@@ -201,6 +201,10 @@ _UPLOAD_MEDIA = r"""async input => {
     const cdnUrl = String(
       uploaded.cdnUrl || uploaded.cdn_url || uploaded.ossPath || uploaded.url || ''
     ).trim();
+    const objectKey = String(
+      uploaded.objectKey || uploaded.object_key || uploaded.objectName ||
+      uploaded.object_name || uploaded.ossPath || ''
+    ).trim();
     if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }
@@ -213,6 +217,7 @@ _UPLOAD_MEDIA = r"""async input => {
       file_size: bytes.length,
       preview_url: cdnUrl,
       cdn_url: cdnUrl,
+      object_key: objectKey,
       data_url: cdnUrl
     });
   }

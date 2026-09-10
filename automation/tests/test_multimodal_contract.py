@@ -550,6 +550,7 @@ def test_minmax_uploaded_media_matches_the_official_web_attachment_contract() ->
                 "mime_type": "image/png",
                 "file_size": 12,
                 "cdn_url": "https://cdn.example.test/sample.png",
+                "object_key": "mavis/sample.png",
             }
         ]
     )
@@ -566,6 +567,7 @@ def test_minmax_uploaded_media_matches_the_official_web_attachment_contract() ->
                 "upload_id": "upload-1",
                 "url": "https://cdn.example.test/sample.png",
                 "data_url": "https://cdn.example.test/sample.png",
+                "object_key": "mavis/sample.png",
             },
         }
     ]

@@ -453,10 +453,18 @@ def _minmax_message_attachments(
             or attachment.get("data_url")
             or ""
         ).strip()
+        object_key = str(
+            attachment.get("object_key")
+            or attachment.get("objectKey")
+            or attachment.get("oss_path")
+            or ""
+        ).strip()
         if not upload_id or not file_name or not mime_type or not isinstance(file_size, int):
             raise ValueError("MinMax uploaded attachment metadata is incomplete")
         if not cdn_url:
             raise ValueError("MinMax uploaded attachment URL is missing")
+        if not object_key:
+            raise ValueError("MinMax uploaded attachment object key is missing")
         result.append(
             {
                 "meta": {
@@ -469,6 +477,7 @@ def _minmax_message_attachments(
                     "upload_id": upload_id,
                     "url": cdn_url,
                     "data_url": cdn_url,
+                    "object_key": object_key,
                 },
             }
         )

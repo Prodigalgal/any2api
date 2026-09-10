@@ -31,6 +31,7 @@ def test_minmax_media_upload_stays_inside_the_browser_runtime() -> None:
     assert "new File([bytes], filename" in _UPLOAD_MEDIA
     assert "uploadId" in _UPLOAD_MEDIA
     assert "file_key" in _UPLOAD_MEDIA
+    assert "object_key" in _UPLOAD_MEDIA
     assert "official media uploader" in _UPLOAD_MEDIA
     assert "crypto.subtle" not in _UPLOAD_MEDIA
 

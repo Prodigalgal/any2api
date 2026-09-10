@@ -181,6 +181,7 @@ _UPLOAD_MEDIA = r"""async input => {
   const uploader = locateUploader();
   const output = [];
   const objectKeys = [];
+  const callbackObjectKeys = [];
   const rememberPolicyCallback = body => {
     let payload = body;
     if (typeof payload === 'string') {
@@ -190,6 +191,16 @@ _UPLOAD_MEDIA = r"""async input => {
     const directory = String(payload.dir || '').trim().replace(/\/+$/, '');
     const filename = String(payload.fileName || '').trim().replace(/^\/+/, '');
     if (directory && filename) objectKeys.push(`${directory}/${filename}`);
+  };
+  const rememberPolicyResponse = body => {
+    let payload = body;
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); } catch (_) { return; }
+    }
+    if (!payload || typeof payload !== 'object') return;
+    const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+    const objectKey = data.ossPath || data.oss_path || data.objectKey || data.object_key || '';
+    if (String(objectKey).trim()) callbackObjectKeys.push(String(objectKey).trim());
   };
   const originalFetch = window.fetch;
   const xhrPrototype = window.XMLHttpRequest?.prototype;
@@ -202,7 +213,12 @@ _UPLOAD_MEDIA = r"""async input => {
       if (String(url).includes('/v1/api/files/policy_callback')) {
         rememberPolicyCallback(args[1]?.body);
       }
-      return originalFetch.apply(this, args);
+      const result = originalFetch.apply(this, args);
+      if (!String(url).includes('/v1/api/files/policy_callback')) return result;
+      return result.then(async response => {
+        try { rememberPolicyResponse(await response.clone().text()); } catch (_) {}
+        return response;
+      });
     };
   }
   if (xhrPrototype && typeof originalXhrOpen === 'function' &&
@@ -214,6 +230,7 @@ _UPLOAD_MEDIA = r"""async input => {
     xhrPrototype.send = function(body) {
       if (String(this.__any2apiMinmaxUrl || '').includes('/v1/api/files/policy_callback')) {
         rememberPolicyCallback(body);
+        this.addEventListener('load', () => rememberPolicyResponse(this.responseText), {once: true});
       }
       return originalXhrSend.call(this, body);
     };
@@ -244,7 +261,7 @@ _UPLOAD_MEDIA = r"""async input => {
       uploaded.objectKey || uploaded.object_key || uploaded.objectName ||
       uploaded.object_name || ''
     ).trim();
-    const objectKeyFromUrl = value => {
+    const objectKeyFromValue = value => {
       const text = String(value || '').trim();
       if (!text) return '';
       try {
@@ -253,10 +270,12 @@ _UPLOAD_MEDIA = r"""async input => {
         return text.split('?', 1)[0].replace(/^\/+/, '');
       }
     };
+    const callbackObjectKey = objectKeyFromValue(callbackObjectKeys.shift() || '');
     const policyObjectKey = objectKeys.shift() || '';
-    const urlObjectKey = objectKeyFromUrl(cdnUrl);
-    const objectKey = explicitObjectKey || policyObjectKey || urlObjectKey;
+    const urlObjectKey = objectKeyFromValue(cdnUrl);
+    const objectKey = explicitObjectKey || callbackObjectKey || policyObjectKey || urlObjectKey;
     const objectKeySource = explicitObjectKey ? 'uploader'
+      : callbackObjectKey ? 'policy_response'
       : policyObjectKey ? 'policy_callback'
       : urlObjectKey ? 'cdn_path' : '';
     if (!uploadId || !cdnUrl) {

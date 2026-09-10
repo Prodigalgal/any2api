@@ -171,7 +171,7 @@ completion is a separate release gate.
 | Provider | Chat | Responses | Reasoning | Function tools | Image input | File input | Audio input | Video input | Stored Responses |
 |---|---|---|---|---|---|---|---|---|---|
 | Qwen | Native | Native | Native | Unsupported; search tools only | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
-| LongCat | Native | Native | Native | Emulated | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
+| LongCat | Native | Native | Native | Emulated | Native upload | Native upload | Unsupported | Unsupported | Unsupported |
 | MiMo | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
 | MinMax | Native | Native | Native | Unsupported | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
 | GLM | Native | Native | Native | Unsupported | Native upload (vision models only) | Unsupported | Unsupported | Unsupported | Unsupported |
@@ -187,13 +187,18 @@ provider marked `Unsupported` fails before account acquisition; the runtime must
 silently discard that content. Grok Web's separate media API is not a declaration that Gateway
 chat accepts arbitrary content blocks.
 
-Qwen, MiMo, MinMax, and GLM currently declare image input only for inline base64 data URLs because
-their page upload protocols require browser-side bytes. GLM exposes the capability only for models
-whose authenticated official catalog metadata contains `capabilities.vision=true`; other GLM models
-remain text-only. Their Java adapters reject remote URLs and file IDs before account leasing; this
-source restriction is part of the provider contract, not a fallback to text. The runtime schema
-records all canonical image/audio/video/file block aliases, while provider capability, model
-metadata, and source policy decide whether a block can proceed.
+Qwen, MiMo, MinMax, GLM, and LongCat currently declare image input only for inline base64 data URLs
+because their page upload protocols require browser-side bytes. LongCat additionally declares one
+inline-base64 document upload per chat, using the authenticated page's `/api/v1/appendix-upload`
+route and the returned `fileUrl`/`fileKey` object in the same chat request. LongCat accepts up to
+nine images or one document in this adapter; image and document inputs cannot be mixed. GLM exposes
+the capability only for models whose authenticated official catalog metadata contains
+`capabilities.vision=true`; other GLM models remain text-only. Their Java adapters reject remote
+URLs and file IDs before account leasing; this source restriction is part of the provider contract,
+not a fallback to text. The runtime schema records all canonical image/audio/video/file block
+aliases, while provider capability, model metadata, and source policy decide whether a block can
+proceed. Audio and video are not declared as LongCat chat input capabilities; their presence in
+other LongCat product flows does not change this contract.
 
 Grok channels remain code-installed but may be administratively hot-unplugged. Disabling them does
 not weaken protocol validation for the enabled providers.

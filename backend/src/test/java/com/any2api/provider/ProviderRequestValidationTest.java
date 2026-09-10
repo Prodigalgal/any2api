@@ -116,6 +116,27 @@ class ProviderRequestValidationTest {
     }
 
     @Test
+    void rejectsNonInlineFilesBeforePageUploadProvidersLeaseAnAccount() {
+        assertThatCode(() -> ProviderRequestValidation.requireInlineMediaUploads(
+            requestWith("file"), "LongCat", Set.of(ProviderCapability.FILE_INPUT)))
+            .doesNotThrowAnyException();
+
+        var message = mapper.createObjectNode().put("role", "user");
+        message.putArray("content").addObject()
+            .put("type", "input_file")
+            .putObject("input_file")
+            .put("file_url", "https://media.example/input.pdf");
+        var remote = new CanonicalRequest("inline-file", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "guarded", "model", false, List.of(message), Map.of(), Map.of(),
+            List.of(), Map.of(), mapper.createObjectNode());
+
+        assertThatThrownBy(() -> ProviderRequestValidation.requireInlineMediaUploads(
+            remote, "LongCat", Set.of(ProviderCapability.FILE_INPUT)))
+            .isInstanceOf(OpenAiRequestException.class)
+            .hasMessageContaining("LongCat file upload currently requires an inline base64 data URL");
+    }
+
+    @Test
     void rejectsFunctionToolsWhenTheProviderDoesNotDeclareThem() {
         var tool = mapper.createObjectNode().put("type", "function")
             .putObject("function").put("name", "lookup");

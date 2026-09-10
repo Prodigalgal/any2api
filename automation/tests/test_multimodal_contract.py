@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,7 +13,12 @@ from any2api_automation.providers.glm_runtime import build_glm_command
 from any2api_automation.providers.grok_browser import build_grok_request
 from any2api_automation.providers.grok_console_browser import build_grok_console_request
 from any2api_automation.providers.grok_web_browser import build_grok_web_request
-from any2api_automation.providers.longcat_browser import build_longcat_request
+from any2api_automation.providers.longcat_browser import _UPLOAD_MEDIA as LONGCAT_UPLOAD_MEDIA
+from any2api_automation.providers.longcat_browser import (
+    LongcatOfficialBrowserTransport,
+    _longcat_upload_sources,
+    build_longcat_request,
+)
 from any2api_automation.providers.mimo_browser import build_mimo_chat_request
 from any2api_automation.providers.minmax import build_minmax_request
 from any2api_automation.providers.multimodal import (
@@ -227,7 +234,19 @@ def test_xai_browser_adapters_preserve_image_and_file_blocks() -> None:
         ("grok", build_grok_request, {"image", "file"}),
         ("grok_console", build_grok_console_request, {"image", "file"}),
         ("grok_web", build_grok_web_request, set()),
-        ("longcat", build_longcat_request, set()),
+        (
+            "longcat",
+            lambda command: build_longcat_request(
+                command,
+                uploaded_files=[
+                    {
+                        "fileUrl": "https://upload.longcat.chat/file",
+                        "fileKey": "file-key",
+                    }
+                ],
+            ),
+            {"image", "file"},
+        ),
         (
             "mimo",
             lambda command: build_mimo_chat_request(command, uploaded_media=[{"url": "media-1"}]),
@@ -295,6 +314,148 @@ def test_mimo_image_requires_a_completed_upload_result() -> None:
     body = build_mimo_chat_request(command, uploaded_media=[{"url": "media-1"}])
     assert body["query"].endswith("[USER]\ndescribe")
     assert body["multiMedias"] == [{"url": "media-1"}]
+
+
+def test_longcat_upload_contract_preserves_official_file_shape() -> None:
+    assert "/api/v1/appendix-upload" not in LONGCAT_UPLOAD_MEDIA
+    assert "FormData" in LONGCAT_UPLOAD_MEDIA
+    assert "form.append('file'" in LONGCAT_UPLOAD_MEDIA
+    assert "fileKey" in LONGCAT_UPLOAD_MEDIA
+
+    image_command = _command(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "describe"},
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,YQ==",
+                        "filename": "input.png",
+                    },
+                ],
+            }
+        ]
+    )
+    sources = _longcat_upload_sources(image_command["messages"])
+
+    assert sources[0]["filename"] == "input.png"
+    assert sources[0]["fileExt"] == "png"
+    assert sources[0]["fileSize"] == 1
+    assert sources[0]["dataUrl"] == "data:image/png;base64,YQ=="
+
+    body = build_longcat_request(
+        image_command,
+        uploaded_files=[
+            {
+                **sources[0],
+                "fileUrl": "https://upload.longcat.chat/image",
+                "fileKey": "image-key",
+            }
+        ],
+    )
+    assert body["content"].endswith("describe")
+    assert body["files"][0]["fileKey"] == "image-key"
+
+
+def test_longcat_upload_contract_rejects_mixed_media_and_non_inline_sources() -> None:
+    mixed = _command(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,YQ=="},
+                    {
+                        "type": "input_file",
+                        "input_file": {
+                            "file_data": "data:application/pdf;base64,Yg==",
+                            "filename": "input.pdf",
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="images or one document"):
+        _longcat_upload_sources(mixed["messages"])
+
+    remote = _command(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_file",
+                        "input_file": {
+                            "file_url": "https://example.test/input.pdf",
+                            "filename": "input.pdf",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="inline base64 data URL"):
+        _longcat_upload_sources(remote["messages"])
+
+
+@pytest.mark.asyncio
+async def test_longcat_media_upload_uses_the_selected_account_page_and_rule_path() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.script = ""
+            self.payload: dict[str, object] = {}
+
+        async def evaluate(
+            self, script: str, payload: dict[str, object]
+        ) -> list[dict[str, object]]:
+            self.script = script
+            self.payload = payload
+            return [
+                {
+                    **payload["files"][0],
+                    "fileUrl": "https://upload.longcat.chat/image",
+                    "fileKey": "image-key",
+                }
+            ]
+
+    page = Page()
+    session = SimpleNamespace(page=page)
+    selection = SimpleNamespace(
+        rules=SimpleNamespace(endpoint_paths={"upload": "/custom/appendix-upload"})
+    )
+    transport = LongcatOfficialBrowserTransport("https://longcat.chat")
+
+    @asynccontextmanager
+    async def operation(_credential: dict[str, object]):
+        yield
+
+    transport.account_operation = operation
+    transport._select_session = AsyncMock(return_value=(session, selection, []))
+    sources = _longcat_upload_sources(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,YQ=="}
+                ],
+            }
+        ]
+    )
+
+    result = await transport.upload_media(
+        {"email": "user@example.test"},
+        sources,
+        "http://proxy.example.test:8080",
+        SimpleNamespace(),
+        runtime_options={"app_key": "test-app-key"},
+    )
+
+    assert result[0]["fileKey"] == "image-key"
+    assert page.payload["uploadPath"] == "/custom/appendix-upload"
+    assert page.payload["files"] == sources
+    assert "FormData" in page.script
+    transport._select_session.assert_awaited_once()
 
 
 def test_minmax_image_attachment_preserves_order_and_rejects_other_media() -> None:

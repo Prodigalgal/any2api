@@ -42,7 +42,7 @@ public final class LongcatProvider implements InferenceProvider {
         Set.of("function"));
 
     private static final ProviderManifest MANIFEST = new ProviderManifest(
-        "longcat", "LongCat", "native-longcat-web-v2", "3",
+        "longcat", "LongCat", "native-longcat-web-v3", "3",
         List.of("longcat-flash", "longcat-thinking", "longcat-search",
             "longcat-reason-search", "longcat-pro"),
         Map.of(
@@ -51,10 +51,14 @@ public final class LongcatProvider implements InferenceProvider {
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
             ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
             ProviderCapability.REASONING, SupportLevel.NATIVE,
+            ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
+            ProviderCapability.FILE_INPUT, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
             ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
             ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-        Map.of(RandomModelRole.TOP_TEXT, List.of("longcat-pro")), true);
+        Map.of(
+            RandomModelRole.TOP_TEXT, List.of("longcat-pro"),
+            RandomModelRole.TOP_MULTIMODAL, List.of("longcat-pro")), true);
 
     private final OfficialBrowserTransportClient transport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
@@ -103,6 +107,8 @@ public final class LongcatProvider implements InferenceProvider {
         ProviderRequestValidation.requireStringParameters(request, "agent_id");
         ProviderRequestValidation.requireBooleanParameters(
             request, "reason_enabled", "search_enabled");
+        ProviderRequestValidation.requireInlineMediaUploads(
+            request, "LongCat", Set.of(ProviderCapability.IMAGE_INPUT, ProviderCapability.FILE_INPUT));
         ProviderRequestValidation.requireReasoningBooleanConsistency(
             request, "reason_enabled", Set.of("none", "minimal"), "reason_enabled");
         toolProtocol.plan(request);

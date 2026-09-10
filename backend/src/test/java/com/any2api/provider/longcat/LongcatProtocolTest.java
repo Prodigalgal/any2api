@@ -10,6 +10,9 @@ import static org.mockito.Mockito.when;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.ProviderCapability;
+import com.any2api.provider.RandomModelRole;
+import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import com.any2api.transport.OfficialBrowserTransportClient;
@@ -33,6 +36,11 @@ class LongcatProtocolTest {
 
         assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
         assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThat(provider.manifest().capabilities())
+            .containsEntry(ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE)
+            .containsEntry(ProviderCapability.FILE_INPUT, SupportLevel.NATIVE);
+        assertThat(provider.manifest().randomModelPreferences())
+            .containsEntry(RandomModelRole.TOP_MULTIMODAL, List.of("longcat-pro"));
         assertThatThrownBy(() -> properties.setModelProbeTimeout(Duration.ZERO))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("must be positive");

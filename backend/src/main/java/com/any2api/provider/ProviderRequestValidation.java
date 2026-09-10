@@ -235,20 +235,51 @@ public final class ProviderRequestValidation {
         CanonicalRequest request,
         String provider
     ) {
+        requireInlineMediaUploads(request, provider, Set.of(ProviderCapability.IMAGE_INPUT));
+    }
+
+    public static void requireInlineMediaUploads(
+        CanonicalRequest request,
+        String provider,
+        Set<ProviderCapability> capabilities
+    ) {
         for (var message : request.messages()) {
             var content = message.path("content");
             if (!content.isArray()) continue;
             for (var part : content) {
                 if (!part.isObject()) continue;
                 var type = part.path("type").asText("");
-                if (!Set.of("image", "image_url", "input_image").contains(type)) continue;
-                if (!isInlineImageSource(part)) {
+                var capability = mediaCapability(type);
+                if (capability == null || !capabilities.contains(capability)) continue;
+                if (!isInlineMediaSource(part, capability)) {
+                    var mediaName = mediaName(capability);
                     throw OpenAiRequestException.unsupported(
                         "input",
-                        provider + " image upload currently requires an inline base64 data URL");
+                        provider + " " + mediaName
+                            + " upload currently requires an inline base64 data URL");
                 }
             }
         }
+    }
+
+    private static ProviderCapability mediaCapability(String type) {
+        return switch (type) {
+            case "image", "image_url", "input_image" -> ProviderCapability.IMAGE_INPUT;
+            case "audio", "audio_url", "input_audio" -> ProviderCapability.AUDIO_INPUT;
+            case "video", "video_url", "input_video" -> ProviderCapability.VIDEO_INPUT;
+            case "attachment", "file", "input_file" -> ProviderCapability.FILE_INPUT;
+            default -> null;
+        };
+    }
+
+    private static String mediaName(ProviderCapability capability) {
+        return switch (capability) {
+            case IMAGE_INPUT -> "image";
+            case AUDIO_INPUT -> "audio";
+            case VIDEO_INPUT -> "video";
+            case FILE_INPUT -> "file";
+            default -> capability.name().toLowerCase(java.util.Locale.ROOT);
+        };
     }
 
     private static void requireMediaShape(
@@ -313,6 +344,21 @@ public final class ProviderRequestValidation {
             || isInlineDataUrl(part.path("data"));
     }
 
+    private static boolean isInlineMediaSource(
+        JsonNode part,
+        ProviderCapability capability
+    ) {
+        if (capability == ProviderCapability.IMAGE_INPUT) {
+            return isInlineImageSource(part);
+        }
+        if (capability != ProviderCapability.FILE_INPUT) return false;
+        for (var field : List.of(
+            "file", "input_file", "attachment", "source", "file_url", "file_data", "data")) {
+            if (isInlineAnyDataUrl(part.path(field))) return true;
+        }
+        return false;
+    }
+
     private static boolean isInlineDataUrl(JsonNode value) {
         if (hasText(value)) {
             var source = value.asText("").trim().toLowerCase(java.util.Locale.ROOT);
@@ -322,6 +368,19 @@ public final class ProviderRequestValidation {
         for (var field : List.of(
             "url", "image_url", "file_url", "file_data", "data", "base64", "source")) {
             if (isInlineDataUrl(value.path(field))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isInlineAnyDataUrl(JsonNode value) {
+        if (hasText(value)) {
+            var source = value.asText("").trim().toLowerCase(java.util.Locale.ROOT);
+            return source.startsWith("data:") && source.contains(";base64,");
+        }
+        if (!value.isObject()) return false;
+        for (var field : List.of(
+            "url", "file_url", "file_data", "data", "base64", "source")) {
+            if (isInlineAnyDataUrl(value.path(field))) return true;
         }
         return false;
     }

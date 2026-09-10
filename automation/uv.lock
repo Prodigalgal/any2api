@@ -89,7 +89,7 @@ wheels = [
 
 [[package]]
 name = "any2api-automation"
-version = "0.13.11"
+version = "0.13.12"
 source = { editable = "." }
 dependencies = [
     { name = "camoufox", extra = ["geoip"] },

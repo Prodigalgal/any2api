@@ -217,6 +217,31 @@ async def test_qwen_native_transport_passes_the_path_to_the_browser_script() -> 
 
 
 @pytest.mark.asyncio
+async def test_qwen_native_transport_retries_a_transient_runtime_load_timeout() -> None:
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", object(), object(), "current")
+    transport._load_page_runtime = AsyncMock(
+        side_effect=[TimeoutError("wait_for_function timeout"), None]
+    )
+
+    await transport._load_page_runtime_with_retry(session)
+
+    assert transport._load_page_runtime.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_does_not_retry_non_timeout_runtime_load_failure() -> None:
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", object(), object(), "current")
+    transport._load_page_runtime = AsyncMock(side_effect=RuntimeError("frontend drift"))
+
+    with pytest.raises(RuntimeError, match="frontend drift"):
+        await transport._load_page_runtime_with_retry(session)
+
+    transport._load_page_runtime.assert_awaited_once_with(session)
+
+
+@pytest.mark.asyncio
 async def test_qwen_native_transport_holds_the_proxy_lease_through_the_request() -> None:
     lease_held = False
 

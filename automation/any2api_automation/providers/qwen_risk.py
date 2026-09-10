@@ -48,6 +48,7 @@ from .qwen_settings import settings
 
 logger = logging.getLogger(__name__)
 QWEN_TIMEZONE = timezone(timedelta(hours=8))
+_QWEN_RUNTIME_LOAD_ATTEMPTS = 2
 
 
 def _browser_major(profile: str) -> str:
@@ -1279,7 +1280,7 @@ class QwenNativeBrowserTransport:
                 browser_manager=browser_manager,
                 browser_lease=browser_lease,
             )
-            await self._load_page_runtime(session)
+            await self._load_page_runtime_with_retry(session)
             return session
         except BaseException:
             try:
@@ -1477,6 +1478,25 @@ class QwenNativeBrowserTransport:
                 session.browser_fingerprint, runtime
             )
             session.fingerprint_digest = qwen_fingerprint_digest(session.browser_fingerprint)
+
+    async def _load_page_runtime_with_retry(self, session: _AccountBrowserSession) -> None:
+        for attempt in range(1, _QWEN_RUNTIME_LOAD_ATTEMPTS + 1):
+            try:
+                await self._load_page_runtime(session)
+                return
+            except Exception as error:
+                if attempt >= _QWEN_RUNTIME_LOAD_ATTEMPTS or not self._is_runtime_timeout(error):
+                    raise
+                logger.warning(
+                    "qwen_native_browser_runtime_retry stage=load_page_runtime "
+                    "next_attempt=%s error_type=%s",
+                    attempt + 1,
+                    type(error).__name__,
+                )
+
+    @staticmethod
+    def _is_runtime_timeout(error: BaseException) -> bool:
+        return type(error).__name__ == "TimeoutError" or "timeout" in str(error).lower()
 
 
 def _qwen_network_failure_reason(value: object) -> str:

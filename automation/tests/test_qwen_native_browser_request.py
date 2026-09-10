@@ -242,6 +242,34 @@ async def test_qwen_native_transport_does_not_retry_non_timeout_runtime_load_fai
 
 
 @pytest.mark.asyncio
+async def test_qwen_native_transport_recovers_when_baxia_initialization_times_out() -> None:
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", object(), object(), "current")
+    transport._ensure_baxia_ready = AsyncMock(
+        side_effect=[TimeoutError("Baxia wait_for_function timeout"), None]
+    )
+    transport._load_page_runtime_with_retry = AsyncMock()
+
+    await transport._ensure_baxia_ready_with_recovery(session)
+
+    transport._load_page_runtime_with_retry.assert_awaited_once_with(session)
+    assert transport._ensure_baxia_ready.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_qwen_native_transport_does_not_recover_non_timeout_baxia_failure() -> None:
+    transport = QwenNativeBrowserTransport()
+    session = _AccountBrowserSession("account", object(), object(), "current")
+    transport._ensure_baxia_ready = AsyncMock(side_effect=RuntimeError("frontend drift"))
+    transport._load_page_runtime_with_retry = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="frontend drift"):
+        await transport._ensure_baxia_ready_with_recovery(session)
+
+    transport._load_page_runtime_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_qwen_native_transport_holds_the_proxy_lease_through_the_request() -> None:
     lease_held = False
 

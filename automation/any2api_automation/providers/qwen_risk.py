@@ -912,7 +912,7 @@ class QwenNativeBrowserTransport:
                 timeout=30_000,
             )
             await session.page.wait_for_timeout(750)
-        await self._ensure_baxia_ready(session)
+        await self._ensure_baxia_ready_with_recovery(session)
 
     @staticmethod
     def _is_navigation_timeout(error: BaseException) -> bool:
@@ -1016,6 +1016,19 @@ class QwenNativeBrowserTransport:
                     attempt,
                     current.path,
                 )
+
+    async def _ensure_baxia_ready_with_recovery(self, session: _AccountBrowserSession) -> None:
+        try:
+            await self._ensure_baxia_ready(session)
+        except Exception as error:
+            if not self._is_runtime_timeout(error):
+                raise
+            logger.warning(
+                "qwen_native_browser_runtime_retry stage=ensure_baxia next_attempt=2 error_type=%s",
+                type(error).__name__,
+            )
+            await self._load_page_runtime_with_retry(session)
+            await self._ensure_baxia_ready(session)
 
     async def _credential_patch(
         self,

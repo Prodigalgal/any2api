@@ -508,9 +508,7 @@ def _normalize_uploaded_files(value: list[dict[str, Any]]) -> list[dict[str, Any
     for item in value:
         if not isinstance(item, dict):
             raise TypeError("LongCat uploaded file metadata must be an object")
-        if not str(item.get("fileUrl") or "").strip() or not str(
-            item.get("fileKey") or ""
-        ).strip():
+        if not str(item.get("fileUrl") or "").strip() or not str(item.get("fileKey") or "").strip():
             raise ValueError("LongCat uploaded file metadata requires fileUrl and fileKey")
         output.append(dict(item))
     return output

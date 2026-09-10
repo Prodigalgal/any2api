@@ -436,9 +436,7 @@ async def test_longcat_media_upload_uses_the_selected_account_page_and_rule_path
         [
             {
                 "role": "user",
-                "content": [
-                    {"type": "input_image", "image_url": "data:image/png;base64,YQ=="}
-                ],
+                "content": [{"type": "input_image", "image_url": "data:image/png;base64,YQ=="}],
             }
         ]
     )

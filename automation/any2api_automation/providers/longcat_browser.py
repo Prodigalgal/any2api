@@ -191,6 +191,7 @@ class LongcatOfficialBrowserTransport(PageFetchBrowserRuntime):
             "searchEnabled": 1 if prepared["search_enabled"] else 0,
             "regenerate": 0,
             "parentMessageId": 0,
+            "creationParam": prepared["creation_param"],
             "files": prepared["files"],
         }
         file_fields = sorted(
@@ -296,6 +297,7 @@ def build_longcat_request(
     )
     tools = _normalize_tools(command.get("tools"))
     choice = raw.get("tool_choice")
+    creation_param = raw.get("creationParam") if isinstance(raw.get("creationParam"), dict) else {}
     if choice == "none":
         tools = []
     content = _prompt(command.get("messages"), allow_media=bool(media_blocks))
@@ -306,6 +308,7 @@ def build_longcat_request(
         "agent_id": agent_id,
         "reason_enabled": reason,
         "search_enabled": search,
+        "creation_param": creation_param,
         "files": files,
     }
 

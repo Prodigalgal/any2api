@@ -387,6 +387,7 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
         ],
     )
     assert body["content"].endswith("describe")
+    assert body["creation_param"] == {}
     assert body["files"][0]["fileKey"] == "image-key"
 
 

@@ -31,7 +31,6 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class GlmProvider implements InferenceProvider {
-    private static final Duration BROWSER_ACCOUNT_PROBE_TIMEOUT = Duration.ofMinutes(2);
     private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
         Map.of(
             "enable_thinking", ProviderProtocolContract.OptionType.BOOLEAN,
@@ -83,7 +82,9 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
-    @Override public Duration accountProbeTimeout() { return BROWSER_ACCOUNT_PROBE_TIMEOUT; }
+    @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
+
+    @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override
     public void validateCredential(JsonNode credential) {
@@ -138,7 +139,9 @@ public final class GlmProvider implements InferenceProvider {
             .concatWith(Flux.defer(() -> status.get() >= 400
                 ? Flux.error(new GlmUpstreamException(
                     status.get(), "GLM upstream returned HTTP " + status.get()))
-                : Flux.fromIterable(decoder.finish())));
+                : Flux.fromIterable(decoder.finish())))
+            .takeUntil(event -> event instanceof CanonicalEvent.Completed
+                || event instanceof CanonicalEvent.Failed);
     }
 
     @Override

@@ -294,6 +294,28 @@ def test_minmax_registration_rejects_a_profile_for_another_mailbox() -> None:
     assert "actual=present=True" in str(error.value)
 
 
+def test_minmax_registration_accepts_a_profile_without_email_after_mailbox_otp() -> None:
+    identity = _verified_profile_identity(
+        {
+            "data": {
+                "userInfo": {
+                    "userID": "account-user",
+                    "realUserID": "stable-real-user",
+                }
+            },
+            "statusInfo": {"code": 0},
+        },
+        "mail@example.test",
+        email_verified=True,
+    )
+
+    assert identity == {
+        "external_id": "stable-real-user",
+        "account_user_id": "account-user",
+        "real_user_id": "stable-real-user",
+    }
+
+
 def test_minmax_registration_allows_a_later_verified_profile_response() -> None:
     identity: dict[str, str] = {}
     errors: list[str] = []

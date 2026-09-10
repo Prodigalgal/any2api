@@ -524,6 +524,8 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
     session_values: dict[str, str] = {}
     profile_identity: dict[str, str] = {}
     profile_error: list[str] = []
+    profile_response: dict[str, Any] = {}
+    email_verified_by_otp = False
 
     def capture_session(request) -> None:
         parsed = urlparse(request.url)
@@ -551,7 +553,16 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
             body = response.json()
             code = str((body.get("statusInfo") or {}).get("code", ""))
             if parsed.path == "/v1/api/user/info":
-                _observe_profile_identity(body, mailbox.address, profile_identity, profile_error)
+                profile_response.clear()
+                if isinstance(body, dict):
+                    profile_response.update(body)
+                _observe_profile_identity(
+                    body,
+                    mailbox.address,
+                    profile_identity,
+                    profile_error,
+                    email_verified=email_verified_by_otp,
+                )
             elif parsed.path == "/v1/api/user/renewal":
                 _extract_session_values(body, session_values)
         except Exception:  # noqa: BLE001,S110 - diagnostics never require a response body
@@ -606,6 +617,15 @@ def _account_browser_flow(page, context, backend, mail, mailbox, password) -> Br
         code = mail.wait_for_code_sync(mailbox)
         enter_code(page, code)
         click_first(page, ('button:has-text("Continue")', 'button[type="submit"]'))
+        email_verified_by_otp = True
+        if profile_response:
+            _observe_profile_identity(
+                profile_response,
+                mailbox.address,
+                profile_identity,
+                profile_error,
+                email_verified=True,
+            )
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline and not page.url.startswith(config.minmax_base_url):
         page.wait_for_timeout(500)
@@ -650,15 +670,28 @@ def _observe_profile_identity(
     expected_email: str,
     profile_identity: dict[str, str],
     profile_error: list[str],
+    *,
+    email_verified: bool = False,
 ) -> None:
     try:
-        profile_identity.update(_verified_profile_identity(body, expected_email))
+        profile_identity.update(
+            _verified_profile_identity(
+                body,
+                expected_email,
+                email_verified=email_verified,
+            )
+        )
         profile_error.clear()
     except (RuntimeError, TypeError) as error:
         profile_error[:] = [str(error)]
 
 
-def _verified_profile_identity(value: Any, expected_email: str) -> dict[str, str]:
+def _verified_profile_identity(
+    value: Any,
+    expected_email: str,
+    *,
+    email_verified: bool = False,
+) -> dict[str, str]:
     if not isinstance(value, dict):
         raise TypeError("MinMax account profile response is invalid")
     status = value.get("statusInfo")
@@ -669,6 +702,8 @@ def _verified_profile_identity(value: Any, expected_email: str) -> dict[str, str
     if not isinstance(user_info, dict):
         raise TypeError("MinMax account profile response is incomplete")
     actual_email = str(user_info.get("email") or "").strip()
+    if not actual_email and email_verified:
+        actual_email = expected_email.strip()
     if not actual_email or actual_email.casefold() != expected_email.strip().casefold():
         raise RuntimeError(
             "MinMax account profile email does not match the registration mailbox "

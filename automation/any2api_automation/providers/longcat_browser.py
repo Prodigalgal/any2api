@@ -188,12 +188,7 @@ class LongcatOfficialBrowserTransport(PageFetchBrowserRuntime):
             "files": prepared["files"],
         }
         file_fields = sorted(
-            {
-                key
-                for file in prepared["files"]
-                for key in file
-                if key != "dataUrl"
-            }
+            {key for file in prepared["files"] for key in file if key != "dataUrl"}
         )
         dimensions = [
             f"{file.get('width')}x{file.get('height')}"

@@ -10,7 +10,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from ..config import settings as core_settings
-from .base import reject_raw_request
+from .base import validate_semantic_command
 from .multimodal import (
     decode_inline_data_url,
     iter_media_blocks,
@@ -627,18 +627,7 @@ def _with_phase(path: str, credential: dict[str, Any]) -> str:
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:
-    reject_raw_request(command, "MiMo")
-    if not isinstance(command, dict) or command.get("schemaVersion") != 1:
-        raise ValueError("MiMo semantic command schema is unsupported")
-    if not str(command.get("model") or "").strip():
-        raise ValueError("MiMo semantic command requires a model")
-    if not isinstance(command.get("messages"), list):
-        raise TypeError("MiMo semantic command messages must be an array")
-    if not isinstance(command.get("tools"), list):
-        raise TypeError("MiMo semantic command tools must be an array")
-    for name in ("generation", "reasoning", "providerOptions", "controls"):
-        if not isinstance(command.get(name), dict):
-            raise TypeError(f"MiMo semantic command {name} must be an object")
+    validate_semantic_command(command, "MiMo")
 
 
 def _message_content(value: Any) -> str:

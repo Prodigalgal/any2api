@@ -305,6 +305,19 @@ class QwenProtocolTest {
     }
 
     @Test
+    void classifiesRateLimitErrorsBeforeGenericLimitText() {
+        var decoder = new QwenEventDecoder("rate");
+        var events = decoder.decode(
+            "{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"too many requests\"}}"
+        );
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("rate_limited"));
+        assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("quota_exhausted"));
+    }
+
+    @Test
     void mapsUploadedVisionFilesWithoutFlatteningThemIntoPromptText() {
         var mapper = new ObjectMapper();
         var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");

@@ -23,7 +23,7 @@ from ..lifecycle.browser import (
     run_browser_flow,
 )
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
-from .base import AutomationProvider, AutomationProviderManifest, reject_raw_request
+from .base import AutomationProvider, AutomationProviderManifest, validate_semantic_command
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .qwen_challenge import QwenSignupChallenge, pace
 from .qwen_fingerprint import (
@@ -523,13 +523,7 @@ def build_qwen_request(
 
 
 def _validate_qwen_command(command: dict[str, Any]) -> None:
-    reject_raw_request(command, "Qwen")
-    if command.get("schemaVersion") != 1:
-        raise ValueError("Qwen semantic command schema is unsupported")
-    if not str(command.get("model") or "").strip():
-        raise ValueError("Qwen semantic command requires a model")
-    if not isinstance(command.get("messages"), list):
-        raise TypeError("Qwen semantic command messages must be an array")
+    validate_semantic_command(command, "Qwen")
 
 
 def _qwen_messages(command: dict[str, Any]) -> list[dict[str, Any]]:

@@ -14,6 +14,7 @@ from any2api_automation.providers.base import (
     CAMOUFOX_BROWSER_RUNTIME,
     AutomationProvider,
     AutomationProviderManifest,
+    validate_semantic_command,
 )
 from any2api_automation.providers.channels import (
     ActionBindingRegistry,
@@ -67,6 +68,26 @@ def test_semantic_action_rejects_an_opaque_raw_request() -> None:
             channel=CAMOUFOX_BROWSER_RUNTIME,
             semantic_command={"rawRequest": {"model": "upstream"}},
         )
+
+
+def test_shared_semantic_command_validation_requires_canonical_sections() -> None:
+    command = {
+        "schemaVersion": 1,
+        "model": "model-1",
+        "messages": [{"role": "user", "content": "hello"}],
+        "generation": {},
+        "reasoning": {},
+        "tools": [],
+        "providerOptions": {},
+        "controls": {},
+    }
+
+    assert validate_semantic_command(command, "fixture") is command
+
+    for field in ("generation", "reasoning", "providerOptions", "controls", "tools"):
+        invalid = {**command, field: None}
+        with pytest.raises((TypeError, ValueError), match=field):
+            validate_semantic_command(invalid, "fixture")
 
 
 @pytest.mark.asyncio

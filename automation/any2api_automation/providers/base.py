@@ -36,6 +36,26 @@ def reject_raw_request(command: Any, provider_id: str) -> None:
         )
 
 
+def validate_semantic_command(command: Any, provider_id: str) -> dict[str, Any]:
+    """Validate the shared Action envelope before provider-native translation."""
+
+    if not isinstance(command, dict):
+        raise TypeError(f"{provider_id} semantic command must be an object")
+    reject_raw_request(command, provider_id)
+    if command.get("schemaVersion") != 1:
+        raise ValueError(f"{provider_id} semantic command schema is unsupported")
+    if not str(command.get("model") or "").strip():
+        raise ValueError(f"{provider_id} semantic command requires a model")
+    if not isinstance(command.get("messages"), list):
+        raise TypeError(f"{provider_id} semantic command messages must be an array")
+    for field in ("generation", "reasoning", "providerOptions", "controls"):
+        if not isinstance(command.get(field), dict):
+            raise TypeError(f"{provider_id} semantic command {field} must be an object")
+    if not isinstance(command.get("tools"), list):
+        raise TypeError(f"{provider_id} semantic command tools must be an array")
+    return command
+
+
 @dataclass(frozen=True)
 class AutomationProviderManifest:
     id: str

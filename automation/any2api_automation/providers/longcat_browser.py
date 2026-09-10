@@ -6,7 +6,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from .base import reject_raw_request
+from .base import validate_semantic_command
 from .longcat_settings import settings
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .page_fetch_browser import PageFetchBrowserRuntime
@@ -457,16 +457,7 @@ def _bool(value: Any, fallback: Any) -> bool:
 
 
 def _validate_command(command: dict[str, Any]) -> None:
-    reject_raw_request(command, "LongCat")
-    if not isinstance(command, dict) or command.get("schemaVersion") != 1:
-        raise ValueError("LongCat semantic command schema is unsupported")
-    if not str(command.get("model") or "").strip():
-        raise ValueError("LongCat semantic command requires a model")
-    if not isinstance(command.get("messages"), list):
-        raise TypeError("LongCat semantic command messages must be an array")
-    for field in ("reasoning", "providerOptions", "controls"):
-        if not isinstance(command.get(field), dict):
-            raise TypeError(f"LongCat semantic command {field} must be an object")
+    validate_semantic_command(command, "LongCat")
 
 
 def _longcat_media_blocks(messages: Any) -> list[tuple[int, str, dict[str, Any]]]:

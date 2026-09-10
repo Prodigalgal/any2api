@@ -178,12 +178,16 @@ final class QwenEventDecoder {
             || text.contains("not found") || text.contains("invalid"))) {
             return "model_unavailable";
         }
+        if (text.contains("rate") || text.contains("too many") || text.contains("throttl")
+            || text.contains("429")) {
+            return "rate_limited";
+        }
         if (text.contains("quota") || text.contains("credit") || text.contains("balance")
-            || text.contains("limit") || text.contains("exhaust")) {
+            || text.contains("usage limit") || text.contains("limit reached")
+            || text.contains("exhaust")) {
             return "quota_exhausted";
         }
         if (text.contains("captcha") || text.contains("verify")) return "captcha_rejected";
-        if (text.contains("rate") || text.contains("too many")) return "rate_limited";
         if (text.contains("token") || text.contains("auth") || text.contains("login")) {
             return "credential_rejected";
         }

@@ -38,7 +38,7 @@ from .base import (
     CAMOUFOX_BROWSER_RUNTIME,
     AutomationProvider,
     AutomationProviderManifest,
-    reject_raw_request,
+    validate_semantic_command,
 )
 from .minmax_browser import MinmaxOfficialBrowserTransport
 from .minmax_daily_checkin import MinmaxDailyCheckin
@@ -360,15 +360,8 @@ def build_minmax_request(command: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:
-    reject_raw_request(command, "MinMax")
-    if command.get("schemaVersion") != 1 or not str(command.get("model") or "").strip():
-        raise ValueError("MinMax semantic command schema is unsupported")
-    if not isinstance(command.get("messages"), list):
-        raise TypeError("MinMax semantic command messages must be an array")
-    for field in ("reasoning", "providerOptions", "controls"):
-        if not isinstance(command.get(field), dict):
-            raise TypeError(f"MinMax semantic command {field} must be an object")
-    if command.get("tools"):
+    validate_semantic_command(command, "MinMax")
+    if command["tools"]:
         raise ValueError("MinMax does not support tools")
 
 

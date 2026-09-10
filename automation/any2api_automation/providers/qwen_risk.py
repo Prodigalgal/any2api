@@ -1625,9 +1625,12 @@ def _qwen_completion_shape(body: bytes) -> str:
                 name = str(key)
                 if name in interesting:
                     fields.add(name)
-                if name in {"content", "reasoning_content", "text"}:
-                    if isinstance(nested, str) and nested.strip():
-                        text_value_count += 1
+                if (
+                    name in {"content", "reasoning_content", "text"}
+                    and isinstance(nested, str)
+                    and nested.strip()
+                ):
+                    text_value_count += 1
                 if name == "status":
                     normalized = str(nested).strip().lower()
                     if normalized in {"completed", "error", "failed", "finished", "streaming"}:

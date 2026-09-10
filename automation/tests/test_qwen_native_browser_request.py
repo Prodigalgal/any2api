@@ -494,7 +494,7 @@ def test_qwen_completion_shape_does_not_log_response_data() -> None:
     body = (
         b'data: {"choices":[{"delta":{"content":"private-output"}}]}\n\n'
         b'data: {"choices":[{"finish_reason":"stop","delta":{}}]}\n\n'
-        b'data: [DONE]\n\n'
+        b"data: [DONE]\n\n"
     )
 
     shape = _qwen_completion_shape(body)

@@ -64,7 +64,8 @@ _UPLOAD_MEDIA = r"""async input => {
   for (const source of input.files || []) {
     const decoded = decode(source.dataUrl);
     const form = new FormData();
-    form.append('file', new File([decoded.bytes], String(source.filename), {
+    const fileName = String(source.fileName || source.filename || 'upload.bin');
+    form.append('file', new File([decoded.bytes], fileName, {
       type: decoded.mime
     }));
     const headers = {...(input.headers || {})};
@@ -93,6 +94,7 @@ _UPLOAD_MEDIA = r"""async input => {
       throw new Error('LongCat media upload was rejected status=' + response.status);
     }
     output.push({...source,
+      fileName,
       fileUrl: data.url,
       fileKey: data.key,
       uploadingStatus: 'success',
@@ -224,6 +226,13 @@ class LongcatOfficialBrowserTransport(PageFetchBrowserRuntime):
             raise TypeError("LongCat media upload returned an invalid result")
         if len(result) != len(sources) or any(not isinstance(item, dict) for item in result):
             raise RuntimeError("LongCat media upload returned an incomplete result")
+        self._logger.info(
+            "official_browser_upload endpoint=%s files=%s bytes=%s completed=%s",
+            selection.rules.endpoint_paths.get("upload", "/api/v1/appendix-upload"),
+            len(result),
+            sum(int(item.get("fileSize") or 0) for item in result),
+            sum(bool(item.get("fileUrl") and item.get("fileKey")) for item in result),
+        )
         return list(result)
 
 
@@ -472,7 +481,7 @@ def _longcat_upload_sources(messages: Any) -> list[dict[str, Any]]:
         sources.append(
             {
                 "fileId": uuid4().hex,
-                "filename": filename,
+                "fileName": filename,
                 "fileExt": extension,
                 "dataUrl": source,
                 "fileSize": len(content),
@@ -508,6 +517,8 @@ def _normalize_uploaded_files(value: list[dict[str, Any]]) -> list[dict[str, Any
     for item in value:
         if not isinstance(item, dict):
             raise TypeError("LongCat uploaded file metadata must be an object")
+        if not str(item.get("fileName") or "").strip():
+            raise ValueError("LongCat uploaded file metadata requires fileName")
         if not str(item.get("fileUrl") or "").strip() or not str(item.get("fileKey") or "").strip():
             raise ValueError("LongCat uploaded file metadata requires fileUrl and fileKey")
         output.append(dict(item))

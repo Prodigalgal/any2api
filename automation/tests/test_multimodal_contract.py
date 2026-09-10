@@ -240,6 +240,7 @@ def test_xai_browser_adapters_preserve_image_and_file_blocks() -> None:
                 command,
                 uploaded_files=[
                     {
+                        "fileName": "input.png",
                         "fileUrl": "https://upload.longcat.chat/file",
                         "fileKey": "file-key",
                     }
@@ -339,7 +340,7 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
     )
     sources = _longcat_upload_sources(image_command["messages"])
 
-    assert sources[0]["filename"] == "input.png"
+    assert sources[0]["fileName"] == "input.png"
     assert sources[0]["fileExt"] == "png"
     assert sources[0]["fileSize"] == 1
     assert sources[0]["dataUrl"] == "data:image/png;base64,YQ=="

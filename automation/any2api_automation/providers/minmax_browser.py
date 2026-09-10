@@ -282,9 +282,13 @@ _UPLOAD_MEDIA = r"""async input => {
       return objectKey;
     };
     const policyBucket = policyBuckets.shift() || '';
-    const callbackObjectKey = objectKeyFromValue(callbackObjectKeys.shift() || '', policyBucket);
-    const policyObjectKey = objectKeyFromValue(objectKeys.shift() || '', policyBucket);
-    const urlObjectKey = objectKeyFromValue(cdnUrl, policyBucket);
+    const rawUrlObjectKey = objectKeyFromValue(cdnUrl);
+    const inferredBucket = policyBucket || rawUrlObjectKey.split('/', 1)[0] || '';
+    const callbackObjectKey = objectKeyFromValue(
+      callbackObjectKeys.shift() || '', inferredBucket
+    );
+    const policyObjectKey = objectKeyFromValue(objectKeys.shift() || '', inferredBucket);
+    const urlObjectKey = objectKeyFromValue(cdnUrl, inferredBucket);
     const objectKey = explicitObjectKey || callbackObjectKey || policyObjectKey || urlObjectKey;
     const objectKeySource = explicitObjectKey ? 'uploader'
       : callbackObjectKey ? 'policy_response'

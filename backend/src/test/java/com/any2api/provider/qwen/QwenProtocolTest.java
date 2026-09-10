@@ -290,6 +290,21 @@ class QwenProtocolTest {
     }
 
     @Test
+    void classifiesUpstreamErrorEventsWithoutTreatingThemAsEmptyResponses() {
+        var decoder = new QwenEventDecoder("error");
+        var events = new java.util.ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode("{\"error\":{\"code\":\"quota_exhausted\"}}"));
+        events.addAll(decoder.decode("[DONE]"));
+        events.addAll(decoder.finish());
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("quota_exhausted"));
+        assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("empty_model_response"));
+        assertThat(events).noneMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
     void mapsUploadedVisionFilesWithoutFlatteningThemIntoPromptText() {
         var mapper = new ObjectMapper();
         var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");

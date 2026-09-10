@@ -13,6 +13,7 @@ final class QwenEventDecoder {
     private long sequence;
     private boolean started;
     private boolean completed;
+    private boolean failed;
     private boolean emittedOutput;
     private boolean emittedUsage;
     private String responseId;
@@ -22,6 +23,7 @@ final class QwenEventDecoder {
     List<CanonicalEvent> decode(String data) {
         var output = new ArrayList<CanonicalEvent>();
         if (data == null || data.isBlank()) return output;
+        if (completed || failed) return output;
         if ("[DONE]".equals(data.trim())) {
             complete(output, "stop");
             return output;
@@ -34,7 +36,9 @@ final class QwenEventDecoder {
                 if (!id.isBlank()) responseId = id;
             }
             var choice = firstChoice(object);
-            if (choice != null) decodeChoice(choice, output);
+            if (hasError(object)) {
+                fail(output, errorType(object));
+            } else if (choice != null) decodeChoice(choice, output);
             else {
                 var content = firstText(object, "response", "text", "content");
                 if (!content.isBlank()) text(output, content);
@@ -52,7 +56,7 @@ final class QwenEventDecoder {
     }
 
     List<CanonicalEvent> finish() {
-        if (completed) return List.of();
+        if (completed || failed) return List.of();
         var output = new ArrayList<CanonicalEvent>();
         complete(output, "stop");
         return output;
@@ -137,13 +141,76 @@ final class QwenEventDecoder {
     }
 
     private void complete(List<CanonicalEvent> output, String reason) {
-        if (!completed && !emittedOutput) {
+        if (!completed && !failed && !emittedOutput) {
             output.add(new CanonicalEvent.Failed(1, requestId, next(),
                 "empty_model_response", "Qwen returned no model output", Map.of()));
-        } else if (!completed) {
+        } else if (!completed && !failed) {
             output.add(new CanonicalEvent.Completed(1, requestId, next(), reason));
         }
         completed = true;
+    }
+
+    private void fail(List<CanonicalEvent> output, String type) {
+        if (completed || failed) return;
+        output.add(new CanonicalEvent.Failed(
+            1, requestId, next(), type, "Qwen completion error class=" + type, Map.of()));
+        failed = true;
+        completed = true;
+    }
+
+    private boolean hasError(JsonNode object) {
+        return object.hasNonNull("error")
+            || object.path("data").hasNonNull("error")
+            || object.path("output").hasNonNull("error")
+            || object.path("response").hasNonNull("error");
+    }
+
+    private String errorType(JsonNode object) {
+        var text = errorText(object).toLowerCase(java.util.Locale.ROOT);
+        if (text.contains("permission") || text.contains("forbidden")) {
+            return "permission_denied";
+        }
+        if (text.contains("account") && (text.contains("unavailable")
+            || text.contains("disabled") || text.contains("blocked"))) {
+            return "account_unavailable";
+        }
+        if (text.contains("model") && (text.contains("unavailable")
+            || text.contains("not found") || text.contains("invalid"))) {
+            return "model_unavailable";
+        }
+        if (text.contains("quota") || text.contains("credit") || text.contains("balance")
+            || text.contains("limit") || text.contains("exhaust")) {
+            return "quota_exhausted";
+        }
+        if (text.contains("captcha") || text.contains("verify")) return "captcha_rejected";
+        if (text.contains("rate") || text.contains("too many")) return "rate_limited";
+        if (text.contains("token") || text.contains("auth") || text.contains("login")) {
+            return "credential_rejected";
+        }
+        return "provider_upstream_error";
+    }
+
+    private String errorText(JsonNode object) {
+        var output = new StringBuilder();
+        for (var source : errorSources(object)) {
+            for (var field : List.of("code", "type", "name", "status", "message", "detail")) {
+                var value = source.path(field);
+                if (value.isValueNode() && !value.isNull()) {
+                    output.append(' ').append(value.asText());
+                }
+            }
+            if (source.isValueNode() && !source.isNull()) output.append(' ').append(source.asText());
+        }
+        return output.toString();
+    }
+
+    private List<JsonNode> errorSources(JsonNode object) {
+        return List.of(
+            object.path("error"),
+            object.path("error").path("data"),
+            object.path("data").path("error"),
+            object.path("output").path("error"),
+            object.path("response").path("error"));
     }
 
     private void start(List<CanonicalEvent> output) {

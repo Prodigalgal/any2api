@@ -162,7 +162,8 @@ public final class QwenProvider implements InferenceProvider {
 
     @Override
     public ProviderRetryPolicy retryPolicy() {
-        return ProviderRetryPolicy.standard(4);
+        return ProviderRetryPolicy.standardWith(
+            4, "provider_upstream_error", "account_unavailable", "quota_exhausted");
     }
 
     @Override

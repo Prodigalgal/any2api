@@ -538,6 +538,39 @@ def test_minmax_upload_reuses_the_official_page_uploader() -> None:
     assert "crypto.subtle" not in _UPLOAD_MEDIA
 
 
+def test_minmax_uploaded_media_matches_the_official_web_attachment_contract() -> None:
+    from any2api_automation.providers.minmax import _minmax_message_attachments
+
+    result = _minmax_message_attachments(
+        [
+            {
+                "type": "image",
+                "file_key": "upload-1",
+                "file_name": "sample.png",
+                "mime_type": "image/png",
+                "file_size": 12,
+                "cdn_url": "https://cdn.example.test/sample.png",
+            }
+        ]
+    )
+
+    assert result == [
+        {
+            "meta": {
+                "attachment_type": "image",
+                "file_name": "sample.png",
+                "mime_type": "image/png",
+                "size_bytes": 12,
+            },
+            "cloud": {
+                "upload_id": "upload-1",
+                "url": "https://cdn.example.test/sample.png",
+                "data_url": "https://cdn.example.test/sample.png",
+            },
+        }
+    ]
+
+
 def test_qwen_image_file_is_attached_without_flattening_the_image_into_text() -> None:
     command = _command(
         [

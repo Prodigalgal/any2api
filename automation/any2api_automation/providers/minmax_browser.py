@@ -195,16 +195,24 @@ _UPLOAD_MEDIA = r"""async input => {
     if (!uploaded || typeof uploaded !== 'object') {
       throw new Error('MinMax official media uploader returned an invalid result');
     }
-    const objectKey = String(uploaded.objectKey || '').trim();
-    const cdnUrl = String(uploaded.cdnUrl || '').trim();
-    if (!objectKey || !cdnUrl) {
+    const uploadId = String(
+      uploaded.uploadId || uploaded.upload_id || uploaded.fileID || uploaded.fileId || ''
+    ).trim();
+    const cdnUrl = String(
+      uploaded.cdnUrl || uploaded.cdn_url || uploaded.ossPath || uploaded.url || ''
+    ).trim();
+    if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }
     output.push({
       type: 'image',
+      file_key: uploadId,
       file_path: filename,
       file_name: filename,
       mime_type: contentType,
+      file_size: bytes.length,
+      preview_url: cdnUrl,
+      cdn_url: cdnUrl,
       data_url: cdnUrl
     });
   }

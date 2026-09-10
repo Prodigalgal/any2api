@@ -324,7 +324,7 @@ async def _semantic_chat_input(
                 "turn_id": str(uuid.uuid4()),
                 "enable_team": prepared["enable_team"],
                 "worktreeMode": prepared["worktree_mode"],
-                "attachments": prepared["attachments"],
+                "attachments": _minmax_message_attachments(prepared["attachments"]),
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -435,6 +435,44 @@ def _minmax_attachments(messages: Any) -> list[dict[str, Any]]:
             }
         )
     return attachments
+
+
+def _minmax_message_attachments(
+    attachments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Map uploaded files to the official web message attachment contract."""
+    result: list[dict[str, Any]] = []
+    for attachment in attachments:
+        upload_id = str(attachment.get("file_key") or "").strip()
+        file_name = str(attachment.get("file_name") or "").strip()
+        mime_type = str(attachment.get("mime_type") or "").strip()
+        file_size = attachment.get("file_size")
+        cdn_url = str(
+            attachment.get("cdn_url")
+            or attachment.get("preview_url")
+            or attachment.get("data_url")
+            or ""
+        ).strip()
+        if not upload_id or not file_name or not mime_type or not isinstance(file_size, int):
+            raise ValueError("MinMax uploaded attachment metadata is incomplete")
+        if not cdn_url:
+            raise ValueError("MinMax uploaded attachment URL is missing")
+        result.append(
+            {
+                "meta": {
+                    "attachment_type": str(attachment.get("type") or "image"),
+                    "file_name": file_name,
+                    "mime_type": mime_type,
+                    "size_bytes": file_size,
+                },
+                "cloud": {
+                    "upload_id": upload_id,
+                    "url": cdn_url,
+                    "data_url": cdn_url,
+                },
+            }
+        )
+    return result
 
 
 def _boolean_option(value: Any, fallback: bool) -> bool:

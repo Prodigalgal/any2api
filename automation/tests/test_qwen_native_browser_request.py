@@ -23,6 +23,7 @@ from any2api_automation.providers.qwen_risk import (
     NativeBrowserRequest,
     QwenNativeBrowserTransport,
     _AccountBrowserSession,
+    _qwen_completion_shape,
     _qwen_network_failure_reason,
     _qwen_punish_url,
     _qwen_sse_finished,
@@ -487,6 +488,22 @@ def test_qwen_thinking_summary_does_not_finish_the_stream() -> None:
     body = b'data: {"choices":[{"delta":{"phase":"thinking_summary","status":"finished"}}]}\n\n'
 
     assert _qwen_sse_finished(body) is False
+
+
+def test_qwen_completion_shape_does_not_log_response_data() -> None:
+    body = (
+        b'data: {"choices":[{"delta":{"content":"private-output"}}]}\n\n'
+        b'data: {"choices":[{"finish_reason":"stop","delta":{}}]}\n\n'
+        b'data: [DONE]\n\n'
+    )
+
+    shape = _qwen_completion_shape(body)
+
+    assert "frames=3" in shape
+    assert "json=2" in shape
+    assert "terminal=True" in shape
+    assert "content" in shape
+    assert "private-output" not in shape
 
 
 @pytest.mark.asyncio

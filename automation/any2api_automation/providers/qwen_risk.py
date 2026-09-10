@@ -1074,9 +1074,16 @@ class QwenNativeBrowserTransport:
         )
         if "/chat/completions" in request.path and b"data:" not in body:
             code = _qwen_failure_code(body) or "unknown"
-            logger.warning("qwen_native_browser_unexpected_completion code=%s", code)
+            logger.warning(
+                "qwen_native_browser_unexpected_completion code=%s shape=%s",
+                code,
+                _qwen_completion_shape(body),
+            )
         elif "/chat/completions" in request.path and not _qwen_sse_finished(body):
-            logger.warning("qwen_native_browser_incomplete_completion")
+            logger.warning(
+                "qwen_native_browser_incomplete_completion shape=%s",
+                _qwen_completion_shape(body),
+            )
         return {
             "status": int(result.get("status") or 502),
             "content_type": content_type,
@@ -1569,6 +1576,96 @@ def _qwen_failure_code(body: bytes) -> str:
         return str(values[0]) if isinstance(values, list) and values else ""
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
         return ""
+
+
+def _qwen_completion_shape(body: bytes) -> str:
+    """Return bounded completion structure diagnostics without logging response data."""
+    text = body.decode("utf-8", errors="replace")
+    frames = []
+    for raw_line in text.splitlines():
+        line = raw_line.lstrip()
+        if line.startswith("data:"):
+            value = line[5:].strip()
+            if value:
+                frames.append(value)
+    if not frames and text.strip():
+        frames.append(text.strip())
+
+    interesting = {
+        "choices",
+        "content",
+        "data",
+        "delta",
+        "error",
+        "finish_reason",
+        "message",
+        "output",
+        "phase",
+        "reasoning_content",
+        "response",
+        "response.completed",
+        "ret",
+        "status",
+        "text",
+        "tool_calls",
+    }
+    fields: set[str] = set()
+    statuses: set[str] = set()
+    text_value_count = 0
+    json_count = 0
+    terminal = False
+    ret_code = ""
+
+    def visit(value: Any, depth: int = 0) -> None:
+        nonlocal text_value_count, terminal, ret_code
+        if depth > 3:
+            return
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                name = str(key)
+                if name in interesting:
+                    fields.add(name)
+                if name in {"content", "reasoning_content", "text"}:
+                    if isinstance(nested, str) and nested.strip():
+                        text_value_count += 1
+                if name == "status":
+                    normalized = str(nested).strip().lower()
+                    if normalized in {"completed", "error", "failed", "finished", "streaming"}:
+                        statuses.add(normalized)
+                    elif normalized:
+                        statuses.add("other")
+                if name == "ret" and isinstance(nested, list) and nested:
+                    candidate = str(nested[0]).strip()
+                    if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", candidate):
+                        ret_code = candidate
+                if name == "response.completed":
+                    terminal = True
+                if name == "finish_reason" and str(nested).strip():
+                    terminal = True
+                visit(nested, depth + 1)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested, depth + 1)
+
+    for frame in frames:
+        if frame == "[DONE]":
+            terminal = True
+            continue
+        try:
+            payload = json.loads(frame)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict):
+            json_count += 1
+            visit(payload)
+
+    field_text = ",".join(sorted(fields)) or "-"
+    status_text = ",".join(sorted(statuses)) or "-"
+    return (
+        f"frames={len(frames)} json={json_count} terminal={terminal} "
+        f"text_values={text_value_count} fields={field_text} "
+        f"statuses={status_text} ret={ret_code or '-'}"
+    )
 
 
 def _qwen_punish_url(body: bytes) -> str:

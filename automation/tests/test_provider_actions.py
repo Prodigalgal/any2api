@@ -113,9 +113,36 @@ async def test_dispatcher_uses_the_declared_channel_and_action_binding() -> None
             action=ProviderAction.CHAT,
             channel=CAMOUFOX_BROWSER_RUNTIME,
             payload={},
+            semantic_command={
+                "schemaVersion": 1,
+                "model": "fixture-model",
+                "messages": [{"role": "user", "content": "hello"}],
+                "generation": {},
+                "reasoning": {},
+                "tools": [],
+                "providerOptions": {},
+                "controls": {},
+            },
         )
     )
     assert [chunk async for chunk in stream] == [b"chat:camoufox_browser_runtime\n"]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_rejects_chat_before_provider_binding_executes() -> None:
+    provider = DummyProvider()
+    providers = SimpleNamespace(require=lambda provider_id: provider)
+    bindings = ActionBindingRegistry([provider])
+    dispatcher = ProviderActionDispatcher(providers, bindings)
+
+    with pytest.raises(ValueError, match="semantic command schema"):
+        await dispatcher.stream(
+            ProviderActionRequest(
+                provider_id="dummy",
+                action=ProviderAction.CHAT,
+                channel=CAMOUFOX_BROWSER_RUNTIME,
+            )
+        )
 
 
 def test_minmax_exposes_api_and_runtime_actions_separately() -> None:

@@ -116,6 +116,24 @@ must not cross the internal Action boundary. Runtime/API channels receive the ca
 an explicit `controls` allowlist; each provider mapper is solely responsible for converting those
 values into its own upstream field names, nesting, defaults, uploads, and event protocol.
 
+The current Runtime mappers make that translation explicit:
+
+| Provider | Canonical messages | Generation | Reasoning/search | Tools | Media |
+|---|---|---|---|---|---|
+| DeepSeek | flattened `prompt` with role sections | unsupported fields rejected before Action | `thinking_enabled`/`search_enabled` booleans | search tools become `search_enabled`; other tools rejected | text-only |
+| GLM | official `chat.history` and completion `messages` | `params.max_tokens`, `temperature`, `top_p` | completion `features.enable_thinking`, `reasoning_effort`, `auto_web_search` | function tools rejected | authenticated image file upload, then official file object |
+| LongCat | flattened `content` with role sections | no output-budget field; unsupported limits rejected | `reasonEnabled`, `searchEnabled`, model-specific `agentId` | function definitions become a provider-local prompt contract | same-session `files` from `/appendix-upload` |
+| MiMo | flattened `query` with system/tool sections | `modelConfig.temperature`, `topP`; output limit is non-binding | `modelConfig.enableThinking`, `webSearchStatus` | function definitions become a provider-local prompt contract | same-session `multiMedias` |
+| MinMax | flattened `content` with role sections | unsupported standard generation fields are rejected | model `variant`, `enable_team`, `worktreeMode` | rejected | Runtime same-session `attachments`; API currently text-only |
+| Qwen | native message graph with `fid`, parent/children and `files` | native `temperature`, `top_p`, `max_tokens` | `feature_config.thinking_mode`, `thinking_budget`, `auto_search` | only search tools; function tools rejected | same-session native image upload |
+
+The table describes adapter behavior, not an upstream compatibility promise. A field is only
+accepted when the selected provider contract has a deterministic translation or an explicitly
+documented emulation; otherwise Java rejects it before account leasing. The shared Action
+Dispatcher validates the canonical envelope before resolving either RuntimeChannel or ApiChannel,
+and provider code then performs only provider-native mapping. This prevents a new channel or
+provider from accidentally forwarding an OpenAI-shaped object to a non-OpenAI upstream.
+
 MinMax request-only options are isolated in its namespace:
 
 ```json

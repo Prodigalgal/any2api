@@ -17,6 +17,7 @@
 - MiniMax 的通用 `daily_checkin` 语义和具体 Runtime 实现已保留，账号额度依赖每日打卡的规则不绕过。
 - LongCat 在当前发布上补充完成 TXT 非流式/SSE 真实 completion；两个不同 ACTIVE/enabled 账号的 `longcat-pro` 账号探针均通过，最近 30 分钟成功请求使用 9 个不同账号。`longcat-flash` 在真实成功样本补充后恢复为 `READY`。
 - Runtime 的公共 Action 已统一先经过共享 semantic command 校验，再由 DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen 各自的 Runtime mapper 翻译为厂商字段；`rawRequest` 不进入 Runtime/API Action 边界。API Channel 仍按计划后置。
+- `ProviderActionDispatcher` 现在会在解析 `CHAT` binding 前统一校验 semantic command；厂商 mapper 保留防御性校验并只负责自己的字段、嵌套、上传和事件协议转换。六家 Runtime 的具体映射矩阵已补入 `docs/architecture/API_CONTRACTS.md`。
 
 ## 当前推进
 

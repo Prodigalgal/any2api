@@ -12,7 +12,7 @@ from .actions import (
     default_action_bindings,
     normalize_channel,
 )
-from .base import API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME
+from .base import API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME, validate_semantic_command
 
 if TYPE_CHECKING:
     from .base import AutomationProvider
@@ -161,14 +161,21 @@ class ProviderActionDispatcher:
     async def execute(self, request: ProviderActionRequest) -> dict[str, Any]:
         provider = self._providers.require(request.provider_id)
         channel = self._channel(request.channel)
+        self._validate_request(request)
         binding = self._bindings.resolve(provider, request.action, request.channel)
         return await channel.execute(request.provider_id, binding, request)
 
     async def stream(self, request: ProviderActionRequest):
         provider = self._providers.require(request.provider_id)
         channel = self._channel(request.channel)
+        self._validate_request(request)
         binding = self._bindings.resolve(provider, request.action, request.channel)
         return await channel.stream(request.provider_id, binding, request)
+
+    @staticmethod
+    def _validate_request(request: ProviderActionRequest) -> None:
+        if request.action is ProviderAction.CHAT:
+            validate_semantic_command(dict(request.semantic_command), request.provider_id)
 
     def _channel(self, value: str) -> ProviderActionChannel:
         normalized = normalize_channel(value)

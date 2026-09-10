@@ -327,6 +327,8 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
     assert "FormData" in LONGCAT_UPLOAD_MEDIA
     assert "form.append('file'" in LONGCAT_UPLOAD_MEDIA
     assert "fileKey" in LONGCAT_UPLOAD_MEDIA
+    assert "const uploaded =" in LONGCAT_UPLOAD_MEDIA
+    assert "output.push({...source" not in LONGCAT_UPLOAD_MEDIA
 
     image_command = _command(
         [

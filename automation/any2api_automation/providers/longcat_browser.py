@@ -94,13 +94,19 @@ _UPLOAD_MEDIA = r"""async input => {
         !data || typeof data.url !== 'string' || typeof data.key !== 'string') {
       throw new Error('LongCat media upload was rejected status=' + response.status);
     }
-    output.push({...source,
+    const uploaded = {
+      fileId: source.fileId,
       fileName,
       fileUrl: data.url,
       fileKey: data.key,
+      fileExt: source.fileExt,
       uploadingStatus: 'success',
-      progress: 100
-    });
+      progress: 100,
+      fileSize: source.fileSize
+    };
+    if (source.width != null) uploaded.width = source.width;
+    if (source.height != null) uploaded.height = source.height;
+    output.push(uploaded);
   }
   return output;
 }"""

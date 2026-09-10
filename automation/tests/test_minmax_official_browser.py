@@ -43,6 +43,8 @@ def test_minmax_media_upload_stays_inside_the_browser_runtime() -> None:
     assert "const objectKey = explicitObjectKey || uploadId" not in _UPLOAD_MEDIA
     assert "policy_callback" in _UPLOAD_MEDIA
     assert "payload.dir" in _UPLOAD_MEDIA
+    assert "payload.bucketName" in _UPLOAD_MEDIA
+    assert "policyBucket" in _UPLOAD_MEDIA
     assert "official media uploader" in _UPLOAD_MEDIA
     assert "crypto.subtle" not in _UPLOAD_MEDIA
 

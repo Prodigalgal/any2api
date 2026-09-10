@@ -181,6 +181,7 @@ _UPLOAD_MEDIA = r"""async input => {
   const uploader = locateUploader();
   const output = [];
   const objectKeys = [];
+  const policyBuckets = [];
   const callbackObjectKeys = [];
   const rememberPolicyCallback = body => {
     let payload = body;
@@ -190,7 +191,11 @@ _UPLOAD_MEDIA = r"""async input => {
     if (!payload || typeof payload !== 'object') return;
     const directory = String(payload.dir || '').trim().replace(/\/+$/, '');
     const filename = String(payload.fileName || '').trim().replace(/^\/+/, '');
-    if (directory && filename) objectKeys.push(`${directory}/${filename}`);
+    const bucket = String(payload.bucketName || payload.bucket_name || '').trim();
+    if (directory && filename) {
+      objectKeys.push(`${directory}/${filename}`);
+      policyBuckets.push(bucket);
+    }
   };
   const rememberPolicyResponse = body => {
     let payload = body;
@@ -261,18 +266,25 @@ _UPLOAD_MEDIA = r"""async input => {
       uploaded.objectKey || uploaded.object_key || uploaded.objectName ||
       uploaded.object_name || ''
     ).trim();
-    const objectKeyFromValue = value => {
+    const objectKeyFromValue = (value, bucket = '') => {
       const text = String(value || '').trim();
       if (!text) return '';
+      let objectKey = text;
       try {
-        return decodeURIComponent(new URL(text).pathname).replace(/^\/+/, '');
+        objectKey = decodeURIComponent(new URL(text).pathname).replace(/^\/+/, '');
       } catch (_) {
-        return text.split('?', 1)[0].replace(/^\/+/, '');
+        objectKey = text.split('?', 1)[0].replace(/^\/+/, '');
       }
+      const normalizedBucket = String(bucket || '').trim().replace(/^\/+|\/+$/g, '');
+      if (normalizedBucket && objectKey.startsWith(`${normalizedBucket}/`)) {
+        return objectKey.slice(normalizedBucket.length + 1);
+      }
+      return objectKey;
     };
-    const callbackObjectKey = objectKeyFromValue(callbackObjectKeys.shift() || '');
-    const policyObjectKey = objectKeys.shift() || '';
-    const urlObjectKey = objectKeyFromValue(cdnUrl);
+    const policyBucket = policyBuckets.shift() || '';
+    const callbackObjectKey = objectKeyFromValue(callbackObjectKeys.shift() || '', policyBucket);
+    const policyObjectKey = objectKeyFromValue(objectKeys.shift() || '', policyBucket);
+    const urlObjectKey = objectKeyFromValue(cdnUrl, policyBucket);
     const objectKey = explicitObjectKey || callbackObjectKey || policyObjectKey || urlObjectKey;
     const objectKeySource = explicitObjectKey ? 'uploader'
       : callbackObjectKey ? 'policy_response'

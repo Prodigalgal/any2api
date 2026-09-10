@@ -308,6 +308,10 @@ _UPLOAD_MEDIA = r"""async input => {
       cdn_url: cdnUrl,
       object_key: objectKey,
       object_key_source: objectKeySource,
+      object_key_bucket: inferredBucket,
+      object_key_bucket_removed: Boolean(
+        inferredBucket && rawUrlObjectKey.startsWith(`${inferredBucket}/`)
+      ),
       data_url: cdnUrl
     });
   }
@@ -437,11 +441,14 @@ class MinmaxOfficialBrowserTransport:
                 logger.info(
                     "minmax_official_media_upload_result upload_id_present=%s "
                     "object_key_present=%s object_key_source=%s object_key_length=%s "
+                    "object_key_bucket=%s object_key_bucket_removed=%s "
                     "cdn_host=%s cdn_path=%s",
                     bool(str(item.get("file_key") or "").strip()),
                     bool(object_key),
                     str(item.get("object_key_source") or "unknown"),
                     len(object_key),
+                    str(item.get("object_key_bucket") or ""),
+                    bool(item.get("object_key_bucket_removed")),
                     parsed_url.hostname or "",
                     parsed_url.path[:240],
                 )

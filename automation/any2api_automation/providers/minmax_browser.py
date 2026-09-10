@@ -203,7 +203,8 @@ _UPLOAD_MEDIA = r"""async input => {
     ).trim();
     const objectKey = String(
       uploaded.objectKey || uploaded.object_key || uploaded.objectName ||
-      uploaded.object_name || uploaded.ossPath || ''
+      uploaded.object_name || uploaded.ossPath || uploaded.cdnUrl ||
+      uploaded.cdn_url || ''
     ).trim();
     if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');

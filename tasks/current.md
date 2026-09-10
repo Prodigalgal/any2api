@@ -6,16 +6,18 @@
 
 ## 已完成
 
-- `0.13.14` 已通过 CI 并由 Argo CD 部署到 `any2api` 命名空间，GLM 视觉模型的图片非流式和 SSE 请求均已在 K8S 真实通过。
+- `9944909` 已通过 CI `34476956811`，源码镜像通过 GitOps `ac420b0` 部署；随后配额修复 GitOps `9642473` 已由 Argo CD 应用。
+- GLM 视觉模型的图片非流式和 SSE 请求、文本非流式和 SSE 请求均已在 K8S 真实通过；模型目录仍为 `probe_status=READY`，但健康窗口状态为 `DEGRADED`，暂不标稳定 Ready。
 - 六家选定模型的非流式和 SSE 文本请求均真实返回成功。
-- MiMo、MiniMax、Qwen、GLM 的图片输入流式请求均成功；LongCat 官方聊天页已确认支持图片或单个文档上传，`0.14.0` 已完成同源上传实现和契约测试，待 K8S 真实图片/文档请求验收；DeepSeek 仍保持 text-only。
+- MiMo、MiniMax、Qwen、GLM 的图片输入流式请求均成功；LongCat 已完成同源上传实现和契约测试，并在 K8S 真实通过图片非流式/SSE、有效 PDF 非流式/SSE、有效 DOCX 非流式请求；DeepSeek 仍保持 text-only。
+- LongCat 的 TXT 上传可以成功但当前上游不返回文件内容解析，其他未实测扩展不计入 Ready；因此 LongCat 当前是“图片 + PDF/DOCX 已通过，文件扩展全量仍观察中”。
 - 最近一小时成功推理使用了 DeepSeek 3、GLM 4、LongCat 3、MiMo 9、MiniMax 1、Qwen 3 个不同账号；MiniMax 当前只有 1 个 `ACTIVE/enabled` 账号，切换验证等待第二个有效账号。
-- 生命周期调度已限制为默认并发 2、单次最多 claim 8 个动作；当前滚动观测没有新的 `OOMKilled`。
+- 生命周期调度已限制为默认并发 2、单次最多 claim 8 个动作；当前滚动观测没有新的 `OOMKilled`。namespace quota 已从 `requests.memory=6Gi/limits.memory=16Gi` 调整为 `8Gi/20Gi`，为滚动副本留出余量。
 - MiniMax 的通用 `daily_checkin` 语义和具体 Runtime 实现已保留，账号额度依赖每日打卡的规则不绕过。
 
 ## 当前推进
 
-- 发布 `0.14.0`，在 K8S 真实验收 LongCat 图片、文档、流式和错误边界；成功后再更新能力矩阵。
+- 继续观察 LongCat 的 PDF/DOCX 与账号切换稳定性，并明确 TXT 及其他扩展的拒绝或能力边界；成功后再把 LongCat 标记为完整 Ready。
 - 等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
 - 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。
 - 当前多模态范围只覆盖图片和文档；音频、视频不纳入本轮 LongCat 聊天输入能力。

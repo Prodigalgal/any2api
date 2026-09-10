@@ -35,6 +35,11 @@ from any2api_automation.providers.qwen_risk import (
     _AccountBrowserSession,
 )
 
+_TINY_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+
 
 def test_shared_content_contract_covers_image_audio_video_and_file_sources() -> None:
     assert "OSS4-HMAC-SHA256" in _UPLOAD_MEDIA
@@ -331,7 +336,7 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
                     {"type": "input_text", "text": "describe"},
                     {
                         "type": "input_image",
-                        "image_url": "data:image/png;base64,YQ==",
+                        "image_url": _TINY_PNG_DATA_URL,
                         "filename": "input.png",
                     },
                 ],
@@ -342,8 +347,32 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
 
     assert sources[0]["fileName"] == "input.png"
     assert sources[0]["fileExt"] == "png"
-    assert sources[0]["fileSize"] == 1
-    assert sources[0]["dataUrl"] == "data:image/png;base64,YQ=="
+    assert sources[0]["fileSize"] == 68
+    assert sources[0]["dataUrl"] == _TINY_PNG_DATA_URL
+    assert sources[0]["width"] == 1
+    assert sources[0]["height"] == 1
+    assert sources[0]["uploadingStatus"] == "progress"
+
+    document_command = _command(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_file",
+                        "input_file": {
+                            "file_data": "data:text/plain;base64,TE9OR0NBVF9URVNU",
+                            "filename": "input.txt",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    document_sources = _longcat_upload_sources(document_command["messages"])
+    assert document_sources[0]["fileExt"] == "txt"
+    assert "width" not in document_sources[0]
+    assert "height" not in document_sources[0]
 
     body = build_longcat_request(
         image_command,
@@ -365,7 +394,7 @@ def test_longcat_upload_contract_rejects_mixed_media_and_non_inline_sources() ->
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_image", "image_url": "data:image/png;base64,YQ=="},
+                    {"type": "input_image", "image_url": _TINY_PNG_DATA_URL},
                     {
                         "type": "input_file",
                         "input_file": {
@@ -437,7 +466,7 @@ async def test_longcat_media_upload_uses_the_selected_account_page_and_rule_path
         [
             {
                 "role": "user",
-                "content": [{"type": "input_image", "image_url": "data:image/png;base64,YQ=="}],
+                "content": [{"type": "input_image", "image_url": _TINY_PNG_DATA_URL}],
             }
         ]
     )

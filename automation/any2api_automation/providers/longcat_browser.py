@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import time
 from typing import Any
 from uuid import uuid4
@@ -186,6 +187,28 @@ class LongcatOfficialBrowserTransport(PageFetchBrowserRuntime):
             "parentMessageId": 0,
             "files": prepared["files"],
         }
+        file_fields = sorted(
+            {
+                key
+                for file in prepared["files"]
+                for key in file
+                if key != "dataUrl"
+            }
+        )
+        dimensions = [
+            f"{file.get('width')}x{file.get('height')}"
+            if file.get("width") is not None and file.get("height") is not None
+            else "unspecified"
+            for file in prepared["files"]
+        ]
+        self._logger.info(
+            "official_browser_chat files=%s fields=%s urls=%s keys=%s dimensions=%s",
+            len(prepared["files"]),
+            ",".join(file_fields) or "none",
+            sum(bool(file.get("fileUrl")) for file in prepared["files"]),
+            sum(bool(file.get("fileKey")) for file in prepared["files"]),
+            ",".join(dimensions) or "none",
+        )
         async for event in self.stream(
             credential,
             proxy_url,
@@ -478,18 +501,71 @@ def _longcat_upload_sources(messages: Any) -> list[dict[str, Any]]:
             expected_prefix="image/" if kind == "image" else None,
         )
         filename, extension = _longcat_filename(part, mime, kind)
-        sources.append(
-            {
-                "fileId": uuid4().hex,
-                "fileName": filename,
-                "fileExt": extension,
-                "dataUrl": source,
-                "fileSize": len(content),
-                "width": 0,
-                "height": 0,
-            }
-        )
+        metadata: dict[str, Any] = {
+            "fileId": uuid4().hex,
+            "fileName": filename,
+            "fileExt": extension,
+            "dataUrl": source,
+            "fileSize": len(content),
+            "fileUrl": "",
+            "uploadingStatus": "progress",
+            "progress": 0,
+        }
+        if kind == "image":
+            metadata["width"], metadata["height"] = _longcat_image_dimensions(content, mime)
+        sources.append(metadata)
     return sources
+
+
+def _longcat_image_dimensions(content: bytes, mime: str) -> tuple[int, int]:
+    normalized_mime = mime.lower()
+    if normalized_mime == "image/png":
+        if len(content) < 24 or content[:8] != b"\x89PNG\r\n\x1a\n":
+            raise ValueError("LongCat image input is not a valid PNG")
+        width, height = struct.unpack(">II", content[16:24])
+    elif normalized_mime == "image/jpeg":
+        width, height = _longcat_jpeg_dimensions(content)
+    else:
+        raise ValueError(f"LongCat image MIME type is not supported: {mime}")
+    if width <= 0 or height <= 0:
+        raise ValueError("LongCat image input has invalid dimensions")
+    return width, height
+
+
+def _longcat_jpeg_dimensions(content: bytes) -> tuple[int, int]:
+    if len(content) < 4 or content[:2] != b"\xff\xd8":
+        raise ValueError("LongCat image input is not a valid JPEG")
+    offset = 2
+    sof_markers = {
+        *range(0xC0, 0xC4),
+        *range(0xC5, 0xC8),
+        *range(0xC9, 0xCC),
+        *range(0xCD, 0xD0),
+    }
+    while offset < len(content):
+        while offset < len(content) and content[offset] != 0xFF:
+            offset += 1
+        while offset < len(content) and content[offset] == 0xFF:
+            offset += 1
+        if offset >= len(content):
+            break
+        marker = content[offset]
+        offset += 1
+        if marker in {0xD8, 0xD9}:
+            continue
+        if offset + 2 > len(content):
+            break
+        segment_length = int.from_bytes(content[offset : offset + 2], "big")
+        if segment_length < 2 or offset + segment_length > len(content):
+            break
+        if marker in sof_markers:
+            if segment_length < 7:
+                break
+            height = int.from_bytes(content[offset + 3 : offset + 5], "big")
+            width = int.from_bytes(content[offset + 5 : offset + 7], "big")
+            return width, height
+        offset += segment_length
+    raise ValueError("LongCat image input has no JPEG dimensions")
 
 
 def _longcat_filename(part: dict[str, Any], mime: str, kind: str) -> tuple[str, str]:

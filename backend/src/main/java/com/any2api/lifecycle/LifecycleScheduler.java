@@ -3,6 +3,7 @@ package com.any2api.lifecycle;
 import com.any2api.persistence.PostgresResultValues;
 import com.any2api.account.AccountRepository;
 import com.any2api.account.AccountStatus;
+import com.any2api.config.Any2ApiProperties;
 import com.any2api.credential.CredentialVault;
 import com.any2api.coordination.AccountCapacityException;
 import com.any2api.coordination.AccountLease;
@@ -38,8 +39,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class LifecycleScheduler {
-    private static final int CLAIM_LIMIT = 16;
-    private static final int CONCURRENCY = 4;
+    private static final int CLAIM_LIMIT = 8;
     private static final int MAX_ATTEMPTS = 12;
     private static final Duration LEASE_TTL = Duration.ofMinutes(5);
     private static final Duration HEALTHY_INTERVAL = Duration.ofHours(6);
@@ -61,6 +61,7 @@ public class LifecycleScheduler {
     private final RuntimeSettingsService runtimeSettings;
     private final List<CredentialPropagationPolicy> credentialPropagationPolicies;
     private final ModelProbeService modelProbes;
+    private final int actionConcurrency;
 
     public LifecycleScheduler(
         JdbcClient jdbc,
@@ -76,7 +77,8 @@ public class LifecycleScheduler {
         OperationEventService observability,
         RuntimeSettingsService runtimeSettings,
         List<CredentialPropagationPolicy> credentialPropagationPolicies,
-        ModelProbeService modelProbes
+        ModelProbeService modelProbes,
+        Any2ApiProperties properties
     ) {
         this.jdbc = jdbc;
         this.transactions = transactions;
@@ -92,6 +94,7 @@ public class LifecycleScheduler {
         this.runtimeSettings = runtimeSettings;
         this.credentialPropagationPolicies = List.copyOf(credentialPropagationPolicies);
         this.modelProbes = modelProbes;
+        this.actionConcurrency = properties.getLifecycle().getActionConcurrency();
     }
 
     @Scheduled(fixedDelayString = "${any2api.lifecycle.poll-interval:10s}")
@@ -99,9 +102,11 @@ public class LifecycleScheduler {
         var owner = "scheduler:" + UUID.randomUUID();
         var claimed = transactions.execute(status -> claim(owner));
         if (claimed == null || claimed.isEmpty()) return;
+        LOGGER.info("lifecycle_actions_claimed count={} concurrency={}",
+            claimed.size(), actionConcurrency);
         Flux.fromIterable(claimed)
             .flatMap(action -> execute(action, owner)
-                .onErrorResume(error -> fail(action, owner, error).then()), CONCURRENCY)
+                .onErrorResume(error -> fail(action, owner, error).then()), actionConcurrency)
             .then()
             .block(Duration.ofMinutes(10));
     }

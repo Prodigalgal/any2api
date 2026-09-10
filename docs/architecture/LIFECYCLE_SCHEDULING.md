@@ -20,6 +20,9 @@ Each stage has independent global, provider, action, egress, and mailbox-domain 
 - Deterministic jitter spreads both normal schedules and catch-up work.
 - Exponential backoff includes decorrelated jitter.
 - PostgreSQL claims a bounded batch with `FOR UPDATE SKIP LOCKED`.
+- Lifecycle execution admits at most two actions by default and claims at most eight rows per poll;
+  the limit is configurable through `ANY2API_LIFECYCLE_ACTION_CONCURRENCY` so browser-backed
+  keepalive bursts cannot exceed the Runtime process budget or the scheduler poll window.
 - Expired durable leases consume an attempt and return with a delay; they cannot reset forever.
 - Manual reauthentication uses a PostgreSQL advisory lock and coalesces an existing pending/leased action.
 - Keepalive authentication failure transforms the same action into delayed reauthentication.

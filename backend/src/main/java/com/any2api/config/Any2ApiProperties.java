@@ -14,6 +14,7 @@ public class Any2ApiProperties {
     private final Media media = new Media();
     private final CacheSettings cache = new CacheSettings();
     private final Observability observability = new Observability();
+    private final Lifecycle lifecycle = new Lifecycle();
     private final ModelRuntime modelRuntime = new ModelRuntime();
     private final TempMail tempMail = new TempMail();
 
@@ -29,6 +30,7 @@ public class Any2ApiProperties {
     public Media getMedia() { return media; }
     public CacheSettings getCache() { return cache; }
     public Observability getObservability() { return observability; }
+    public Lifecycle getLifecycle() { return lifecycle; }
     public ModelRuntime getModelRuntime() { return modelRuntime; }
     public TempMail getTempMail() { return tempMail; }
 
@@ -183,6 +185,18 @@ public class Any2ApiProperties {
                 throw new IllegalArgumentException(name + " must be positive");
             }
             return value;
+        }
+    }
+
+    public static class Lifecycle {
+        private int actionConcurrency = 2;
+
+        public int getActionConcurrency() { return actionConcurrency; }
+        public void setActionConcurrency(int value) {
+            if (value < 1 || value > 8) {
+                throw new IllegalArgumentException("lifecycle action concurrency must be between 1 and 8");
+            }
+            actionConcurrency = value;
         }
     }
 

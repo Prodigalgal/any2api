@@ -27,4 +27,4 @@
 
 ## 当前实现决策
 
-生产默认浏览器进程预算为 3。原因是单棵 Camoufox 进程树在当前 K8S 节点约占数百 MiB 到 1 GiB，原 Automation Pod 在 6 GiB limit 下同时存在 6 棵 Camoufox 树并伴随 Chromium/驱动进程，已出现 exit code 137；预算优先保证服务稳定，再按实测逐步调高。
+生产默认浏览器进程预算为 3。原因是单棵 Camoufox 进程树在当前 K8S 节点约占数百 MiB 到 1 GiB，原 Automation Pod 在 6 GiB limit 下同时存在 6 棵 Camoufox 树并伴随 Chromium/驱动进程，已出现 exit code 137；预算优先保证服务稳定，再按实测逐步调高。Java 生命周期调度默认只并行执行 2 个动作、每次最多 claim 8 个动作，避免保活高峰同时创建过多浏览器树；该 admission 由 `ANY2API_LIFECYCLE_ACTION_CONCURRENCY` 控制。

@@ -64,6 +64,8 @@ any2api:
     scheduled-probe-batch-size: ${ANY2API_MODEL_PROBE_BATCH_SIZE:5}
     ready-success-rate-threshold: ${ANY2API_MODEL_READY_SUCCESS_RATE:90}
     ready-p95-threshold: ${ANY2API_MODEL_READY_P95:60s}
+  lifecycle:
+    action-concurrency: ${ANY2API_LIFECYCLE_ACTION_CONCURRENCY:2}
   observability:
     operation-retention: ${ANY2API_OBSERVABILITY_OPERATION_RETENTION:30d}
     usage-retention: ${ANY2API_OBSERVABILITY_USAGE_RETENTION:90d}

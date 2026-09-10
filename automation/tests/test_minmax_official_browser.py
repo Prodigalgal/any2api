@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -27,11 +26,11 @@ def test_minmax_bridge_discovers_the_official_runtime_without_fixed_module_ids()
 
 
 def test_minmax_media_upload_stays_inside_the_browser_runtime() -> None:
-    assert "crypto.subtle" in _UPLOAD_MEDIA
-    assert "policy_callback" not in _UPLOAD_MEDIA
-    assert "bridge(input.callbackPath" in _UPLOAD_MEDIA
-    assert "fetch(objectUrl" in _UPLOAD_MEDIA
-    assert "MinMax object upload was rejected' + await responseError" in _UPLOAD_MEDIA
+    assert "webpackChunk" in _UPLOAD_MEDIA
+    assert "refreshSTSTokenInterval" in _UPLOAD_MEDIA
+    assert "new File([bytes], filename" in _UPLOAD_MEDIA
+    assert "official media uploader" in _UPLOAD_MEDIA
+    assert "crypto.subtle" not in _UPLOAD_MEDIA
 
 
 def test_minmax_storage_injection_rejects_cross_provider_state() -> None:
@@ -130,8 +129,6 @@ async def test_minmax_media_upload_rejects_incomplete_results() -> None:
     transport = MinmaxOfficialBrowserTransport("https://agent.minimax.io")
     transport._session_for = AsyncMock(return_value=session)
     transport._inject_context = AsyncMock()
-    plan = SimpleNamespace(active=SimpleNamespace(rules=SimpleNamespace(endpoint_paths={})))
-
     with pytest.raises(RuntimeError, match="incomplete result"):
         await transport.upload_media(
             {"user_id": "user", "token": "token"},
@@ -139,7 +136,6 @@ async def test_minmax_media_upload_rejects_incomplete_results() -> None:
                 {"data_url": "data:image/png;base64,YQ=="},
                 {"data_url": "data:image/png;base64,Yg=="},
             ],
-            plan,
             "",
             1024,
         )

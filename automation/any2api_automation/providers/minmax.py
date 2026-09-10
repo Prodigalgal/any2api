@@ -292,7 +292,6 @@ async def _semantic_chat_input(
             "attachments": await official_browser_transport.upload_media(
                 current,
                 prepared["attachments"],
-                plan,
                 proxy_url,
                 settings().minmax_max_upload_bytes,
             ),

@@ -21,7 +21,6 @@ from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
 from ..session_pool import AccountSessionPool, SessionSlot
-from .runtime_rules import RuntimePlan
 
 logger = logging.getLogger("any2api_automation.providers.minmax_browser")
 _SCHEMA_VERSION = 1
@@ -155,55 +154,31 @@ _STREAM_REQUEST = rf"""async request => {{
 }}"""
 
 _UPLOAD_MEDIA = r"""async input => {
-  const locate = () => {
-    const cached = window.__any2apiMinmaxOfficialBridge;
-    if (typeof cached === 'function') return cached;
-    throw new Error('MinMax official request bridge was not found');
+  const locateUploader = () => {
+    const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
+    let moduleCount = 0;
+    for (const chunkName of chunkNames) {
+      const chunks = window[chunkName];
+      if (!Array.isArray(chunks)) continue;
+      let runtime;
+      chunks.push([['any2api-upload-' + Date.now()], {}, require => { runtime = require; }]);
+      if (!runtime?.m) continue;
+      for (const [id, factory] of Object.entries(runtime.m)) {
+        const source = String(factory);
+        if (!source.includes('refreshSTSTokenInterval') ||
+            !source.includes('fileMd5') || !source.includes('ossPath')) continue;
+        let exports;
+        try { exports = runtime(id); } catch (_) { continue; }
+        const candidates = [exports?.S, exports?.upload, exports?.default?.S];
+        const uploader = candidates.find(candidate => typeof candidate === 'function');
+        if (uploader) return uploader;
+        moduleCount++;
+      }
+    }
+    throw new Error('MinMax official media uploader was not found'
+      + ' chunks=' + chunkNames.length + ' candidates=' + moduleCount);
   };
-  const bridge = locate();
-  const readJson = async response => {
-    const text = await response.text();
-    let body;
-    try { body = JSON.parse(text); } catch (_) { body = {}; }
-    if (!response.ok) throw new Error('MinMax media request was rejected');
-    return body;
-  };
-  const sign = async (secret, value) => {
-    const key = await crypto.subtle.importKey(
-      'raw', new TextEncoder().encode(secret), {name: 'HMAC', hash: 'SHA-1'},
-      false, ['sign']
-    );
-    const bytes = new Uint8Array(await crypto.subtle.sign(
-      'HMAC', key, new TextEncoder().encode(value)
-    ));
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return btoa(binary);
-  };
-  const encodedPath = value => value.split('/').map(encodeURIComponent).join('/');
-  const objectUrl = (endpoint, bucket, objectName) => {
-    const normalizedEndpoint = endpoint.replace(/^\/+/, '');
-    const parsed = new URL(
-      /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedEndpoint)
-        ? normalizedEndpoint
-        : 'https://' + normalizedEndpoint
-    );
-    const originalHost = parsed.hostname;
-    if (!originalHost.startsWith(bucket + '.')) parsed.hostname = bucket + '.' + originalHost;
-    const prefix = parsed.pathname.replace(/\/+$/, '');
-    parsed.pathname = prefix + '/' + encodedPath(objectName);
-    return parsed.toString();
-  };
-  const responseError = async response => {
-    const text = await response.text();
-    let code = '';
-    try {
-      const xml = new DOMParser().parseFromString(text, 'application/xml');
-      code = String(xml?.querySelector('Code')?.textContent || '')
-        .replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
-    } catch (_) {}
-    return ' HTTP ' + response.status + (code ? ' code ' + code : '');
-  };
+  const uploader = locateUploader();
   const output = [];
   for (const source of input.images) {
     const match = /^data:([^;]+);base64,(.+)$/s.exec(String(source.data_url || ''));
@@ -214,70 +189,23 @@ _UPLOAD_MEDIA = r"""async input => {
     if (!bytes.length || bytes.length > input.maximumBytes) {
       throw new Error('MinMax media exceeds the configured upload limit');
     }
-    const policyResponse = await bridge(input.policyPath, {
-      method: 'GET',
-      credentials: 'include'
-    }, {stream: false});
-    const policyBody = await readJson(policyResponse);
-    const policy = policyBody?.data || {};
-    const endpoint = String(policy.endpoint || '').trim();
-    const accessKeyId = String(policy.accessKeyId || '').trim();
-    const accessKeySecret = String(policy.accessKeySecret || '').trim();
-    const securityToken = String(policy.securityToken || '').trim();
-    const bucketName = String(policy.bucketName || '').trim();
-    const dir = String(policy.dir || '').replace(/\/+$/, '');
-    if (!endpoint || !accessKeyId || !accessKeySecret || !securityToken ||
-        !bucketName || !dir) throw new Error('MinMax upload policy is incomplete');
     const filename = String(source.file_name || ('upload-' + crypto.randomUUID() + '.bin'));
-    const extensionIndex = filename.lastIndexOf('.');
-    const extension = extensionIndex > 0 ? filename.slice(extensionIndex) : '.bin';
-    const objectName = dir + '/' + crypto.randomUUID().replaceAll('-', '') + extension;
     const contentType = String(source.mime_type || match[1]);
-    const ossDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const canonicalHeaders = 'x-oss-date:' + ossDate + '\n' +
-      'x-oss-security-token:' + securityToken + '\n';
-    const resource = '/' + bucketName + '/' + objectName;
-    const stringToSign = 'PUT\n\n' + contentType + '\n\n' +
-      canonicalHeaders + resource;
-    const signature = await sign(accessKeySecret, stringToSign);
-    const uploadResponse = await fetch(objectUrl(endpoint, bucketName, objectName), {
-      method: 'PUT',
-      headers: {
-        'Authorization': 'OSS ' + accessKeyId + ':' + signature,
-        'Content-Type': contentType,
-        'x-oss-date': ossDate,
-        'x-oss-security-token': securityToken
-      },
-      body: bytes
-    });
-    if (!uploadResponse.ok) {
-      throw new Error('MinMax object upload was rejected' + await responseError(uploadResponse));
+    const uploaded = await uploader(new File([bytes], filename, {type: contentType}));
+    if (!uploaded || typeof uploaded !== 'object') {
+      throw new Error('MinMax official media uploader returned an invalid result');
     }
-    const callbackBody = {
-      fileName: objectName.slice(objectName.lastIndexOf('/') + 1),
-      originFileName: filename,
-      dir,
-      endpoint,
-      bucketName,
-      size: String(bytes.length),
-      mimeType: contentType,
-      fileMd5: String(source.file_md5 || '')
-    };
-    const callbackResponse = await bridge(input.callbackPath, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(callbackBody)
-    }, {stream: false});
-    const callbackBodyResult = await readJson(callbackResponse);
-    const ossPath = String(callbackBodyResult?.data?.ossPath || '').trim();
-    if (!ossPath) throw new Error('MinMax media callback returned no ossPath');
+    const objectKey = String(uploaded.objectKey || '').trim();
+    const cdnUrl = String(uploaded.cdnUrl || '').trim();
+    if (!objectKey || !cdnUrl) {
+      throw new Error('MinMax official media uploader returned an incomplete result');
+    }
     output.push({
       type: 'image',
       file_path: filename,
       file_name: filename,
       mime_type: contentType,
-      data_url: ossPath
+      data_url: cdnUrl
     });
   }
   return output;
@@ -369,7 +297,6 @@ class MinmaxOfficialBrowserTransport:
         self,
         credential: dict[str, Any],
         attachments: list[dict[str, Any]],
-        plan: RuntimePlan,
         proxy_url: str,
         maximum_bytes: int,
     ) -> list[dict[str, Any]]:
@@ -382,16 +309,6 @@ class MinmaxOfficialBrowserTransport:
                 _UPLOAD_MEDIA,
                 {
                     "images": attachments,
-                    "policyPath": str(
-                        plan.active.rules.endpoint_paths.get(
-                            "filesPolicy", "/v1/api/files/request_policy"
-                        )
-                    ),
-                    "callbackPath": str(
-                        plan.active.rules.endpoint_paths.get(
-                            "filesCallback", "/v1/api/files/policy_callback"
-                        )
-                    ),
                     "maximumBytes": maximum_bytes,
                 },
             )

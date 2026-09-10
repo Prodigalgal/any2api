@@ -884,6 +884,14 @@ class QwenNativeBrowserTransport:
                     )
                 elif "NS_ERROR_FAILURE" in error_text:
                     await self._recover_failed_same_origin_navigation(session, target, desired)
+                elif type(error).__name__ == "TimeoutError" or "timeout" in error_text.lower():
+                    await self._recover_failed_same_origin_navigation(
+                        session,
+                        target,
+                        desired,
+                        error_label="TimeoutError",
+                        wait_for_load=True,
+                    )
                 else:
                     raise
             await session.page.wait_for_function(
@@ -898,12 +906,25 @@ class QwenNativeBrowserTransport:
         session: _AccountBrowserSession,
         target: str,
         desired: Any,
+        *,
+        error_label: str = "NS_ERROR_FAILURE",
+        wait_for_load: bool = False,
     ) -> None:
         current = urlparse(session.page.url)
         if current.scheme != desired.scheme or current.netloc != desired.netloc:
             raise RuntimeError(
                 "Qwen authenticated surface left the configured origin after navigation failure"
             )
+        if wait_for_load:
+            try:
+                await session.page.wait_for_load_state(
+                    "domcontentloaded",
+                    timeout=10_000,
+                )
+            except Exception as settle_error:
+                raise RuntimeError(
+                    "Qwen authenticated surface did not settle after navigation timeout"
+                ) from settle_error
         await session.page.evaluate(
             "target => history.replaceState(history.state, '', target)", target
         )
@@ -915,8 +936,10 @@ class QwenNativeBrowserTransport:
         if recovered.path != desired.path:
             raise RuntimeError("Qwen authenticated surface route recovery did not reach target")
         logger.warning(
-            "qwen_native_browser_navigation_recovered error=NS_ERROR_FAILURE target_path=%s",
+            "qwen_native_browser_navigation_recovered error=%s target_path=%s actual_path=%s",
+            error_label,
             desired.path,
+            current.path,
         )
 
     async def _ensure_baxia_ready(self, session: _AccountBrowserSession) -> None:

@@ -890,6 +890,44 @@ def _log_upstream_request(request: Any) -> None:
         host,
         path,
     )
+    if path.endswith("/message"):
+        _log_message_attachment_shape(request)
+
+
+def _log_message_attachment_shape(request: Any) -> None:
+    try:
+        body = json.loads(str(request.post_data or ""))
+    except (AttributeError, TypeError, ValueError):
+        return
+    attachments = body.get("attachments") if isinstance(body, dict) else None
+    if not isinstance(attachments, list):
+        logger.info("minmax_official_message_attachment_shape count=0 cloud_fields=none")
+        return
+    cloud_fields = sorted(
+        {
+            str(key)
+            for attachment in attachments
+            if isinstance(attachment, dict)
+            for key in (attachment.get("cloud") or {})
+            if isinstance(attachment.get("cloud"), dict)
+        }
+    )
+    cloud_values = [
+        attachment.get("cloud")
+        for attachment in attachments
+        if isinstance(attachment, dict) and isinstance(attachment.get("cloud"), dict)
+    ]
+    logger.info(
+        "minmax_official_message_attachment_shape count=%s cloud_fields=%s "
+        "upload_id_present=%s url_present=%s object_key_present=%s object_key_lengths=%s",
+        len(attachments),
+        ",".join(cloud_fields) or "none",
+        any(bool(str(value.get("upload_id") or "").strip()) for value in cloud_values),
+        any(bool(str(value.get("url") or "").strip()) for value in cloud_values),
+        any(bool(str(value.get("object_key") or "").strip()) for value in cloud_values),
+        ",".join(str(len(str(value.get("object_key") or "").strip())) for value in cloud_values)
+        or "none",
+    )
 
 
 def _log_upstream_response(response: Any) -> None:

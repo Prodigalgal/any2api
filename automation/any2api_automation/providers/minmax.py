@@ -38,6 +38,7 @@ from .base import (
     CAMOUFOX_BROWSER_RUNTIME,
     AutomationProvider,
     AutomationProviderManifest,
+    reject_raw_request,
 )
 from .minmax_browser import MinmaxOfficialBrowserTransport
 from .minmax_daily_checkin import MinmaxDailyCheckin
@@ -335,7 +336,7 @@ async def _semantic_chat_input(
 def build_minmax_request(command: dict[str, Any]) -> dict[str, Any]:
     _validate_semantic_command(command)
     options = command["providerOptions"]
-    raw = command.get("rawRequest") if isinstance(command.get("rawRequest"), dict) else {}
+    controls = command["controls"]
     model_id = str(command["model"]).strip()
     variant = str(options.get("variant") or "").strip()
     if not variant:
@@ -344,7 +345,7 @@ def build_minmax_request(command: dict[str, Any]) -> dict[str, Any]:
     model = {"provider_id": "minimax", "model_id": model_id}
     if variant:
         model["variant"] = variant
-    agent_id = str(options.get("agent_id") or raw.get("agent_id") or "").strip()
+    agent_id = str(options.get("agent_id") or controls.get("agent_id") or "").strip()
     role = str(options.get("agent_role") or "mavis").strip() or "mavis"
     return {
         "content": _minmax_prompt(command.get("messages")),
@@ -359,6 +360,7 @@ def build_minmax_request(command: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "MinMax")
     if command.get("schemaVersion") != 1 or not str(command.get("model") or "").strip():
         raise ValueError("MinMax semantic command schema is unsupported")
     if not isinstance(command.get("messages"), list):

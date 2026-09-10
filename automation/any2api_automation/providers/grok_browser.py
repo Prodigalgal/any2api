@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from ..lifecycle.account import required
+from .base import reject_raw_request
 from .grok_settings import settings
 from .multimodal import text_content, xai_input_content
 from .page_fetch_browser import PageFetchBrowserRuntime
@@ -100,15 +101,6 @@ class GrokOfficialBrowserTransport(PageFetchBrowserRuntime):
 
 def build_grok_request(command: dict[str, Any]) -> dict[str, Any]:
     _validate_semantic_command(command)
-    raw = command.get("rawRequest")
-    if str(command.get("protocol") or "") == "RESPONSES" and isinstance(raw, dict):
-        payload = _copy(raw)
-        payload["model"] = str(command["model"])
-        payload["stream"] = True
-        payload.setdefault("store", False)
-        payload.setdefault("include", ["reasoning.encrypted_content"])
-        return payload
-
     controls = command["controls"]
     payload: dict[str, Any] = {
         "model": str(command["model"]),
@@ -118,10 +110,6 @@ def build_grok_request(command: dict[str, Any]) -> dict[str, Any]:
         "include": ["reasoning.encrypted_content"],
         "input": _input(command.get("messages")),
     }
-    if isinstance(raw, dict):
-        instructions = raw.get("instructions")
-        if instructions is not None:
-            payload["instructions"] = instructions
     for field in _FORWARDED_FIELDS:
         if field in command["generation"]:
             payload[field] = _copy(command["generation"][field])
@@ -134,9 +122,7 @@ def build_grok_request(command: dict[str, Any]) -> dict[str, Any]:
                 break
     payload["tools"] = _tools(command.get("tools"))
     skip_search = bool(
-        command["providerOptions"].get("skip_x_search")
-        or controls.get("_skip_x_search")
-        or (isinstance(raw, dict) and raw.get("_skip_x_search"))
+        command["providerOptions"].get("skip_x_search") or controls.get("_skip_x_search")
     )
     if not skip_search and not any(item.get("type") == "x_search" for item in payload["tools"]):
         payload["tools"].insert(0, {"type": "x_search"})
@@ -174,9 +160,9 @@ def _request_headers(
 
 
 def _conversation_id(command: dict[str, Any]) -> str:
-    raw = command.get("rawRequest")
-    if not isinstance(raw, dict):
-        raw = {}
+    controls = command.get("controls")
+    if not isinstance(controls, dict):
+        controls = {}
     for field in (
         "prompt_cache_key",
         "conversation_id",
@@ -184,10 +170,10 @@ def _conversation_id(command: dict[str, Any]) -> str:
         "thread_id",
         "session_id",
     ):
-        value = str(raw.get(field) or "").strip()
+        value = str(controls.get(field) or "").strip()
         if value:
             return value
-    metadata = raw.get("metadata")
+    metadata = controls.get("metadata")
     if isinstance(metadata, dict):
         for field in (
             "prompt_cache_key",
@@ -279,11 +265,7 @@ def _tools(raw_tools: Any) -> list[dict[str, Any]]:
 
 
 def _reasoning(command: dict[str, Any]) -> dict[str, Any]:
-    raw = command.get("rawRequest")
-    if isinstance(raw, dict) and isinstance(raw.get("reasoning"), dict):
-        value = _copy(raw["reasoning"])
-    else:
-        value = _copy(command.get("reasoning") or {})
+    value = _copy(command.get("reasoning") or {})
     if not isinstance(value, dict):
         value = {}
     if "effort" not in value:
@@ -309,6 +291,7 @@ def _copy(value: Any) -> Any:
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "Grok")
     if not isinstance(command, dict) or command.get("schemaVersion") != 1:
         raise ValueError("Grok semantic command schema is unsupported")
     if not str(command.get("model") or "").strip():

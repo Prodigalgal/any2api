@@ -7,6 +7,7 @@ import time
 from typing import Any
 from urllib.parse import quote
 
+from .base import reject_raw_request
 from .deepseek_settings import settings
 from .multimodal import text_content
 from .page_fetch_browser import PageFetchBrowserRuntime
@@ -349,13 +350,11 @@ def _thinking(command: dict[str, Any]) -> bool:
     options = command["providerOptions"]
     if isinstance(options.get("thinking_enabled"), bool):
         return options["thinking_enabled"]
-    raw = command.get("rawRequest")
-    if isinstance(raw, dict) and isinstance(raw.get("enable_thinking"), bool):
-        return raw["enable_thinking"]
+    controls = command["controls"]
+    if isinstance(controls.get("enable_thinking"), bool):
+        return controls["enable_thinking"]
     effort = str(
-        command["reasoning"].get("effort")
-        or (raw.get("reasoning_effort") if isinstance(raw, dict) else "")
-        or ""
+        command["reasoning"].get("effort") or controls.get("reasoning_effort") or ""
     ).lower()
     if effort:
         return effort not in {"none", "minimal"}
@@ -366,11 +365,10 @@ def _search(command: dict[str, Any]) -> bool:
     options = command["providerOptions"]
     if isinstance(options.get("search_enabled"), bool):
         return options["search_enabled"]
-    raw = command.get("rawRequest")
-    if isinstance(raw, dict):
-        for field in ("web_search", "enable_search", "search"):
-            if isinstance(raw.get(field), bool):
-                return raw[field]
+    controls = command["controls"]
+    for field in ("web_search", "enable_search", "search"):
+        if isinstance(controls.get(field), bool):
+            return controls[field]
     return any(
         isinstance(tool, dict)
         and str(tool.get("type") or "") in {"web_search", "web_search_preview", "search"}
@@ -379,13 +377,14 @@ def _search(command: dict[str, Any]) -> bool:
 
 
 def _validate_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "DeepSeek")
     if not isinstance(command, dict) or command.get("schemaVersion") != 1:
         raise ValueError("DeepSeek semantic command schema is unsupported")
     if not str(command.get("model") or "").strip():
         raise ValueError("DeepSeek semantic command requires a model")
     if not isinstance(command.get("messages"), list):
         raise TypeError("DeepSeek semantic command messages must be an array")
-    for field in ("reasoning", "providerOptions"):
+    for field in ("reasoning", "providerOptions", "controls"):
         if not isinstance(command.get(field), dict):
             raise TypeError(f"DeepSeek semantic command {field} must be an object")
 

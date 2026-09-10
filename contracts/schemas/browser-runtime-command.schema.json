@@ -118,9 +118,9 @@
         "reasoning": { "type": "object" },
         "tools": { "type": "array" },
         "providerOptions": { "type": "object" },
-        "controls": { "type": "object" },
-        "rawRequest": { "type": "object" }
+        "controls": { "type": "object" }
       },
+      "not": { "required": ["rawRequest"] },
       "additionalProperties": true
     },
     "runtime_plan": { "type": "object" },

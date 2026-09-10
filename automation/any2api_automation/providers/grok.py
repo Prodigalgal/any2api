@@ -475,19 +475,6 @@ def _probe_command(model: str) -> dict[str, Any]:
         "tools": [],
         "providerOptions": {},
         "controls": {},
-        "rawRequest": {
-            "model": model,
-            "stream": True,
-            "store": False,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "Reply with OK."}],
-                }
-            ],
-            "max_output_tokens": 1,
-            "reasoning": {"effort": "low", "summary": "auto"},
-        },
     }
 
 

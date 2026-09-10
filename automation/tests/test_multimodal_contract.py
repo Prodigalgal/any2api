@@ -67,6 +67,28 @@ def test_shared_content_contract_covers_image_audio_video_and_file_sources() -> 
     ]
 
 
+@pytest.mark.parametrize(
+    "builder",
+    [
+        lambda command: build_deepseek_request(command, "session-1"),
+        lambda command: build_glm_command(command, "user@example.test", timestamp_ms=1),
+        build_grok_request,
+        build_grok_console_request,
+        build_grok_web_request,
+        build_longcat_request,
+        build_mimo_chat_request,
+        build_minmax_request,
+        lambda command: build_qwen_request(command, "chat-1"),
+    ],
+)
+def test_provider_builders_reject_opaque_raw_requests(builder) -> None:
+    command = _command([{"role": "user", "content": "hello"}])
+    command["rawRequest"] = {"temperature": 0.1}
+
+    with pytest.raises(ValueError, match="must not contain rawRequest"):
+        builder(command)
+
+
 def test_browser_runtime_schema_declares_all_canonical_media_aliases() -> None:
     schema_path = (
         Path(__file__).resolve().parents[2]
@@ -91,6 +113,9 @@ def test_browser_runtime_schema_declares_all_canonical_media_aliases() -> None:
         "input_file",
         "attachment",
     }
+    semantic_command = schema["properties"]["semantic_command"]
+    assert "rawRequest" not in semantic_command["properties"]
+    assert semantic_command["not"] == {"required": ["rawRequest"]}
 
 
 @pytest.mark.parametrize(

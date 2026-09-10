@@ -26,6 +26,16 @@ _INFERENCE_ACTIONS = frozenset(
 )
 
 
+def reject_raw_request(command: Any, provider_id: str) -> None:
+    """Keep the public request opaque to Runtime/API provider implementations."""
+
+    if isinstance(command, dict) and ("rawRequest" in command or "raw_request" in command):
+        raise ValueError(
+            f"{provider_id} semantic command must not contain rawRequest; "
+            "use canonical fields, controls, or providerOptions"
+        )
+
+
 @dataclass(frozen=True)
 class AutomationProviderManifest:
     id: str

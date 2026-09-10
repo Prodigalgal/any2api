@@ -18,6 +18,7 @@ from patchright.sync_api import sync_playwright
 from ..browser_budget import browser_process_budget
 from ..config import settings as core_settings
 from ..lifecycle.browser import camoufox_config_from_options
+from .base import reject_raw_request
 from .glm_challenge import GlmAliyunChallenge
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .official_browser import (
@@ -638,6 +639,7 @@ def build_glm_command(
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "GLM")
     if not isinstance(command, dict) or command.get("schemaVersion") != 1:
         raise ValueError("GLM semantic command schema is unsupported")
     if not str(command.get("model") or "").strip():

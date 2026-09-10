@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..config import settings as core_settings
+from .base import reject_raw_request
 from .multimodal import text_content, xai_input_content
 from .official_browser import OfficialBrowserRuntime, OfficialBrowserSession
 from .runtime_rules import (
@@ -302,13 +303,11 @@ class GrokConsoleOfficialBrowserTransport(OfficialBrowserRuntime):
 
 def build_grok_console_request(command: dict[str, Any]) -> dict[str, Any]:
     _validate_semantic_command(command)
-    protocol = str(command.get("protocol") or "")
-    raw_request = command.get("rawRequest")
-    if protocol == "RESPONSES" and isinstance(raw_request, dict):
-        payload = _copy_object(raw_request)
-    else:
-        payload = {"input": _input(command.get("messages"))}
-        _copy_generation(payload, command)
+    payload = {"input": _input(command.get("messages"))}
+    _copy_generation(payload, command)
+    controls = command["controls"]
+    if isinstance(controls.get("include"), list):
+        payload["include"] = _copy_object(controls["include"])
     payload["model"] = str(command["model"])
     payload["stream"] = True
     payload["store"] = False
@@ -330,6 +329,7 @@ def build_grok_console_request(command: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_semantic_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "Grok Console")
     if not isinstance(command, dict) or command.get("schemaVersion") != 1:
         raise ValueError("Grok Console semantic command schema is unsupported")
     if not str(command.get("model") or "").strip():

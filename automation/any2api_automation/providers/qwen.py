@@ -23,7 +23,7 @@ from ..lifecycle.browser import (
     run_browser_flow,
 )
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
-from .base import AutomationProvider, AutomationProviderManifest
+from .base import AutomationProvider, AutomationProviderManifest, reject_raw_request
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .qwen_challenge import QwenSignupChallenge, pace
 from .qwen_fingerprint import (
@@ -523,6 +523,7 @@ def build_qwen_request(
 
 
 def _validate_qwen_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "Qwen")
     if command.get("schemaVersion") != 1:
         raise ValueError("Qwen semantic command schema is unsupported")
     if not str(command.get("model") or "").strip():

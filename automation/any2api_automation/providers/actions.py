@@ -92,7 +92,13 @@ class ProviderActionRequest:
         object.__setattr__(self, "action", action)
         object.__setattr__(self, "channel", normalize_channel(self.channel))
         object.__setattr__(self, "payload", dict(self.payload))
-        object.__setattr__(self, "semantic_command", dict(self.semantic_command))
+        semantic_command = dict(self.semantic_command)
+        if "rawRequest" in semantic_command or "raw_request" in semantic_command:
+            raise ValueError(
+                "provider semantic_command must not contain rawRequest; "
+                "use canonical fields, controls, or providerOptions"
+            )
+        object.__setattr__(self, "semantic_command", semantic_command)
         object.__setattr__(self, "runtime_plan", dict(self.runtime_plan))
 
     @classmethod

@@ -69,17 +69,11 @@ def test_grok_console_sanitizes_responses_state_fields_and_tools() -> None:
             "schemaVersion": 1,
             "protocol": "RESPONSES",
             "model": "grok-4.20-0309-reasoning",
-            "messages": [],
-            "rawRequest": {
-                "input": "Reply with OK.",
-                "metadata": {"requester": "test"},
-                "previous_response_id": "response-1",
-                "max_output_tokens": 8,
-            },
-            "generation": {},
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+            "generation": {"max_output_tokens": 8},
             "reasoning": {"effort": "high"},
             "providerOptions": {},
-            "controls": {},
+            "controls": {"metadata": {"requester": "test"}, "previous_response_id": "response-1"},
             "tools": [
                 {
                     "type": "function",
@@ -93,7 +87,7 @@ def test_grok_console_sanitizes_responses_state_fields_and_tools() -> None:
         }
     )
 
-    assert body["input"] == "Reply with OK."
+    assert body["input"][0]["content"][0]["text"] == "Reply with OK."
     assert "metadata" not in body
     assert "previous_response_id" not in body
     assert body["max_output_tokens"] == 8

@@ -6,6 +6,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from .base import reject_raw_request
 from .longcat_settings import settings
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .page_fetch_browser import PageFetchBrowserRuntime
@@ -283,28 +284,30 @@ def build_longcat_request(
     if media_blocks:
         default_agent = "multiModal"
     options = command["providerOptions"]
-    raw = command.get("rawRequest") if isinstance(command.get("rawRequest"), dict) else {}
-    agent_id = _string(options.get("agent_id"), str(raw.get("agent_id") or default_agent))
+    controls = command["controls"]
+    agent_id = _string(options.get("agent_id"), str(controls.get("agent_id") or default_agent))
     reason = _bool(
         options.get("reason_enabled"),
-        raw.get("reason_enabled")
-        if isinstance(raw.get("reason_enabled"), bool)
+        controls.get("reason_enabled")
+        if isinstance(controls.get("reason_enabled"), bool)
         else _reasoning(command, default_reason),
     )
     search = _bool(
         options.get("search_enabled"),
-        raw.get("search_enabled")
-        if isinstance(raw.get("search_enabled"), bool)
+        controls.get("search_enabled")
+        if isinstance(controls.get("search_enabled"), bool)
         else default_search,
     )
     tools = _normalize_tools(command.get("tools"))
-    choice = raw.get("tool_choice")
-    creation_param = raw.get("creationParam") if isinstance(raw.get("creationParam"), dict) else {}
+    choice = controls.get("tool_choice")
+    creation_param = (
+        controls.get("creationParam") if isinstance(controls.get("creationParam"), dict) else {}
+    )
     if choice == "none":
         tools = []
     content = _prompt(command.get("messages"), allow_media=bool(media_blocks))
     if tools:
-        content = _append_tool_contract(content, tools, choice, raw.get("parallel_tool_calls"))
+        content = _append_tool_contract(content, tools, choice, controls.get("parallel_tool_calls"))
     return {
         "content": content,
         "agent_id": agent_id,
@@ -433,7 +436,7 @@ def _reasoning(command: dict[str, Any], fallback: bool) -> bool:
     value = (
         command["providerOptions"].get("reasoning_effort")
         or command["reasoning"].get("effort")
-        or (command.get("rawRequest") or {}).get("reasoning_effort")
+        or command["controls"].get("reasoning_effort")
     )
     return fallback if value in {None, ""} else str(value).lower() not in {"none", "minimal"}
 
@@ -454,6 +457,7 @@ def _bool(value: Any, fallback: Any) -> bool:
 
 
 def _validate_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "LongCat")
     if not isinstance(command, dict) or command.get("schemaVersion") != 1:
         raise ValueError("LongCat semantic command schema is unsupported")
     if not str(command.get("model") or "").strip():

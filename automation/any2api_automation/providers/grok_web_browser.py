@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..config import settings as core_settings
+from .base import reject_raw_request
 from .multimodal import text_content
 from .official_browser import OfficialBrowserRuntime, OfficialBrowserSession
 from .runtime_rules import RuntimePlan, RuntimeRuleDiscoveryError, runtime_canary, successful_canary
@@ -370,6 +371,7 @@ def build_grok_web_request(command: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_command(command: dict[str, Any]) -> None:
+    reject_raw_request(command, "Grok Web")
     if not isinstance(command, dict) or command.get("schemaVersion") != 1:
         raise ValueError("Grok Web semantic command schema is unsupported")
     if not str(command.get("model") or "").strip():

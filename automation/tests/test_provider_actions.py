@@ -59,6 +59,16 @@ def test_legacy_transport_is_converted_to_a_stable_action() -> None:
     assert request.legacy_payload()["action"] == "model_discovery"
 
 
+def test_semantic_action_rejects_an_opaque_raw_request() -> None:
+    with pytest.raises(ValueError, match="must not contain rawRequest"):
+        ProviderActionRequest(
+            provider_id="dummy",
+            action=ProviderAction.CHAT,
+            channel=CAMOUFOX_BROWSER_RUNTIME,
+            semantic_command={"rawRequest": {"model": "upstream"}},
+        )
+
+
 @pytest.mark.asyncio
 async def test_dispatcher_uses_the_declared_channel_and_action_binding() -> None:
     provider = DummyProvider()

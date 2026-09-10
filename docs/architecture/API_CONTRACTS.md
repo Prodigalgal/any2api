@@ -111,6 +111,11 @@ Common fields enter `CanonicalRequest`; native differences enter:
 }
 ```
 
+`CanonicalRequest.rawRequest` is Java-side validation, telemetry, and compatibility data only. It
+must not cross the internal Action boundary. Runtime/API channels receive the canonical maps plus
+an explicit `controls` allowlist; each provider mapper is solely responsible for converting those
+values into its own upstream field names, nesting, defaults, uploads, and event protocol.
+
 MinMax request-only options are isolated in its namespace:
 
 ```json

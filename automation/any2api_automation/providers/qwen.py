@@ -110,7 +110,7 @@ class QwenAutomationProvider(AutomationProvider):
         ) as proxy_url:
             result = await _qwen_models_request(current, proxy_url, plan, payload)
         status = int(result.get("status") or 502)
-        body = str(result.get("body") or "")
+        body = _qwen_body_text(result)
         response: dict[str, Any] = {
             "healthy": 200 <= status < 300 and _qwen_model_catalog_available(body),
             "auth_expired": status in {401, 403},
@@ -698,10 +698,14 @@ def _qwen_sse_data(body: bytes) -> list[str]:
 
 
 def _qwen_body_excerpt(result: dict[str, Any]) -> str:
+    return _qwen_body_text(result)[:16_384]
+
+
+def _qwen_body_text(result: dict[str, Any]) -> str:
     try:
-        return _decode_qwen_body(result).decode("utf-8", errors="replace")[:16_384]
+        return _decode_qwen_body(result).decode("utf-8", errors="replace")
     except RuntimeError:
-        return str(result.get("body") or "Qwen browser request failed")[:16_384]
+        return str(result.get("body") or "Qwen browser request failed")
 
 
 def _qwen_chat_id(value: Any) -> str:

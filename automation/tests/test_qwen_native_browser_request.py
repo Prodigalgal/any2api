@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
-from any2api_automation.providers.qwen import _qwen_json_body
+from any2api_automation.providers.qwen import _qwen_body_excerpt, _qwen_json_body
 from any2api_automation.providers.qwen_fingerprint import (
     new_qwen_fingerprint,
     qwen_fingerprint_digest,
@@ -47,6 +47,12 @@ def test_qwen_json_body_decodes_native_browser_response() -> None:
     ).decode()
 
     assert _qwen_json_body({"body_base64": encoded})["data"]["id"] == "chat-1"
+
+
+def test_qwen_model_catalog_reads_native_base64_response_body() -> None:
+    encoded = base64.b64encode(b'{"data":{"models":[{"id":"qwen3.8-max"}]}}').decode()
+
+    assert "qwen3.8-max" in _qwen_body_excerpt({"body_base64": encoded})
 
 
 @pytest.mark.asyncio

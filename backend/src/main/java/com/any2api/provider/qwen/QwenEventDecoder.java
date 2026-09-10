@@ -162,7 +162,18 @@ final class QwenEventDecoder {
         return object.hasNonNull("error")
             || object.path("data").hasNonNull("error")
             || object.path("output").hasNonNull("error")
-            || object.path("response").hasNonNull("error");
+            || object.path("response").hasNonNull("error")
+            || hasNonEmptyRet(object)
+            || hasNonEmptyRet(object.path("data"))
+            || hasNonEmptyRet(object.path("output"))
+            || hasNonEmptyRet(object.path("response"))
+            || hasNonEmptyRet(object.path("error"));
+    }
+
+    private boolean hasNonEmptyRet(JsonNode object) {
+        var ret = object.path("ret");
+        return ret.isArray() && !ret.isEmpty()
+            || ret.isTextual() && !ret.asText().isBlank();
     }
 
     private String errorType(JsonNode object) {
@@ -178,6 +189,10 @@ final class QwenEventDecoder {
             || text.contains("not found") || text.contains("invalid"))) {
             return "model_unavailable";
         }
+        if (text.contains("invalid_input") || text.contains("invalid input")
+            || text.contains("bad request") || text.contains("validation")) {
+            return "invalid_request_error";
+        }
         if (text.contains("rate") || text.contains("too many") || text.contains("throttl")
             || text.contains("429")) {
             return "rate_limited";
@@ -187,7 +202,8 @@ final class QwenEventDecoder {
             || text.contains("exhaust")) {
             return "quota_exhausted";
         }
-        if (text.contains("captcha") || text.contains("verify")) return "captcha_rejected";
+        if (text.contains("captcha") || text.contains("verify")
+            || text.contains("fail_sys_user_validate")) return "captcha_rejected";
         if (text.contains("token") || text.contains("auth") || text.contains("login")) {
             return "credential_rejected";
         }
@@ -204,6 +220,11 @@ final class QwenEventDecoder {
                 }
             }
             if (source.isValueNode() && !source.isNull()) output.append(' ').append(source.asText());
+            if (source.isArray()) {
+                for (var value : source) {
+                    if (value.isValueNode() && !value.isNull()) output.append(' ').append(value.asText());
+                }
+            }
         }
         return output.toString();
     }
@@ -212,9 +233,14 @@ final class QwenEventDecoder {
         return List.of(
             object.path("error"),
             object.path("error").path("data"),
+            object.path("error").path("ret"),
+            object.path("ret"),
             object.path("data").path("error"),
+            object.path("data").path("ret"),
             object.path("output").path("error"),
-            object.path("response").path("error"));
+            object.path("output").path("ret"),
+            object.path("response").path("error"),
+            object.path("response").path("ret"));
     }
 
     private void start(List<CanonicalEvent> output) {

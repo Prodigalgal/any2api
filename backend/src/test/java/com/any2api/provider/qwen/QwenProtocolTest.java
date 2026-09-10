@@ -318,6 +318,26 @@ class QwenProtocolTest {
     }
 
     @Test
+    void classifiesProviderInvalidInputAsAClientRequestError() {
+        var decoder = new QwenEventDecoder("invalid-input");
+
+        var events = decoder.decode("{\"error\":{\"code\":\"invalid_input\"}}");
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("invalid_request_error"));
+    }
+
+    @Test
+    void classifiesRetBasedCaptchaEventsAsCaptchaFailures() {
+        var decoder = new QwenEventDecoder("captcha");
+
+        var events = decoder.decode("{\"ret\":[\"FAIL_SYS_USER_VALIDATE\"]}");
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("captcha_rejected"));
+    }
+
+    @Test
     void mapsUploadedVisionFilesWithoutFlatteningThemIntoPromptText() {
         var mapper = new ObjectMapper();
         var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");

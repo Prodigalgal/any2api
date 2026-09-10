@@ -324,6 +324,21 @@ async def _qwen_chat_request(
                 "body": "Qwen media upload returned an incomplete file list",
             }
         uploaded_files = [item for item in uploaded if isinstance(item, dict)]
+        file_fields = sorted({key for item in uploaded_files for key in item})
+        nested_file_fields = sorted(
+            {
+                key
+                for item in uploaded_files
+                if isinstance(item.get("file"), dict)
+                for key in item["file"]
+            }
+        )
+        logger.info(
+            "qwen_media_upload_shape file_count=%s file_fields=%s nested_file_fields=%s",
+            len(uploaded_files),
+            file_fields[:32],
+            nested_file_fields[:32],
+        )
     completion_body = json.dumps(
         build_qwen_request(command, chat_id, uploaded_files=uploaded_files),
         ensure_ascii=False,

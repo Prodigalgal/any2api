@@ -18,11 +18,12 @@
 - LongCat 在当前发布上补充完成 TXT 非流式/SSE 真实 completion；两个不同 ACTIVE/enabled 账号的 `longcat-pro` 账号探针均通过，最近 30 分钟成功请求使用 9 个不同账号。`longcat-flash` 在真实成功样本补充后恢复为 `READY`。
 - Runtime 的公共 Action 已统一先经过共享 semantic command 校验，再由 DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen 各自的 Runtime mapper 翻译为厂商字段；`rawRequest` 不进入 Runtime/API Action 边界。API Channel 仍按计划后置。
 - `ProviderActionDispatcher` 现在会在解析 `CHAT` binding 前统一校验 semantic command；厂商 mapper 保留防御性校验并只负责自己的字段、嵌套、上传和事件协议转换。六家 Runtime 的具体映射矩阵已补入 `docs/architecture/API_CONTRACTS.md`。
+- `a99ec65` 已通过 CI `34537508021` 并由 GitOps `d564532` 发布；Argo CD 为 `Synced / Healthy / Succeeded`，三套 Deployment 已运行同一不可变镜像，Qwen 图片真实复测确认 `image_count=1`、上传 `file_count=1`，上游 `invalid_input` 被映射为 HTTP 400 `invalid_request_error`，且服务端仅 `attempt=1`。
 
 ## 当前推进
 
 - LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；继续观察自然 keepalive、24 小时健康窗口和其他未逐项验证的文件扩展，不将其自动扩大为全部文件格式 Ready。
-- Qwen 文本探针与 keepalive 可用，但图片请求在两个账号上均返回 HTTP 200、392 字节、仅含 `error` 的不完整 SSE；继续定位图片上传后上游拒绝的具体原因，Qwen 整体保持未 Ready。
+- Qwen 文本探针与 keepalive 可用，但图片请求在当前发布仍返回 HTTP 200、392 字节、仅含 `error` 的不完整 SSE；公共层现在返回不可重试的 HTTP 400 `invalid_request_error`，继续定位图片上传后的上游拒绝原因，Qwen 整体保持未 Ready。
 - 等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
 - 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。
 - 当前多模态范围只覆盖图片和文档；音频、视频不纳入本轮 LongCat 聊天输入能力。

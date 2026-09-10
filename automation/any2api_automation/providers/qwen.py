@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import random
 import secrets
 import time
@@ -43,6 +44,8 @@ from .qwen_session import (
 from .qwen_settings import settings
 from .runtime_rules import RuntimePlan, parse_runtime_plan
 from .transport_support import transport_frame, transport_proxy_lease
+
+logger = logging.getLogger(__name__)
 
 
 class QwenAutomationProvider(AutomationProvider):
@@ -263,6 +266,13 @@ async def _qwen_chat_request(
 ) -> dict[str, Any]:
     session_path = _runtime_path(plan, "session", "/api/v2/chats/new")
     completion_path = _runtime_path(plan, "chat", "/api/v2/chat/completions")
+    messages = command.get("messages")
+    media_sources = _qwen_media_sources(messages)
+    logger.info(
+        "qwen_semantic_command_shape message_count=%s image_count=%s",
+        len(messages) if isinstance(messages, list) else -1,
+        len(media_sources),
+    )
     session_body = json.dumps(
         {
             "chatId": "",
@@ -297,7 +307,6 @@ async def _qwen_chat_request(
     if not chat_id:
         return {**session, "status": 502, "body": "Qwen chats/new returned no chat id"}
     merged = {**current, **(session.get("credential_patch") or {})}
-    media_sources = _qwen_media_sources(command.get("messages"))
     uploaded_files: list[dict[str, Any]] = []
     upload: dict[str, Any] = {}
     if media_sources:

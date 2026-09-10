@@ -253,7 +253,12 @@ _UPLOAD_MEDIA = r"""async input => {
         return text.split('?', 1)[0].replace(/^\/+/, '');
       }
     };
-    const objectKey = explicitObjectKey || uploadId || objectKeys.shift() || objectKeyFromUrl(cdnUrl);
+    const policyObjectKey = objectKeys.shift() || '';
+    const urlObjectKey = objectKeyFromUrl(cdnUrl);
+    const objectKey = explicitObjectKey || policyObjectKey || urlObjectKey;
+    const objectKeySource = explicitObjectKey ? 'uploader'
+      : policyObjectKey ? 'policy_callback'
+      : urlObjectKey ? 'cdn_path' : '';
     if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }
@@ -267,6 +272,7 @@ _UPLOAD_MEDIA = r"""async input => {
       preview_url: cdnUrl,
       cdn_url: cdnUrl,
       object_key: objectKey,
+      object_key_source: objectKeySource,
       data_url: cdnUrl
     });
   }
@@ -389,6 +395,21 @@ class MinmaxOfficialBrowserTransport:
                 not isinstance(item, dict) for item in result
             ):
                 raise RuntimeError("MinMax media upload returned an incomplete result")
+            for item in result:
+                cdn_url = str(item.get("cdn_url") or item.get("preview_url") or "").strip()
+                parsed_url = urlparse(cdn_url)
+                object_key = str(item.get("object_key") or "").strip()
+                logger.info(
+                    "minmax_official_media_upload_result upload_id_present=%s "
+                    "object_key_present=%s object_key_source=%s object_key_length=%s "
+                    "cdn_host=%s cdn_path=%s",
+                    bool(str(item.get("file_key") or "").strip()),
+                    bool(object_key),
+                    str(item.get("object_key_source") or "unknown"),
+                    len(object_key),
+                    parsed_url.hostname or "",
+                    parsed_url.path[:240],
+                )
             return list(result)
 
     async def stream(

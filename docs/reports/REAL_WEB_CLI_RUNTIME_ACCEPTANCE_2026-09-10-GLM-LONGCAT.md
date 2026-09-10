@@ -39,6 +39,7 @@ GLM-4.6V 的图片输入来自官方目录 `capabilities.vision=true`；GLM-5.2 
 
 - `glm/glm-5.2`：文本非流式 HTTP 200，文本 SSE HTTP 200、存在数据和 `[DONE]`。
 - `glm/glm-4.6v`：纯图片输入非流式 HTTP 200，纯图片输入 SSE HTTP 200、存在识别结果和 `[DONE]`。
+- 有效 PDF 发给 `glm/glm-5.2`：HTTP 400，`unsupported_parameter`，明确提示 `glm does not support content block type input_file`；这证明文档拒绝是当前真实契约边界，不是未验证占位。
 
 因此 GLM 的业务功能链路通过，但运行窗口尚未达到稳定 Ready 门槛；历史失败样本不能通过清理或降低阈值隐藏。
 

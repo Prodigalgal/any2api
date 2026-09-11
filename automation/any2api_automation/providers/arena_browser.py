@@ -556,18 +556,48 @@ def _capability_enabled(value: Any) -> bool:
     return False
 
 
-def _arena_ndjson_stream_script(binding_name: str) -> str:
+def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> str:
     binding = json.dumps(binding_name)
+    site_key = json.dumps(recaptcha_site_key)
     return rf"""async request => {{
   const emit = event => window[{binding}]({{requestId: request.requestId, ...event}});
+  const getRecaptchaV3Token = async () => {{
+    const enterprise = window.grecaptcha?.enterprise;
+    if (typeof enterprise?.ready !== 'function' || typeof enterprise?.execute !== 'function') {{
+      return '';
+    }}
+    const execute = new Promise(resolve => enterprise.ready(async () => {{
+      try {{
+        const token = await enterprise.execute({site_key}, {{action: 'chat_submit'}});
+        resolve(typeof token === 'string' ? token : '');
+      }} catch (_) {{
+        resolve('');
+      }}
+    }}));
+    const timeout = new Promise(resolve => setTimeout(() => resolve(''), 10_000));
+    return await Promise.race([execute, timeout]);
+  }};
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
   try {{
+    let requestBody = request.body === '' ? undefined : request.body;
+    if (request.method === 'POST' && request.body !== '') {{
+      try {{
+        const parsedBody = JSON.parse(request.body);
+        if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {{
+          const token = await getRecaptchaV3Token();
+          if (token) {{
+            parsedBody.recaptchaV3Token = token;
+            requestBody = JSON.stringify(parsedBody);
+          }}
+        }}
+      }} catch (_) {{ /* keep the provider's original body */ }}
+    }}
     const response = await fetch(request.url, {{
       method: request.method,
       credentials: 'include',
       headers: request.headers,
-      body: request.body === '' ? undefined : request.body,
+      body: requestBody,
       signal: controller.signal
     }});
     await emit({{type: 'status', status: response.status,
@@ -1135,7 +1165,9 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         )
 
     def stream_request_script(self) -> str:
-        return _arena_ndjson_stream_script(self._binding_name)
+        return _arena_ndjson_stream_script(
+            self._binding_name, arena_settings().arena_recaptcha_site_key
+        )
 
     async def models(
         self,

@@ -10,6 +10,7 @@ from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers.arena_browser import (
     _arena_anonymous_signup_script,
     _arena_me_script,
+    _arena_ndjson_stream_script,
     _arena_set_password_script,
     _arena_sign_in_script,
     _arena_upload_script,
@@ -95,6 +96,15 @@ def test_arena_mapper_translates_search_and_signed_attachments() -> None:
         },
     ]
     assert "rawRequest" not in json.dumps(body)
+
+
+def test_arena_chat_stream_uses_the_official_recaptcha_v3_action() -> None:
+    script = _arena_ndjson_stream_script("__emit", "arena-site-key")
+
+    assert "window.grecaptcha?.enterprise" in script
+    assert "enterprise.execute" in script
+    assert "action: 'chat_submit'" in script
+    assert "parsedBody.recaptchaV3Token" in script
 
 
 def test_arena_media_sources_accept_inline_png_and_pdf_only() -> None:

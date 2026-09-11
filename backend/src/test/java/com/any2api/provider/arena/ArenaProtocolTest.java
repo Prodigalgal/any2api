@@ -125,6 +125,23 @@ class ArenaProtocolTest {
     }
 
     @Test
+    void decodesCurrentArenaPrefixedFrames() {
+        var decoder = new ArenaEventDecoder("arena-request");
+
+        var events = decoder.decode("a2:[{\"type\":\"routed_model\",\"organization\":\"arena\"}]");
+        events.addAll(decoder.decode("a2:[{\"type\":\"heartbeat\"}]"));
+        events.addAll(decoder.decode("a0:\"answer\""));
+        events.addAll(decoder.decode("ad:{\"finishReason\":\"stop\"}"));
+
+        assertThat(events).extracting(CanonicalEvent::getClass)
+            .containsExactly(
+                CanonicalEvent.ResponseStarted.class,
+                CanonicalEvent.OutputTextDelta.class,
+                CanonicalEvent.Completed.class);
+        assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed);
+    }
+
+    @Test
     void classifiesUserNotFoundAsCredentialFailure() {
         var decoder = new ArenaEventDecoder("arena-request");
 

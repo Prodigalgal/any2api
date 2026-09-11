@@ -8,7 +8,7 @@ import java.util.Map;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** Decodes Arena's one-character-prefixed newline-delimited Web stream. */
+/** Decodes Arena's prefix-coded newline-delimited Web stream. */
 final class ArenaEventDecoder {
     private final String requestId;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -35,8 +35,11 @@ final class ArenaEventDecoder {
             fail(output, "provider_protocol_violation");
             return output;
         }
-        var code = frame.charAt(0);
-        var payload = frame.substring(1).trim();
+        var separator = frame.indexOf(':');
+        var code = separator > 0 ? frame.substring(0, separator) : frame.substring(0, 1);
+        var payload = separator > 0
+            ? frame.substring(separator + 1).trim()
+            : frame.substring(1).trim();
         if (payload.startsWith(":")) payload = payload.substring(1).trim();
         JsonNode value;
         try {
@@ -46,29 +49,30 @@ final class ArenaEventDecoder {
             return output;
         }
         switch (code) {
-            case '0' -> text(value, output);
-            case '2' -> data(value, output);
-            case '3' -> fail(output, classifyError(textValue(value)));
-            case '8', '9', 'a', 'b', 'c', 'h', 'i', 'j' -> {
+            case "0", "a0" -> text(value, output);
+            case "2" -> data(value, output);
+            case "a2" -> metadata(value, output);
+            case "3", "a3" -> fail(output, classifyError(textValue(value)));
+            case "8", "9", "a", "b", "c", "h", "i", "j" -> {
                 /* Arena emits annotations, tool frames, and reasoning metadata around text. */
             }
-            case 'k' -> fail(output, "unsupported_model_output");
-            case 'd' -> {
+            case "k", "ak" -> fail(output, "unsupported_model_output");
+            case "d", "ad" -> {
                 usage(value.path("usage"), output);
                 complete(output, firstText(value, "finishReason", "finish_reason", "reason", "stop"));
             }
-            case 'e' -> {
+            case "e", "ae" -> {
                 if (!value.path("isContinued").asBoolean(false)) {
                     usage(value.path("usage"), output);
                     complete(output, firstText(value, "finishReason", "finish_reason", "reason", "stop"));
                 }
             }
-            case 'f' -> {
+            case "f", "af" -> {
                 var id = firstText(value, "messageId", "message_id", "id", "responseId");
                 if (!id.isBlank()) responseId = id;
                 start(output);
             }
-            case 'g' -> reasoning(value, output);
+            case "g", "ag" -> reasoning(value, output);
             default -> fail(output, "provider_protocol_violation");
         }
         return output;
@@ -121,6 +125,10 @@ final class ArenaEventDecoder {
                 return;
             }
         }
+    }
+
+    private void metadata(JsonNode value, List<CanonicalEvent> output) {
+        if (!value.isArray()) fail(output, "provider_protocol_violation");
     }
 
     private void usage(JsonNode value, List<CanonicalEvent> output) {

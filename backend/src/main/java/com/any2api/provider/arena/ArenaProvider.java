@@ -144,6 +144,7 @@ public final class ArenaProvider implements InferenceProvider {
         return Flux.defer(() -> {
             var decoder = new ArenaEventDecoder(request.requestId());
             var status = new AtomicInteger(-1);
+            var frameCount = new AtomicInteger();
             return transport.stream(
                     MANIFEST.id(),
                     "chat",
@@ -166,7 +167,15 @@ public final class ArenaProvider implements InferenceProvider {
                         sink.error(new ArenaUpstreamException(
                             code, summarize(code, frame.path("data").asText(""))));
                     } else if ("data".equals(type) && status.get() < 400) {
-                        sink.next(frame.path("data").asText("").getBytes(StandardCharsets.UTF_8));
+                        var data = frame.path("data").asText("");
+                        if (frameCount.getAndIncrement() < 12) {
+                            LOGGER.info(
+                                "arena_upstream_frame index={} prefix={} bytes={}",
+                                frameCount.get() - 1,
+                                data.isBlank() ? "<blank>" : data.substring(0, 1),
+                                data.getBytes(StandardCharsets.UTF_8).length);
+                        }
+                        sink.next(data.getBytes(StandardCharsets.UTF_8));
                     } else if ("credential_patch".equals(type)) {
                         context.acceptCredentialPatch(frame.path("data"));
                     }

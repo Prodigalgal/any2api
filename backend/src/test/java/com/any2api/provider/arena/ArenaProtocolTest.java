@@ -92,6 +92,20 @@ class ArenaProtocolTest {
     }
 
     @Test
+    void ignoresArenaMetadataFrameBeforeOutput() {
+        var decoder = new ArenaEventDecoder("arena-request");
+
+        var events = decoder.decode("a:{\"auto_resume\":false,\"click_behavior\":\"none\"}");
+        events.addAll(decoder.decode("f:{\"messageId\":\"msg-1\"}"));
+        events.addAll(decoder.decode("0:\"answer\""));
+        events.addAll(decoder.decode("d:{\"finishReason\":\"stop\"}"));
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta);
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Completed);
+        assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed);
+    }
+
+    @Test
     void classifiesUserNotFoundAsCredentialFailure() {
         var decoder = new ArenaEventDecoder("arena-request");
 

@@ -49,8 +49,10 @@ final class ArenaEventDecoder {
             case '0' -> text(value, output);
             case '2' -> data(value, output);
             case '3' -> fail(output, classifyError(textValue(value)));
-            case '8', 'h', 'i', 'j' -> { /* annotations, sources, and reasoning metadata */ }
-            case '9', 'a', 'b', 'c', 'k' -> fail(output, "unsupported_model_output");
+            case '8', 'a', 'h', 'i', 'j' -> {
+                /* Arena emits these metadata frames before and around model output. */
+            }
+            case '9', 'b', 'c', 'k' -> fail(output, "unsupported_model_output");
             case 'd' -> {
                 usage(value.path("usage"), output);
                 complete(output, firstText(value, "finishReason", "finish_reason", "reason", "stop"));

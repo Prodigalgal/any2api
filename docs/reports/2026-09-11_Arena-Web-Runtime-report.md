@@ -6,16 +6,16 @@
 Camoufox Browser Runtime，不接入 Arena 官方 API/CLI Channel，也不开放 Battle、
 Side-by-side 等模式。
 
-0.16.4 已在 K8S 上取得 Arena Direct 的真实 Search、图片和 PDF 非流式/SSE 成功样本；
+0.16.5 已在 K8S 上取得 Arena Direct 的真实文本、Search、图片和 PDF 非流式/SSE 成功样本；
 PDF 成功样本使用当前目录声明支持文件输入且账号探针通过的 `claude-sonnet-4-6`。
 `Max` 当前不声明文件输入，发送 PDF 时返回明确的能力错误，这是正确的契约门禁。
 
-当前整体状态仍为 `DEGRADED / ACCOUNT_RECOVERY_PENDING`，不是“所有账号稳定 Ready”：
-Arena 账号池现场快照为 9 个账号，其中仅 2 个 `ACTIVE/enabled`，另有 4 个注册后待探针
-账号、2 个凭据失效账号和 1 个历史反爬/协议失败账号。恢复失败的直接原因已定位为 Java
-生命周期客户端的默认 256 KiB 解码上限触发 `DataBufferLimitException`，不是 TOU 弹窗、
-reCAPTCHA V3 发放失败或 Arena 协议解析失败。0.16.5 已加入受控响应上限，待 CI/GitOps
-发布后重新跑恢复和多账号稳定性验收。
+当前整体状态仍为 `DEGRADED / HEALTH_WINDOW`，不是“所有账号稳定 Ready”：
+Arena 账号池现场快照为 9 个账号，其中 7 个 `ACTIVE/enabled`、1 个凭据失效账号和 1 个
+历史反爬/协议失败账号。旧版本恢复失败的直接原因已定位为 Java 生命周期客户端的默认
+256 KiB 解码上限触发 `DataBufferLimitException`，不是 TOU 弹窗、reCAPTCHA V3 发放失败
+或 Arena 协议解析失败。0.16.5 的受控响应上限已在真实 reauthenticate 和账号探针中生效；
+当前剩余阻断是 24 小时健康窗口和历史失败样本，不能通过清理历史指标伪造 Ready。
 
 ## 已确认的 Web 协议
 
@@ -59,14 +59,14 @@ flowchart LR
 
 ## 当前真实验收证据
 
-以下记录来自 0.16.4 K8S 运行态，均通过临时测试密钥调用公开 OpenAI-compatible 路由，
+以下记录来自 0.16.5 K8S 运行态，均通过临时测试密钥调用公开 OpenAI-compatible 路由，
 测试密钥已在测试结束后清理；账号、邮箱、密钥和内部标识不写入本报告。
 
 | 能力 | 模型/模式 | 非流式 | SSE | 结论 |
 |---|---|---:|---:|---|
-| 文本 | Arena Direct | HTTP 200、JSON、存在 choices | 由同一 Chat Runtime 处理 | 已通过 |
+| 文本 | Arena Direct | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、6 个数据帧、含 `[DONE]` | 已通过 |
 | Search | `Max` + `web_search=true` | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、14 个数据帧、含 `[DONE]` | 已通过 |
-| 图片 | `claude-sonnet-4-6` + inline PNG | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、4 个数据帧、含 `[DONE]` | 已通过，受账号池稳定性约束 |
+| 图片 | `Max` + inline PNG | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、4 个数据帧、含 `[DONE]` | 已通过，受账号池稳定性约束 |
 | PDF | `claude-sonnet-4-6` + inline PDF | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、13 个数据帧、含 `[DONE]` | 已通过，限于声明 file 能力的模型 |
 | PDF 能力门禁 | `Max` | HTTP 400、`unsupported_parameter`、参数 `input` | 不进入上游流 | 正确拒绝 |
 
@@ -99,14 +99,14 @@ flowchart LR
 
 | 状态 | 数量 | 说明 |
 |---|---:|---|
-| `ACTIVE/enabled` | 2 | 当前可进入 inference pool |
-| `PENDING/disabled` | 4 | 注册成功后尚未完成账号专属推理探针 |
-| `EXPIRED/disabled` | 2 | 上游凭据返回 401 后进入重新认证流程 |
+| `ACTIVE/enabled` | 7 | 当前可进入 inference pool |
+| `PENDING/disabled` | 0 | 已完成账号专属推理探针 |
+| `EXPIRED/disabled` | 1 | 上游凭据返回 401 后进入重新认证流程 |
 | `DEGRADED/disabled` | 1 | 历史反爬/协议失败，保留作诊断，不强行启用 |
 
 旧版本恢复事件大量出现 `automation_transport_error`，详细原因为
 `DataBufferLimitException`；这发生在 Java 读取 Automation 返回的浏览器状态上下文阶段。
-0.16.5 的响应缓冲修复发布后，验收顺序为：
+0.16.5 的响应缓冲修复已发布并取得 1 笔 reauthenticate、4 笔账号探针成功；后续验收顺序为：
 
 1. 观察 PENDING/EXPIRED 账号的 `reauthenticate` 是否能完成并写回 credential patch。
 2. 对恢复账号执行账号专属 inference probe，确认进入 inference pool。
@@ -115,10 +115,11 @@ flowchart LR
 
 ## 发布与回滚
 
-- 代码候选：`0.16.5`，包含生命周期响应缓冲修复和对应回归测试。
-- 0.16.4 K8S 运行态：Argo CD `Synced/Healthy/Succeeded`，server、automation、web 使用
-  同一 `8a131b0` SHA 镜像，业务 Pod Ready、重启 0；本轮检查未发现新增 `OOMKilled`。
-- 0.16.5 在 CI、GitOps 和 K8S 验收完成前，不把本地测试结果写成线上结果。
+- 当前制品：`0.16.5`，提交 `0075462`，包含生命周期响应缓冲修复和对应回归测试。
+- CI `34628549967` 全部质量检查、三套镜像构建和 `update-gitops` 成功；GitOps revision
+  `588c7c4…` 已由 Argo CD `Synced/Healthy/Succeeded` 应用。
+- K8S server、automation、web 均运行 `*-sha-0075462…` 不可变镜像，业务 Pod Ready、
+  重启 0；本轮检查未发现新增 `OOMKilled` 或 0.16.5 后的 `DataBufferLimitException`。
 - 若 0.16.5 发布后出现回归，Backend/Web/Automation 可回滚到上一不可变 0.16.4 SHA 镜像；
   不删除或重置已有 Arena 账号。
 

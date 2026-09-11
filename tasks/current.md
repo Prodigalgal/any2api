@@ -6,7 +6,7 @@
 - Arena 对外只接受 `direct` 语义；官方新会话所需的 wire `mode=direct-battle` 仅作为内部协议值保留，不开放 Battle/Side-by-side，不发送 `modelBId`。
 - Arena 注册修复已加入 provisional user 多来源等待提取、匿名注册/密码设置瞬态重试和激活链接 `NS_BINDING_ABORTED` 目标页确认；已成功落库的账号不删除、不重置，继续由生命周期探针接管。
 - Arena 对话已加入官方 Enterprise V3 → V2 escalation：仅当上游明确返回 `recaptcha validation failed` 或 `prompt failed` 时渲染官方 V2 widget；没有官方 callback token 时返回 `recaptcha_v2_required`，不伪造或绕过验证。
-- 0.16.5 候选新增受控的 Automation 响应缓冲（默认 8 MiB，允许范围 256 KiB–32 MiB），修复浏览器状态上下文回传时的 `DataBufferLimitException`，同时保留 OOM 上限；本地 Backend、Automation 和 Web 验证已通过，等待 CI/GitOps/K8S 发布复核。
+- 0.16.5 新增受控的 Automation 响应缓冲（默认 8 MiB，允许范围 256 KiB–32 MiB），修复浏览器状态上下文回传时的 `DataBufferLimitException`，同时保留 OOM 上限；本地、CI、GitOps 和 K8S 验证均已通过。
 
 ## Arena 适配（0.16.5，K8S 验证中）
 
@@ -16,15 +16,15 @@
 - 文本请求使用 Arena `POST /nextjs-api/stream/create-evaluation` 的一字符前缀 NDJSON 帧；`0/2/3/d/e/f/g` 已映射到统一 canonical events，验证码、额度、认证、限流、模型不可用和协议错误分别归类。
 - 图片/PDF 输入使用同一账号页面导出的 `uploadFile` 与 signed upload action，随后发送 `experimental_attachments`；当前适配只声明 PNG/JPEG/WebP 与 PDF，远程 URL、file ID、音频、视频和未声明文档格式在浏览器请求前失败。
 - `provider_options.arena.web_search=true`（或契约允许的 `web_search`）映射为 Arena 原生 `modality="search"`；Search 能力按当前模型目录 `outputCapabilities.search` 做检查。
-- K8S 已保留真实 Arena 注册账号，不删除、不重置；0.16.4 上已取得 Direct Search 非流式/SSE、`claude-sonnet-4-6` PDF 非流式/SSE、图片非流式/SSE 的真实成功样本。当前仍需在 0.16.5 发布后完成生命周期恢复、多账号稳定性和再次验收，未满足前不得标记 `Ready`。
+- K8S 已保留真实 Arena 注册账号，不删除、不重置；0.16.5 已取得 Direct 文本、Search、图片和 PDF 非流式/SSE 的真实成功样本。模型健康窗口仍为 `DEGRADED`，在成功率/P95 和长期账号切换证据达标前不得标记 `Ready`。
 
 ## 当前推进（2026-09-12）
 
 - 当前源码候选为 `0.16.5`；修复点是 Java `LifecycleAutomationClient` 与 `AutomationProviderCatalog` 的响应解码上限，不取消上限、不扩大浏览器并发。配置键为 `ANY2API_AUTOMATION_MAX_RESPONSE_BYTES`，默认 `8388608`。
-- 0.16.4 K8S 运行态在电脑重启后已恢复：Argo CD `Synced/Healthy/Succeeded`，server、automation、web 使用同一 `8a131b0` 不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现新增 `OOMKilled`。0.16.5 尚未部署，不能把本地结果冒充线上结果。
-- Arena Direct 真实证据：Search 非流式 HTTP 200 JSON、SSE HTTP 200 且 14 个数据帧含 `[DONE]`；`claude-sonnet-4-6` PDF 非流式 HTTP 200、SSE HTTP 200 且 13 个数据帧含 `[DONE]`；图片非流式 HTTP 200、SSE HTTP 200 且 4 个数据帧含 `[DONE]`。Arena V3 reCAPTCHA 已取得 `issued/available=true` 记录；V2 只走官方 widget 升级边界，不伪造 callback、不绕过验证。
+- 0.16.5 K8S 运行态已稳定：Argo CD `Synced/Healthy/Succeeded`，server、automation、web 使用同一 `0075462` 不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现新增 `OOMKilled` 或发布后的 `DataBufferLimitException`。
+- Arena Direct 真实证据：文本非流式/SSE、Search 非流式/SSE、Max 图片非流式/SSE、`claude-sonnet-4-6` PDF 非流式/SSE 均 HTTP 200 并完成；SSE 分别取得 6/8/4/13 个数据帧并包含 `[DONE]`。Arena V3 reCAPTCHA 已取得 `issued/available=true` 记录；V2 只走官方 widget 升级边界，不伪造 callback、不绕过验证。
 - Arena `Max` 当前目录不声明文件输入；对 Max 发送 PDF 返回 HTTP 400 `unsupported_parameter`（`input`），属于正确的模型能力门禁。PDF 验收使用声明 `file` 能力并已探针通过的 `claude-sonnet-4-6`，不能将能力扩展到 Max 或未声明模型。
-- 账号聚合快照为 9 个：2 个 `ACTIVE/enabled`、4 个注册后待探针 `PENDING/disabled`、2 个凭据失败 `EXPIRED/disabled`、1 个历史反爬/协议失败 `DEGRADED/disabled`。失败事件集中出现 `automation_transport_error/DataBufferLimitException`，0.16.5 发布后需重新观察 reauthenticate 是否能完成并恢复账号池；在此之前 Arena 总体保持 `DEGRADED`。
+- 账号聚合快照为 9 个：7 个 `ACTIVE/enabled`、0 个 `PENDING/disabled`、1 个凭据失败 `EXPIRED/disabled`、1 个历史反爬/协议失败 `DEGRADED/disabled`。0.16.5 已验证 1 笔 reauthenticate 和 4 笔账号探针成功；剩余账号恢复与 24 小时健康窗口继续观察，Arena 总体保持 `DEGRADED`。
 
 ## 历史推进记录（0.14.1 及之前）
 

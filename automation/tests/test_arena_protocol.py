@@ -221,7 +221,7 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
         def wait_for_link_sync(self, mailbox: Mailbox, **kwargs: object) -> str:
             assert mailbox.address == "a2a@example.test"
             self.seen = kwargs["seen_ids"]
-            return "https://arena.ai/auth/verify?token=one-time"
+            return "https://cdn.arena.ai/auth/verify?token=one-time"
 
     page = Page()
     mail = Mail()

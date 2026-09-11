@@ -1100,7 +1100,7 @@ def _validate_arena_link(value: str) -> str:
     host = (parsed.hostname or "").lower().rstrip(".")
     if (
         parsed.scheme != "https"
-        or host not in {"arena.ai", "www.arena.ai"}
+        or not (host == "arena.ai" or host.endswith(".arena.ai"))
         or parsed.username
         or parsed.password
         or not parsed.path.startswith("/")

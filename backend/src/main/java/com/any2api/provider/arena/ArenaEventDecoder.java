@@ -37,6 +37,7 @@ final class ArenaEventDecoder {
         }
         var code = frame.charAt(0);
         var payload = frame.substring(1).trim();
+        if (payload.startsWith(":")) payload = payload.substring(1).trim();
         JsonNode value;
         try {
             value = mapper.readTree(payload);

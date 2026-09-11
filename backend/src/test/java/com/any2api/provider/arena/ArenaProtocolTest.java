@@ -70,10 +70,10 @@ class ArenaProtocolTest {
         var decoder = new ArenaEventDecoder("arena-request");
 
         var events = List.of(
-            decoder.decode("f{\"messageId\":\"arena-message\"}"),
-            decoder.decode("0\"hello\""),
-            decoder.decode("2[{\"type\":\"search\",\"text\":\"source\"}]"),
-            decoder.decode("d{\"finishReason\":\"stop\",\"usage\":{\"promptTokens\":2,\"completionTokens\":3}}"))
+            decoder.decode("f:{\"messageId\":\"arena-message\"}"),
+            decoder.decode("0:\"hello\""),
+            decoder.decode("2:[{\"type\":\"search\",\"text\":\"source\"}]"),
+            decoder.decode("d:{\"finishReason\":\"stop\",\"usage\":{\"promptTokens\":2,\"completionTokens\":3}}"))
             .stream()
             .flatMap(List::stream)
             .toList();
@@ -95,7 +95,7 @@ class ArenaProtocolTest {
     void classifiesUserNotFoundAsCredentialFailure() {
         var decoder = new ArenaEventDecoder("arena-request");
 
-        var events = decoder.decode("3\"User not found\"");
+        var events = decoder.decode("3:\"User not found\"");
 
         assertThat(events).singleElement().isInstanceOf(CanonicalEvent.Failed.class);
         assertThat(((CanonicalEvent.Failed) events.getFirst()).errorType())

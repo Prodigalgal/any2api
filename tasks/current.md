@@ -23,7 +23,7 @@
 ## 当前推进
 
 - 最新业务版本已迭代到 `0.14.1`：源码 `fc33232`、CI `34556906088`、GitOps `46b6e98`、Argo revision `46b6e985...` 已形成同一不可变发布链路；server、automation、web 全部运行 `*-sha-fc33232...`，Pod Ready、重启 0、无新的 `OOMKilling` 事件。本地 `ircs-prod-config` checkout 已 fast-forward 到 `46b6e98`。
-- 生命周期过期凭据修复已在生产生效：Qwen 过期 keepalive 记录为 `credential_refresh_scheduled`，账号进入 `EXPIRED/disabled` 并生成 `reauthenticate`；第一笔真实 reauthenticate 在 `inference_probe` 阶段因 `provider_transport_error/PrematureCloseException` 失败，当前继续观察重试，不标 Qwen Ready。:codex-annotation{index="1"}
+- 生命周期过期凭据修复已在生产生效：Qwen 过期 keepalive 记录为 `credential_refresh_scheduled`，账号进入 `EXPIRED/disabled` 并生成 `reauthenticate`；截至 11:27 已有 7 笔真实 reauthenticate 在 `inference_probe` 阶段因 `provider_transport_error/PrematureCloseException` 失败，另有 1 笔 keepalive 同类失败，当前继续处理上游 Runtime 稳定性，不标 Qwen Ready。:codex-annotation{index="1"}
 - Qwen 当前账号快照为 6 个 `ACTIVE/enabled`（其中 3 个 expiry fence 已过期）、40 个 `EXPIRED/disabled`、1 个 `PENDING/disabled`；这证明生命周期分流已发生，但恢复稳定性和上游 transport 仍未闭环。
 - MiniMax 保留 7 个 `daily_checkin` 待执行动作，最早中国时间 15:02 到期；继续等待自然打卡结果，不提前伪造额度或完成事件。
 - Automation 当前约 `1361Mi`、内存 limit `6Gi`，浏览器预算日志显示等待/idle eviction 正常工作；本次发布后无 Pod 重启和 OOM 事件。

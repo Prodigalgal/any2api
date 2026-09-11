@@ -57,6 +57,8 @@ error=PrematureCloseException
 
 对应 Automation 日志为 Qwen `/api/v2/chat/completions` 请求 `NS_BINDING_ABORTED`，服务端记录为推理探针失败，而不是认证成功。该证据同时说明账号生命周期分类和失败回写已经打通，但 Qwen 上游/浏览器响应仍不稳定。
 
+截至中国时间 11:27 的后续窗口累计出现 7 笔 `reauthenticate` 同类失败，另有 1 笔 `keepalive` 的 `inference_probe` 失败；Automation 资源约 `715Mi`，三套业务 Pod 仍 Ready、重启 0。当前没有证据表明这是 OOM，暂按 Qwen 上游/Runtime transport 稳定性问题继续处理。
+
 ## MiniMax 打卡状态
 
 MiniMax 当前保留 7 个 `daily_checkin` 待执行动作，最早到期时间为 `2026-09-11 07:02 UTC`（中国时间 15:02）。本次不提前调用、不伪造打卡完成事件；应以自然调度后的真实 `SUCCEEDED` 或明确失败结果作为验收依据。

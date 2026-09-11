@@ -10,9 +10,9 @@
 - `5b4cdb5` 已通过 CI `34527813416`；GitOps `45bbb52` 已切换到 server、automation、web 的 `*-sha-5b4cdb5...` 不可变镜像，Argo CD revision 为 `45bbb527...`，三套 Pod 当前 Ready 且零重启。
 - GLM-4.6V 图片 SSE 连续三次在 K8S 真实通过，当前 `rolling_success_rate=90.48%`、`p95=53.7s`，已达到该模型 Ready 门槛；`glm-5.2` 仍为 Ready。`glm-4.7`/`glm-5.3` 仍因窗口指标为 `DEGRADED`，另有多个目录模型为真实探针判定的 `UNAVAILABLE/provider_upstream_error`，不能把 GLM 全目录标为 Ready。
 - 六家选定模型的非流式和 SSE 文本请求均真实返回成功。
-- MiMo、MiniMax、GLM 的图片输入流式请求均成功；LongCat 已完成同源上传实现和契约测试，并在 K8S 真实通过图片非流式/SSE、有效 PDF 非流式/SSE、有效 DOCX 非流式请求；DeepSeek 仍保持 text-only；Qwen 最新图片复测仍未得到可用输出，不能标记为图片 Ready。
+- MiMo、MiniMax、GLM 的图片输入流式请求均成功；LongCat 已完成同源上传实现和契约测试，并在 K8S 真实通过图片非流式/SSE、有效 PDF 非流式/SSE、有效 DOCX/TXT 请求；DeepSeek 仍保持 text-only；Qwen 32x32 图片非流式/SSE 均已成功，但 1x1 仍为明确 `invalid_request_error`，不能标记为完整图片 Ready。
 - LongCat 的 TXT 上传可以成功但当前上游不返回文件内容解析，其他未实测扩展不计入 Ready；因此 LongCat 当前是“图片 + PDF/DOCX 已通过，文件扩展全量仍观察中”。
-- 当前账号池为 DeepSeek 16、GLM 23、LongCat 26、MiMo 57、MiniMax 7、Qwen 47 个 `ACTIVE/enabled` 账号；Qwen 和 MiniMax 均没有当前 `quota_limited` 账号，不能把 Qwen 图片失败直接归因于额度耗尽。
+- 当前账号表为 DeepSeek 16、GLM 23、LongCat 26、MiMo 57、MiniMax 7、Qwen 47 个 `ACTIVE/enabled`；Qwen 其中 44 个 `expires_at` 已过期，模型目录实际仅 3 个 eligible/available，MiniMax 当前 7 个 eligible/available，二者均无当前 `quota_limited` 账号。Qwen 的剩余阻断是凭据生命周期和健康窗口，不直接归因于额度耗尽。
 - 生命周期调度已限制为默认并发 2、单次最多 claim 8 个动作；当前滚动观测没有新的 `OOMKilled`。namespace quota 已从 `requests.memory=6Gi/limits.memory=16Gi` 调整为 `8Gi/20Gi`，为滚动副本留出余量。
 - MiniMax 的通用 `daily_checkin` 语义和具体 Runtime 实现已保留，账号额度依赖每日打卡的规则不绕过。
 - LongCat 在当前发布上补充完成 TXT 非流式/SSE 真实 completion；两个不同 ACTIVE/enabled 账号的 `longcat-pro` 账号探针均通过，最近 30 分钟成功请求使用 9 个不同账号。`longcat-flash` 在真实成功样本补充后恢复为 `READY`。
@@ -25,6 +25,7 @@
 - LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；26 个账号均为 `ACTIVE/enabled`，自然 `keepalive` 事件已取得 `SUCCEEDED / lifecycle_completed` 证据；当前生产制品 `ce2ee60` 在 K8S 内新增文本请求返回 HTTP 200，服务端 `attempt=1/status=SUCCEEDED`，五个目录模型均 `available=true/probe=READY/circuit=CLOSED`，滚动成功率约 90.9%–100%，按本轮声明范围达到 Runtime Ready。继续观察多账号覆盖、24 小时健康窗口和其他未逐项验证的文件扩展，不扩大为全部文件格式 Ready。
 - Qwen 文本探针、keepalive 和 32x32 图片非流式/SSE completion 已在 `ce2ee60` 发布上成功；本次 K8S SSE 请求 HTTP 200，39 个 SSE 帧、包含 `[DONE]`，服务端 `attempt=1/status=SUCCEEDED`。1x1 图片仍返回 HTTP 200、392 字节、仅含 `error` 的不完整 SSE，公共层转换为不可重试的 HTTP 400 `invalid_request_error`；Qwen 当前仍为 `DEGRADED`，继续补齐尺寸边界和稳定性证据，整体保持未 Ready。
 - MiniMax-M3 在 K8S 内新增 SSE 和两次非流式请求均 `attempt=1/status=SUCCEEDED`，三个不同账号分别承载请求，证明租约切换；7 个账号均可用且 `quota_limited=0`。但 M3/M2.7 24 小时滚动成功率约 87.1%/31.4%，当前仍为 `DEGRADED`，且自然 `daily_checkin` 尚未取得完成事件，继续观察真实结果。
+- DeepSeek 最新 SSE 请求 HTTP 200、`attempt=1/status=SUCCEEDED`，但首字节约 122.1s、P95 约 125.7s，`DEGRADED` 属于真实上游延迟风险；MiMo-v2.5 最新图片 SSE HTTP 200、`attempt=1/status=SUCCEEDED`，但滚动成功率约 85.7%，继续观察历史失败样本自然退出。
 - 继续等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
 - 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。
 - 当前多模态范围只覆盖图片和文档；音频、视频不纳入本轮 LongCat 聊天输入能力。

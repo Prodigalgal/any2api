@@ -24,7 +24,8 @@
 
 - LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；26 个账号均为 `ACTIVE/enabled`，自然 `keepalive` 事件已取得 `SUCCEEDED / lifecycle_completed` 证据；当前生产制品 `ce2ee60` 在 K8S 内新增文本请求返回 HTTP 200，服务端 `attempt=1/status=SUCCEEDED`，五个目录模型均 `available=true/probe=READY/circuit=CLOSED`，滚动成功率约 90.9%–100%，按本轮声明范围达到 Runtime Ready。继续观察多账号覆盖、24 小时健康窗口和其他未逐项验证的文件扩展，不扩大为全部文件格式 Ready。
 - Qwen 文本探针、keepalive 和 32x32 图片非流式/SSE completion 已在 `ce2ee60` 发布上成功；本次 K8S SSE 请求 HTTP 200，39 个 SSE 帧、包含 `[DONE]`，服务端 `attempt=1/status=SUCCEEDED`。1x1 图片仍返回 HTTP 200、392 字节、仅含 `error` 的不完整 SSE，公共层转换为不可重试的 HTTP 400 `invalid_request_error`；Qwen 当前仍为 `DEGRADED`，继续补齐尺寸边界和稳定性证据，整体保持未 Ready。
-- 等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
+- MiniMax-M3 在 K8S 内新增 SSE 和两次非流式请求均 `attempt=1/status=SUCCEEDED`，三个不同账号分别承载请求，证明租约切换；7 个账号均可用且 `quota_limited=0`。但 M3/M2.7 24 小时滚动成功率约 87.1%/31.4%，当前仍为 `DEGRADED`，且自然 `daily_checkin` 尚未取得完成事件，继续观察真实结果。
+- 继续等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
 - 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。
 - 当前多模态范围只覆盖图片和文档；音频、视频不纳入本轮 LongCat 聊天输入能力。
 - GLM 图片请求只允许官方目录标记 `capabilities.vision=true` 的模型，且只接受 inline base64 图片。

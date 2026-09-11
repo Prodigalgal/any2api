@@ -8,7 +8,7 @@
 - Arena 对话已加入官方 Enterprise V3 → V2 escalation：仅当上游明确返回 `recaptcha validation failed` 或 `prompt failed` 时渲染官方 V2 widget；没有官方 callback token 时返回 `recaptcha_v2_required`，不伪造或绕过验证。
 - 0.16.5 新增受控的 Automation 响应缓冲（默认 8 MiB，允许范围 256 KiB–32 MiB），修复浏览器状态上下文回传时的 `DataBufferLimitException`，同时保留 OOM 上限；本地、CI、GitOps 和 K8S 验证均已通过。
 
-## Arena 适配（0.16.5，K8S 验证中）
+## Arena 适配（0.16.5，K8S 真实验收完成，健康窗口观察中）
 
 - 已新增 `arena` Automation Provider 与 Java `ArenaProvider`，仅启用 `camoufox_browser_runtime`，不注册官方 API/CLI Channel。
 - 注册使用共享 `TempMailClient` 的 email magic link：每个 `register` 操作只创建一个临时邮箱，先快照历史邮件 ID，再提交 `/nextjs-api/sign-up/magic-link`，验证新链接并通过 `/api/me` 核对身份；Manifest 与 Java 调度器均限制 `target=1`、`maxAttempts=1`。
@@ -21,10 +21,10 @@
 ## 当前推进（2026-09-12）
 
 - 当前源码候选为 `0.16.5`；修复点是 Java `LifecycleAutomationClient` 与 `AutomationProviderCatalog` 的响应解码上限，不取消上限、不扩大浏览器并发。配置键为 `ANY2API_AUTOMATION_MAX_RESPONSE_BYTES`，默认 `8388608`。
-- 0.16.5 K8S 运行态已稳定：Argo CD `Synced/Healthy/Succeeded`，server、automation、web 使用同一 `0075462` 不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现新增 `OOMKilled` 或发布后的 `DataBufferLimitException`。
-- Arena Direct 真实证据：文本非流式/SSE、Search 非流式/SSE、Max 图片非流式/SSE、`claude-sonnet-4-6` PDF 非流式/SSE 均 HTTP 200 并完成；SSE 分别取得 6/8/4/13 个数据帧并包含 `[DONE]`。Arena V3 reCAPTCHA 已取得 `issued/available=true` 记录；V2 只走官方 widget 升级边界，不伪造 callback、不绕过验证。
+- 0.16.5 K8S 运行态已稳定：Argo CD `Synced/Healthy/Succeeded`，当前 server、automation、web 使用文档复验提交 `1883585` 生成的同一不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现 `OOMKilled`、`OOMKilling` 或发布后的 `DataBufferLimitException`。
+- Arena Direct 真实证据：文本非流式/SSE、Search 非流式/SSE、Max 图片非流式/SSE、`claude-sonnet-4-6` PDF 非流式/SSE 均 HTTP 200 并完成；最新串行复验的 Search/图片/PDF SSE 分别取得 9/7/8 个数据帧并包含 `[DONE]`，无错误帧。Arena V3 reCAPTCHA 已取得 `issued/available=true` 记录；V2 只走官方 widget 升级边界，不伪造 callback、不绕过验证。
 - Arena `Max` 当前目录不声明文件输入；对 Max 发送 PDF 返回 HTTP 400 `unsupported_parameter`（`input`），属于正确的模型能力门禁。PDF 验收使用声明 `file` 能力并已探针通过的 `claude-sonnet-4-6`，不能将能力扩展到 Max 或未声明模型。
-- 账号聚合快照为 9 个：7 个 `ACTIVE/enabled`、0 个 `PENDING/disabled`、1 个凭据失败 `EXPIRED/disabled`、1 个历史反爬/协议失败 `DEGRADED/disabled`。0.16.5 已验证 1 笔 reauthenticate 和 4 笔账号探针成功；剩余账号恢复与 24 小时健康窗口继续观察，Arena 总体保持 `DEGRADED`。
+- 账号聚合快照为 9 个：8 个 `ACTIVE/enabled`、0 个 `PENDING/disabled`、1 个凭据失败 `EXPIRED/disabled`、0 个当前 `DEGRADED`。0.16.5 运行态已记录多笔 reauthenticate 与账号探针成功；剩余过期凭据恢复和 24 小时健康窗口继续观察，Arena 总体保持 `DEGRADED`。
 
 ## 历史推进记录（0.14.1 及之前）
 

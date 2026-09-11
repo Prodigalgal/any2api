@@ -11,8 +11,8 @@ PDF 成功样本使用当前目录声明支持文件输入且账号探针通过�
 `Max` 当前不声明文件输入，发送 PDF 时返回明确的能力错误，这是正确的契约门禁。
 
 当前整体状态仍为 `DEGRADED / HEALTH_WINDOW`，不是“所有账号稳定 Ready”：
-Arena 账号池现场快照为 9 个账号，其中 7 个 `ACTIVE/enabled`、1 个凭据失效账号和 1 个
-历史反爬/协议失败账号。旧版本恢复失败的直接原因已定位为 Java 生命周期客户端的默认
+Arena 账号池现场快照为 9 个账号，其中 8 个 `ACTIVE/enabled`、1 个凭据失效账号；历史
+失败账号仍通过生命周期状态隔离，不进入推理池。旧版本恢复失败的直接原因已定位为 Java 生命周期客户端的默认
 256 KiB 解码上限触发 `DataBufferLimitException`，不是 TOU 弹窗、reCAPTCHA V3 发放失败
 或 Arena 协议解析失败。0.16.5 的受控响应上限已在真实 reauthenticate 和账号探针中生效；
 当前剩余阻断是 24 小时健康窗口和历史失败样本，不能通过清理历史指标伪造 Ready。
@@ -73,6 +73,23 @@ flowchart LR
 此前 Search 真实流中发现的 provider-native `ac` 工具增量帧已加入 decoder；当前 Search
 非流式和 SSE 都能正常完成，未知帧不会被静默当成文本。
 
+### 2026-09-12 K8S 新鲜 smoke 复验
+
+在文档提交后的当前 K8S 制品上，使用集群现有测试密钥以串行、低并发方式重新复验：
+
+| 能力 | HTTP | SSE 数据帧 | 结束/错误 | 耗时 |
+|---|---:|---:|---|---:|
+| 文本非流式（`Max`） | 200 | — | 1 choice / 无错误 | 20.7s |
+| Search 非流式（`Max`） | 200 | — | 1 choice / 无错误 | 19.6s |
+| Search SSE（`Max`） | 200 | 9 | `[DONE]` / 无错误 | 20.7s |
+| 图片非流式（`Max`） | 200 | — | 1 choice / 无错误 | 29.0s |
+| 图片 SSE（`Max`） | 200 | 7 | `[DONE]` / 无错误 | 33.8s |
+| PDF 非流式（`claude-sonnet-4-6`） | 200 | — | 1 choice / 无错误 | 54.1s |
+| PDF SSE（`claude-sonnet-4-6`） | 200 | 8 | `[DONE]` / 无错误 | 66.8s |
+
+本轮请求均为 `attempt=1/status=SUCCEEDED`；服务端日志未出现新的
+`DataBufferLimitException`，自动化 Pod 在复验前后均为 Ready 且重启次数为 0。
+
 ## 媒体和请求边界
 
 - 图片只声明 PNG、JPEG、WebP；文档本轮只声明 PDF。
@@ -99,14 +116,15 @@ flowchart LR
 
 | 状态 | 数量 | 说明 |
 |---|---:|---|
-| `ACTIVE/enabled` | 7 | 当前可进入 inference pool |
+| `ACTIVE/enabled` | 8 | 当前可进入 inference pool |
 | `PENDING/disabled` | 0 | 已完成账号专属推理探针 |
 | `EXPIRED/disabled` | 1 | 上游凭据返回 401 后进入重新认证流程 |
-| `DEGRADED/disabled` | 1 | 历史反爬/协议失败，保留作诊断，不强行启用 |
+| `DEGRADED/disabled` | 0 | 当前没有新的 DEGRADED 账号 |
 
 旧版本恢复事件大量出现 `automation_transport_error`，详细原因为
 `DataBufferLimitException`；这发生在 Java 读取 Automation 返回的浏览器状态上下文阶段。
-0.16.5 的响应缓冲修复已发布并取得 1 笔 reauthenticate、4 笔账号探针成功；后续验收顺序为：
+0.16.5 的响应缓冲修复已发布并取得多笔 reauthenticate 与账号探针成功；当前仍需持续观察
+过期凭据是否自然恢复和 24 小时窗口指标。后续验收顺序为：
 
 1. 观察 PENDING/EXPIRED 账号的 `reauthenticate` 是否能完成并写回 credential patch。
 2. 对恢复账号执行账号专属 inference probe，确认进入 inference pool。
@@ -115,11 +133,13 @@ flowchart LR
 
 ## 发布与回滚
 
-- 当前制品：`0.16.5`，提交 `0075462`，包含生命周期响应缓冲修复和对应回归测试。
-- CI `34628549967` 全部质量检查、三套镜像构建和 `update-gitops` 成功；GitOps revision
-  `588c7c4…` 已由 Argo CD `Synced/Healthy/Succeeded` 应用。
-- K8S server、automation、web 均运行 `*-sha-0075462…` 不可变镜像，业务 Pod Ready、
-  重启 0；本轮检查未发现新增 `OOMKilled` 或 0.16.5 后的 `DataBufferLimitException`。
+- 当前制品：`0.16.5`，功能源码提交 `0075462`，包含生命周期响应缓冲修复和对应回归测试；
+  文档复验提交为 `1883585`。
+- CI `34628549967`（源码修复）和 `34631703153`（验收文档）均通过全部质量检查、三套镜像
+  构建和 `update-gitops`；当前 GitOps revision 为 `291debf…`，Argo CD 状态为
+  `Synced/Healthy/Succeeded`。
+- K8S server、automation、web 均运行 `*-sha-1883585…` 不可变镜像，业务 Pod Ready、
+  重启 0；当前未发现 `OOMKilled`、`OOMKilling` 或发布后的 `DataBufferLimitException`。
 - 若 0.16.5 发布后出现回归，Backend/Web/Automation 可回滚到上一不可变 0.16.4 SHA 镜像；
   不删除或重置已有 Arena 账号。
 

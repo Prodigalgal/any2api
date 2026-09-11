@@ -94,8 +94,8 @@ def build_arena_request(
     if unsupported_controls:
         raise ValueError("Arena control is unsupported: " + unsupported_controls[0])
     mode = str(options.get("mode") or "direct").strip().lower()
-    if mode != "direct":
-        raise ValueError("Arena only supports direct mode")
+    if mode not in {"direct", "direct_battle"}:
+        raise ValueError("Arena only supports direct battle mode")
     web_search = _arena_search_enabled(options, controls)
 
     explicit_model_id = model_id or options.get("model_id")
@@ -118,7 +118,9 @@ def build_arena_request(
     normalized_attachments = _normalize_arena_attachments(attachments or [])
     return {
         "id": _uuid7(),
-        "mode": "direct",
+        # Arena's current direct UI uses DIRECT_BATTLE for a new session.  The
+        # upstream rejects mode=direct until an existing conversation exists.
+        "mode": "direct_battle",
         "modelAId": resolved_model_id,
         "userMessageId": _uuid7(),
         "modelAMessageId": _uuid7(),

@@ -21,9 +21,10 @@ final class ArenaRequestMapper {
         }
         var mode = request.providerOptions().get("mode");
         if (mode != null && (!(mode instanceof String)
-            || !"direct".equalsIgnoreCase(String.valueOf(mode).trim()))) {
+            || !Set.of("direct", "direct_battle")
+                .contains(String.valueOf(mode).trim().toLowerCase()))) {
             throw OpenAiRequestException.invalid(
-                "provider_options.arena.mode", "Arena only supports direct mode");
+                "provider_options.arena.mode", "Arena only supports direct battle mode");
         }
         var modelId = request.providerOptions().get("model_id");
         if (modelId != null && (!(modelId instanceof String)

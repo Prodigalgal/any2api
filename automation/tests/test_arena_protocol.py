@@ -78,7 +78,7 @@ def test_arena_mapper_translates_search_and_signed_attachments() -> None:
         ],
     )
 
-    assert body["mode"] == "direct"
+    assert body["mode"] == "direct_battle"
     assert body["modality"] == "search"
     assert body["modelAId"] == _MODEL_UUID
     assert body["userMessage"]["content"].endswith("Describe both inputs")

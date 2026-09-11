@@ -212,6 +212,9 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
         def goto(self, url: str, **_: object) -> None:
             self.visited.append(url)
 
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            assert milliseconds in {500, 1_000}
+
         def evaluate(self, script: str, argument: object | None = None) -> object:
             if "JSON.stringify(input.body)" in script:
                 self.signup = dict(argument or {})

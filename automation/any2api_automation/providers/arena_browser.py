@@ -887,17 +887,32 @@ def register_with_magic_link(
             timeout=90_000,
         )
     trace.mark(RegistrationStage.ACTIVATED)
-    profile = page.evaluate(
-        _arena_me_script(),
-        {"path": config["me_path"], "timeoutMs": 60_000},
-    )
+    profile: dict[str, Any] | None = None
+    for attempt in range(3):
+        page.wait_for_timeout(1_000 if attempt else 500)
+        candidate = page.evaluate(
+            _arena_me_script(),
+            {"path": config["me_path"], "timeoutMs": 60_000},
+        )
+        if isinstance(candidate, dict):
+            profile = candidate
+            if candidate.get("ok") and str(candidate.get("id") or ""):
+                break
     if not isinstance(profile, dict) or not profile.get("ok") or not str(profile.get("id") or ""):
         status = int(profile.get("status") or 502) if isinstance(profile, dict) else 502
         failure_class = _arena_error_class(status, "profile probe failed")
+        page_path = str(getattr(page, "url", "") or "").split("?", 1)[0]
+        cookie_names = sorted(
+            str(item.get("name") or "")
+            for item in context.cookies()
+            if isinstance(item, dict) and item.get("name")
+        )
         raise _arena_registration_failure(
             trace,
             f"arena_{failure_class}",
-            f"Arena profile verification failed with HTTP {status} ({failure_class})",
+            "Arena profile verification failed with "
+            f"HTTP {status} ({failure_class}); page_path={page_path or '<unknown>'}; "
+            f"cookie_names={','.join(cookie_names) or '<none>'}",
             error_type="ArenaProfileProbeFailed",
             retryable=False,
         )

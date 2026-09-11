@@ -8,7 +8,7 @@
 
 - `9944909` 已通过 CI `34476956811`，源码镜像通过 GitOps `ac420b0` 部署；随后配额修复 GitOps `9642473` 已由 Argo CD 应用。
 - `5b4cdb5` 已通过 CI `34527813416`；GitOps `45bbb52` 已切换到 server、automation、web 的 `*-sha-5b4cdb5...` 不可变镜像，Argo CD revision 为 `45bbb527...`，三套 Pod 当前 Ready 且零重启。
-- GLM 视觉模型的图片非流式和 SSE 请求、文本非流式和 SSE 请求均已在 K8S 真实通过；模型目录仍为 `probe_status=READY`，但健康窗口状态为 `DEGRADED`，暂不标稳定 Ready。
+- GLM-4.6V 图片 SSE 连续三次在 K8S 真实通过，当前 `rolling_success_rate=90.48%`、`p95=53.7s`，已达到该模型 Ready 门槛；`glm-5.2` 仍为 Ready。`glm-4.7`/`glm-5.3` 仍因窗口指标为 `DEGRADED`，另有多个目录模型为真实探针判定的 `UNAVAILABLE/provider_upstream_error`，不能把 GLM 全目录标为 Ready。
 - 六家选定模型的非流式和 SSE 文本请求均真实返回成功。
 - MiMo、MiniMax、GLM 的图片输入流式请求均成功；LongCat 已完成同源上传实现和契约测试，并在 K8S 真实通过图片非流式/SSE、有效 PDF 非流式/SSE、有效 DOCX 非流式请求；DeepSeek 仍保持 text-only；Qwen 最新图片复测仍未得到可用输出，不能标记为图片 Ready。
 - LongCat 的 TXT 上传可以成功但当前上游不返回文件内容解析，其他未实测扩展不计入 Ready；因此 LongCat 当前是“图片 + PDF/DOCX 已通过，文件扩展全量仍观察中”。

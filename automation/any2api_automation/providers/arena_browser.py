@@ -799,7 +799,7 @@ def register_with_magic_link(
     try:
         verification_link = mail.wait_for_link_sync(
             mailbox,
-            host_pattern=r"(?:[A-Za-z0-9-]+\.)*arena\.ai(?:/|$)",
+            host_pattern=r"(?:www\.)?arena\.ai(?:/|$)",
             timeout=float(config["mail_timeout_seconds"]),
             seen_ids=seen_ids,
         )
@@ -1100,7 +1100,7 @@ def _validate_arena_link(value: str) -> str:
     host = (parsed.hostname or "").lower().rstrip(".")
     if (
         parsed.scheme != "https"
-        or not (host == "arena.ai" or host.endswith(".arena.ai"))
+        or host not in {"arena.ai", "www.arena.ai"}
         or parsed.username
         or parsed.password
         or not parsed.path.startswith("/")

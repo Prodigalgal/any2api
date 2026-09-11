@@ -9,6 +9,7 @@ from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers.arena_browser import (
     _arena_upload_script,
+    _validate_arena_link,
     arena_media_sources,
     build_arena_request,
     parse_arena_models,
@@ -185,6 +186,14 @@ def test_arena_page_upload_script_uses_the_official_exported_uploader() -> None:
     assert "new File([bytes]" in script
 
 
+def test_arena_verification_link_rejects_cdn_assets() -> None:
+    link = "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time&type=email"
+
+    assert _validate_arena_link(link) == link
+    with pytest.raises(ValueError, match="host is invalid"):
+        _validate_arena_link("https://cdn.arena.ai/assets/logo.png")
+
+
 def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pending() -> None:
     class Page:
         def __init__(self) -> None:
@@ -222,7 +231,10 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
         def wait_for_link_sync(self, mailbox: Mailbox, **kwargs: object) -> str:
             assert mailbox.address == "a2a@example.test"
             self.seen = kwargs["seen_ids"]
-            link = "https://cdn.arena.ai/auth/verify?token=one-time"
+            link = (
+                "https://arena.ai/auth/verify?"
+                "signup_intent_id=signup-1&token=one-time&type=email"
+            )
             assert re.search(
                 rf"https?://[^\s<>'\"]*{kwargs['host_pattern']}[^\s<>'\"]*",
                 link,

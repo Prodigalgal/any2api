@@ -21,7 +21,7 @@
 ## 当前推进（2026-09-12）
 
 - 当前源码候选为 `0.16.5`；修复点是 Java `LifecycleAutomationClient` 与 `AutomationProviderCatalog` 的响应解码上限，不取消上限、不扩大浏览器并发。配置键为 `ANY2API_AUTOMATION_MAX_RESPONSE_BYTES`，默认 `8388608`。
-- 0.16.5 K8S 运行态已稳定：Argo CD `Synced/Healthy/Succeeded`，当前 server、automation、web 使用文档复验提交 `1883585` 生成的同一不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现 `OOMKilled`、`OOMKilling` 或发布后的 `DataBufferLimitException`。
+- 0.16.5 K8S 运行态已稳定：Argo CD `Synced/Healthy/Succeeded`，当前 server、automation、web 使用验收记录提交 `61f0f8c` 生成的同一不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现 `OOMKilled`、`OOMKilling` 或发布后的 `DataBufferLimitException`。
 - Arena Direct 真实证据：文本非流式/SSE、Search 非流式/SSE、Max 图片非流式/SSE、`claude-sonnet-4-6` PDF 非流式/SSE 均 HTTP 200 并完成；最新串行复验的 Search/图片/PDF SSE 分别取得 9/7/8 个数据帧并包含 `[DONE]`，无错误帧。Arena V3 reCAPTCHA 已取得 `issued/available=true` 记录；V2 只走官方 widget 升级边界，不伪造 callback、不绕过验证。
 - Arena `Max` 当前目录不声明文件输入；对 Max 发送 PDF 返回 HTTP 400 `unsupported_parameter`（`input`），属于正确的模型能力门禁。PDF 验收使用声明 `file` 能力并已探针通过的 `claude-sonnet-4-6`，不能将能力扩展到 Max 或未声明模型。
 - 账号聚合快照为 9 个：8 个 `ACTIVE/enabled`、0 个 `PENDING/disabled`、1 个凭据失败 `EXPIRED/disabled`、0 个当前 `DEGRADED`。0.16.5 运行态已记录多笔 reauthenticate 与账号探针成功；剩余过期凭据恢复和 24 小时健康窗口继续观察，Arena 总体保持 `DEGRADED`。

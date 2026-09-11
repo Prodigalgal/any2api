@@ -134,11 +134,11 @@ flowchart LR
 ## 发布与回滚
 
 - 当前制品：`0.16.5`，功能源码提交 `0075462`，包含生命周期响应缓冲修复和对应回归测试；
-  文档复验提交为 `1883585`。
-- CI `34628549967`（源码修复）和 `34631703153`（验收文档）均通过全部质量检查、三套镜像
-  构建和 `update-gitops`；当前 GitOps revision 为 `291debf…`，Argo CD 状态为
-  `Synced/Healthy/Succeeded`。
-- K8S server、automation、web 均运行 `*-sha-1883585…` 不可变镜像，业务 Pod Ready、
+  最新验收记录提交为 `61f0f8c`。
+- CI `34628549967`（源码修复）、`34631703153`（验收文档）和 `34657518222`（最新验收记录）
+  均通过全部质量检查、三套镜像构建和 `update-gitops`；当前 GitOps revision 为
+  `5164eab…`，Argo CD 状态为 `Synced/Healthy/Succeeded`。
+- K8S server、automation、web 均运行 `*-sha-61f0f8c…` 不可变镜像，业务 Pod Ready、
   重启 0；当前未发现 `OOMKilled`、`OOMKilling` 或发布后的 `DataBufferLimitException`。
 - 若 0.16.5 发布后出现回归，Backend/Web/Automation 可回滚到上一不可变 0.16.4 SHA 镜像；
   不删除或重置已有 Arena 账号。

@@ -90,7 +90,7 @@ Python 不决定业务账号是否可用、模型路由、额度、租约和最�
 ## 迁移顺序
 
 1. 先固定统一 Action contract、Runtime/API Channel 和旧 transport 兼容转换。
-2. 将现有生命周期与 9 个 provider 的 Runtime 推理注册为 Runtime binding。
+2. 将现有生命周期与 10 个 provider 的 Runtime 推理注册为 Runtime binding。
 3. 以 Provider + Action 为单位新增 API binding；MinMax 作为首个 API 样板，API 只覆盖已验证动作。
 4. 删除或封存已被 binding 替代的 Java 上游 WebClient、curl-cffi inference 和独立物理 WebSocket 入口。
 5. 用 provider/action、账号隔离、保活、切换、credential patch、媒体和测试环境 completion smoke 逐个验收。
@@ -114,6 +114,7 @@ Python 不决定业务账号是否可用、模型路由、额度、租约和最�
 
 | Provider | 图片 | 文件 | 音频 | 视频 | 当前实现 |
 |---|---|---|---|---|---|
+| Arena | 支持（内联 base64，PNG/JPEG/WebP） | 支持（内联 base64，PDF） | 不支持 | 不支持 | Arena 页面 `uploadFile` + signed upload + `experimental_attachments` |
 | Qwen | 支持（内联 base64） | 不支持 | 不支持 | 不支持 | Camoufox 页面内 STS + OSS 上传 |
 | MiMo | 支持（内联 base64） | 不支持 | 不支持 | 不支持 | Camoufox 页面内签名上传 + 解析 |
 | MinMax | 支持（内联 base64） | 不支持 | 不支持 | 不支持 | Camoufox 页面内临时策略 + OSS 上传 |
@@ -123,6 +124,10 @@ Python 不决定业务账号是否可用、模型路由、额度、租约和最�
 | DeepSeek | 当前文本入口不声明 | 当前文本入口不声明 | 当前文本入口不声明 | 当前文本入口不声明 | 等待官方网页上传链路 fixture/live evidence |
 | GLM | 当前文本入口不声明 | 当前文本入口不声明 | 当前文本入口不声明 | 当前文本入口不声明 | 等待官方网页上传链路 fixture/live evidence |
 | LongCat | 当前文本入口不声明 | 当前文本入口不声明 | 当前文本入口不声明 | 当前文本入口不声明 | 等待官方网页上传链路 fixture/live evidence |
+
+Arena 的 Web Search 不是通用工具透传：`provider_options.arena.web_search=true` 经 canonical
+command 进入 Arena mapper，并转换为页面协议的 `modality="search"`；模型目录未声明 Search
+能力时请求必须失败闭环。Arena 当前只接入 Runtime，API Channel 后置。
 
 每一种已声明输入都必须覆盖：canonical block 形状、该 provider 声明的来源类型（URL/base64/file ID）、
 空值和错误 base64、MIME/大小边界、多文件顺序、同账号同代理上传、上传结果注入上游请求、流式与
@@ -136,6 +141,7 @@ Python 不决定业务账号是否可用、模型路由、额度、租约和最�
 上传 host、状态码、首个事件、终止事件和账号/代理绑定证据，才可将状态从 `LOCAL_CONTRACT`
 提升为 `LIVE_ACCEPTED`。
 
-本轮本地矩阵覆盖 9 个 provider 与图片、音频、视频、文件四类输入的 36 个组合，并覆盖
-Java 入口别名、嵌套 `source`、内联 MIME/大小边界、上传结果完整性和 Qwen/MiMo/MinMax
-账号页面上下文绑定；这证明的是契约和边界行为，不是各厂商真实账号的多模态 completion。
+既有本地矩阵覆盖 9 个 provider 与图片、音频、视频、文件四类输入的 36 个组合；本轮为
+Arena 增加了独立的图片/PDF、Search、页面上传导出定位和注册 fixture，并覆盖 Java 入口别名、
+嵌套 `source`、内联 MIME/大小边界、上传结果完整性和账号页面上下文绑定；这证明的是契约
+和边界行为，不是各厂商真实账号的多模态 completion。

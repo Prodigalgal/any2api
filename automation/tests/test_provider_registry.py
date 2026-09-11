@@ -138,6 +138,7 @@ def test_all_inference_provider_manifests_use_camoufox_runtime() -> None:
 
     assert set(manifests) == {
         "deepseek",
+        "arena",
         "glm",
         "grok",
         "grok_console",

@@ -305,7 +305,7 @@ def test_xai_browser_adapters_preserve_image_and_file_blocks() -> None:
         ("file", {"type": "input_file", "input_file": {"file_id": "file-1"}}),
     ],
 )
-def test_all_nine_provider_builders_have_an_explicit_multimodal_outcome(
+def test_existing_nine_provider_builders_have_an_explicit_multimodal_outcome(
     provider: str, builder, supported: set[str], kind: str, media_block: dict[str, object]
 ) -> None:
     command = _command(

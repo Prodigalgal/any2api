@@ -49,6 +49,20 @@ class AutomationProviderCatalogTest {
     }
 
     @Test
+    void preservesProviderRegistrationSafetyLimitsFromAutomationManifest() {
+        catalog.replaceFrom(mapper.readTree("""
+            {"providers":[{"id":"arena","operations":["register"],
+              "registration_attempt_mode":"single_identity",
+              "registration_max_target":1,"registration_max_attempts":1}]}
+            """));
+
+        assertThat(catalog.registrationAttemptMode("arena"))
+            .isEqualTo(RegistrationAttemptMode.SINGLE_IDENTITY);
+        assertThat(catalog.registrationMaxTarget("arena")).isEqualTo(1);
+        assertThat(catalog.registrationMaxAttempts("arena")).isEqualTo(1);
+    }
+
+    @Test
     void indexesActionBindingsAndRejectsAutoAsAConcreteChannel() {
         catalog.replaceFrom(mapper.readTree("""
             {"providers":[{"id":"minmax","operations":["keepalive"],

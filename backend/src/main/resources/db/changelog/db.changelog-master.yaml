@@ -53,3 +53,5 @@ databaseChangeLog:
       file: db/changelog/releases/026-minmax-daily-checkin.sql
   - include:
       file: db/changelog/releases/027-longcat-multimodal-runtime.sql
+  - include:
+      file: db/changelog/releases/028-arena-browser-runtime.sql

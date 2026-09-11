@@ -1,6 +1,6 @@
 # any2api
 
-`any2api` consolidates DeepSeek, GLM, Grok, Grok Console, Grok Web, MiMo, Qwen, LongCat, and MinMax web-account gateways behind one OpenAI-compatible API and one operational control plane.
+`any2api` consolidates Arena, DeepSeek, GLM, Grok, Grok Console, Grok Web, MiMo, Qwen, LongCat, and MinMax web-account gateways behind one OpenAI-compatible API and one operational control plane.
 
 The repository is a deliberately small distributed system:
 

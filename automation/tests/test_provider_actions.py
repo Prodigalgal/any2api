@@ -157,6 +157,7 @@ def test_minmax_exposes_api_and_runtime_actions_separately() -> None:
 
 def test_runtime_action_matrix_matches_each_provider_manifest() -> None:
     expected = {
+        "arena": {"model_discovery", "chat"},
         "deepseek": {"model_discovery", "chat"},
         "glm": {"model_discovery", "chat"},
         "grok": {"model_discovery", "chat"},

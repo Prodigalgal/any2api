@@ -82,6 +82,9 @@ final class LifecycleOperationExecutor {
                 if ("keepalive".equals(externalOperation)
                     || "daily_checkin".equals(externalOperation)) {
                     payload.put("runtime_plan", runtimeRules.plan(providerId));
+                } else if ("reauthenticate".equals(externalOperation)) {
+                    var plan = runtimeRules.findPlan(providerId);
+                    if (plan != null) plan.ifPresent(value -> payload.put("runtime_plan", value));
                 }
                 runtimeSettings.applyMailSettings(payload, null);
                 return automation.execute(

@@ -1,4 +1,14 @@
-# 当前任务：排除 Grok 的六家 Runtime 全链路闭环
+# 当前任务：Arena 接入与 Grok 之外六家 Runtime 全链路闭环
+
+## Arena 适配（0.15.0，未 Ready）
+
+- 已新增 `arena` Automation Provider 与 Java `ArenaProvider`，仅启用 `camoufox_browser_runtime`，不注册官方 API/CLI Channel。
+- 注册使用共享 `TempMailClient` 的 email magic link：每个 `register` 操作只创建一个临时邮箱，先快照历史邮件 ID，再提交 `/nextjs-api/sign-up/magic-link`，验证新链接并通过 `/api/me` 核对身份；Manifest 与 Java 调度器均限制 `target=1`、`maxAttempts=1`。
+- 模型发现从登录后的 `/text/direct?model_a=max` 页面 RSC `initialModels` 提取 UUID、显示名、输入/输出能力；Arena UUID 只由当前页面目录解析，不把显示名直接当作上游 ID。
+- 文本请求使用 Arena `POST /nextjs-api/stream/create-evaluation` 的一字符前缀 NDJSON 帧；`0/2/3/d/e/f/g` 已映射到统一 canonical events，验证码、额度、认证、限流、模型不可用和协议错误分别归类。
+- 图片/PDF 输入使用同一账号页面导出的 `uploadFile` 与 signed upload action，随后发送 `experimental_attachments`；当前适配只声明 PNG/JPEG/WebP 与 PDF，远程 URL、file ID、音频、视频和未声明文档格式在浏览器请求前失败。
+- `provider_options.arena.web_search=true`（或契约允许的 `web_search`）映射为 Arena 原生 `modality="search"`；Search 能力按当前模型目录 `outputCapabilities.search` 做检查。
+- 当前仅完成代码、单元/契约测试和协议审计；未执行真实外部注册、邮件投递、账号登录或 Arena inference probe，因此不得标记 `Ready`。CI/GitOps/K8S 与真实账号验收仍是后续发布门槛。
 
 ## 目标
 
@@ -39,5 +49,6 @@
 
 - 每家选定 Provider 至少有模型发现、文本非流式、文本 SSE、账号保活和账号租约/切换的运行证据。
 - 声明图片输入的 Provider 通过真实图片请求；未声明的 Provider 对图片输入给出明确契约错误。
+- Arena 还必须分别取得真实文本、Search、图片和 PDF 请求的非流式/SSE 证据；注册成功必须再完成 Arena 账号探针后才能进入 inference pool。
 - 新版本在 K8S Pod Ready、零重启、无新增 OOMKilled，浏览器进程预算和生命周期并发限制持续生效。
 - 代码、测试、GitOps、镜像和运行态版本保持同一不可变发布链路。

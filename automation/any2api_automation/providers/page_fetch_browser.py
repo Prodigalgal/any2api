@@ -199,7 +199,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
             async def execute() -> None:
                 try:
                     await session.page.evaluate(
-                        _stream_request_script(self._binding_name),
+                        self.stream_request_script(),
                         {
                             "requestId": request_id,
                             "url": self._endpoint(selection, target_path),
@@ -287,6 +287,11 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                 if not task.done():
                     task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+
+    def stream_request_script(self) -> str:
+        """Return the page-world stream reader for this provider's framing protocol."""
+
+        return _stream_request_script(self._binding_name)
 
     async def configure_context(
         self,

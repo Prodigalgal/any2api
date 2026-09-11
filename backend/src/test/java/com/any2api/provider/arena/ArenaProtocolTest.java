@@ -135,6 +135,8 @@ class ArenaProtocolTest {
             "a:{\"toolCallId\":\"tool-1\",\"result\":{\"status\":\"done\"}}"));
         events.addAll(decoder.decode("b:{\"toolCallId\":\"tool-2\",\"toolName\":\"search\"}"));
         events.addAll(decoder.decode("c:{\"toolCallId\":\"tool-2\",\"argsTextDelta\":\"{}\"}"));
+        events.addAll(decoder.decode(
+            "ac:{\"toolCallId\":\"tool-2\",\"argsTextDelta\":\"{\\\"query\\\":\\\"latest\\\"}\"}"));
         events.addAll(decoder.decode("f:{\"messageId\":\"msg-1\"}"));
         events.addAll(decoder.decode("0:\"answer\""));
         events.addAll(decoder.decode("d:{\"finishReason\":\"stop\"}"));

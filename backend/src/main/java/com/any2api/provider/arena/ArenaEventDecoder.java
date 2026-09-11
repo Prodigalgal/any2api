@@ -53,7 +53,7 @@ final class ArenaEventDecoder {
             case "2" -> data(value, output);
             case "a2" -> metadata(value, output);
             case "3", "a3" -> fail(output, classifyError(textValue(value)));
-            case "8", "9", "a", "b", "c", "h", "i", "j" -> {
+            case "8", "9", "a", "b", "c", "ac", "h", "i", "j" -> {
                 /* Arena emits annotations, tool frames, and reasoning metadata around text. */
             }
             case "k", "ak" -> fail(output, "unsupported_model_output");

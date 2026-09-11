@@ -2,7 +2,7 @@
 
 ## 结论
 
-Qwen Runtime 当前不能标记为全链路 Ready。文本推理、模型发现、账号保活和一条有效尺寸图片 completion 已有成功证据；但 1x1 图片仍会被上游返回 `invalid_input`，图片尺寸边界和持续稳定窗口尚未完成。
+Qwen Runtime 当前不能标记为全链路 Ready。文本推理、模型发现、账号保活，以及 32x32 图片的非流式和 SSE completion 均已有成功证据；但 1x1 图片仍会被上游返回 `invalid_input`，图片尺寸边界和持续稳定窗口尚未完成。
 
 这次结果不能解释为“Qwen 账号全部没额度”：账号表有 47 个 `ACTIVE/enabled` 账号，当前模型目录的 `quota_limited_account_count` 为 0，且同一发布上的文本模型探针成功。
 
@@ -46,8 +46,9 @@ Qwen 不接收 OpenAI 请求原文作为上游 payload。Java 侧将公共请求
 | 历史复测 | HTTP 200，`text/event-stream`，392 bytes，2 个 JSON frame，仅存在 `error` 字段，无文本、无终止事件 | `provider_upstream_error`，随后发生重试 |
 | 当前发布 `a99ec65` | 同样的 HTTP 200、392 bytes、不完整 `error` 流；`qwen_semantic_command_shape` 确认 `image_count=1`，上传结果 `file_count=1` | HTTP 400，`invalid_request_error`；服务端 `attempt=1`，未发生换账号重试 |
 | 当前发布 `ce2ee60`，32x32 红色 PNG | HTTP 200，`text/event-stream`，4446 bytes；`image_count=1`、`file_count=1`，上传字段包含 `uploadTaskId` | HTTP 200，返回 19 字符文本；服务端 `attempt=1`、`duration_ms=232102`、`ttfb_ms=223873`、`usage_source=UPSTREAM` |
+| 当前发布 `ce2ee60`，32x32 红色 PNG，`stream=true` | HTTP 200，`text/event-stream`，上游响应 3412 bytes；`image_count=1`、`file_count=1`，无 `completion_error` | HTTP 200，39 个 SSE 帧、38 个 JSON 帧、包含 `[DONE]`、无错误事件；服务端 `attempt=1`、`duration_ms=222681`、`ttfb_ms=205899`、`usage_source=UPSTREAM` |
 
-Qwen automation 对 1x1 图片的脱敏诊断为：`frames=2 json=2 terminal=False text_values=0 fields=error statuses=- ret=-`，错误码为 `invalid_input`；当前发布将这个上游 SSE 错误映射为不可重试的 `invalid_request_error`。32x32 图片则形成了 4446 字节的有效 SSE，并由 Server 记录成功 usage。当前证据说明有效尺寸图片链路已打通，但不能把 1x1 这类边界输入静默视为成功；仍需明确图片尺寸校验边界、补充 SSE/多尺寸样本和持续健康窗口，因此 Qwen 暂不标完整 Ready，也不自动注册新账号。
+Qwen automation 对 1x1 图片的脱敏诊断为：`frames=2 json=2 terminal=False text_values=0 fields=error statuses=- ret=-`，错误码为 `invalid_input`；当前发布将这个上游 SSE 错误映射为不可重试的 `invalid_request_error`。32x32 图片则形成了有效的非流式和 SSE 响应，并由 Server 记录成功 usage；本次 SSE 复测后 `qwen3.5-omni-plus` 仍为 `DEGRADED`，滚动成功率约 57.1%、P95 约 252.9s。当前证据说明有效尺寸图片链路已打通，但不能把 1x1 这类边界输入静默视为成功；仍需明确图片尺寸校验边界、补充多尺寸样本和持续健康窗口，因此 Qwen 暂不标完整 Ready，也不自动注册新账号。
 
 ### 生命周期
 

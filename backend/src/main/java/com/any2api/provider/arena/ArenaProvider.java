@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -35,6 +37,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Arena Web adapter. It deliberately exposes no official/API channel. */
 @Component
 public final class ArenaProvider implements InferenceProvider {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ArenaProvider.class);
     private static final ProviderProtocolContract PROTOCOL = new ProviderProtocolContract(
         Map.of(
             "mode", ProviderProtocolContract.OptionType.STRING,
@@ -153,6 +156,11 @@ public final class ArenaProvider implements InferenceProvider {
                     var type = frame.path("type").asText("");
                     if ("status".equals(type)) {
                         status.set(frame.path("status").asInt(502));
+                    } else if ("recaptcha".equals(type)) {
+                        LOGGER.info(
+                            "arena_recaptcha_v3 available={} token_length={}",
+                            frame.path("available").asBoolean(false),
+                            frame.path("tokenLength").asInt(0));
                     } else if ("error".equals(type)) {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new ArenaUpstreamException(

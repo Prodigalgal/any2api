@@ -562,19 +562,27 @@ def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> s
     return rf"""async request => {{
   const emit = event => window[{binding}]({{requestId: request.requestId, ...event}});
   const getRecaptchaV3Token = async () => {{
-    const enterprise = window.grecaptcha?.enterprise;
+    const deadline = Date.now() + 10_000;
+    let enterprise;
+    while (Date.now() < deadline) {{
+      enterprise = window.grecaptcha?.enterprise;
+      if (typeof enterprise?.ready === 'function'
+          && typeof enterprise?.execute === 'function') break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }}
     if (typeof enterprise?.ready !== 'function' || typeof enterprise?.execute !== 'function') {{
-      return '';
+      return {{token: '', available: false}};
     }}
     const execute = new Promise(resolve => enterprise.ready(async () => {{
       try {{
         const token = await enterprise.execute({site_key}, {{action: 'chat_submit'}});
-        resolve(typeof token === 'string' ? token : '');
+        resolve({{token: typeof token === 'string' ? token : '', available: true}});
       }} catch (_) {{
-        resolve('');
+        resolve({{token: '', available: true}});
       }}
     }}));
-    const timeout = new Promise(resolve => setTimeout(() => resolve(''), 10_000));
+    const timeout = new Promise(resolve =>
+      setTimeout(() => resolve({{token: '', available: true}}), 10_000));
     return await Promise.race([execute, timeout]);
   }};
   const controller = new AbortController();
@@ -585,9 +593,11 @@ def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> s
       try {{
         const parsedBody = JSON.parse(request.body);
         if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {{
-          const token = await getRecaptchaV3Token();
-          if (token) {{
-            parsedBody.recaptchaV3Token = token;
+          const recaptcha = await getRecaptchaV3Token();
+          await emit({{type: 'recaptcha', available: recaptcha.available === true,
+            tokenLength: String(recaptcha.token || '').length}});
+          if (recaptcha.token) {{
+            parsedBody.recaptchaV3Token = recaptcha.token;
             requestBody = JSON.stringify(parsedBody);
           }}
         }}

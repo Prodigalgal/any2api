@@ -105,6 +105,7 @@ def test_arena_chat_stream_uses_the_official_recaptcha_v3_action() -> None:
     assert "enterprise.execute" in script
     assert "action: 'chat_submit'" in script
     assert "parsedBody.recaptchaV3Token" in script
+    assert "tokenLength" in script
 
 
 def test_arena_media_sources_accept_inline_png_and_pdf_only() -> None:

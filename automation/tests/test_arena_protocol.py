@@ -15,7 +15,9 @@ from any2api_automation.providers.arena_browser import (
     _arena_set_password_script,
     _arena_sign_in_script,
     _arena_terms_script,
+    _arena_update_tou_consent_script,
     _arena_upload_script,
+    _ensure_arena_tou_consent,
     _validate_arena_link,
     arena_media_sources,
     build_arena_request,
@@ -63,6 +65,58 @@ async def test_arena_runtime_surfaces_a_terms_dialog_without_agree_button() -> N
 
     with pytest.raises(RuntimeError, match="missing_button"):
         await _accept_arena_terms_if_present(Page())
+
+
+@pytest.mark.asyncio
+async def test_arena_runtime_confirms_tou_via_official_api_when_dialog_is_deferred() -> None:
+    assert "touConsentTimestamp" in _arena_me_script()
+    assert "input.path" in _arena_update_tou_consent_script()
+    assert "method: 'POST'" in _arena_update_tou_consent_script()
+
+    class Page:
+        def __init__(self) -> None:
+            self.profile_calls = 0
+            self.consent_calls = 0
+            self.waits: list[int] = []
+
+        async def evaluate(self, script: str, argument: object | None = None) -> dict[str, object]:
+            del argument
+            if "touConsentTimestampPresent" in script:
+                self.profile_calls += 1
+                return {
+                    "status": 200,
+                    "id": "arena-user-1",
+                    "touConsentFieldPresent": True,
+                    "touConsentTimestampPresent": self.profile_calls > 1,
+                }
+            if "agree.click()" in script:
+                return {"status": "absent"}
+            self.consent_calls += 1
+            return {"ok": True, "status": 200}
+
+        async def wait_for_timeout(self, milliseconds: int) -> None:
+            self.waits.append(milliseconds)
+
+    page = Page()
+    assert await _ensure_arena_tou_consent(page) == "accepted_via_api"
+    assert page.profile_calls == 2
+    assert page.consent_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_arena_runtime_skips_consent_write_for_already_consented_profile() -> None:
+    class Page:
+        async def evaluate(self, script: str, argument: object | None = None) -> dict[str, object]:
+            del argument
+            assert "touConsentTimestampPresent" in script
+            return {
+                "status": 200,
+                "id": "arena-user-1",
+                "touConsentFieldPresent": True,
+                "touConsentTimestampPresent": True,
+            }
+
+    assert await _ensure_arena_tou_consent(Page()) == "already_consented"
 
 
 def _command(messages: list[dict[str, object]], **overrides: object) -> dict[str, object]:

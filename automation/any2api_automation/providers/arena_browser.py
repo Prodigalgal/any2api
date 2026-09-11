@@ -55,6 +55,7 @@ _SUPPORTED_ATTACHMENT_BLOCK_TYPES = frozenset(
 )
 _ARENA_TERMS_POLL_ATTEMPTS = 8
 _ARENA_TERMS_POLL_INTERVAL_MS = 250
+_ARENA_TOU_CONSENT_PATH = "/api/me/update-tou-consent"
 
 
 def _arena_terms_script() -> str:
@@ -106,6 +107,71 @@ async def _accept_arena_terms_if_present(page: Any) -> str:
         if attempt + 1 < _ARENA_TERMS_POLL_ATTEMPTS:
             await page.wait_for_timeout(_ARENA_TERMS_POLL_INTERVAL_MS)
     return "absent"
+
+
+def _arena_update_tou_consent_script() -> str:
+    """Call the same consent endpoint used by Arena's Agree button."""
+
+    return r"""async input => {
+  const response = await fetch(input.path, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'}
+  });
+  return {ok: response.ok, status: response.status};
+}"""
+
+
+def _arena_tou_consented(profile: dict[str, Any]) -> bool:
+    return bool(
+        profile.get("touConsentFieldPresent")
+        and profile.get("touConsentTimestampPresent")
+    )
+
+
+async def _arena_tou_profile(page: Any) -> dict[str, Any]:
+    result = await page.evaluate(_arena_me_script(), {"path": "/api/me"})
+    return result if isinstance(result, dict) else {"status": 502}
+
+
+async def _wait_for_arena_tou_consent(page: Any) -> bool:
+    for attempt in range(_ARENA_TERMS_POLL_ATTEMPTS):
+        profile = await _arena_tou_profile(page)
+        if _arena_tou_consented(profile):
+            return True
+        if attempt + 1 < _ARENA_TERMS_POLL_ATTEMPTS:
+            await page.wait_for_timeout(_ARENA_TERMS_POLL_INTERVAL_MS)
+    return False
+
+
+async def _ensure_arena_tou_consent(page: Any) -> str:
+    profile = await _arena_tou_profile(page)
+    status = int(profile.get("status") or 502)
+    if status in {401, 403}:
+        return "unauthenticated"
+    if status < 200 or status >= 300 or not str(profile.get("id") or ""):
+        return "profile_unavailable"
+    if _arena_tou_consented(profile):
+        return "already_consented"
+
+    dialog_state = "absent"
+    try:
+        dialog_state = await _accept_arena_terms_if_present(page)
+    except RuntimeError:
+        dialog_state = "dialog_error"
+    if dialog_state == "accepted" and await _wait_for_arena_tou_consent(page):
+        return "accepted_via_dialog"
+
+    if not profile.get("touConsentFieldPresent"):
+        return f"legacy_{dialog_state}"
+
+    consent = await page.evaluate(
+        _arena_update_tou_consent_script(), {"path": _ARENA_TOU_CONSENT_PATH}
+    )
+    consent_status = int(consent.get("status") or 502) if isinstance(consent, dict) else 502
+    if 200 <= consent_status < 300 and await _wait_for_arena_tou_consent(page):
+        return "accepted_via_api"
+    return f"consent_update_http_{consent_status}"
 
 
 def _uuid7() -> str:
@@ -919,11 +985,18 @@ def _arena_me_script() -> str:
     let data = {};
     try { data = await response.json(); } catch (_) {}
     const user = data?.user || data?.data?.user || data;
+    const touConsentTimestamp = user?.touConsentTimestamp;
     return {
       ok: response.ok,
       status: response.status,
       id: String(user?.id || user?.userId || ''),
-      email: String(user?.email || '')
+      email: String(user?.email || ''),
+      touConsentFieldPresent: Object.prototype.hasOwnProperty.call(
+        user || {}, 'touConsentTimestamp'
+      ),
+      touConsentTimestampPresent: touConsentTimestamp !== null
+        && touConsentTimestamp !== undefined
+        && String(touConsentTimestamp).trim() !== ''
     };
   } finally {
     clearTimeout(timeout);
@@ -1283,7 +1356,13 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
 
     async def wait_until_ready(self, page: Any, rule: Any) -> None:
         del rule
-        terms_state = await _accept_arena_terms_if_present(page)
+        try:
+            terms_state = await _ensure_arena_tou_consent(page)
+        except Exception as error:  # noqa: BLE001 - readiness must preserve auth errors
+            self._logger.warning(
+                "arena_terms state=error error_type=%s", type(error).__name__
+            )
+            return
         self._logger.info("arena_terms state=%s", terms_state)
 
     async def upload_attachments(

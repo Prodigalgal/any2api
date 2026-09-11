@@ -177,7 +177,7 @@ public final class ArenaProvider implements InferenceProvider {
                             code, summarize(code, frame.path("data").asText(""))));
                     } else if ("data".equals(type) && status.get() < 400) {
                         var data = frame.path("data").asText("");
-                        if (frameCount.getAndIncrement() < 12) {
+                        if (frameCount.getAndIncrement() < 64) {
                             LOGGER.info(
                                 "arena_upstream_frame index={} descriptor={} bytes={}",
                                 frameCount.get() - 1,

@@ -25,7 +25,7 @@ _PATH_ID = re.compile(r"/[0-9a-fA-F-]{24,}(?=/|$)")
 _logger = logging.getLogger("any2api_automation.http")
 
 
-@dataclass(frozen=True)
+@dataclass
 class OperationFailure(RuntimeError):
     code: str
     stage: str

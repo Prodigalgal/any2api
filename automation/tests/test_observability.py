@@ -82,3 +82,17 @@ def test_operation_failure_is_resanitized_at_the_boundary() -> None:
 
     assert "private-value" not in failure.message
     assert "<redacted>" in failure.message
+
+
+def test_operation_failure_can_be_raised_with_cause() -> None:
+    cause = RuntimeError("upstream failure")
+
+    with pytest.raises(OperationFailure) as raised:
+        raise OperationFailure(
+            code="provider_failed",
+            stage="activation",
+            message="activation failed",
+            error_type="UpstreamError",
+        ) from cause
+
+    assert raised.value.__cause__ is cause

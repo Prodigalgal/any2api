@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -221,7 +222,13 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
         def wait_for_link_sync(self, mailbox: Mailbox, **kwargs: object) -> str:
             assert mailbox.address == "a2a@example.test"
             self.seen = kwargs["seen_ids"]
-            return "https://cdn.arena.ai/auth/verify?token=one-time"
+            link = "https://cdn.arena.ai/auth/verify?token=one-time"
+            assert re.search(
+                rf"https?://[^\s<>'\"]*{kwargs['host_pattern']}[^\s<>'\"]*",
+                link,
+                re.IGNORECASE,
+            )
+            return link
 
     page = Page()
     mail = Mail()

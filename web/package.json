@@ -1,6 +1,6 @@
 {
   "name": "any2api-web",
-  "version": "0.15.7",
+  "version": "0.15.8",
   "private": true,
   "scripts": {
     "dev": "next dev",

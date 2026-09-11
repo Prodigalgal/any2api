@@ -874,7 +874,9 @@ def register_with_magic_link(
             retryable=False,
         )
     redirect_to = str(password_result.get("redirectTo") or "").strip()
+    activation_redirect_path = ""
     if redirect_to:
+        activation_redirect_path = urlparse(redirect_to).path or "/"
         page.goto(
             f"{config['base_url']}{_same_origin_path(redirect_to)}",
             wait_until="domcontentloaded",
@@ -902,8 +904,16 @@ def register_with_magic_link(
         status = int(profile.get("status") or 502) if isinstance(profile, dict) else 502
         failure_class = _arena_error_class(status, "profile probe failed")
         page_path = str(getattr(page, "url", "") or "").split("?", 1)[0]
-        cookie_names = sorted(
-            str(item.get("name") or "")
+        cookie_descriptors = sorted(
+            ":".join(
+                (
+                    str(item.get("name") or ""),
+                    str(item.get("domain") or ""),
+                    str(item.get("path") or ""),
+                    "secure" if item.get("secure") else "plain",
+                    "http" if item.get("httpOnly") else "script",
+                )
+            )
             for item in context.cookies()
             if isinstance(item, dict) and item.get("name")
         )
@@ -912,7 +922,8 @@ def register_with_magic_link(
             f"arena_{failure_class}",
             "Arena profile verification failed with "
             f"HTTP {status} ({failure_class}); page_path={page_path or '<unknown>'}; "
-            f"cookie_names={','.join(cookie_names) or '<none>'}",
+            f"redirect_path={activation_redirect_path or '<none>'}; "
+            f"cookie_descriptors={','.join(cookie_descriptors) or '<none>'}",
             error_type="ArenaProfileProbeFailed",
             retryable=False,
         )

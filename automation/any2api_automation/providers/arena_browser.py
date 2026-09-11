@@ -123,10 +123,7 @@ def _arena_update_tou_consent_script() -> str:
 
 
 def _arena_tou_consented(profile: dict[str, Any]) -> bool:
-    return bool(
-        profile.get("touConsentFieldPresent")
-        and profile.get("touConsentTimestampPresent")
-    )
+    return bool(profile.get("touConsentFieldPresent") and profile.get("touConsentTimestampPresent"))
 
 
 async def _arena_tou_profile(page: Any) -> dict[str, Any]:
@@ -1359,9 +1356,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         try:
             terms_state = await _ensure_arena_tou_consent(page)
         except Exception as error:  # noqa: BLE001 - readiness must preserve auth errors
-            self._logger.warning(
-                "arena_terms state=error error_type=%s", type(error).__name__
-            )
+            self._logger.warning("arena_terms state=error error_type=%s", type(error).__name__)
             return
         self._logger.info("arena_terms state=%s", terms_state)
 

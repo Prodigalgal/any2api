@@ -202,6 +202,7 @@ def test_arena_sign_in_script_matches_official_email_session_exchange() -> None:
     assert "input.email" in script
     assert "input.password" in script
     assert "shouldLinkHistory: false" in script
+    assert "requiresVerification" in script
     assert "credentials: 'include'" in script
 
 

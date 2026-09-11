@@ -760,6 +760,7 @@ def _arena_sign_in_script() -> str:
       status: response.status,
       success: data?.success === true,
       emailConfirmed: data?.user?.emailConfirmed === true,
+      requiresVerification: data?.requiresVerification === true,
       code: String(data?.code || ''),
       error: String(data?.error || '')
     };
@@ -922,6 +923,7 @@ def register_with_magic_link(
         )
     trace.mark(RegistrationStage.ACTIVATED)
     profile: dict[str, Any] | None = None
+    session_exchange: dict[str, Any] | None = None
     for attempt in range(3):
         page.wait_for_timeout(1_000 if attempt else 500)
         candidate = page.evaluate(
@@ -942,6 +944,7 @@ def register_with_magic_link(
                 "timeoutMs": 60_000,
             },
         )
+        session_exchange = sign_in if isinstance(sign_in, dict) else None
         if (
             isinstance(sign_in, dict)
             and sign_in.get("ok")
@@ -982,6 +985,15 @@ def register_with_magic_link(
             "Arena profile verification failed with "
             f"HTTP {status} ({failure_class}); page_path={page_path or '<unknown>'}; "
             f"redirect_path={activation_redirect_path or '<none>'}; "
+            "session_exchange="
+            f"status={int(session_exchange.get('status') or 0) if session_exchange else 0},"
+            f"success={bool(session_exchange.get('success')) if session_exchange else False},"
+            "email_confirmed="
+            f"{bool(session_exchange.get('emailConfirmed')) if session_exchange else False},"
+            "requires_verification="
+            f"{bool(session_exchange.get('requiresVerification')) if session_exchange else False},"
+            f"code={str(session_exchange.get('code') or '')[:80] if session_exchange else '<none>'},"
+            f"error={str(session_exchange.get('error') or '')[:120] if session_exchange else '<none>'}; "
             f"cookie_descriptors={','.join(cookie_descriptors) or '<none>'}",
             error_type="ArenaProfileProbeFailed",
             retryable=False,

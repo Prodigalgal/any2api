@@ -232,8 +232,7 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
             assert mailbox.address == "a2a@example.test"
             self.seen = kwargs["seen_ids"]
             link = (
-                "https://arena.ai/auth/verify?"
-                "signup_intent_id=signup-1&token=one-time&type=email"
+                "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time&type=email"
             )
             assert re.search(
                 rf"https?://[^\s<>'\"]*{kwargs['host_pattern']}[^\s<>'\"]*",

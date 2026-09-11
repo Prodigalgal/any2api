@@ -23,6 +23,8 @@ import tools.jackson.databind.JsonNode;
 public class AutomationProviderCatalog {
     private static final Logger log = LoggerFactory.getLogger(AutomationProviderCatalog.class);
     private static final Pattern PROVIDER_ID = Pattern.compile("^[a-z][a-z0-9_-]{1,31}$");
+    private static final int DEFAULT_MAX_TARGET = 1000;
+    private static final int DEFAULT_MAX_ATTEMPTS = 10000;
 
     private final WebClient client;
     private final String token;
@@ -81,6 +83,16 @@ public class AutomationProviderCatalog {
             .getOrDefault(providerId, RegistrationAttemptMode.NEW_IDENTITY);
     }
 
+    public int registrationMaxTarget(String providerId) {
+        return current.get().registrationMaxTargets()
+            .getOrDefault(providerId, DEFAULT_MAX_TARGET);
+    }
+
+    public int registrationMaxAttempts(String providerId) {
+        return current.get().registrationMaxAttempts()
+            .getOrDefault(providerId, DEFAULT_MAX_ATTEMPTS);
+    }
+
     public boolean ready() {
         return current.get().refreshedAt() != null;
     }
@@ -91,6 +103,8 @@ public class AutomationProviderCatalog {
         }
         var parsed = new LinkedHashMap<String, Set<AutomationOperation>>();
         var attemptModes = new LinkedHashMap<String, RegistrationAttemptMode>();
+        var maxTargets = new LinkedHashMap<String, Integer>();
+        var maxAttempts = new LinkedHashMap<String, Integer>();
         var actionBindings = new LinkedHashMap<String, Set<ProviderActionBinding>>();
         for (var provider : response.path("providers")) {
             var providerId = provider.path("id").asText("");
@@ -112,10 +126,41 @@ public class AutomationProviderCatalog {
             var attemptMode = RegistrationAttemptMode.fromExternalName(
                 provider.path("registration_attempt_mode").asText("new_identity"));
             attemptModes.put(providerId, attemptMode);
+            var targetLimit = boundedLimit(
+                provider, "registration_max_target", 1, DEFAULT_MAX_TARGET, DEFAULT_MAX_TARGET);
+            var attemptLimit = boundedLimit(
+                provider, "registration_max_attempts", 1, DEFAULT_MAX_ATTEMPTS,
+                DEFAULT_MAX_ATTEMPTS);
+            if (attemptLimit < targetLimit) {
+                throw new IllegalArgumentException(
+                    "registration attempt limit cannot be below target limit: " + providerId);
+            }
+            maxTargets.put(providerId, targetLimit);
+            maxAttempts.put(providerId, attemptLimit);
             actionBindings.put(providerId, parseActions(providerId, provider.path("actions")));
         }
         current.set(new Snapshot(
-            Map.copyOf(parsed), Map.copyOf(attemptModes), Map.copyOf(actionBindings), Instant.now()));
+            Map.copyOf(parsed), Map.copyOf(attemptModes), Map.copyOf(maxTargets),
+            Map.copyOf(maxAttempts), Map.copyOf(actionBindings), Instant.now()));
+    }
+
+    private static int boundedLimit(
+        JsonNode provider,
+        String field,
+        int minimum,
+        int maximum,
+        int fallback
+    ) {
+        if (!provider.has(field)) return fallback;
+        var value = provider.path(field);
+        if (!value.isIntegralNumber()) {
+            throw new IllegalArgumentException(field + " must be an integer");
+        }
+        var result = value.asLong();
+        if (result < minimum || result > maximum) {
+            throw new IllegalArgumentException(field + " is outside allowed range");
+        }
+        return (int) result;
     }
 
     private Set<ProviderActionBinding> parseActions(String providerId, JsonNode values) {
@@ -145,11 +190,13 @@ public class AutomationProviderCatalog {
     private record Snapshot(
         Map<String, Set<AutomationOperation>> operations,
         Map<String, RegistrationAttemptMode> registrationAttemptModes,
+        Map<String, Integer> registrationMaxTargets,
+        Map<String, Integer> registrationMaxAttempts,
         Map<String, Set<ProviderActionBinding>> actions,
         Instant refreshedAt
     ) {
         static Snapshot empty() {
-            return new Snapshot(Map.of(), Map.of(), Map.of(), null);
+            return new Snapshot(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), null);
         }
     }
 

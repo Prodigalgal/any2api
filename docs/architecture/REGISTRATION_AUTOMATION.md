@@ -18,6 +18,17 @@ with the provider manifest's `top_text` model. The probe must return the request
 normal completion event before the account becomes ACTIVE. Probe evidence is stored as non-secret
 metadata; failures remain disabled and reuse the lifecycle queue's bounded backoff.
 
+### Arena single-identity flow
+
+Arena uses the shared temporary-mail client and the shared Camoufox registration flow. One
+`register` operation creates exactly one mailbox, snapshots existing message IDs, submits
+`POST /nextjs-api/sign-up/magic-link` from the Arena page, waits only for a new `arena.ai` link,
+opens that link in the same browser context, and verifies `GET /api/me` before returning the
+credential. The worker never treats the signup response alone as a usable account. Arena's
+manifest sets `registration_attempt_mode=single_identity`, `registration_max_target=1`, and
+`registration_max_attempts=1`; the Java scheduler therefore cannot turn this adapter into a batch
+account creator.
+
 ## Shared browser platform
 
 One Python service and image contains Camoufox, Patchright, Xvfb, provider plugins, solver libraries, sing-box, and temporary-mail clients. It separates work with internal lanes rather than microservices:
@@ -146,7 +157,7 @@ MinMax's inference request `user_id` is a protocol field and is not an account i
 
 The common provider lifecycle contract includes a `daily_checkin` operation for providers whose Web or CLI account requires a daily account action before inference. The Python side exposes the shared `DailyCheckinStrategy` contract; each provider owns its protocol, parser, endpoint paths, and credential-patch handling in a separate concrete strategy module. MinMax is the first implementation: it reads the official Web check-in panel through `GET /minimax-cloud/api/v1/signin/status` and claims the current day through `POST /minimax-cloud/api/v1/signin/claim` when the day is claimable. An already-claimed day is idempotently successful. Newly imported or manually activated accounts with this capability execute the operation before the real inference probe so a zero-credit account is not misclassified as an invalid credential.
 
-The six full-lifecycle plugins for GLM, Grok, LongCat, MiMo, MinMax, and Qwen expose the common
+The seven full-lifecycle plugins for Arena, GLM, Grok, LongCat, MiMo, MinMax, and Qwen expose the common
 registration, reauthentication, and keepalive operations. A provider may additionally advertise
 the common `daily_checkin` operation when its account lifecycle requires it; channel-only plugins
 such as Grok Console may advertise a strict subset:
@@ -157,6 +168,12 @@ reauthenticate -> merged credential_patch or terminal auth failure
 keepalive -> healthy, auth_expired, optional credential_patch
 daily_checkin -> healthy, auth_expired, idempotent claim metadata, optional credential_patch
 ```
+
+Arena reauthentication and keepalive use the same account-bound page session and `/api/me`
+identity probe. HTTP 401/403 is reported as credential failure or interactive authentication
+required; it is not retried as a successful registration. Arena's registration challenge type is
+`email_magic_link`; captcha, rate limiting, duplicate identity, invalid request, and upstream
+failure are recorded as separate error classes.
 
 ## Challenge pipeline
 

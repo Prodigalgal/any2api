@@ -39,5 +39,7 @@ class ModelCapabilityContractTest {
         assertThat(value.supportedParameters().get("chat_completions"))
             .contains("model", "messages", "temperature", "tools");
         assertThat(value.providerOptions()).containsEntry("thinking_budget", "integer");
+        assertThat(value.withoutInputMedia("image").multimodal().input())
+            .containsExactly("text");
     }
 }

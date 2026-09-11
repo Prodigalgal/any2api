@@ -120,6 +120,7 @@ The current Runtime mappers make that translation explicit:
 
 | Provider | Canonical messages | Generation | Reasoning/search | Tools | Media |
 |---|---|---|---|---|---|
+| Arena | flattened role sections; image/PDF blocks upload in the account page first | unsupported fields rejected before Action | `provider_options.arena.web_search=true` maps to native `modality: "search"` | unsupported | same-session page upload; current declared formats are PNG/JPEG/WebP and PDF |
 | DeepSeek | flattened `prompt` with role sections | unsupported fields rejected before Action | `thinking_enabled`/`search_enabled` booleans | search tools become `search_enabled`; other tools rejected | text-only |
 | GLM | official `chat.history` and completion `messages` | `params.max_tokens`, `temperature`, `top_p` | completion `features.enable_thinking`, `reasoning_effort`, `auto_web_search` | function tools rejected | authenticated image file upload, then official file object |
 | LongCat | flattened `content` with role sections | no output-budget field; unsupported limits rejected | `reasonEnabled`, `searchEnabled`, model-specific `agentId` | function definitions become a provider-local prompt contract | same-session `files` from `/appendix-upload` |
@@ -193,6 +194,7 @@ completion is a separate release gate.
 
 | Provider | Chat | Responses | Reasoning | Function tools | Image input | File input | Audio input | Video input | Stored Responses |
 |---|---|---|---|---|---|---|---|---|---|
+| Arena | Native | Native | Unsupported | Unsupported | Native page upload | Native page upload (PDF) | Unsupported | Unsupported | Unsupported |
 | Qwen | Native | Native | Native | Unsupported; search tools only | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
 | LongCat | Native | Native | Native | Emulated | Native upload | Native upload | Unsupported | Unsupported | Unsupported |
 | MiMo | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
@@ -222,6 +224,17 @@ not a fallback to text. The runtime schema records all canonical image/audio/vid
 aliases, while provider capability, model metadata, and source policy decide whether a block can
 proceed. Audio and video are not declared as LongCat chat input capabilities; their presence in
 other LongCat product flows does not change this contract.
+
+Arena is a Web-only Runtime provider. The public request may use either the typed
+`provider_options.arena.web_search` option or the provider-contract `web_search` parameter; both
+are normalized to the same semantic boolean and the page mapper emits Arena's native
+`modality: "search"`. Media blocks must be user-message inputs with inline base64 data URLs. The
+Camoufox page locates the current Arena-exported `uploadFile` function, obtains Arena's signed
+upload URL through the page-owned action, uploads the bytes, and sends only the returned
+`experimental_attachments` objects in `create-evaluation`. The current UI declaration is PNG,
+JPEG, WebP, and PDF; audio, video, remote URLs, file IDs, and unsupported document MIME types fail
+closed before the browser stream. A successful model catalog response is not an inference-ready
+account; Arena still requires a real text probe after registration.
 
 Grok channels remain code-installed but may be administratively hot-unplugged. Disabling them does
 not weaken protocol validation for the enabled providers.

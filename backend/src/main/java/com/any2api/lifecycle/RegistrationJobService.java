@@ -21,6 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class RegistrationJobService {
     private static final int MAX_TARGET = 1000;
+    private static final int MAX_ATTEMPTS = 10000;
     private static final int MAX_CONCURRENCY = 8;
     private static final int MAX_ATTEMPT_INTERVAL_SECONDS = 3600;
     private static final int MAX_ROUND_INTERVAL_SECONDS = 86400;
@@ -92,21 +93,32 @@ public class RegistrationJobService {
     }
 
     public CreateCommand normalize(CreateCommand command) {
-        var provider = providers.require(command.providerId());
+        var providerId = command.providerId().trim();
+        var provider = providers.require(providerId);
         if (provider.manifest().capabilities().getOrDefault(
             ProviderCapability.REGISTRATION, SupportLevel.UNSUPPORTED) == SupportLevel.UNSUPPORTED) {
             throw new IllegalArgumentException("provider does not support registration");
         }
-        if (!automationProviders.supports(command.providerId(), AutomationOperation.REGISTER)) {
+        if (!automationProviders.supports(providerId, AutomationOperation.REGISTER)) {
             throw new IllegalArgumentException(
-                "automation provider does not support registration: " + command.providerId());
+                "automation provider does not support registration: " + providerId);
         }
         var defaults = runtimeSettings.registrationDefaults();
-        var target = bounded(command.target(), 1, MAX_TARGET, defaults.target());
-        var attempts = bounded(command.maxAttempts(), target, target * 10,
-            Math.max(target, defaults.maxAttempts()));
+        var providerTargetLimit = automationProviders.registrationMaxTarget(providerId);
+        var targetLimit = Math.min(MAX_TARGET, providerTargetLimit);
+        var target = bounded(command.target(), 1, targetLimit,
+            Math.min(defaults.target(), targetLimit));
+        var providerAttemptLimit = automationProviders.registrationMaxAttempts(providerId);
+        if (providerAttemptLimit < target) {
+            throw new IllegalArgumentException(
+                "registration attempt limit is below requested target: " + providerId);
+        }
+        var attemptsLimit = Math.min(MAX_ATTEMPTS, Math.min(Math.multiplyExact(target, 10),
+            providerAttemptLimit));
+        var attempts = bounded(command.maxAttempts(), target, attemptsLimit,
+            Math.min(Math.max(target, defaults.maxAttempts()), attemptsLimit));
         attempts = effectiveMaxAttempts(
-            attempts, automationProviders.registrationAttemptMode(command.providerId()));
+            attempts, automationProviders.registrationAttemptMode(providerId));
         var concurrency = bounded(
             command.concurrency(), 1, MAX_CONCURRENCY, defaults.concurrency());
         var attemptIntervalSeconds = bounded(
@@ -135,7 +147,7 @@ public class RegistrationJobService {
             || command.idempotencyKey().isBlank()
             ? null : command.idempotencyKey().trim();
         return new CreateCommand(
-            command.providerId().trim(), target, attempts, concurrency,
+            providerId, target, attempts, concurrency,
             attemptIntervalSeconds, roundIntervalSeconds, attemptTimeoutSeconds,
             flowMaxAttempts, maxConsecutiveFailureBatches, proxyPolicy, headless,
             mailDomain, captcha.aiEnabled(), captcha.aiMode(), idempotencyKey);

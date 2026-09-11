@@ -113,6 +113,19 @@ public record ModelCapabilityContract(
             new MultimodalSupport(input, multimodal.output()));
     }
 
+    public ModelCapabilityContract withoutInputMedia(String mediaType) {
+        var normalized = mediaType == null ? ""
+            : mediaType.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isBlank() || !multimodal.input().contains(normalized)) return this;
+        var input = multimodal.input().stream()
+            .filter(value -> !normalized.equals(value))
+            .toList();
+        return new ModelCapabilityContract(
+            supportedParameters, providerOptions, maxContextTokens, maxInputTokens,
+            maxOutputTokens, reasoning, reasoningLevels, tools, streaming,
+            new MultimodalSupport(input, multimodal.output()));
+    }
+
     private static boolean supported(ProviderManifest manifest, ProviderCapability capability) {
         return manifest.capabilities().getOrDefault(capability, SupportLevel.UNSUPPORTED)
             != SupportLevel.UNSUPPORTED;

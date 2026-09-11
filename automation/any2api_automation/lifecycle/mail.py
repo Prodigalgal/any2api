@@ -125,9 +125,10 @@ class TempMailClient:
         *,
         host_pattern: str,
         timeout: float | None = None,
+        seen_ids: set[str] | None = None,
     ) -> str:
         regex = re.compile(rf"https?://[^\s<>'\"]*{host_pattern}[^\s<>'\"]*", re.IGNORECASE)
-        return unescape(await self._wait(mailbox, regex, timeout, None, None)).rstrip(".,);]")
+        return unescape(await self._wait(mailbox, regex, timeout, None, seen_ids)).rstrip(".,);]")
 
     def wait_for_code_sync(
         self,
@@ -145,9 +146,10 @@ class TempMailClient:
         *,
         host_pattern: str,
         timeout: float | None = None,
+        seen_ids: set[str] | None = None,
     ) -> str:
         regex = re.compile(rf"https?://[^\s<>'\"]*{host_pattern}[^\s<>'\"]*", re.IGNORECASE)
-        return unescape(self._wait_sync(mailbox, regex, timeout, None)).rstrip(".,);]")
+        return unescape(self._wait_sync(mailbox, regex, timeout, seen_ids)).rstrip(".,);]")
 
     def message_ids_sync(self, mailbox: Mailbox) -> set[str]:
         return {

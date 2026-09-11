@@ -70,6 +70,8 @@ class AutomationProviderManifest:
     inference_modes: tuple[str, ...] = (CAMOUFOX_BROWSER_RUNTIME,)
     inference_actions: tuple[str, ...] = ()
     registration_attempt_mode: str = "new_identity"
+    registration_max_target: int = 1000
+    registration_max_attempts: int = 10000
 
     def __post_init__(self) -> None:
         if self.inference_runtime not in _INFERENCE_RUNTIMES:
@@ -103,6 +105,22 @@ class AutomationProviderManifest:
             raise ValueError(f"inference provider {self.id} must declare inference actions")
         if self.inference_transport and "chat" not in declared_actions:
             raise ValueError(f"inference provider {self.id} must declare the chat action")
+        if (
+            not isinstance(self.registration_max_target, int)
+            or isinstance(self.registration_max_target, bool)
+            or not 1 <= self.registration_max_target <= 1000
+        ):
+            raise ValueError(f"provider {self.id} registration target limit is invalid")
+        if (
+            not isinstance(self.registration_max_attempts, int)
+            or isinstance(self.registration_max_attempts, bool)
+            or not 1 <= self.registration_max_attempts <= 10000
+        ):
+            raise ValueError(f"provider {self.id} registration attempt limit is invalid")
+        if self.registration_max_attempts < self.registration_max_target:
+            raise ValueError(
+                f"provider {self.id} registration attempt limit cannot be below target limit"
+            )
 
 
 class DailyCheckinStrategy(ABC):

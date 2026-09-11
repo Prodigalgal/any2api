@@ -22,6 +22,12 @@
 
 ## 当前推进
 
+- 最新业务版本已迭代到 `0.14.1`：源码 `fc33232`、CI `34556906088`、GitOps `46b6e98`、Argo revision `46b6e985...` 已形成同一不可变发布链路；server、automation、web 全部运行 `*-sha-fc33232...`，Pod Ready、重启 0、无新的 `OOMKilling` 事件。本地 `ircs-prod-config` checkout 已 fast-forward 到 `46b6e98`。
+- 生命周期过期凭据修复已在生产生效：Qwen 过期 keepalive 记录为 `credential_refresh_scheduled`，账号进入 `EXPIRED/disabled` 并生成 `reauthenticate`；第一笔真实 reauthenticate 在 `inference_probe` 阶段因 `provider_transport_error/PrematureCloseException` 失败，当前继续观察重试，不标 Qwen Ready。:codex-annotation{index="1"}
+- Qwen 当前账号快照为 6 个 `ACTIVE/enabled`（其中 3 个 expiry fence 已过期）、40 个 `EXPIRED/disabled`、1 个 `PENDING/disabled`；这证明生命周期分流已发生，但恢复稳定性和上游 transport 仍未闭环。
+- MiniMax 保留 7 个 `daily_checkin` 待执行动作，最早中国时间 15:02 到期；继续等待自然打卡结果，不提前伪造额度或完成事件。
+- Automation 当前约 `1361Mi`、内存 limit `6Gi`，浏览器预算日志显示等待/idle eviction 正常工作；本次发布后无 Pod 重启和 OOM 事件。
+
 - LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；26 个账号均为 `ACTIVE/enabled`，自然 `keepalive` 事件已取得 `SUCCEEDED / lifecycle_completed` 证据；当前生产制品 `ce2ee60` 在 K8S 内新增文本请求返回 HTTP 200，服务端 `attempt=1/status=SUCCEEDED`，五个目录模型均 `available=true/probe=READY/circuit=CLOSED`，滚动成功率约 90.9%–100%，按本轮声明范围达到 Runtime Ready。继续观察多账号覆盖、24 小时健康窗口和其他未逐项验证的文件扩展，不扩大为全部文件格式 Ready。
 - Qwen 文本探针、keepalive 和 32x32 图片非流式/SSE completion 已在 `ce2ee60` 发布上成功；本次 K8S SSE 请求 HTTP 200，39 个 SSE 帧、包含 `[DONE]`，服务端 `attempt=1/status=SUCCEEDED`。1x1 图片仍返回 HTTP 200、392 字节、仅含 `error` 的不完整 SSE，公共层转换为不可重试的 HTTP 400 `invalid_request_error`；Qwen 当前仍为 `DEGRADED`，继续补齐尺寸边界和稳定性证据，整体保持未 Ready。
 - MiniMax-M3 在 K8S 内新增 SSE 和两次非流式请求均 `attempt=1/status=SUCCEEDED`，三个不同账号分别承载请求，证明租约切换；7 个账号均可用且 `quota_limited=0`。但 M3/M2.7 24 小时滚动成功率约 87.1%/31.4%，当前仍为 `DEGRADED`，且自然 `daily_checkin` 尚未取得完成事件，继续观察真实结果。

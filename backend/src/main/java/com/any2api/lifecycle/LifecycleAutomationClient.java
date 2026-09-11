@@ -23,7 +23,11 @@ final class LifecycleAutomationClient {
         Any2ApiProperties properties,
         ObjectMapper mapper
     ) {
-        client = builder.baseUrl(properties.getAutomation().getBaseUrl().toString()).build();
+        client = builder.clone()
+            .baseUrl(properties.getAutomation().getBaseUrl().toString())
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(
+                properties.getAutomation().getMaxResponseBytes()))
+            .build();
         token = properties.getSecurity().getInternalToken();
         this.mapper = mapper;
     }

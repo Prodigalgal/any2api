@@ -96,6 +96,7 @@ any2api:
     login-pow-difficulty: ${ANY2API_LOGIN_POW_DIFFICULTY:18}
   automation:
     base-url: ${AUTOMATION_BASE_URL:http://localhost:8090}
+    max-response-bytes: ${ANY2API_AUTOMATION_MAX_RESPONSE_BYTES:8388608}
   temp-mail:
     api-base: ${ANY2API_AUTOMATION_MAIL_API_BASE:}
     admin-password: ${ANY2API_AUTOMATION_MAIL_ADMIN_PASSWORD:}

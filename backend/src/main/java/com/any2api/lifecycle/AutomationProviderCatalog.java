@@ -31,7 +31,11 @@ public class AutomationProviderCatalog {
     private final AtomicReference<Snapshot> current = new AtomicReference<>(Snapshot.empty());
 
     public AutomationProviderCatalog(WebClient.Builder builder, Any2ApiProperties properties) {
-        client = builder.baseUrl(properties.getAutomation().getBaseUrl().toString()).build();
+        client = builder.clone()
+            .baseUrl(properties.getAutomation().getBaseUrl().toString())
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(
+                properties.getAutomation().getMaxResponseBytes()))
+            .build();
         token = properties.getSecurity().getInternalToken();
     }
 

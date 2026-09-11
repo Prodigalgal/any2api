@@ -2,119 +2,128 @@
 
 ## 结论
 
-`arena` 已接入仓库现有 Provider、Action、生命周期和模型目录框架，当前实现只使用
-Camoufox Browser Runtime。注册、重新认证、保活、模型发现、文本流、图片/PDF 上传和 Web
-Search 的 provider-native 映射已经具备代码与自动化契约测试；真实 Arena 账号注册、登录后
-推理探针、CI/GitOps/K8S 发布验收尚未执行，因此本适配状态为 `Implemented / Not Ready`。
+本报告于 2026-09-12 按 K8S 运行态复核结果修订。Arena 只接入 Direct 语义，使用
+Camoufox Browser Runtime，不接入 Arena 官方 API/CLI Channel，也不开放 Battle、
+Side-by-side 等模式。
 
-本轮没有创建外部 Arena 账号，也没有绕过验证码、限流、额度或登录限制。注册器使用共享
-Temp Mail，但通过 `single_identity`、`target=1`、`maxAttempts=1` 把测试注册限制为单个
-身份。
+0.16.4 已在 K8S 上取得 Arena Direct 的真实 Search、图片和 PDF 非流式/SSE 成功样本；
+PDF 成功样本使用当前目录声明支持文件输入且账号探针通过的 `claude-sonnet-4-6`。
+`Max` 当前不声明文件输入，发送 PDF 时返回明确的能力错误，这是正确的契约门禁。
+
+当前整体状态仍为 `DEGRADED / ACCOUNT_RECOVERY_PENDING`，不是“所有账号稳定 Ready”：
+Arena 账号池现场快照为 9 个账号，其中仅 2 个 `ACTIVE/enabled`，另有 4 个注册后待探针
+账号、2 个凭据失效账号和 1 个历史反爬/协议失败账号。恢复失败的直接原因已定位为 Java
+生命周期客户端的默认 256 KiB 解码上限触发 `DataBufferLimitException`，不是 TOU 弹窗、
+reCAPTCHA V3 发放失败或 Arena 协议解析失败。0.16.5 已加入受控响应上限，待 CI/GitOps
+发布后重新跑恢复和多账号稳定性验收。
 
 ## 已确认的 Web 协议
 
-2026-09-11 对公开 Arena Web 页面进行低影响协议取证，未发送真实 prompt：
+低影响协议取证和真实请求共同确认：
 
 | 观察项 | 结果 |
 |---|---|
-| 公开页面 | `https://arena.ai/text/direct?model_a=max` 可加载 Direct/Max 页面 |
-| 模型目录 | 页面 RSC 中存在 `initialModels`，记录含 provider UUID、显示名、输入/输出能力和可选状态 |
-| 模型接口 | `GET /nextjs-api/stream/create-evaluation` 返回 `405`；`OPTIONS` 返回 `204` 且声明 `POST` |
-| 未登录状态 | `GET /api/me` 返回 `401` 和 `User not found` |
-| 注册入口 | `POST /nextjs-api/sign-up/magic-link` 的空请求返回 `400 invalid request body` |
-| 注册方式 | 当前页面使用 email magic link；验证链接在同一页面上下文继续完成登录 |
-| 聊天请求 | 页面向 `POST /nextjs-api/stream/create-evaluation` 发送 `mode`、模型 UUID、消息 UUID、`userMessage` 和 `modality` |
-| 流事件 | 一字符前缀、换行分隔的 JSON 帧；文本 `0`、数组 `2`、错误 `3`、结束/用量 `d/e`、消息开始 `f`、推理 `g` |
-| 媒体上传 | 页面导出 `uploadFile`，内部使用 `generateUploadUrl`、signed upload 和 `getSignedUrl`；聊天随后发送 `experimental_attachments` |
-| 当前媒体声明 | 页面 UI 当前声明 PNG/JPEG/WebP 图片与 PDF 文件；本适配不把其他 MIME 类型扩大为已验证能力 |
+| 公开页面 | `https://arena.ai/text/direct?model_a=max` 可加载 Direct 页面 |
+| 模型目录 | 页面 RSC `initialModels` 提供模型 UUID、显示名和输入/输出能力 |
+| 聊天请求 | `POST /nextjs-api/stream/create-evaluation`，请求含模型 UUID、消息 UUID、`userMessage` 和 `modality` |
+| Direct wire 值 | 新会话内部使用 `mode=direct-battle`；这是官方页面内部枚举，不向公共请求开放 Battle 语义 |
+| 流事件 | 一字符前缀、换行分隔的 JSON 帧；文本、工具/Search、结束和错误帧分别由 Provider decoder 处理 |
+| 媒体上传 | 页面导出的 `uploadFile` 使用同源 signed upload action，聊天请求随后发送 `experimental_attachments` |
+| 首次协议 | `arena_terms state=already_consented` 已在真实请求日志出现；TOU 状态与认证状态分开处理 |
+| 验证码 | Enterprise V3 成功发放时记录 `issued/available=true`；只有上游明确要求时才升级官方 V2 widget |
 
-## 运行链路
+## 分层职责
 
 ```mermaid
-sequenceDiagram
-    participant Client as OpenAI-compatible Client
-    participant Java as Java CanonicalRequest
-    participant Action as Runtime Action
-    participant Py as Python Arena Provider
-    participant Page as Camoufox Arena Page
-    participant Mail as Temp Mail
-    participant Arena as arena.ai
-
-    Client->>Java: Chat/Responses + provider_options.arena
-    Java->>Java: validate canonical fields and model contract
-    Java->>Action: semantic command, no rawRequest
-    Action->>Py: model_discovery or chat
-    Py->>Page: load direct page and parse initialModels
-    opt image or PDF input
-        Py->>Page: locate exported uploadFile(File)
-        Page->>Arena: signed upload action and object storage PUT
-        Page-->>Py: provider attachment URL
-    end
-    Py->>Arena: POST create-evaluation with modality chat/search
-    Arena-->>Py: newline-delimited native frames
-    Py-->>Java: canonical events and credential patch
-    opt registration
-        Py->>Arena: POST sign-up/magic-link
-        Arena-->>Mail: verification mail
-        Mail-->>Py: new arena.ai verification link
-        Py->>Page: open link and GET /api/me
-    end
+flowchart LR
+    client[OpenAI-compatible Client]
+    java[Java Canonical Request and Policy]
+    action[Semantic Action]
+    py[Python Arena Runtime]
+    page[Camoufox Direct Page]
+    mail[Temp Mail]
+    arena[Arena Web]
+    client --> java --> action --> py --> page --> arena
+    py --> mail
+    page --> arena
 ```
 
-## 能力与边界
+框架负责 Action/Channel 契约、账号租约、浏览器预算、生命周期、统一错误模型、媒体特征
+授权和观测；Arena Provider 负责页面路径、模型 UUID、请求字段、Search modality、TOU
+处理、V3/V2 官方验证码边界、媒体上传、原生帧解码和 provider-local 重试。
 
-| 能力 | 当前实现 | 验证状态 |
-|---|---|---|
-| 自动注册 | 共享 Temp Mail、历史邮件 ID 快照、magic link、`/api/me` 身份核对 | 代码/fixture 通过；未执行外部注册 |
-| 重新认证/保活 | 同一账号 Browser Runtime 调用 `/api/me`，401/403 分类为认证失败 | 代码接入；未有真实账号证据 |
-| 模型发现 | 从同源 direct 页面提取 UUID、显示名和能力元数据 | parser 契约通过；匿名页面取证通过 |
-| 文本非流式/SSE | Java 仍使用统一 OpenAI renderer；Python 读取 Arena 原生帧 | mapper/decoder 测试通过；未有登录后 completion |
-| 图片输入 | inline base64 PNG/JPEG/WebP，经页面 `uploadFile` 后发送 signed URL | 页面导出定位与 mapper 测试通过；未有真实 completion |
-| 文档输入 | inline base64 PDF，经同一页面上传 | mapper 测试通过；未有真实 completion |
-| Web Search | `web_search=true` 映射为 Arena `modality="search"`，并检查目录 Search 能力 | mapper 测试通过；未有真实 Search completion |
-| API Channel | 未实现、未声明 | 按范围后置 |
+生命周期自动化返回的浏览器状态上下文由 Java 客户端受控缓冲，配置键为
+`ANY2API_AUTOMATION_MAX_RESPONSE_BYTES`，默认 8 MiB，允许范围 256 KiB–32 MiB。
+该上限用于容纳合法的浏览器状态回传，同时保留对异常大响应的硬限制，避免用取消限制的
+方式引入 OOM 风险。
 
-媒体输入只允许 user message 的 inline base64 data URL。每个文件默认上限 20 MiB，总量默认
-40 MiB，最多 10 个；远程 URL、file ID、音频、视频和未声明 MIME 类型在进入浏览器流前
-失败。上传使用的 signed URL 不写入普通日志；credential patch 只保留经过运行时域名过滤
-的浏览器上下文。
+## 当前真实验收证据
 
-## 请求示例
+以下记录来自 0.16.4 K8S 运行态，均通过临时测试密钥调用公开 OpenAI-compatible 路由，
+测试密钥已在测试结束后清理；账号、邮箱、密钥和内部标识不写入本报告。
 
-文本和 Search 使用现有 OpenAI-compatible 路由，Arena 私有开关放在 provider namespace：
+| 能力 | 模型/模式 | 非流式 | SSE | 结论 |
+|---|---|---:|---:|---|
+| 文本 | Arena Direct | HTTP 200、JSON、存在 choices | 由同一 Chat Runtime 处理 | 已通过 |
+| Search | `Max` + `web_search=true` | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、14 个数据帧、含 `[DONE]` | 已通过 |
+| 图片 | `claude-sonnet-4-6` + inline PNG | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、4 个数据帧、含 `[DONE]` | 已通过，受账号池稳定性约束 |
+| PDF | `claude-sonnet-4-6` + inline PDF | HTTP 200、JSON、存在 choices | HTTP 200、`text/event-stream`、13 个数据帧、含 `[DONE]` | 已通过，限于声明 file 能力的模型 |
+| PDF 能力门禁 | `Max` | HTTP 400、`unsupported_parameter`、参数 `input` | 不进入上游流 | 正确拒绝 |
 
-```json
-{
-  "model": "arena/Max",
-  "stream": true,
-  "provider_options": {
-    "arena": {
-      "web_search": true
-    }
-  },
-  "messages": [
-    {"role": "user", "content": "查找并总结今天的公开信息"}
-  ]
-}
-```
+此前 Search 真实流中发现的 provider-native `ac` 工具增量帧已加入 decoder；当前 Search
+非流式和 SSE 都能正常完成，未知帧不会被静默当成文本。
 
-图片/PDF 先在公共请求中使用 `input_image` 或 `input_file` 的 inline data URL。Java 只传递
-canonical content block 给 Action；Python 页面上传完成后才组装 Arena 的
-`experimental_attachments`，不会把 OpenAI 请求体原样转发给上游。
+## 媒体和请求边界
 
-## 错误与发布门槛
+- 图片只声明 PNG、JPEG、WebP；文档本轮只声明 PDF。
+- 输入必须是 user message 中的 inline base64 data URL；远程 URL、file ID、音频、视频和
+  未声明 MIME 类型在进入浏览器流前失败。
+- 单文件默认上限 20 MiB，总量默认 40 MiB，最多 10 个文件。
+- 图片 data URL 同时需要分发密钥的 `MULTIMODAL_INPUT` 与 `FILE_UPLOADS` feature；这是
+  inline 文件授权规则，不是 Arena 上游错误。
+- Search 只有在当前 Arena 模型目录声明 Search 能力时才发送 `modality=search`。
 
-Arena 上游错误被归类为 `credential_rejected`、`permission_denied`、`model_unavailable`、
-`rate_limited`、`invalid_request_error` 或 `provider_upstream_error`；流协议异常、空输出和
-未声明的模型输出分别归为 `provider_protocol_violation`、`empty_model_response` 和
-`unsupported_model_output`。注册端额外区分验证码拒绝、限流、重复身份、无效请求、邮件超时
-和身份不匹配。
+## 验证码和首次协议边界
 
-要把 Arena 标为 `Ready`，还需要同一不可变版本完成以下证据：
+请求前会在同一浏览器页面检查并处理官方 TOU 状态；已同意时继续请求，未同意时由官方
+页面协议流程处理。reCAPTCHA 只允许使用官方页面生成的 Enterprise V3 token；如果上游
+明确返回 `recaptcha validation failed` 或 `prompt failed`，才渲染官方 V2 widget。没有
+官方 callback token 时，系统返回 `recaptcha_v2_required`，不伪造 token、不绕过验证。
 
-1. 使用配置好的 Temp Mail 和一条合法代理链完成一次注册，确认账号只进入 `PENDING`。
-2. 完成 `/api/me` 保活、模型发现和账号专属文本探针，确认账号进入 inference pool。
-3. 对同一账号分别完成文本、Search、图片和 PDF 的非流式与 SSE 请求，并保存去敏化的请求/帧形状、模型、账号、状态码和 canonical terminal event。
-4. 运行 CI、构建镜像并完成 GitOps/K8S 的 Pod Ready、零重启、无新增 `OOMKilled`、健康接口和真实用户路径验收。
+因此，V2 人工交互或上游策略升级是明确的 readiness 边界；它不应被伪装成普通账号、协议
+或模型错误。:codex-annotation{index="1"}
 
-本报告仅记录代码和协议审计结果，不将未执行的真实上游请求写成成功证据。
+## 账号生命周期和未完成项
+
+现场账号聚合如下：
+
+| 状态 | 数量 | 说明 |
+|---|---:|---|
+| `ACTIVE/enabled` | 2 | 当前可进入 inference pool |
+| `PENDING/disabled` | 4 | 注册成功后尚未完成账号专属推理探针 |
+| `EXPIRED/disabled` | 2 | 上游凭据返回 401 后进入重新认证流程 |
+| `DEGRADED/disabled` | 1 | 历史反爬/协议失败，保留作诊断，不强行启用 |
+
+旧版本恢复事件大量出现 `automation_transport_error`，详细原因为
+`DataBufferLimitException`；这发生在 Java 读取 Automation 返回的浏览器状态上下文阶段。
+0.16.5 的响应缓冲修复发布后，验收顺序为：
+
+1. 观察 PENDING/EXPIRED 账号的 `reauthenticate` 是否能完成并写回 credential patch。
+2. 对恢复账号执行账号专属 inference probe，确认进入 inference pool。
+3. 使用至少两个不同账号分别完成文本、Search、图片和 PDF 的非流式/SSE 请求。
+4. 观察 24 小时成功率、P95、账号切换和浏览器预算，不清理历史失败来伪造 Ready。
+
+## 发布与回滚
+
+- 代码候选：`0.16.5`，包含生命周期响应缓冲修复和对应回归测试。
+- 0.16.4 K8S 运行态：Argo CD `Synced/Healthy/Succeeded`，server、automation、web 使用
+  同一 `8a131b0` SHA 镜像，业务 Pod Ready、重启 0；本轮检查未发现新增 `OOMKilled`。
+- 0.16.5 在 CI、GitOps 和 K8S 验收完成前，不把本地测试结果写成线上结果。
+- 若 0.16.5 发布后出现回归，Backend/Web/Automation 可回滚到上一不可变 0.16.4 SHA 镜像；
+  不删除或重置已有 Arena 账号。
+
+## API Channel
+
+Arena 本轮不实现、不声明官方 API/CLI Channel；当前所有真实请求均通过同一套 Arena
+Camoufox Browser Runtime。后续若实现 API Channel，必须另建 provider-local 协议、认证、
+签名、媒体和错误映射，不得把 Arena 页面 wire 值或浏览器凭据上浮到公共层。

@@ -101,6 +101,7 @@ public class Any2ApiProperties {
 
     public static class Automation {
         private URI baseUrl = URI.create("http://localhost:8090");
+        private int maxResponseBytes = 8 << 20;
 
         public URI getBaseUrl() {
             return baseUrl;
@@ -108,6 +109,18 @@ public class Any2ApiProperties {
 
         public void setBaseUrl(URI baseUrl) {
             this.baseUrl = baseUrl;
+        }
+
+        public int getMaxResponseBytes() {
+            return maxResponseBytes;
+        }
+
+        public void setMaxResponseBytes(int value) {
+            if (value < (256 << 10) || value > (32 << 20)) {
+                throw new IllegalArgumentException(
+                    "automation max response bytes must be between 262144 and 33554432");
+            }
+            maxResponseBytes = value;
         }
     }
 

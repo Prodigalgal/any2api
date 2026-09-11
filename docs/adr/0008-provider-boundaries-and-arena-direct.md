@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-09-11
-- 适用版本：0.16.4
+- 适用版本：0.16.5
 - 关联：ADR-0007《统一 Action 契约并拆分 Runtime / API Channel》
 
 ## 决策摘要
@@ -11,6 +11,10 @@
 观测能力；厂商适配器负责自己的 Web/CLI 协议、页面脚本、接口参数、签名、验证码交互、
 媒体上传和事件解码。任何厂商差异都不得上浮到公共协议层，也不得在同一个 Provider 方法
 里用 `if api / if runtime` 混合实现。
+
+生命周期自动化客户端对 Automation 返回体使用受控缓冲上限，默认 8 MiB，可通过
+`ANY2API_AUTOMATION_MAX_RESPONSE_BYTES` 调整但限制在 256 KiB 至 32 MiB；这允许浏览器
+状态上下文安全回传，同时避免以取消上限的方式放大 OOM 风险。
 
 Arena 本轮只开放语义上的 `direct` 模式。Arena 当前新会话在上游 wire body 中仍要求
 `mode=direct-battle`，这是官方页面的内部枚举，不代表对外开放 Battle/Side-by-side 能力；

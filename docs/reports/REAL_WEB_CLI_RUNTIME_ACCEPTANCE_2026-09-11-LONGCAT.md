@@ -9,13 +9,13 @@
 | 项目 | 结果 |
 | --- | --- |
 | K8S context / namespace | `kubernetes-admin@sg-osaka-dualstack` / `any2api` |
-| 源码提交 | `09b5202`（LongCat Runtime 映射代码沿用已验收的 `1a7e6b9`） |
-| GitOps 提交 | `16eda4f` |
+| 源码提交 | `ce2ee60`（当前生产 Runtime 制品；LongCat 映射代码沿用已验收的 `1a7e6b9`） |
+| GitOps 提交 | `60cd8c1` |
 | Argo CD | `Succeeded / Synced / Healthy` |
 | 业务 Pod | server、automation、web 均 `Ready=true`，重启数为 0 |
 | OOM | 当前没有 `OOMKilling` 事件 |
 
-健康端点 `/healthz`、`/readyz` 和 Actuator readiness 均返回 HTTP 200、`{"status":"UP"}`。
+健康端点 `/healthz`、`/readyz` 和 Actuator readiness 均返回 HTTP 200、`{"status":"UP"}`；当前业务 Pod 均 `Ready=true`、重启数为 0，namespace 没有新的 `OOMKilling` 事件。
 
 ## LongCat 真实请求
 
@@ -23,13 +23,14 @@
 | --- | --- | --- |
 | `longcat/longcat-flash` | 4 次非流式 | 全部 HTTP 200，正常 completion |
 | `longcat/longcat-flash` | 2 次 SSE | 全部 HTTP 200，包含 `[DONE]`，无错误事件 |
+| `longcat/longcat-flash` | K8S 集群内新增非流式 | HTTP 200，`LONGCAT_RUNTIME_OK`，耗时约 32.9s；服务端 `attempt=1`、`status=SUCCEEDED` |
 | TXT `acceptance.txt` | 非流式 | HTTP 200，准确返回附件唯一标识 |
 | TXT `acceptance-sse.txt` | SSE | HTTP 200，包含 `[DONE]` 和附件唯一标识，无错误事件 |
 | 两个不同 ACTIVE/enabled 账号 | 手动账号探针 | 均 `ready=true`，模型为 `longcat-pro`，耗时约 38.8s / 11.3s |
 
 此前已在同一 Runtime 版本链路取得图片、PDF 和 DOCX 的非流式/SSE completion 证据；本次 TXT 复测推翻了旧的“只能上传、无法解析”观察结论。最近 30 分钟 LongCat 成功请求使用了 9 个不同账号，说明租约选择没有固定在单一账号。
 
-当前模型目录重新读取结果：`longcat-flash`、`longcat-pro`、`longcat-thinking`、`longcat-search`、`longcat-reason-search` 均 `available=true`、探针 `READY`、熔断器 `CLOSED`；`longcat-flash` 成功率约 90%、P95 约 47.6s，已达到当前 Ready 门槛。
+当前模型目录重新读取结果：`longcat-flash`、`longcat-pro`、`longcat-thinking`、`longcat-search`、`longcat-reason-search` 均 `available=true`、探针 `READY`、熔断器 `CLOSED`；滚动成功率分别约为 90.9%、92.9%、100%、100%、100%，均达到当前 Ready 门槛。
 
 LongCat 账号事件页当前返回 26 个账号，26 个为 `ACTIVE/enabled`。选定账号的最近自然 `keepalive` 事件为 `SUCCEEDED / lifecycle_completed`，耗时 `21502ms`，开始时间 `2026-09-10T20:31:32Z`，无错误码；本次未通过手动命令伪造保活结果。
 
@@ -42,4 +43,4 @@ LongCat 账号事件页当前返回 26 个账号，26 个为 `ACTIVE/enabled`。
 
 ## 后续
 
-继续观察下一批 LongCat 自然保活、文件扩展和 24 小时健康窗口；同时把相同的“每家厂商独立参数映射、独立错误分类、Runtime 实证”口径推进到其余未达到 Ready 的 Provider。API Channel 仍后置。
+LongCat 当前已按本轮声明范围达到 Runtime Ready；仍继续观察下一批自然保活、文件扩展和 24 小时窗口，但不把尚未逐项验证的其他扩展自动纳入能力声明。下一步转向其余仍为 `DEGRADED/UNAVAILABLE` 的 Provider。API Channel 仍后置。

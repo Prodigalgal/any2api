@@ -512,6 +512,7 @@ _UPLOAD_MEDIA = r"""async input => {
       size: decoded.bytes.length,
       error: '',
       itemId: crypto.randomUUID(),
+      uploadTaskId: crypto.randomUUID(),
       file_type: decoded.contentType,
       showType: 'image',
       file_class: 'vision'

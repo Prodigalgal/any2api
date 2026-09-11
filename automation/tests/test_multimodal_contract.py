@@ -687,6 +687,7 @@ async def test_qwen_media_upload_stays_in_the_account_browser_context() -> None:
     assert result["files"][0]["id"] == "file-1"
     assert "OSS4-HMAC-SHA256" in page.script
     assert "x-oss-security-token" in page.script
+    assert "uploadTaskId: crypto.randomUUID()" in page.script
     assert page.payload["stsPath"] == "/api/v2/files/getstsToken"
     assert page.payload["sources"] == sources
     transport._prepare_authenticated_surface.assert_awaited_once()

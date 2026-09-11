@@ -778,6 +778,7 @@ def _arena_me_script() -> str:
     const response = await fetch(input.path, {
       method: 'GET',
       credentials: 'include',
+      cache: 'no-store',
       headers: {'Accept': 'application/json'},
       signal: controller.signal
     });

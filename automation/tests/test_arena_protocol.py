@@ -8,6 +8,7 @@ import pytest
 from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers.arena_browser import (
+    _arena_me_script,
     _arena_set_password_script,
     _arena_sign_in_script,
     _arena_upload_script,
@@ -204,6 +205,10 @@ def test_arena_sign_in_script_matches_official_email_session_exchange() -> None:
     assert "shouldLinkHistory: false" in script
     assert "requiresVerification" in script
     assert "credentials: 'include'" in script
+
+
+def test_arena_profile_probe_bypasses_pre_auth_cache() -> None:
+    assert "cache: 'no-store'" in _arena_me_script()
 
 
 def test_arena_verification_link_rejects_cdn_assets() -> None:

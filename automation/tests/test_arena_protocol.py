@@ -234,8 +234,11 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
             link = (
                 "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time&type=email"
             )
+            cdn_link = "https://cdn.arena.ai/assets/logo.png"
+            pattern = rf"https?://[^\s<>'\"]*{kwargs['host_pattern']}[^\s<>'\"]*"
+            assert re.search(pattern, cdn_link, re.IGNORECASE) is None
             assert re.search(
-                rf"https?://[^\s<>'\"]*{kwargs['host_pattern']}[^\s<>'\"]*",
+                pattern,
                 link,
                 re.IGNORECASE,
             )

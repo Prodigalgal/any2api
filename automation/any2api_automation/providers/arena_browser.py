@@ -799,7 +799,7 @@ def register_with_magic_link(
     try:
         verification_link = mail.wait_for_link_sync(
             mailbox,
-            host_pattern=r"(?:www\.)?arena\.ai(?:/|$)",
+            host_pattern=r"(?<![A-Za-z0-9.-])(?:www\.)?arena\.ai(?:/|$)",
             timeout=float(config["mail_timeout_seconds"]),
             seen_ids=seen_ids,
         )

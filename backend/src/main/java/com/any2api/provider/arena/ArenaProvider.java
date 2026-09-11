@@ -20,6 +20,7 @@ import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import com.any2api.transport.OfficialBrowserTransportClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -171,9 +172,9 @@ public final class ArenaProvider implements InferenceProvider {
                         var data = frame.path("data").asText("");
                         if (frameCount.getAndIncrement() < 12) {
                             LOGGER.info(
-                                "arena_upstream_frame index={} prefix={} bytes={}",
+                                "arena_upstream_frame index={} descriptor={} bytes={}",
                                 frameCount.get() - 1,
-                                data.isBlank() ? "<blank>" : data.substring(0, 1),
+                                describeFrame(data),
                                 data.getBytes(StandardCharsets.UTF_8).length);
                         }
                         sink.next(data.getBytes(StandardCharsets.UTF_8));
@@ -293,6 +294,29 @@ public final class ArenaProvider implements InferenceProvider {
         return compact.isBlank()
             ? "Arena upstream returned HTTP " + status
             : "Arena upstream returned HTTP " + status + ": " + compact;
+    }
+
+    private String describeFrame(String data) {
+        var frame = data == null ? "" : data.trim();
+        var separator = frame.indexOf(':');
+        if (separator < 1 || separator == frame.length() - 1) return "invalid_frame";
+        var code = frame.substring(0, separator);
+        var payload = frame.substring(separator + 1).trim();
+        try {
+            var value = mapper.readTree(payload);
+            if (!value.isObject()) {
+                return code + ":" + value.getNodeType().name().toLowerCase(Locale.ROOT);
+            }
+            var fields = new ArrayList<String>();
+            for (var entry : value.properties()) {
+                if (fields.size() >= 12) break;
+                var name = entry.getKey();
+                if (name.matches("[A-Za-z0-9_]{1,40}")) fields.add(name);
+            }
+            return code + ":object:" + String.join(",", fields);
+        } catch (RuntimeException error) {
+            return code + ":invalid_json";
+        }
     }
 
     private static String first(JsonNode source, String... fields) {

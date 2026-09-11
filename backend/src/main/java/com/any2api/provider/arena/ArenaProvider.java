@@ -99,6 +99,9 @@ public final class ArenaProvider implements InferenceProvider {
     public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override
+    public boolean scheduledModelProbeEnabled() { return false; }
+
+    @Override
     public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override

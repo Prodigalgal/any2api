@@ -43,6 +43,15 @@ public interface InferenceProvider {
         return Duration.ofSeconds(45);
     }
 
+    /**
+     * Whether the framework may issue broad scheduled probes for this provider's catalog.
+     * Provider-native anti-abuse or billing constraints may opt out; explicit admin probes,
+     * lifecycle readiness probes, and real request evidence remain available.
+     */
+    default boolean scheduledModelProbeEnabled() {
+        return true;
+    }
+
     default Duration accountProbeTimeout() {
         return Duration.ofSeconds(30);
     }

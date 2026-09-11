@@ -208,4 +208,16 @@ class ArenaProtocolTest {
 
         assertThat(contract.multimodal().input()).containsExactly("text", "image");
     }
+
+    @Test
+    void disablesBroadScheduledProbesBecauseArenaRateLimitsRealPrompts() {
+        var provider = new ArenaProvider(
+            new ArenaProperties(),
+            mock(ProxyPoolService.class),
+            mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        assertThat(provider.scheduledModelProbeEnabled()).isFalse();
+    }
 }

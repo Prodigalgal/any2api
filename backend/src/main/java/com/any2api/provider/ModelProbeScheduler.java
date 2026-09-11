@@ -4,6 +4,7 @@ import com.any2api.config.Any2ApiProperties;
 import com.any2api.persistence.PostgresResultValues;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,11 +23,13 @@ public final class ModelProbeScheduler {
     private final ModelProbeService probes;
     private final int batchSize;
     private final Duration freshness;
+    private final Set<String> scheduledProviderIds;
 
     public ModelProbeScheduler(
         JdbcClient jdbc,
         ExecutorService databaseExecutor,
         ModelProbeService probes,
+        ProviderRegistry providers,
         Any2ApiProperties properties
     ) {
         this.jdbc = jdbc;
@@ -34,6 +37,10 @@ public final class ModelProbeScheduler {
         this.probes = probes;
         this.batchSize = properties.getModelRuntime().getScheduledProbeBatchSize();
         this.freshness = properties.getModelRuntime().getProbeFreshness();
+        this.scheduledProviderIds = providers.plugins().stream()
+            .filter(InferenceProvider::scheduledModelProbeEnabled)
+            .map(provider -> provider.manifest().id())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     @Scheduled(
@@ -57,6 +64,9 @@ public final class ModelProbeScheduler {
     }
 
     private Mono<List<Candidate>> candidates() {
+        if (scheduledProviderIds.isEmpty()) {
+            return Mono.just(List.of());
+        }
         return Mono.fromCallable(() -> jdbc.sql("""
                 SELECT model.provider_id, model.upstream_id
                 FROM models model
@@ -67,12 +77,14 @@ public final class ModelProbeScheduler {
                 WHERE model.enabled = TRUE
                   AND provider.enabled = TRUE
                   AND provider.installed = TRUE
+                  AND provider.id IN (:providerIds)
                   AND (probe.probed_at IS NULL
                     OR probe.probed_at < :staleBefore)
                 ORDER BY probe.probed_at NULLS FIRST, model.provider_id, model.upstream_id
                 LIMIT :limit
                 """)
             .param("limit", batchSize)
+            .param("providerIds", scheduledProviderIds)
             .param("staleBefore", PostgresResultValues.timestamp(
                 java.time.Instant.now().minus(freshness)))
             .query((row, ignored) -> new Candidate(

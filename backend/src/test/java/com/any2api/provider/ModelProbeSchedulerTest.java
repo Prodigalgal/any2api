@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.any2api.config.Any2ApiProperties;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -28,16 +29,28 @@ class ModelProbeSchedulerTest {
         when(statement.query(any(RowMapper.class))).thenReturn((JdbcClient.MappedQuerySpec) query);
         when(query.list()).thenReturn(List.of());
         var properties = new Any2ApiProperties();
+        var provider = mock(InferenceProvider.class);
+        when(provider.manifest()).thenReturn(new ProviderManifest(
+            "test", "Test", "test", "1", List.of(),
+            Map.of(
+                ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                ProviderCapability.RESPONSES, SupportLevel.NATIVE),
+            true));
+        when(provider.protocolContract()).thenReturn(ProviderProtocolContract.strict());
+        when(provider.scheduledModelProbeEnabled()).thenReturn(true);
+        var providers = ProviderRegistry.allEnabled(List.of(provider));
 
         try (var executor = Executors.newSingleThreadExecutor()) {
             new ModelProbeScheduler(
-                jdbc, executor, mock(ModelProbeService.class), properties).probeStaleModels();
+                jdbc, executor, mock(ModelProbeService.class), providers, properties)
+                .probeStaleModels();
         }
 
         var sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).sql(sql.capture());
         assertThat(sql.getValue())
             .contains("model.enabled = TRUE")
+            .contains("provider.id IN (:providerIds)")
             .contains("probe.probed_at IS NULL")
             .doesNotContain("cardinality(model.random_roles)");
     }

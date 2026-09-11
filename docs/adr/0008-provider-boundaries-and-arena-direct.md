@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-09-11
-- 适用版本：0.16.0
+- 适用版本：0.16.2
 - 关联：ADR-0007《统一 Action 契约并拆分 Runtime / API Channel》
 
 ## 决策摘要
@@ -69,6 +69,12 @@ flowchart LR
 | 事件解码 | 原始流帧、前缀、错误体和终止事件转换前的 provider parser | Arena 一字符前缀 NDJSON 转换为 canonical events |
 | 错误分类 | provider-specific 错误码、HTTP 状态、不可重试与可重试边界 | `recaptcha_v2_required`、`prompt failed`、模型不可用和账号拒绝 |
 | Provider-local retry | 同一邮箱/页面阶段内的有限重试，避免重复创建身份 | provisional ID 提取、激活链接导航和密码设置 429 的最多 3 次重试 |
+
+定时模型探针由框架统一编排，但是否允许对全量目录发起真实 prompt 属于 Provider
+策略。Provider 可以通过 `scheduledModelProbeEnabled()` 关闭广泛定时探针；这不影响
+管理员指定模型探针、账号生命周期推理就绪探针，也不影响真实业务请求形成的模型就绪证据。
+Arena 因上游对真实 prompt 的反滥用限制关闭该策略，避免把 512 个目录模型的轮询变成
+账号级风控流量。
 
 ## 注册任务的正确职责链
 

@@ -11,6 +11,7 @@ class ArenaSettings(AutomationProviderSettings):
     arena_base_url: str = "https://arena.ai"
     arena_page_path: str = "/text/direct?model_a=max"
     arena_registration_path: str = "/nextjs-api/sign-up/magic-link"
+    arena_password_path: str = "/nextjs-api/auth/set-password"
     arena_me_path: str = "/api/me"
     arena_chat_path: str = "/nextjs-api/stream/create-evaluation"
     arena_full_name: str = "Any2API Test"

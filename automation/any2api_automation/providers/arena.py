@@ -5,7 +5,12 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ..lifecycle.account import credential, mail_client
+from ..lifecycle.account import (
+    RegistrationPasswordPolicy,
+    credential,
+    mail_client,
+    strong_password,
+)
 from ..lifecycle.browser import BrowserContextProfile, BrowserLaunchProfile, run_browser_flow
 from ..lifecycle.proxy import proxy_attempt_payload
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
@@ -62,6 +67,11 @@ class ArenaAutomationProvider(AutomationProvider):
         trace = RegistrationTrace(self.manifest.id)
         try:
             mail = mail_client(payload)
+            password = RegistrationPasswordPolicy(
+                strong_password,
+                min_length=8,
+                max_length=64,
+            ).resolve(payload.get("password"))
             mailbox = await mail.create_address()
             trace.mark(RegistrationStage.MAILBOX_CREATED)
             seen_ids = await asyncio.to_thread(mail.message_ids_sync, mailbox)
@@ -81,6 +91,7 @@ class ArenaAutomationProvider(AutomationProvider):
                     mail,
                     mailbox,
                     seen_ids,
+                    password,
                     flow_payload,
                     trace,
                 ),

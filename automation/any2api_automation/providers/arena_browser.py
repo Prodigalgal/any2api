@@ -707,6 +707,36 @@ def _arena_signup_script() -> str:
 }"""
 
 
+def _arena_set_password_script() -> str:
+    return r"""async input => {
+  const token = new URL(window.location.href).searchParams.get('token');
+  if (!token) return {ok: false, status: 400, code: 'TOKEN_MISSING'};
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetch(input.path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: input.password, token}),
+      signal: controller.signal
+    });
+    let data = {};
+    try { data = await response.json(); } catch (_) {}
+    return {
+      ok: response.ok,
+      status: response.status,
+      success: data?.success === true,
+      redirectTo: String(data?.redirectTo || ''),
+      code: String(data?.code || ''),
+      error: String(data?.error || '')
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}"""
+
+
 def _arena_me_script() -> str:
     return r"""async input => {
   const controller = new AbortController();
@@ -740,6 +770,7 @@ def register_with_magic_link(
     mail: TempMailClient,
     mailbox: Mailbox,
     seen_ids: set[str],
+    password: str,
     payload: dict[str, Any],
     trace: RegistrationTrace,
 ) -> BrowserResult:
@@ -814,6 +845,47 @@ def register_with_magic_link(
     trace.mark(RegistrationStage.OTP_RECEIVED)
     verification_link = _validate_arena_link(verification_link)
     page.goto(verification_link, wait_until="domcontentloaded", timeout=90_000)
+    password_result = page.evaluate(
+        _arena_set_password_script(),
+        {
+            "path": config["password_path"],
+            "password": password,
+            "timeoutMs": 60_000,
+        },
+    )
+    if (
+        not isinstance(password_result, dict)
+        or not password_result.get("ok")
+        or not password_result.get("success")
+    ):
+        status = (
+            int(password_result.get("status") or 502) if isinstance(password_result, dict) else 502
+        )
+        error_code = (
+            str(password_result.get("code") or "password_setup_rejected")
+            if isinstance(password_result, dict)
+            else "password_setup_rejected"
+        )
+        raise _arena_registration_failure(
+            trace,
+            "arena_password_setup_failed",
+            f"Arena password setup failed with HTTP {status} ({error_code})",
+            error_type="ArenaPasswordSetupFailed",
+            retryable=False,
+        )
+    redirect_to = str(password_result.get("redirectTo") or "").strip()
+    if redirect_to:
+        page.goto(
+            f"{config['base_url']}{_same_origin_path(redirect_to)}",
+            wait_until="domcontentloaded",
+            timeout=90_000,
+        )
+    else:
+        page.goto(
+            f"{config['base_url']}{config['page_path']}",
+            wait_until="domcontentloaded",
+            timeout=90_000,
+        )
     trace.mark(RegistrationStage.ACTIVATED)
     profile = page.evaluate(
         _arena_me_script(),
@@ -838,8 +910,7 @@ def register_with_magic_link(
             error_type="ArenaIdentityMismatch",
             retryable=False,
         )
-    value = credential_from_context(context, page, "", mailbox.jwt)
-    value.pop("password", None)
+    value = credential_from_context(context, page, password, mailbox.jwt)
     value.update(
         {
             "email": mailbox.address,
@@ -857,6 +928,7 @@ def register_with_magic_link(
             **trace.metadata(),
             "authentication": "email_magic_link",
             "registration_protocol": "arena_nextjs_magic_link",
+            "password_setup": True,
             "inference_probe_required": True,
         },
         ready_for_inference=False,
@@ -1056,6 +1128,7 @@ def _arena_config(payload: dict[str, Any]) -> dict[str, Any]:
         "base_url": base_url,
         "page_path": _same_origin_path(config.arena_page_path),
         "registration_path": _same_origin_path(config.arena_registration_path),
+        "password_path": _same_origin_path(config.arena_password_path),
         "me_path": _same_origin_path(config.arena_me_path),
         "chat_path": _same_origin_path(config.arena_chat_path),
         "full_name": config.arena_full_name,

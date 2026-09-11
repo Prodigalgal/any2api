@@ -56,6 +56,7 @@ _SUPPORTED_ATTACHMENT_BLOCK_TYPES = frozenset(
 _ARENA_TERMS_POLL_ATTEMPTS = 8
 _ARENA_TERMS_POLL_INTERVAL_MS = 250
 _ARENA_TOU_CONSENT_PATH = "/api/me/update-tou-consent"
+_ARENA_TOU_PROFILE_TIMEOUT_MS = 60_000
 
 
 def _arena_terms_script() -> str:
@@ -127,7 +128,10 @@ def _arena_tou_consented(profile: dict[str, Any]) -> bool:
 
 
 async def _arena_tou_profile(page: Any) -> dict[str, Any]:
-    result = await page.evaluate(_arena_me_script(), {"path": "/api/me"})
+    result = await page.evaluate(
+        _arena_me_script(),
+        {"path": "/api/me", "timeoutMs": _ARENA_TOU_PROFILE_TIMEOUT_MS},
+    )
     return result if isinstance(result, dict) else {"status": 502}
 
 
@@ -704,56 +708,69 @@ def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> s
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
   try {{
-    let requestBody = request.body === '' ? undefined : request.body;
+    let parsedBody;
     if (request.method === 'POST' && request.body !== '') {{
       try {{
-        const parsedBody = JSON.parse(request.body);
-        if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {{
-          const recaptcha = await getRecaptchaV3Token();
-          await emit({{type: 'recaptcha', available: recaptcha.available === true,
-            tokenLength: String(recaptcha.token || '').length}});
-          if (recaptcha.token) {{
-            parsedBody.recaptchaV3Token = recaptcha.token;
-            requestBody = JSON.stringify(parsedBody);
-          }}
+        const candidate = JSON.parse(request.body);
+        if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {{
+          parsedBody = candidate;
         }}
       }} catch (_) {{ /* keep the provider's original body */ }}
     }}
-    const response = await fetch(request.url, {{
-      method: request.method,
-      credentials: 'include',
-      headers: request.headers,
-      body: requestBody,
-      signal: controller.signal
-    }});
-    await emit({{type: 'status', status: response.status,
-      contentType: response.headers.get('content-type') || ''}});
-    if (!response.ok) {{
-      await emit({{type: 'error', data: (await response.text()).slice(0, 16384)}});
-      return;
-    }}
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('Arena response has no stream body');
-    const decoder = new TextDecoder();
-    let pending = '';
-    const consume = async text => {{
-      pending += text;
-      const lines = pending.split(/\r?\n/);
-      pending = lines.pop() || '';
-      for (const line of lines) {{
-        const value = line.trim();
-        if (!value) continue;
-        const normalized = value.startsWith('data:') ? value.slice(5).trimStart() : value;
-        if (normalized) await emit({{type: 'data', data: normalized}});
-      }}
+    const requestBody = async () => {{
+      if (!parsedBody) return request.body === '' ? undefined : request.body;
+      const recaptcha = await getRecaptchaV3Token();
+      await emit({{type: 'recaptcha', available: recaptcha.available === true,
+        tokenLength: String(recaptcha.token || '').length}});
+      if (!recaptcha.token) return JSON.stringify(parsedBody);
+      return JSON.stringify({{...parsedBody, recaptchaV3Token: recaptcha.token}});
     }};
-    while (true) {{
-      const {{done, value}} = await reader.read();
-      if (done) break;
-      await consume(decoder.decode(value, {{stream: true}}));
-    }}
-    await consume(decoder.decode());
-    if (pending.trim()) await consume('\n');
+    const send = async attempt => {{
+      const response = await fetch(request.url, {{
+        method: request.method,
+        credentials: 'include',
+        headers: request.headers,
+        body: await requestBody(),
+        signal: controller.signal
+      }});
+      if (!response.ok) {{
+        const errorBody = (await response.text()).slice(0, 16384);
+        if (response.status === 403 && attempt === 0
+            && /recaptcha validation failed/i.test(errorBody)) {{
+          await new Promise(resolve => setTimeout(resolve, 250));
+          return send(1);
+        }}
+        await emit({{type: 'status', status: response.status,
+          contentType: response.headers.get('content-type') || ''}});
+        await emit({{type: 'error', data: errorBody}});
+        return;
+      }}
+      await emit({{type: 'status', status: response.status,
+        contentType: response.headers.get('content-type') || ''}});
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Arena response has no stream body');
+      const decoder = new TextDecoder();
+      let pending = '';
+      const consume = async text => {{
+        pending += text;
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() || '';
+        for (const line of lines) {{
+          const value = line.trim();
+          if (!value) continue;
+          const normalized = value.startsWith('data:') ? value.slice(5).trimStart() : value;
+          if (normalized) await emit({{type: 'data', data: normalized}});
+        }}
+      }};
+      while (true) {{
+        const {{done, value}} = await reader.read();
+        if (done) break;
+        await consume(decoder.decode(value, {{stream: true}}));
+      }}
+      await consume(decoder.decode());
+      if (pending.trim()) await consume('\n');
+    }};
+    await send(0);
   }} finally {{
     clearTimeout(timeout);
   }}

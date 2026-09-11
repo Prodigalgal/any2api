@@ -197,7 +197,9 @@ def test_arena_chat_stream_uses_the_official_recaptcha_v3_action() -> None:
     assert "window.grecaptcha?.enterprise" in script
     assert "enterprise.execute" in script
     assert "action: 'chat_submit'" in script
-    assert "parsedBody.recaptchaV3Token" in script
+    assert "recaptchaV3Token: recaptcha.token" in script
+    assert "recaptcha validation failed" in script
+    assert "return send(1)" in script
     assert "tokenLength" in script
 
 

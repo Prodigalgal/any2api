@@ -8,11 +8,13 @@ import pytest
 from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers.arena_browser import (
+    _accept_arena_terms_if_present,
     _arena_anonymous_signup_script,
     _arena_me_script,
     _arena_ndjson_stream_script,
     _arena_set_password_script,
     _arena_sign_in_script,
+    _arena_terms_script,
     _arena_upload_script,
     _validate_arena_link,
     arena_media_sources,
@@ -24,6 +26,43 @@ from any2api_automation.providers.arena_browser import (
 _MODEL_UUID = "11111111-1111-4111-8111-111111111111"
 _PNG = "data:image/png;base64,YQ=="
 _PDF = "data:application/pdf;base64,JVBERi0xLjQ="
+
+
+@pytest.mark.asyncio
+async def test_arena_runtime_accepts_only_the_terms_and_privacy_dialog() -> None:
+    script = _arena_terms_script()
+    assert '[role="dialog"]' in script
+    assert "terms of use" in script
+    assert "privacy policy" in script
+    assert "agree.click()" in script
+
+    class Page:
+        def __init__(self) -> None:
+            self.results = [{"status": "absent"}, {"status": "accepted"}]
+            self.waits: list[int] = []
+
+        async def evaluate(self, _: str) -> dict[str, str]:
+            return self.results.pop(0)
+
+        async def wait_for_timeout(self, milliseconds: int) -> None:
+            self.waits.append(milliseconds)
+
+    page = Page()
+    assert await _accept_arena_terms_if_present(page) == "accepted"
+    assert page.waits == [250, 250]
+
+
+@pytest.mark.asyncio
+async def test_arena_runtime_surfaces_a_terms_dialog_without_agree_button() -> None:
+    class Page:
+        async def evaluate(self, _: str) -> dict[str, str]:
+            return {"status": "missing_button"}
+
+        async def wait_for_timeout(self, _: int) -> None:
+            raise AssertionError("a missing Agree button must fail immediately")
+
+    with pytest.raises(RuntimeError, match="missing_button"):
+        await _accept_arena_terms_if_present(Page())
 
 
 def _command(messages: list[dict[str, object]], **overrides: object) -> dict[str, object]:

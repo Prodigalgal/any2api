@@ -53,6 +53,59 @@ _SUPPORTED_ATTACHMENT_MIME_TYPES = _SUPPORTED_IMAGE_MIME_TYPES | _SUPPORTED_DOCU
 _SUPPORTED_ATTACHMENT_BLOCK_TYPES = frozenset(
     {"image", "image_url", "input_image", "file", "input_file", "attachment"}
 )
+_ARENA_TERMS_POLL_ATTEMPTS = 8
+_ARENA_TERMS_POLL_INTERVAL_MS = 250
+
+
+def _arena_terms_script() -> str:
+    """Find and accept Arena's first-use Terms/Privacy dialog only."""
+
+    return r"""() => {
+  const visible = element => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== 'hidden'
+      && style.display !== 'none'
+      && Number(style.opacity || 1) > 0
+      && rect.width > 0
+      && rect.height > 0;
+  };
+  const normalized = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const dialogs = Array.from(document.querySelectorAll(
+    '[role="dialog"], [aria-modal="true"], dialog'
+  )).filter(visible);
+  const dialog = dialogs.find(element => {
+    const text = normalized(element.textContent);
+    return text.includes('terms of use') && text.includes('privacy policy');
+  });
+  if (!dialog) return {status: 'absent'};
+  const agree = Array.from(dialog.querySelectorAll('button, [role="button"]')).find(element => {
+    const label = normalized(element.getAttribute('aria-label') || element.textContent);
+    return label === 'agree';
+  });
+  if (!agree) return {status: 'missing_button'};
+  if (agree.disabled || agree.getAttribute('aria-disabled') === 'true') {
+    return {status: 'button_disabled'};
+  }
+  agree.click();
+  return {status: 'accepted'};
+}"""
+
+
+async def _accept_arena_terms_if_present(page: Any) -> str:
+    for attempt in range(_ARENA_TERMS_POLL_ATTEMPTS):
+        result = await page.evaluate(_arena_terms_script())
+        status = result.get("status") if isinstance(result, dict) else None
+        if status == "accepted":
+            await page.wait_for_timeout(_ARENA_TERMS_POLL_INTERVAL_MS)
+            return "accepted"
+        if status in {"missing_button", "button_disabled"}:
+            raise RuntimeError(f"Arena Terms dialog {status}")
+        if status not in {"absent"}:
+            raise RuntimeError("Arena Terms dialog returned an unsupported state")
+        if attempt + 1 < _ARENA_TERMS_POLL_ATTEMPTS:
+            await page.wait_for_timeout(_ARENA_TERMS_POLL_INTERVAL_MS)
+    return "absent"
 
 
 def _uuid7() -> str:
@@ -1227,6 +1280,11 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             headers={"Accept": "application/json"},
             timeout_ms=plan.active.rules.canary_timeout_seconds * 1000,
         )
+
+    async def wait_until_ready(self, page: Any, rule: Any) -> None:
+        del rule
+        terms_state = await _accept_arena_terms_if_present(page)
+        self._logger.info("arena_terms state=%s", terms_state)
 
     async def upload_attachments(
         self,

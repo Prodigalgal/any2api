@@ -8,6 +8,7 @@ import pytest
 from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers.arena_browser import (
+    _arena_anonymous_signup_script,
     _arena_me_script,
     _arena_set_password_script,
     _arena_sign_in_script,
@@ -197,6 +198,15 @@ def test_arena_password_setup_script_uses_current_magic_link_token() -> None:
     assert "credentials: 'include'" in script
 
 
+def test_arena_anonymous_signup_script_uses_provisional_user_flow() -> None:
+    script = _arena_anonymous_signup_script()
+
+    assert "provisionalUserId" in script
+    assert "recaptchaToken: ''" in script
+    assert "user_country_code=" in script
+    assert "credentials: 'include'" in script
+
+
 def test_arena_sign_in_script_matches_official_email_session_exchange() -> None:
     script = _arena_sign_in_script()
 
@@ -239,6 +249,13 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
             if "JSON.stringify(input.body)" in script:
                 self.signup = dict(argument or {})
                 return {"ok": True, "status": 200, "body": "{}"}
+            if "provisionalUserId" in script:
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "userId": "anonymous-user-1",
+                    "registeredCountryCode": "JP",
+                }
             if "input.email" in script:
                 return {
                     "ok": True,

@@ -707,6 +707,44 @@ def _arena_signup_script() -> str:
 }"""
 
 
+def _arena_anonymous_signup_script() -> str:
+    return r"""async input => {
+  const source = document.documentElement.innerHTML;
+  const userIndex = source.indexOf('userId');
+  const provisionalUserId = userIndex < 0
+    ? ''
+    : source.slice(userIndex, userIndex + 300)
+        .match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || '';
+  if (!provisionalUserId) return {ok: false, status: 400, code: 'PROVISIONAL_ID_MISSING'};
+  const countryCookie = document.cookie.split(';')
+    .map(value => value.trim())
+    .find(value => value.startsWith('user_country_code=')) || '';
+  const registeredCountryCode = decodeURIComponent(countryCookie.split('=').slice(1).join('='))
+    .trim().toUpperCase();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetch(input.path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({recaptchaToken: '', provisionalUserId}),
+      signal: controller.signal
+    });
+    let data = {};
+    try { data = await response.json(); } catch (_) {}
+    return {
+      ok: response.ok,
+      status: response.status,
+      userId: String(data?.user?.id || ''),
+      registeredCountryCode
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}"""
+
+
 def _arena_set_password_script() -> str:
     return r"""async input => {
   const token = new URL(window.location.href).searchParams.get('token');
@@ -821,13 +859,43 @@ def register_with_magic_link(
         raise _arena_registration_failure(
             trace, "arena_registration_invalid", "full name is required", retryable=False
         )
+    anonymous_result = page.evaluate(
+        _arena_anonymous_signup_script(),
+        {"path": "/nextjs-api/sign-up", "timeoutMs": 60_000},
+    )
+    if (
+        not isinstance(anonymous_result, dict)
+        or not anonymous_result.get("ok")
+        or not str(anonymous_result.get("userId") or "")
+    ):
+        anonymous_status = (
+            int(anonymous_result.get("status") or 502)
+            if isinstance(anonymous_result, dict)
+            else 502
+        )
+        anonymous_code = (
+            str(anonymous_result.get("code") or "anonymous_signup_rejected")
+            if isinstance(anonymous_result, dict)
+            else "anonymous_signup_rejected"
+        )
+        raise _arena_registration_failure(
+            trace,
+            "arena_anonymous_signup_failed",
+            f"Arena anonymous signup failed with HTTP {anonymous_status} ({anonymous_code})",
+            error_type="ArenaAnonymousSignupFailed",
+            retryable=False,
+        )
     request_body: dict[str, Any] = {
         "email": mailbox.address,
         "fullName": full_name,
         "shouldLinkHistory": False,
         "marketingConsent": False,
     }
-    country = str(payload.get("registered_country_code") or "").strip()
+    country = str(
+        payload.get("registered_country_code")
+        or anonymous_result.get("registeredCountryCode")
+        or ""
+    ).strip()
     if country:
         if not re.fullmatch(r"[A-Za-z]{2,3}", country):
             raise _arena_registration_failure(

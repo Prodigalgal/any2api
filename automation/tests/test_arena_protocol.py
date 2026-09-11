@@ -10,9 +10,12 @@ from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers.arena_browser import (
     _accept_arena_terms_if_present,
     _arena_anonymous_signup_script,
+    _arena_anonymous_signup_with_retry,
+    _arena_goto,
     _arena_me_script,
     _arena_ndjson_stream_script,
     _arena_set_password_script,
+    _arena_set_password_with_retry,
     _arena_sign_in_script,
     _arena_terms_script,
     _arena_update_tou_consent_script,
@@ -24,6 +27,7 @@ from any2api_automation.providers.arena_browser import (
     parse_arena_models,
     register_with_magic_link,
 )
+from any2api_automation.providers.arena_settings import settings as arena_settings
 
 _MODEL_UUID = "11111111-1111-4111-8111-111111111111"
 _PNG = "data:image/png;base64,YQ=="
@@ -191,15 +195,35 @@ def test_arena_mapper_translates_search_and_signed_attachments() -> None:
     assert "rawRequest" not in json.dumps(body)
 
 
+def test_arena_mapper_rejects_battle_modes_at_the_public_semantic_boundary() -> None:
+    command = _command(
+        [{"role": "user", "content": "hello"}],
+        providerOptions={"mode": "direct-battle"},
+    )
+
+    with pytest.raises(ValueError, match="direct mode"):
+        build_arena_request(command, model_id=_MODEL_UUID)
+
+
 def test_arena_chat_stream_uses_the_official_recaptcha_v3_action() -> None:
-    script = _arena_ndjson_stream_script("__emit", "arena-site-key")
+    script = _arena_ndjson_stream_script(
+        "__emit",
+        "arena-site-key",
+        arena_settings().arena_recaptcha_v2_site_key,
+        arena_settings().arena_recaptcha_v2_timeout_seconds * 1000,
+    )
 
     assert "window.grecaptcha?.enterprise" in script
     assert "enterprise.execute" in script
     assert "action: 'chat_submit'" in script
     assert "recaptchaV3Token: recaptcha.token" in script
     assert "recaptcha validation failed" in script
-    assert "return send(1)" in script
+    assert "prompt failed" in script
+    assert "enterprise.render" in script
+    assert "recaptchaV2Token" in script
+    assert "recaptcha_v2_required" in script
+    assert "modelBId" not in script
+    assert "return send(1, token)" in script
     assert "tokenLength" in script
 
 
@@ -311,6 +335,98 @@ def test_arena_anonymous_signup_script_uses_provisional_user_flow() -> None:
     assert "recaptchaToken: ''" in script
     assert "user_country_code=" in script
     assert "credentials: 'include'" in script
+    assert "localStorage" in script
+    assert "sessionStorage" in script
+    assert "provisionalIdTimeoutMs" in script
+
+
+def test_arena_anonymous_signup_retries_missing_provisional_id_after_reload() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.goto_calls = 0
+            self.evaluate_calls = 0
+
+        def goto(self, _: str, **__: object) -> None:
+            self.goto_calls += 1
+
+        def wait_for_timeout(self, _: int) -> None:
+            return
+
+        def evaluate(self, script: str, _: object) -> object:
+            assert "provisionalUserId" in script
+            self.evaluate_calls += 1
+            if self.evaluate_calls == 1:
+                return {"ok": False, "status": 400, "code": "PROVISIONAL_ID_MISSING"}
+            return {
+                "ok": True,
+                "status": 200,
+                "userId": "anonymous-user-2",
+                "registeredCountryCode": "US",
+            }
+
+    result = _arena_anonymous_signup_with_retry(
+        Page(),
+        {"base_url": "https://arena.ai", "page_path": "/text/direct?model_a=max"},
+        2,
+    )
+
+    assert result is not None
+    assert result["userId"] == "anonymous-user-2"
+
+
+def test_arena_password_setup_retries_transient_upstream_status() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.evaluate_calls = 0
+            self.waits: list[int] = []
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            self.waits.append(milliseconds)
+
+        def evaluate(self, script: str, _: object) -> object:
+            assert "input.password" in script
+            self.evaluate_calls += 1
+            if self.evaluate_calls == 1:
+                return {"ok": False, "status": 429, "success": False}
+            return {"ok": True, "status": 200, "success": True}
+
+    page = Page()
+    result = _arena_set_password_with_retry(
+        page,
+        path="/nextjs-api/auth/set-password",
+        password="TestPassword123!",
+        timeout_ms=60_000,
+        attempts=2,
+    )
+
+    assert result is not None
+    assert result["success"] is True
+    assert page.waits == [500]
+
+
+def test_arena_verification_navigation_accepts_abort_after_target_loaded() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.url = "https://arena.ai/text/direct?model_a=max"
+            self.goto_calls = 0
+
+        def goto(self, _: str, **__: object) -> None:
+            self.goto_calls += 1
+            self.url = (
+                "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time"
+            )
+            raise RuntimeError("NS_BINDING_ABORTED")
+
+        def wait_for_timeout(self, _: int) -> None:
+            raise AssertionError("a loaded verification page must not be retried")
+
+    page = Page()
+    _arena_goto(
+        page,
+        "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time",
+    )
+
+    assert page.goto_calls == 1
 
 
 def test_arena_sign_in_script_matches_official_email_session_exchange() -> None:

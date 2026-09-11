@@ -160,10 +160,14 @@ public final class ArenaProvider implements InferenceProvider {
                     if ("status".equals(type)) {
                         status.set(frame.path("status").asInt(502));
                     } else if ("recaptcha".equals(type)) {
+                        var version = frame.path("version").asText("v3");
                         LOGGER.info(
-                            "arena_recaptcha_v3 available={} token_length={}",
+                            "arena_recaptcha version={} state={} available={} token_length={} trigger_reason={}",
+                            version,
+                            frame.path("state").asText("issued"),
                             frame.path("available").asBoolean(false),
-                            frame.path("tokenLength").asInt(0));
+                            frame.path("tokenLength").asInt(0),
+                            frame.path("triggerReason").asText(""));
                     } else if ("error".equals(type)) {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new ArenaUpstreamException(
@@ -239,8 +243,10 @@ public final class ArenaProvider implements InferenceProvider {
     public ProviderFailure classify(Throwable error) {
         if (error instanceof ArenaUpstreamException upstream) {
             var status = upstream.status();
-            if (status == 429 && upstream.getMessage() != null
-                && upstream.getMessage().toLowerCase(Locale.ROOT).contains("prompt failed")) {
+            var message = upstream.getMessage() == null
+                ? "" : upstream.getMessage().toLowerCase(Locale.ROOT);
+            if ((status == 429 && message.contains("prompt failed"))
+                || message.contains("recaptcha_v2_required")) {
                 return new ProviderFailure(
                     "anti_bot_rejected", upstream.getMessage(), false,
                     Map.of("status", status, "challenge", "recaptcha_v2"));

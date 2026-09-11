@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
+from ..lifecycle.account import flow_max_attempts
 from ..lifecycle.browser import BrowserResult, credential_from_context
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
@@ -57,6 +58,10 @@ _ARENA_TERMS_POLL_ATTEMPTS = 8
 _ARENA_TERMS_POLL_INTERVAL_MS = 250
 _ARENA_TOU_CONSENT_PATH = "/api/me/update-tou-consent"
 _ARENA_TOU_PROFILE_TIMEOUT_MS = 60_000
+_ARENA_REGISTRATION_RETRY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+_ARENA_REGISTRATION_RETRY_LIMIT = 3
+_ARENA_PROVISIONAL_ID_TIMEOUT_MS = 12_000
+_ARENA_NAVIGATION_RETRY_LIMIT = 3
 
 
 def _arena_terms_script() -> str:
@@ -214,8 +219,8 @@ def build_arena_request(
     if unsupported_controls:
         raise ValueError("Arena control is unsupported: " + unsupported_controls[0])
     mode = str(options.get("mode") or "direct").strip().lower()
-    if mode not in {"direct", "direct-battle", "direct_battle"}:
-        raise ValueError("Arena only supports direct battle mode")
+    if mode != "direct":
+        raise ValueError("Arena only supports direct mode")
     web_search = _arena_search_enabled(options, controls)
 
     explicit_model_id = model_id or options.get("model_id")
@@ -676,9 +681,15 @@ def _capability_enabled(value: Any) -> bool:
     return False
 
 
-def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> str:
+def _arena_ndjson_stream_script(
+    binding_name: str,
+    recaptcha_site_key: str,
+    recaptcha_v2_site_key: str,
+    recaptcha_v2_timeout_ms: int,
+) -> str:
     binding = json.dumps(binding_name)
-    site_key = json.dumps(recaptcha_site_key)
+    v3_site_key = json.dumps(recaptcha_site_key)
+    v2_site_key = json.dumps(recaptcha_v2_site_key)
     return rf"""async request => {{
   const emit = event => window[{binding}]({{requestId: request.requestId, ...event}});
   const getRecaptchaV3Token = async () => {{
@@ -695,7 +706,7 @@ def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> s
     }}
     const execute = new Promise(resolve => enterprise.ready(async () => {{
       try {{
-        const token = await enterprise.execute({site_key}, {{action: 'chat_submit'}});
+        const token = await enterprise.execute({v3_site_key}, {{action: 'chat_submit'}});
         resolve({{token: typeof token === 'string' ? token : '', available: true}});
       }} catch (_) {{
         resolve({{token: '', available: true}});
@@ -704,6 +715,68 @@ def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> s
     const timeout = new Promise(resolve =>
       setTimeout(() => resolve({{token: '', available: true}}), 10_000));
     return await Promise.race([execute, timeout]);
+  }};
+  const getRecaptchaV2Token = async triggerReason => {{
+    const deadline = Date.now() + 10_000;
+    let enterprise;
+    while (Date.now() < deadline) {{
+      enterprise = window.grecaptcha?.enterprise;
+      if (typeof enterprise?.render === 'function') break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }}
+    if (typeof enterprise?.render !== 'function') {{
+      await emit({{type: 'recaptcha', version: 'v2', state: 'unavailable', available: false,
+        tokenLength: 0, triggerReason}});
+      return '';
+    }}
+    const container = document.createElement('div');
+    container.setAttribute('data-any2api-arena-recaptcha', 'v2');
+    Object.assign(container.style, {{
+      position: 'fixed', right: '16px', bottom: '16px', zIndex: '2147483647',
+      padding: '8px', background: '#fff', borderRadius: '4px'
+    }});
+    const host = document.body || document.documentElement;
+    if (!host) return '';
+    host.appendChild(container);
+    await emit({{type: 'recaptcha', version: 'v2', state: 'required', available: true,
+      tokenLength: 0, triggerReason}});
+    let token = '';
+    try {{
+      token = await new Promise(resolve => {{
+        let settled = false;
+        const finish = value => {{
+          if (settled) return;
+          settled = true;
+          resolve(typeof value === 'string' ? value : '');
+        }};
+        const render = () => {{
+          try {{
+            enterprise.render(container, {{
+              sitekey: {v2_site_key},
+              callback: finish,
+              'error-callback': () => finish(''),
+              'expired-callback': () => finish(''),
+              theme: 'light'
+            }});
+          }} catch (_) {{
+            finish('');
+          }}
+        }};
+        try {{
+          if (typeof enterprise.ready === 'function') enterprise.ready(render);
+          else render();
+        }} catch (_) {{
+          finish('');
+        }}
+        setTimeout(() => finish(''), {recaptcha_v2_timeout_ms});
+      }});
+    }} finally {{
+      await emit({{type: 'recaptcha', version: 'v2',
+        state: token ? 'solved' : 'timeout', available: true,
+        tokenLength: String(token || '').length, triggerReason}});
+      try {{ container.remove(); }} catch (_) {{}}
+    }}
+    return token;
   }};
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
@@ -717,28 +790,45 @@ def _arena_ndjson_stream_script(binding_name: str, recaptcha_site_key: str) -> s
         }}
       }} catch (_) {{ /* keep the provider's original body */ }}
     }}
-    const requestBody = async () => {{
+    const requestBody = async v2Token => {{
       if (!parsedBody) return request.body === '' ? undefined : request.body;
+      if (v2Token) {{
+        const retryBody = {{...parsedBody, recaptchaV2Token: v2Token}};
+        delete retryBody.recaptchaV3Token;
+        return JSON.stringify(retryBody);
+      }}
       const recaptcha = await getRecaptchaV3Token();
       await emit({{type: 'recaptcha', available: recaptcha.available === true,
         tokenLength: String(recaptcha.token || '').length}});
       if (!recaptcha.token) return JSON.stringify(parsedBody);
       return JSON.stringify({{...parsedBody, recaptchaV3Token: recaptcha.token}});
     }};
-    const send = async attempt => {{
+    const send = async (attempt, v2Token = '') => {{
       const response = await fetch(request.url, {{
         method: request.method,
         credentials: 'include',
         headers: request.headers,
-        body: await requestBody(),
+        body: await requestBody(v2Token),
         signal: controller.signal
       }});
       if (!response.ok) {{
         const errorBody = (await response.text()).slice(0, 16384);
-        if (response.status === 403 && attempt === 0
-            && /recaptcha validation failed/i.test(errorBody)) {{
-          await new Promise(resolve => setTimeout(resolve, 250));
-          return send(1);
+        const triggerReason = response.status === 403
+            && /recaptcha validation failed/i.test(errorBody)
+          ? 'recaptcha_escalation'
+          : response.status === 429 && /prompt failed/i.test(errorBody)
+            ? 'prompt_rate_limit'
+            : '';
+        if (attempt === 0 && triggerReason) {{
+          const token = await getRecaptchaV2Token(triggerReason);
+          if (token) return send(1, token);
+          await emit({{type: 'status', status: response.status,
+            contentType: response.headers.get('content-type') || ''}});
+          await emit({{type: 'error', data: JSON.stringify({{
+            error: 'recaptcha v2 interactive verification required',
+            code: 'recaptcha_v2_required', triggerReason
+          }})}});
+          return;
         }}
         await emit({{type: 'status', status: response.status,
           contentType: response.headers.get('content-type') || ''}});
@@ -883,20 +973,217 @@ def _arena_signup_script() -> str:
 }"""
 
 
+def _arena_registration_attempts(payload: dict[str, Any]) -> int:
+    return min(
+        _ARENA_REGISTRATION_RETRY_LIMIT,
+        flow_max_attempts(payload, _ARENA_REGISTRATION_RETRY_LIMIT),
+    )
+
+
+def _arena_transient_status(status: int) -> bool:
+    return status in _ARENA_REGISTRATION_RETRY_STATUSES
+
+
+def _arena_retry_delay_ms(attempt: int) -> int:
+    return 500 * (2 ** min(max(0, attempt - 1), 2))
+
+
+def _arena_verification_page_active(page: Any) -> bool:
+    current_url = str(getattr(page, "url", "") or "")
+    parsed = urlparse(current_url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return (
+        parsed.scheme == "https"
+        and host in {"arena.ai", "www.arena.ai"}
+        and parsed.path.startswith("/auth/verify")
+        and "token=" in parsed.query
+    )
+
+
+def _arena_goto(page: Any, url: str, *, retries: int = _ARENA_NAVIGATION_RETRY_LIMIT) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+            return
+        except Exception as error:  # noqa: BLE001 - browser navigation is retried below
+            last_error = error
+            if _arena_verification_page_active(page):
+                return
+            if attempt < retries:
+                page.wait_for_timeout(_arena_retry_delay_ms(attempt))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Arena browser navigation attempts were exhausted")
+
+
+def _arena_anonymous_signup_with_retry(
+    page: Any,
+    config: dict[str, Any],
+    attempts: int,
+) -> dict[str, Any] | None:
+    result: dict[str, Any] | None = None
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            _arena_goto(page, f"{config['base_url']}{config['page_path']}")
+        try:
+            candidate = page.evaluate(
+                _arena_anonymous_signup_script(),
+                {
+                    "path": "/nextjs-api/sign-up",
+                    "timeoutMs": 60_000,
+                    "provisionalIdTimeoutMs": _ARENA_PROVISIONAL_ID_TIMEOUT_MS,
+                },
+            )
+        except Exception:
+            if attempt >= attempts:
+                raise
+            page.wait_for_timeout(_arena_retry_delay_ms(attempt))
+            continue
+        result = candidate if isinstance(candidate, dict) else None
+        if result and result.get("ok") and str(result.get("userId") or ""):
+            return result
+        status = int(result.get("status") or 502) if result else 502
+        code = str(result.get("code") or "") if result else ""
+        if attempt >= attempts or (code != "PROVISIONAL_ID_MISSING" and not _arena_transient_status(status)):
+            return result
+        page.wait_for_timeout(_arena_retry_delay_ms(attempt))
+    return result
+
+
+def _arena_signup_with_retry(
+    page: Any,
+    *,
+    path: str,
+    body: dict[str, Any],
+    timeout_ms: int,
+    attempts: int,
+) -> dict[str, Any] | None:
+    result: dict[str, Any] | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            candidate = page.evaluate(
+                _arena_signup_script(),
+                {"path": path, "body": body, "timeoutMs": timeout_ms},
+            )
+        except Exception:
+            if attempt >= attempts:
+                raise
+            page.wait_for_timeout(_arena_retry_delay_ms(attempt))
+            continue
+        result = candidate if isinstance(candidate, dict) else None
+        status = int(result.get("status") or 502) if result else 502
+        if result and 200 <= status < 300:
+            return result
+        if attempt >= attempts or not _arena_transient_status(status):
+            return result
+        page.wait_for_timeout(_arena_retry_delay_ms(attempt))
+    return result
+
+
+def _arena_set_password_with_retry(
+    page: Any,
+    *,
+    path: str,
+    password: str,
+    timeout_ms: int,
+    attempts: int,
+) -> dict[str, Any] | None:
+    result: dict[str, Any] | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            candidate = page.evaluate(
+                _arena_set_password_script(),
+                {"path": path, "password": password, "timeoutMs": timeout_ms},
+            )
+        except Exception:
+            if attempt >= attempts:
+                raise
+            page.wait_for_timeout(_arena_retry_delay_ms(attempt))
+            continue
+        result = candidate if isinstance(candidate, dict) else None
+        status = int(result.get("status") or 502) if result else 502
+        if result and result.get("ok") and result.get("success"):
+            return result
+        if attempt >= attempts or not _arena_transient_status(status):
+            return result
+        page.wait_for_timeout(_arena_retry_delay_ms(attempt))
+    return result
+
+
 def _arena_anonymous_signup_script() -> str:
     return r"""async input => {
-  const source = document.documentElement.innerHTML;
-  const userIndex = source.indexOf('userId');
-  const provisionalUserId = userIndex < 0
-    ? ''
-    : source.slice(userIndex, userIndex + 300)
-        .match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || '';
-  if (!provisionalUserId) return {ok: false, status: 400, code: 'PROVISIONAL_ID_MISSING'};
+  const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  const keyedUuidPattern = /(?:provisionalUserId|userId|user_id)[^0-9a-f]{0,80}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+  const uuidFromValue = value => String(value || '').match(uuidPattern)?.[0] || '';
+  const uuidFromKeyedValue = value => String(value || '').match(keyedUuidPattern)?.[1] || '';
+  const storageValues = storage => {
+    const values = [];
+    try {
+      for (const key of ['provisionalUserId', 'userId', 'user_id', 'anonymousUserId']) {
+        const value = storage.getItem(key);
+        if (value) values.push(value);
+      }
+      for (let index = 0; index < storage.length; index++) {
+        const key = storage.key(index) || '';
+        if (/user|anonymous|session/i.test(key)) values.push(storage.getItem(key) || '');
+      }
+    } catch (_) {}
+    return values;
+  };
+  const findProvisionalUserId = () => {
+    const sources = [document.cookie || '', document.documentElement?.innerHTML || ''];
+    for (const script of Array.from(document.scripts || [])) {
+      sources.push(script.textContent || '');
+    }
+    for (const source of sources) {
+      const value = uuidFromKeyedValue(source);
+      if (value) return value;
+    }
+    const selectors = [
+      '[data-user-id]', '[data-userid]', '[name="userId"]', '[name="user_id"]',
+      '[id="userId"]', '[id="user_id"]'
+    ];
+    for (const element of document.querySelectorAll(selectors.join(','))) {
+      for (const value of [
+        element.getAttribute('data-user-id'), element.getAttribute('data-userid'),
+        element.getAttribute('value'), element.textContent
+      ]) {
+        const id = uuidFromValue(value);
+        if (id) return id;
+      }
+    }
+    try {
+      for (const storage of [window.localStorage, window.sessionStorage]) {
+        for (const value of storageValues(storage)) {
+          const id = uuidFromKeyedValue(value) || uuidFromValue(value);
+          if (id) return id;
+        }
+      }
+    } catch (_) {}
+    return '';
+  };
+  const deadline = Date.now() + Math.max(
+    1_000, Math.min(30_000, Number(input.provisionalIdTimeoutMs || 12_000))
+  );
+  let provisionalUserId = '';
+  while (!provisionalUserId && Date.now() < deadline) {
+    provisionalUserId = findProvisionalUserId();
+    if (!provisionalUserId) await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  if (!provisionalUserId) {
+    return {ok: false, status: 400, code: 'PROVISIONAL_ID_MISSING',
+      diagnostic: {htmlHasUserId: /userId|user_id/i.test(document.documentElement?.innerHTML || ''),
+        cookieHasUserId: /(?:^|;)\s*(?:userId|user_id)=/i.test(document.cookie || '')}};
+  }
   const countryCookie = document.cookie.split(';')
     .map(value => value.trim())
     .find(value => value.startsWith('user_country_code=')) || '';
-  const registeredCountryCode = decodeURIComponent(countryCookie.split('=').slice(1).join('='))
-    .trim().toUpperCase();
+  let registeredCountryCode = '';
+  try {
+    registeredCountryCode = decodeURIComponent(countryCookie.split('=').slice(1).join('='))
+      .trim().toUpperCase();
+  } catch (_) {}
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
   try {
@@ -1030,21 +1317,19 @@ def register_with_magic_link(
     trace: RegistrationTrace,
 ) -> BrowserResult:
     config = _arena_config(payload)
+    attempts = _arena_registration_attempts(payload)
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
-    page.goto(
-        f"{config['base_url']}{config['page_path']}",
-        wait_until="domcontentloaded",
-        timeout=90_000,
-    )
+    _arena_goto(page, f"{config['base_url']}{config['page_path']}")
     trace.mark(RegistrationStage.FORM_READY)
     full_name = str(payload.get("arena_full_name") or config["full_name"]).strip()
     if not full_name:
         raise _arena_registration_failure(
             trace, "arena_registration_invalid", "full name is required", retryable=False
         )
-    anonymous_result = page.evaluate(
-        _arena_anonymous_signup_script(),
-        {"path": "/nextjs-api/sign-up", "timeoutMs": 60_000},
+    anonymous_result = _arena_anonymous_signup_with_retry(
+        page,
+        config,
+        attempts,
     )
     if (
         not isinstance(anonymous_result, dict)
@@ -1066,7 +1351,8 @@ def register_with_magic_link(
             "arena_anonymous_signup_failed",
             f"Arena anonymous signup failed with HTTP {anonymous_status} ({anonymous_code})",
             error_type="ArenaAnonymousSignupFailed",
-            retryable=False,
+            retryable=_arena_transient_status(anonymous_status)
+            or anonymous_code == "PROVISIONAL_ID_MISSING",
         )
     request_body: dict[str, Any] = {
         "email": mailbox.address,
@@ -1088,13 +1374,12 @@ def register_with_magic_link(
                 retryable=False,
             )
         request_body["registeredCountryCode"] = country.upper()
-    result = page.evaluate(
-        _arena_signup_script(),
-        {
-            "path": config["registration_path"],
-            "body": request_body,
-            "timeoutMs": 60_000,
-        },
+    result = _arena_signup_with_retry(
+        page,
+        path=config["registration_path"],
+        body=request_body,
+        timeout_ms=60_000,
+        attempts=attempts,
     )
     if not isinstance(result, dict):
         raise _arena_registration_failure(
@@ -1108,7 +1393,7 @@ def register_with_magic_link(
             f"arena_{failure_class}",
             f"Arena signup rejected with HTTP {status} ({failure_class})",
             error_type="ArenaSignupRejected",
-            retryable=False,
+            retryable=_arena_transient_status(status),
         )
     trace.mark(RegistrationStage.FORM_SUBMITTED)
     trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
@@ -1129,14 +1414,13 @@ def register_with_magic_link(
         ) from error
     trace.mark(RegistrationStage.OTP_RECEIVED)
     verification_link = _validate_arena_link(verification_link)
-    page.goto(verification_link, wait_until="domcontentloaded", timeout=90_000)
-    password_result = page.evaluate(
-        _arena_set_password_script(),
-        {
-            "path": config["password_path"],
-            "password": password,
-            "timeoutMs": 60_000,
-        },
+    _arena_goto(page, verification_link)
+    password_result = _arena_set_password_with_retry(
+        page,
+        path=config["password_path"],
+        password=password,
+        timeout_ms=60_000,
+        attempts=attempts,
     )
     if (
         not isinstance(password_result, dict)
@@ -1156,23 +1440,15 @@ def register_with_magic_link(
             "arena_password_setup_failed",
             f"Arena password setup failed with HTTP {status} ({error_code})",
             error_type="ArenaPasswordSetupFailed",
-            retryable=False,
+            retryable=_arena_transient_status(status),
         )
     redirect_to = str(password_result.get("redirectTo") or "").strip()
     activation_redirect_path = ""
     if redirect_to:
         activation_redirect_path = urlparse(redirect_to).path or "/"
-        page.goto(
-            f"{config['base_url']}{_same_origin_path(redirect_to)}",
-            wait_until="domcontentloaded",
-            timeout=90_000,
-        )
+        _arena_goto(page, f"{config['base_url']}{_same_origin_path(redirect_to)}")
     else:
-        page.goto(
-            f"{config['base_url']}{config['page_path']}",
-            wait_until="domcontentloaded",
-            timeout=90_000,
-        )
+        _arena_goto(page, f"{config['base_url']}{config['page_path']}")
     trace.mark(RegistrationStage.ACTIVATED)
     profile: dict[str, Any] | None = None
     session_exchange: dict[str, Any] | None = None
@@ -1315,8 +1591,12 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         )
 
     def stream_request_script(self) -> str:
+        config = arena_settings()
         return _arena_ndjson_stream_script(
-            self._binding_name, arena_settings().arena_recaptcha_site_key
+            self._binding_name,
+            config.arena_recaptcha_site_key,
+            config.arena_recaptcha_v2_site_key,
+            config.arena_recaptcha_v2_timeout_seconds * 1000,
         )
 
     async def models(

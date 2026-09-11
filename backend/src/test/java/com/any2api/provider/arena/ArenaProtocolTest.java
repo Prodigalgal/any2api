@@ -66,6 +66,26 @@ class ArenaProtocolTest {
     }
 
     @Test
+    void rejectsBattleModeAtThePublicSemanticBoundary() {
+        var request = new CanonicalRequest(
+            "arena-request",
+            CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "arena",
+            "Max",
+            true,
+            List.of(mapper.createObjectNode().put("role", "user").put("content", "hello")),
+            Map.of(),
+            Map.of(),
+            List.of(),
+            Map.of("mode", "direct-battle"),
+            mapper.createObjectNode().put("model", "Max"));
+
+        assertThatThrownBy(() -> new ArenaRequestMapper().validate(request))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("direct mode");
+    }
+
+    @Test
     void decodesTextSearchMetadataFinishAndUsageFrames() {
         var decoder = new ArenaEventDecoder("arena-request");
 

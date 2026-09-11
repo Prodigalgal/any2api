@@ -922,6 +922,9 @@ def _arena_upload_script() -> str:
       + ' marker_factories=' + markerFactoryCount);
   };
   if (!Array.isArray(input.files) || input.files.length === 0) return [];
+  if (typeof window.__any2apiArenaUploadFile !== 'function') {
+    await window.__any2apiArenaLoadUploadChunk?.();
+  }
   const uploader = locateUploader();
   const output = [];
   for (const item of input.files) {
@@ -948,6 +951,150 @@ def _arena_upload_script() -> str:
   }
   return output;
 }"""
+
+
+def _arena_turbopack_uploader_init_script() -> str:
+    """Capture Arena's exported uploader while Turbopack evaluates its module."""
+
+    return r"""(() => {
+  const wrapFactory = factory => {
+    if (typeof factory !== 'function') return factory;
+    const source = String(factory);
+    if (!source.includes('generateUploadUrl') || !source.includes('getSignedUrl')) {
+      return factory;
+    }
+    if (factory.__any2apiArenaWrapped) return factory;
+    const wrapped = function(moduleContext, ...args) {
+      if (moduleContext && typeof moduleContext.s === 'function') {
+        const defineExports = moduleContext.s;
+        moduleContext.s = function(definitions, ...defineArgs) {
+          if (Array.isArray(definitions)) {
+            for (let index = 0; index + 2 < definitions.length; index += 3) {
+              if (definitions[index] === 'uploadFile'
+                  && typeof definitions[index + 2] === 'function') {
+                window.__any2apiArenaUploadFile = definitions[index + 2];
+              }
+            }
+          }
+          return defineExports.call(this, definitions, ...defineArgs);
+        };
+      }
+      return factory.call(this, moduleContext, ...args);
+    };
+    wrapped.__any2apiArenaWrapped = true;
+    return wrapped;
+  };
+  const captureChunk = chunk => {
+    if (!Array.isArray(chunk) || chunk.length < 3) return chunk;
+    for (let index = 1; index + 1 < chunk.length; index += 2) {
+      chunk[index + 1] = wrapFactory(chunk[index + 1]);
+    }
+    return chunk;
+  };
+  const wrapRuntime = runtime => {
+    if (!runtime || typeof runtime.push !== 'function' || runtime.push.__any2apiWrapped) {
+      return;
+    }
+    const push = runtime.push;
+    const wrappedPush = function(...chunks) {
+      return push.apply(this, chunks.map(captureChunk));
+    };
+    wrappedPush.__any2apiWrapped = true;
+    runtime.push = wrappedPush;
+  };
+  globalThis.__any2apiArenaLoadUploadChunk = async () => {
+    if (typeof globalThis.__any2apiArenaUploadFile === 'function') return true;
+    const state = globalThis.__any2apiArenaUploadDiscovery || {
+      scanned: new Set(),
+      loaded: new Set(),
+      inFlight: null,
+    };
+    globalThis.__any2apiArenaUploadDiscovery = state;
+    if (state.inFlight) return state.inFlight;
+    const normalizeSource = value => {
+      try {
+        const url = new URL(String(value || ''), location.href);
+        if (url.origin !== location.origin
+            || !url.pathname.startsWith('/_next/static/chunks/')
+            || !url.pathname.endsWith('.js')) return '';
+        return url.href;
+      } catch (_) {
+        return '';
+      }
+    };
+    const candidateSources = () => {
+      const sources = new Set();
+      for (const script of Array.from(document.scripts)) {
+        const source = normalizeSource(script.src);
+        if (source) sources.add(source);
+      }
+      for (const entry of performance.getEntriesByType('resource')) {
+        const source = normalizeSource(entry.name);
+        if (source) sources.add(source);
+      }
+      const html = document.documentElement?.outerHTML || '';
+      const matches = html.matchAll(
+        /(?:https?:\/\/[^"'\s<>]+)?\/_next\/static\/chunks\/[^"'\s<>]+/g,
+      );
+      for (const match of matches) {
+        const source = normalizeSource(match[0]);
+        if (source) sources.add(source);
+      }
+      return sources;
+    };
+    const load = async source => {
+      if (state.scanned.has(source) || state.loaded.has(source)) return false;
+      state.scanned.add(source);
+      try {
+        const response = await fetch(source, {credentials: 'include'});
+        const body = await response.text();
+        if (!response.ok || !body.includes('generateUploadUrl')
+            || !body.includes('getSignedUrl')) return false;
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = source;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        state.loaded.add(source);
+        return typeof globalThis.__any2apiArenaUploadFile === 'function';
+      } catch (_) {
+        return false;
+      }
+    };
+    state.inFlight = (async () => {
+      try {
+        for (let attempt = 0; attempt < 60; attempt++) {
+          for (const source of candidateSources()) {
+            if (await load(source)) return true;
+          }
+          if (typeof globalThis.__any2apiArenaUploadFile === 'function') return true;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        return false;
+      } finally {
+        state.inFlight = null;
+      }
+    })();
+    return state.inFlight;
+  };
+  let current;
+  try {
+    current = globalThis.TURBOPACK;
+    wrapRuntime(current);
+    Object.defineProperty(globalThis, 'TURBOPACK', {
+      configurable: true,
+      get: () => current,
+      set: value => {
+        current = value;
+        wrapRuntime(value);
+      }
+    });
+  } catch (_) {
+    wrapRuntime(globalThis.TURBOPACK);
+  }
+})();"""
 
 
 def _arena_signup_script() -> str:
@@ -1601,6 +1748,14 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             config.arena_recaptcha_v2_timeout_seconds * 1000,
         )
 
+    async def configure_page(
+        self,
+        session: Any,
+        credential: dict[str, Any],
+    ) -> None:
+        await super().configure_page(session, credential)
+        await session.page.add_init_script(_arena_turbopack_uploader_init_script())
+
     async def models(
         self,
         credential: dict[str, Any],
@@ -1670,19 +1825,29 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             return {"attachments": []}
         async with self.account_operation(credential):
             session, _, reports = await self._select_session(credential, proxy_url, plan)
-            result = await session.page.evaluate(
-                _arena_upload_script(),
-                {
-                    "files": [
-                        {
-                            "dataUrl": source["data_url"],
-                            "filename": source["filename"],
-                            "mimeType": source["mime_type"],
-                        }
-                        for source in sources
-                    ]
-                },
-            )
+            try:
+                result = await session.page.evaluate(
+                    _arena_upload_script(),
+                    {
+                        "files": [
+                            {
+                                "dataUrl": source["data_url"],
+                                "filename": source["filename"],
+                                "mimeType": source["mime_type"],
+                            }
+                            for source in sources
+                        ]
+                    },
+                )
+            except Exception as error:
+                reason = re.sub(r"https?://\S+", "<url>", " ".join(str(error).split()))
+                reason = reason[:200] or "<empty>"
+                self._logger.warning(
+                    "arena_media_upload_failed error_type=%s reason=%s",
+                    type(error).__name__,
+                    reason,
+                )
+                raise
             attachments = _normalize_arena_attachments(result)
             return {
                 "attachments": attachments,

@@ -18,6 +18,7 @@ from any2api_automation.providers.arena_browser import (
     _arena_set_password_with_retry,
     _arena_sign_in_script,
     _arena_terms_script,
+    _arena_turbopack_uploader_init_script,
     _arena_update_tou_consent_script,
     _arena_upload_script,
     _ensure_arena_tou_consent,
@@ -318,6 +319,16 @@ def test_arena_page_upload_script_uses_the_official_exported_uploader() -> None:
     assert "uploadFile" in script
     assert "experimental_attachments" not in script
     assert "new File([bytes]" in script
+
+
+def test_arena_turbopack_init_script_captures_official_uploader_export() -> None:
+    script = _arena_turbopack_uploader_init_script()
+
+    assert "globalThis.TURBOPACK" in script
+    assert "generateUploadUrl" in script
+    assert "getSignedUrl" in script
+    assert "__any2apiArenaUploadFile" in script
+    assert "uploadFile" in script
 
 
 def test_arena_password_setup_script_uses_current_magic_link_token() -> None:

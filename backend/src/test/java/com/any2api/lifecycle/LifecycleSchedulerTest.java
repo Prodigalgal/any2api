@@ -41,6 +41,26 @@ class LifecycleSchedulerTest {
     }
 
     @Test
+    void identifiesExpiredCredentialWindows() {
+        assertEquals(true, LifecycleScheduler.isCredentialExpired(
+            NOW.minusSeconds(1), NOW));
+        assertEquals(false, LifecycleScheduler.isCredentialExpired(
+            NOW.plusSeconds(1), NOW));
+        assertEquals(false, LifecycleScheduler.isCredentialExpired(null, NOW));
+    }
+
+    @Test
+    void clearsAnExpiredCredentialFenceAfterSuccessfulReauthenticationWithoutProviderExpiry() {
+        assertEquals(true, LifecycleScheduler.shouldClearStaleCredentialExpiry(
+            "reauthenticate", null, NOW.minus(Duration.ofMinutes(1)), NOW));
+        assertEquals(false, LifecycleScheduler.shouldClearStaleCredentialExpiry(
+            "keepalive", null, NOW.minus(Duration.ofMinutes(1)), NOW));
+        assertEquals(false, LifecycleScheduler.shouldClearStaleCredentialExpiry(
+            "reauthenticate", NOW.plus(Duration.ofDays(1)),
+            NOW.minus(Duration.ofMinutes(1)), NOW));
+    }
+
+    @Test
     void reauthenticatesWhenKeepalivePassesButInferenceRejectsTheCredential() {
         assertEquals("reauthenticate", LifecycleScheduler.nextAction(
             "keepalive", true, false, true));

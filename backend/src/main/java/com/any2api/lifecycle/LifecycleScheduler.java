@@ -297,9 +297,13 @@ public class LifecycleScheduler {
                 task.account().getMetadata(), task.proxyPool(), context)
             .flatMap(result -> {
                 var dailyCheckinSupported = supportsDailyCheckin(action.providerId());
+                var effectiveCredentialExpiry = result.credentialExpiresAt() == null
+                    ? task.credentialExpiresAt() : result.credentialExpiresAt();
+                var credentialExpired = !"reauthenticate".equals(action.action())
+                    && isCredentialExpired(effectiveCredentialExpiry, Instant.now());
                 var readinessRequired = requiresReadinessProbe(
-                        action.action(), task.account().getStatus(), result.healthy(),
-                        dailyCheckinSupported);
+                    action.action(), task.account().getStatus(), result.healthy(),
+                    dailyCheckinSupported);
                 var probe = !readinessRequired
                     ? reactor.core.publisher.Mono.just(
                         InferenceReadinessProbe.Result.notRequired())
@@ -310,14 +314,16 @@ public class LifecycleScheduler {
                             ? task.credentialExpiresAt() : result.credentialExpiresAt());
                 return probe.flatMap(probeResult -> renewOwnership(action, owner, lease)
                     .then(reactor.core.publisher.Mono.<Void>fromRunnable(() -> {
-                    transactions.executeWithoutResult(ignored ->
-                        complete(action, owner, task, result, probeResult,
-                            readinessRequired, dailyCheckinSupported));
-                    var inferenceReady = result.healthy() && probeResult.ready()
+                        transactions.executeWithoutResult(ignored ->
+                            complete(action, owner, task, result, probeResult,
+                            readinessRequired, dailyCheckinSupported, credentialExpired));
+                    var inferenceReady = !credentialExpired && result.healthy() && probeResult.ready()
                         && (readinessRequired
                             || (task.account().getStatus() == AccountStatus.ACTIVE
                                 && task.account().isEnabled()));
-                    if (inferenceReady) {
+                    if (credentialExpired) {
+                        observability.succeed(observed, "credential_refresh_scheduled");
+                    } else if (inferenceReady) {
                         observability.succeed(observed, probeResult.model().isBlank()
                             ? "lifecycle_completed" : "inference_probe_ready");
                     } else if (result.healthy() && probeResult.ready()) {
@@ -344,17 +350,26 @@ public class LifecycleScheduler {
         LifecycleResult result,
         InferenceReadinessProbe.Result probe,
         boolean readinessRequired,
-        boolean dailyCheckinSupported
+        boolean dailyCheckinSupported,
+        boolean credentialExpired
     ) {
         var completedAt = Instant.now();
-        var credentialExpiresAt = result.credentialExpiresAt();
-        if (credentialExpiresAt == null) credentialExpiresAt = task.credentialExpiresAt();
+        var clearStaleCredentialExpiry = shouldClearStaleCredentialExpiry(
+            action.action(), result.credentialExpiresAt(), task.credentialExpiresAt(), completedAt);
+        var credentialExpiresAt = clearStaleCredentialExpiry
+            ? null : result.credentialExpiresAt();
+        if (credentialExpiresAt == null && !clearStaleCredentialExpiry) {
+            credentialExpiresAt = task.credentialExpiresAt();
+        }
         var recoveredCredential = mergedCredential(
             mergedCredential(task.credential(), result.credentialPatch()), probe.credentialPatch());
         credentials.storeIfVersion(
             task.account(), action.providerId(), task.credentialVersion(),
             recoveredCredential, credentialExpiresAt);
-        if (credentialExpiresAt != null
+        if (clearStaleCredentialExpiry) {
+            task.account().clearCredentialExpiry();
+            accounts.save(task.account());
+        } else if (credentialExpiresAt != null
             && !credentialExpiresAt.equals(task.account().getExpiresAt())) {
             task.account().updateCredentialExpiry(credentialExpiresAt);
             accounts.save(task.account());
@@ -383,10 +398,10 @@ public class LifecycleScheduler {
                 policy.propagate(task.account(), recoveredCredential, credentialExpiresAt);
             }
         }
-        var healthy = result.healthy() && probe.ready();
+        var healthy = !credentialExpired && result.healthy() && probe.ready();
         var inferenceReady = probe.ready() && (readinessRequired
             || (task.account().getStatus() == AccountStatus.ACTIVE && task.account().isEnabled()));
-        var authExpired = result.authExpired();
+        var authExpired = result.authExpired() || credentialExpired;
         var inferenceCredentialRejected = result.healthy() && readinessRequired
             && !probe.ready()
             && "credential_rejected".equals(probe.errorClass());
@@ -402,14 +417,15 @@ public class LifecycleScheduler {
                 "InferenceProbe:" + probe.errorClass(),
                 completedAt.plus(retryDelay(action.attempts() + 1)));
         } else if (authExpired) {
-            task.account().updateState(AccountStatus.EXPIRED, true);
+            task.account().updateState(AccountStatus.EXPIRED, false);
             accounts.save(task.account());
         }
         if (result.terminal()) {
             exhaust(action, owner, "TerminalAuthenticationFailure");
             return;
         }
-        var nextAttempts = healthy ? 0 : action.attempts() + 1;
+        var reauthenticationRequired = authExpired || inferenceCredentialRejected;
+        var nextAttempts = healthy || reauthenticationRequired ? 0 : action.attempts() + 1;
         if (!healthy && nextAttempts >= MAX_ATTEMPTS) {
             exhaust(action, owner, "LifecycleAttemptsExhausted");
             return;
@@ -428,7 +444,6 @@ public class LifecycleScheduler {
                 .param("entityId", task.account().getId().toString()).param("nextAction", nextAction)
                 .update();
         }
-        var reauthenticationRequired = authExpired || inferenceCredentialRejected;
         var keepalivePolicy = runtimeSettings.keepalivePolicy(action.providerId());
         var activationFollowup = dailyCheckinSupported && result.healthy()
             && ("reauthenticate".equals(action.action())
@@ -463,6 +478,7 @@ public class LifecycleScheduler {
             .param("dueAt", PostgresResultValues.timestamp(dueAt))
             .param("idempotencyKey", "action:" + action.id() + ":" + nextGeneration)
             .param("errorClass", healthy ? null
+                : credentialExpired ? "credential_expired"
                 : !probe.ready() ? probe.errorClass() : result.errorClass())
             .param("id", action.id())
             .param("owner", owner)
@@ -563,6 +579,21 @@ public class LifecycleScheduler {
         }
         return untilRefreshWindow.compareTo(maximumInterval) > 0
             ? maximumInterval : untilRefreshWindow;
+    }
+
+    static boolean isCredentialExpired(Instant credentialExpiresAt, Instant now) {
+        return credentialExpiresAt != null && !credentialExpiresAt.isAfter(now);
+    }
+
+    static boolean shouldClearStaleCredentialExpiry(
+        String action,
+        Instant reportedExpiry,
+        Instant storedExpiry,
+        Instant now
+    ) {
+        return "reauthenticate".equals(action)
+            && reportedExpiry == null
+            && isCredentialExpired(storedExpiry, now);
     }
 
     static boolean requiresReadinessProbe(

@@ -208,6 +208,10 @@ public class AccountEntity {
         if (expiresAt != null) this.expiresAt = expiresAt;
     }
 
+    public void clearCredentialExpiry() {
+        this.expiresAt = null;
+    }
+
     public void mergeMetadata(Map<String, Object> patch) {
         if (patch != null) this.metadata.putAll(patch);
     }

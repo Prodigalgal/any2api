@@ -117,6 +117,23 @@ class ArenaProtocolTest {
     }
 
     @Test
+    void classifiesPromptRateLimitAsInteractiveAntiBotChallenge() {
+        var provider = new ArenaProvider(
+            new ArenaProperties(),
+            mock(ProxyPoolService.class),
+            mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        var failure = provider.classify(new ArenaUpstreamException(
+            429, "Arena upstream returned HTTP 429: {\"error\":\"prompt failed\"}"));
+
+        assertThat(failure.type()).isEqualTo("anti_bot_rejected");
+        assertThat(failure.retryable()).isFalse();
+        assertThat(failure.detail()).containsEntry("challenge", "recaptcha_v2");
+    }
+
+    @Test
     void derivesPerModelMediaContractFromArenaCatalogCapabilities() {
         var provider = new ArenaProvider(
             new ArenaProperties(),

@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -237,6 +238,12 @@ public final class ArenaProvider implements InferenceProvider {
     public ProviderFailure classify(Throwable error) {
         if (error instanceof ArenaUpstreamException upstream) {
             var status = upstream.status();
+            if (status == 429 && upstream.getMessage() != null
+                && upstream.getMessage().toLowerCase(Locale.ROOT).contains("prompt failed")) {
+                return new ProviderFailure(
+                    "anti_bot_rejected", upstream.getMessage(), false,
+                    Map.of("status", status, "challenge", "recaptcha_v2"));
+            }
             var retryable = status >= 500 || Set.of(408, 409, 425, 429).contains(status);
             var type = switch (status) {
                 case 401 -> "credential_rejected";

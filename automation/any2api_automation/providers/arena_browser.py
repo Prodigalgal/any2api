@@ -1045,7 +1045,9 @@ def _arena_anonymous_signup_with_retry(
             return result
         status = int(result.get("status") or 502) if result else 502
         code = str(result.get("code") or "") if result else ""
-        if attempt >= attempts or (code != "PROVISIONAL_ID_MISSING" and not _arena_transient_status(status)):
+        if attempt >= attempts or (
+            code != "PROVISIONAL_ID_MISSING" and not _arena_transient_status(status)
+        ):
             return result
         page.wait_for_timeout(_arena_retry_delay_ms(attempt))
     return result

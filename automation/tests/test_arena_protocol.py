@@ -412,9 +412,7 @@ def test_arena_verification_navigation_accepts_abort_after_target_loaded() -> No
 
         def goto(self, _: str, **__: object) -> None:
             self.goto_calls += 1
-            self.url = (
-                "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time"
-            )
+            self.url = "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time"
             raise RuntimeError("NS_BINDING_ABORTED")
 
         def wait_for_timeout(self, _: int) -> None:

@@ -9,6 +9,7 @@ from any2api_automation.lifecycle.mail import Mailbox
 from any2api_automation.lifecycle.registration import RegistrationTrace
 from any2api_automation.providers.arena_browser import (
     _arena_set_password_script,
+    _arena_sign_in_script,
     _arena_upload_script,
     _validate_arena_link,
     arena_media_sources,
@@ -195,6 +196,15 @@ def test_arena_password_setup_script_uses_current_magic_link_token() -> None:
     assert "credentials: 'include'" in script
 
 
+def test_arena_sign_in_script_matches_official_email_session_exchange() -> None:
+    script = _arena_sign_in_script()
+
+    assert "input.email" in script
+    assert "input.password" in script
+    assert "shouldLinkHistory: false" in script
+    assert "credentials: 'include'" in script
+
+
 def test_arena_verification_link_rejects_cdn_assets() -> None:
     link = "https://arena.ai/auth/verify?signup_intent_id=signup-1&token=one-time&type=email"
 
@@ -208,6 +218,7 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
         def __init__(self) -> None:
             self.visited: list[str] = []
             self.signup: dict[str, object] = {}
+            self.profile_calls = 0
 
         def goto(self, url: str, **_: object) -> None:
             self.visited.append(url)
@@ -219,9 +230,19 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
             if "JSON.stringify(input.body)" in script:
                 self.signup = dict(argument or {})
                 return {"ok": True, "status": 200, "body": "{}"}
+            if "input.email" in script:
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "success": True,
+                    "emailConfirmed": True,
+                }
             if "input.password" in script:
                 return {"ok": True, "status": 200, "success": True, "redirectTo": "/text/direct"}
             if "response.json()" in script:
+                self.profile_calls += 1
+                if self.profile_calls == 1:
+                    return {"ok": False, "status": 401, "id": "", "email": ""}
                 return {
                     "ok": True,
                     "status": 200,

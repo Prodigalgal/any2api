@@ -737,6 +737,38 @@ def _arena_set_password_script() -> str:
 }"""
 
 
+def _arena_sign_in_script() -> str:
+    return r"""async input => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetch(input.path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        email: input.email,
+        password: input.password,
+        shouldLinkHistory: false
+      }),
+      signal: controller.signal
+    });
+    let data = {};
+    try { data = await response.json(); } catch (_) {}
+    return {
+      ok: response.ok,
+      status: response.status,
+      success: data?.success === true,
+      emailConfirmed: data?.user?.emailConfirmed === true,
+      code: String(data?.code || ''),
+      error: String(data?.error || '')
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}"""
+
+
 def _arena_me_script() -> str:
     return r"""async input => {
   const controller = new AbortController();
@@ -900,6 +932,33 @@ def register_with_magic_link(
             profile = candidate
             if candidate.get("ok") and str(candidate.get("id") or ""):
                 break
+    if isinstance(profile, dict) and int(profile.get("status") or 502) in {401, 403}:
+        sign_in = page.evaluate(
+            _arena_sign_in_script(),
+            {
+                "path": "/nextjs-api/sign-in/email",
+                "email": mailbox.address,
+                "password": password,
+                "timeoutMs": 60_000,
+            },
+        )
+        if (
+            isinstance(sign_in, dict)
+            and sign_in.get("ok")
+            and sign_in.get("success")
+            and sign_in.get("emailConfirmed")
+        ):
+            profile = None
+            for attempt in range(3):
+                page.wait_for_timeout(1_000 if attempt else 500)
+                candidate = page.evaluate(
+                    _arena_me_script(),
+                    {"path": config["me_path"], "timeoutMs": 60_000},
+                )
+                if isinstance(candidate, dict):
+                    profile = candidate
+                    if candidate.get("ok") and str(candidate.get("id") or ""):
+                        break
     if not isinstance(profile, dict) or not profile.get("ok") or not str(profile.get("id") or ""):
         status = int(profile.get("status") or 502) if isinstance(profile, dict) else 502
         failure_class = _arena_error_class(status, "profile probe failed")

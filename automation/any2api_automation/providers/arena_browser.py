@@ -952,6 +952,10 @@ def register_with_magic_link(
             and sign_in.get("success")
             and sign_in.get("emailConfirmed")
         ):
+            page.reload(
+                wait_until="domcontentloaded",
+                timeout=90_000,
+            )
             profile = None
             for attempt in range(3):
                 page.wait_for_timeout(1_000 if attempt else 500)

@@ -229,6 +229,9 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
         def goto(self, url: str, **_: object) -> None:
             self.visited.append(url)
 
+        def reload(self, **_: object) -> None:
+            self.visited.append("reload")
+
         def wait_for_timeout(self, milliseconds: int) -> None:
             assert milliseconds in {500, 1_000}
 

@@ -21,7 +21,7 @@ final class ArenaRequestMapper {
         }
         var mode = request.providerOptions().get("mode");
         if (mode != null && (!(mode instanceof String)
-            || !Set.of("direct", "direct_battle")
+            || !Set.of("direct", "direct-battle", "direct_battle")
                 .contains(String.valueOf(mode).trim().toLowerCase()))) {
             throw OpenAiRequestException.invalid(
                 "provider_options.arena.mode", "Arena only supports direct battle mode");

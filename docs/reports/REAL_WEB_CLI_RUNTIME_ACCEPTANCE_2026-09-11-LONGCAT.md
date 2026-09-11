@@ -9,8 +9,8 @@
 | 项目 | 结果 |
 | --- | --- |
 | K8S context / namespace | `kubernetes-admin@sg-osaka-dualstack` / `any2api` |
-| 源码提交 | `1a7e6b9` |
-| GitOps 提交 | `af2f4fa` |
+| 源码提交 | `09b5202`（LongCat Runtime 映射代码沿用已验收的 `1a7e6b9`） |
+| GitOps 提交 | `16eda4f` |
 | Argo CD | `Succeeded / Synced / Healthy` |
 | 业务 Pod | server、automation、web 均 `Ready=true`，重启数为 0 |
 | OOM | 当前没有 `OOMKilling` 事件 |
@@ -31,12 +31,14 @@
 
 当前模型目录重新读取结果：`longcat-flash`、`longcat-pro`、`longcat-thinking`、`longcat-search`、`longcat-reason-search` 均 `available=true`、探针 `READY`、熔断器 `CLOSED`；`longcat-flash` 成功率约 90%、P95 约 47.6s，已达到当前 Ready 门槛。
 
+LongCat 账号事件页当前返回 26 个账号，26 个为 `ACTIVE/enabled`。选定账号的最近自然 `keepalive` 事件为 `SUCCEEDED / lifecycle_completed`，耗时 `21502ms`，开始时间 `2026-09-10T20:31:32Z`，无错误码；本次未通过手动命令伪造保活结果。
+
 ## 能力边界
 
 - 已验证：文本、图片、PDF、DOCX、TXT；图片和文档均使用同一账号页面/代理上下文完成上传与对话。
 - 尚未逐项取得真实 completion：`doc`、`xls`、`xlsx`、`pptx` 等其他扩展；不能从 TXT/PDF/DOCX 推导全部文件扩展均可用。
 - 音频、视频不属于本轮 LongCat 聊天输入范围。
-- LongCat 自然 `keepalive` 的新版本成功记录仍等待下一调度窗口；本记录不把手动账号探针冒充成自然保活证据。
+- 已取得 LongCat 自然 `keepalive` 成功记录；仍继续观察多账号覆盖和 24 小时健康窗口，本记录不把手动账号探针冒充成自然保活证据。
 
 ## 后续
 

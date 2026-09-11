@@ -10,10 +10,10 @@ Qwen Runtime 当前不能标记为全链路 Ready。文本推理、模型发现�
 
 | 项目 | 结果 |
 |---|---|
-| Source commit | `a99ec65`（包含 `fb27307` 的 Qwen 错误分类修复） |
-| CI | `34537508021`，Automation、Backend、Web 质量检查及镜像构建均成功 |
-| GitOps | `d564532`，三套 Any2API 镜像均切换到 `sha-a99ec65...` |
-| Argo CD | `Synced / Healthy / Succeeded`，revision `d5645323...` |
+| Source commit | `09b5202`（运行时代码包含 `fb27307` 的 Qwen 错误分类修复；图片证据在功能等价的 `a99ec65` 镜像上采集） |
+| CI | `34538894494`，Automation、Backend、Web 质量检查及镜像构建均成功 |
+| GitOps | `16eda4f`，三套 Any2API 镜像均切换到 `sha-09b5202...` |
+| Argo CD | `Synced / Healthy / Succeeded`，revision `16eda4fb...` |
 | K8S Pod | server、automation、web、PostgreSQL、Redis 均 Ready，重启次数均为 0 |
 | OOM | `reason=OOMKilling` 无事件；本次复测后未出现新的 OOM |
 

@@ -22,7 +22,7 @@
 
 ## 当前推进
 
-- LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；继续观察自然 keepalive、24 小时健康窗口和其他未逐项验证的文件扩展，不将其自动扩大为全部文件格式 Ready。
+- LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；26 个账号均为 `ACTIVE/enabled`，自然 `keepalive` 事件已取得 `SUCCEEDED / lifecycle_completed` 证据（约 21.5s），继续观察多账号覆盖、24 小时健康窗口和其他未逐项验证的文件扩展，不将其自动扩大为全部文件格式 Ready。
 - Qwen 文本探针与 keepalive 可用，但图片请求在当前发布仍返回 HTTP 200、392 字节、仅含 `error` 的不完整 SSE；公共层现在返回不可重试的 HTTP 400 `invalid_request_error`，继续定位图片上传后的上游拒绝原因，Qwen 整体保持未 Ready。
 - 等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
 - 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。

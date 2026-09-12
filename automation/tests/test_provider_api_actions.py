@@ -569,8 +569,7 @@ async def test_mimo_api_uploads_and_parses_an_inline_image(monkeypatch) -> None:
         module,
         "api_provider_put_sync",
         lambda url, content, **kwargs: (
-            upload_headers.append(dict(kwargs["headers"]))
-            or {"status": 200, "body": ""}
+            upload_headers.append(dict(kwargs["headers"])) or {"status": 200, "body": ""}
         ),
     )
     command = _command(

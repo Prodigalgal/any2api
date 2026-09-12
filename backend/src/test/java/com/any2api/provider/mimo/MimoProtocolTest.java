@@ -163,5 +163,11 @@ class MimoProtocolTest {
         assertThat(failure.type()).isEqualTo("provider_upstream_error");
         assertThat(failure.retryable()).isTrue();
         assertThat(failure.detail()).containsEntry("stage", "object_upload");
+
+        var authenticationFailure = provider.classify(
+            new MimoUpstreamException(403, "MiMo upstream returned HTTP 403: forbidden"));
+
+        assertThat(authenticationFailure.type()).isEqualTo("credential_rejected");
+        assertThat(authenticationFailure.retryable()).isFalse();
     }
 }

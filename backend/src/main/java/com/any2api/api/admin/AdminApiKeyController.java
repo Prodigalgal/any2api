@@ -4,6 +4,7 @@ import com.any2api.auth.ApiKeyProtocol;
 import com.any2api.auth.ApiKeyFeature;
 import com.any2api.auth.ApiKeyService;
 import com.any2api.auth.ApiKeyUsageService;
+import com.any2api.provider.ProviderTransportMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -45,7 +46,7 @@ public class AdminApiKeyController {
     public ApiKeyService.Created create(@RequestBody CreateRequest request) {
         return keys.create(new ApiKeyService.CreateCommand(
             request.name(), request.providerModels(), request.protocols(), request.features(),
-            request.expiresAt()));
+            request.expiresAt(), request.transportMode()));
     }
 
     @PatchMapping("/{id}")
@@ -67,7 +68,8 @@ public class AdminApiKeyController {
         Map<String, List<String>> providerModels,
         Set<ApiKeyProtocol> protocols,
         Set<ApiKeyFeature> features,
-        Instant expiresAt
+        Instant expiresAt,
+        ProviderTransportMode transportMode
     ) {}
 
     public record UpdateRequest(Boolean enabled) {}

@@ -1,6 +1,13 @@
 # 当前任务：Grok 之外七家 Provider 的 Runtime/API 双通道闭环
 
-## 本轮推进：全厂商 API Channel（0.17.3）
+## 本轮推进：API Key 通道选择与全厂商 API Channel（0.18.0）
+
+### API Key 通道选择 task spec
+
+- 目标：创建分发 KEY 时选择 `API`、`RUNTIME` 或 `AUTO`，并让普通推理请求按 KEY 策略执行。
+- 范围：`api_keys` 持久化、授权缓存、Admin API、管理端创建/详情/列表、直连与随机推理入口、数据库迁移和契约文档。
+- 非目标：不改变生命周期动作、不把 `/v1/images/*` 的 Runtime-only 媒体边界伪装成 API 能力、不开放随机接口自定义通道。
+- 验收：历史 KEY 默认 `AUTO`；显式 API/Runtime 不跨通道回退；AUTO 为 API 优先并可按既有失败分类回退 Runtime；两个随机路由族固定 AUTO；GitHub Actions 完成 Backend/Automation/WEB 验证。
 
 - 业务范围为 Arena、DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen；Grok 三通道继续排除。
 - Java `ProviderTransportModeService` 统一选择 `API`、`RUNTIME` 或 `AUTO`；`InferenceCoordinator`、模型发现和就绪探针均把最终模式传入 Provider。
@@ -15,6 +22,7 @@
 - `0.17.2` 将已知 provider verification 信号统一收敛到 `ProviderFailureSignals`；DeepSeek、LongCat、MiMo、MinMax、Qwen、Arena、GLM 的 API 风控响应不再误判为凭证失效，统一进入 anti-bot 冷却/`AUTO` 回退边界。各 API handler 继续只提交 provider-native 参数，未引入验证码生成或绕过。
 - 2026-09-12 E2E API 真实验收已取得 DeepSeek、LongCat、MiMo 的文本非流式/SSE HTTP 200；LongCat、MiMo 的图片非流式 HTTP 200。LongCat PDF 的上传、会话和 completion 返回 200，但当前测试文档未被模型读取，不能算 API 文档通过；GLM 非流式真实返回 `anti_bot_rejected`，SSE 随后因冷却返回 `account_unavailable`。Arena、MiniMax、Qwen 因没有可用账号暂不验收，详见 [API Channel K8S 真实验收记录](../docs/reports/REAL_API_CHANNEL_ACCEPTANCE_2026-09-12.md)。
 - `0.17.3` 将最终 `ProviderTransportMode` 写入 inference start/finish 日志与 `any2api.inference.duration` 指标的 `channel` 标签；API/Runtime 的真实验收不再只依赖数据库模式快照判读。兼容旧的 `InferenceTrace` 构造方式，媒体动作明确标为 Runtime。GitHub Actions `34689733061` 已通过，`70926ef` 已滚动到 E2E；新版本 MiMo API smoke HTTP 200 且日志确认 `channel=api`。滚动初始阶段仅出现一次 PostgreSQL DNS 瞬态启动失败，恢复后 `healthz/readyz` 均 200，无 OOM；生产未更新。
+- `0.18.0` 新增 KEY 级 `transportMode`（默认 `AUTO`）；普通 Chat/Responses 直连遵循 KEY 选择，两个 random 路由族固定 `AUTO`，并保留生命周期与 `/v1/images/*` 的既有边界。本次候选的构建与测试仍只交给 GitHub Actions。
 - 验证约束：本机不执行编译、构建或测试构建；Backend、Automation、WEB 的编译与测试统一由 `.github/workflows/build-and-deploy.yml` 的 GitHub Actions 执行。
 
 ## 上一版本：Provider 边界、Arena Direct 与生命周期稳定性（0.16.5）

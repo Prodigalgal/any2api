@@ -1,5 +1,6 @@
 package com.any2api.auth;
 
+import com.any2api.provider.ProviderTransportMode;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,7 +15,8 @@ public record ApiKeyGrant(
     Set<ApiKeyProtocol> protocols,
     Set<ApiKeyFeature> features,
     Instant expiresAt,
-    boolean fullAccess
+    boolean fullAccess,
+    ProviderTransportMode transportMode
 ) {
     public ApiKeyGrant {
         var copied = new LinkedHashMap<String, ApiKeyProviderScope>();
@@ -27,10 +29,26 @@ public record ApiKeyGrant(
         providerScopes = Map.copyOf(copied);
         protocols = Set.copyOf(protocols);
         features = Set.copyOf(features);
+        transportMode = transportMode == null ? ProviderTransportMode.AUTO : transportMode;
+    }
+
+    public ApiKeyGrant(
+        UUID keyId,
+        String name,
+        Map<String, ApiKeyProviderScope> providerScopes,
+        Set<ApiKeyProtocol> protocols,
+        Set<ApiKeyFeature> features,
+        Instant expiresAt,
+        boolean fullAccess
+    ) {
+        this(keyId, name, providerScopes, protocols, features, expiresAt, fullAccess,
+            ProviderTransportMode.AUTO);
     }
 
     public static ApiKeyGrant unrestricted() {
-        return new ApiKeyGrant(null, "system", Map.of(), Set.of(), Set.of(), null, true);
+        return new ApiKeyGrant(
+            null, "system", Map.of(), Set.of(), Set.of(), null, true,
+            ProviderTransportMode.AUTO);
     }
 
     public boolean allowsProtocol(ApiKeyProtocol protocol) {

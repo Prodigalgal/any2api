@@ -64,20 +64,31 @@ public class InferenceCoordinator {
     }
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request, UUID apiKeyId) {
-        return execute(request, apiKeyId, "INFERENCE");
+        return execute(request, apiKeyId, null, "INFERENCE");
+    }
+
+    public Flux<CanonicalEvent> execute(
+        CanonicalRequest request,
+        UUID apiKeyId,
+        ProviderTransportMode requestedTransportMode
+    ) {
+        return execute(request, apiKeyId, requestedTransportMode, "INFERENCE");
     }
 
     public Flux<CanonicalEvent> executeProbe(CanonicalRequest request) {
-        return execute(request, null, "PROBE");
+        return execute(request, null, null, "PROBE");
     }
 
     private Flux<CanonicalEvent> execute(
         CanonicalRequest request,
         UUID apiKeyId,
+        ProviderTransportMode requestedTransportMode,
         String requestKind
     ) {
         var provider = providers.require(request.providerId());
-        var transportPlan = transportModes.plan(provider);
+        var transportPlan = requestedTransportMode == null
+            ? transportModes.plan(provider)
+            : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
             validateRequest(request, provider, modelCapabilities);
@@ -97,14 +108,14 @@ public class InferenceCoordinator {
         CanonicalRequest request,
         com.any2api.account.LeasedProviderAccount account
     ) {
-        return execute(request, account, null, "INFERENCE");
+        return execute(request, account, null, null, "INFERENCE");
     }
 
     public Flux<CanonicalEvent> executeProbe(
         CanonicalRequest request,
         com.any2api.account.LeasedProviderAccount account
     ) {
-        return execute(request, account, null, "PROBE");
+        return execute(request, account, null, null, "PROBE");
     }
 
     public Flux<CanonicalEvent> execute(
@@ -112,13 +123,23 @@ public class InferenceCoordinator {
         com.any2api.account.LeasedProviderAccount account,
         UUID apiKeyId
     ) {
-        return execute(request, account, apiKeyId, "INFERENCE");
+        return execute(request, account, apiKeyId, null, "INFERENCE");
+    }
+
+    public Flux<CanonicalEvent> execute(
+        CanonicalRequest request,
+        com.any2api.account.LeasedProviderAccount account,
+        UUID apiKeyId,
+        ProviderTransportMode requestedTransportMode
+    ) {
+        return execute(request, account, apiKeyId, requestedTransportMode, "INFERENCE");
     }
 
     private Flux<CanonicalEvent> execute(
         CanonicalRequest request,
         com.any2api.account.LeasedProviderAccount account,
         UUID apiKeyId,
+        ProviderTransportMode requestedTransportMode,
         String requestKind
     ) {
         if (!request.providerId().equals(account.providerId())) {
@@ -127,7 +148,9 @@ public class InferenceCoordinator {
                     "random route account provider does not match the request")));
         }
         var provider = providers.require(request.providerId());
-        var transportPlan = transportModes.plan(provider);
+        var transportPlan = requestedTransportMode == null
+            ? transportModes.plan(provider)
+            : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
             model.ifPresent(entry -> requestLimits.requireWithinLimits(

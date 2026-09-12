@@ -7,7 +7,7 @@
 - Registration aggregate: campaign, job, attempt, step events, and final account reference.
 - Scheduled action aggregate: handler, entity, due time, generation, attempts, lease, and terminal result.
 - Session aggregate: tenant, provider, model, account binding, upstream state, context, and expiry.
-- Distribution-key aggregate: hashed identity, lifecycle state, provider/model grants, protocol grants, request-feature grants, and usage timestamp.
+- Distribution-key aggregate: hashed identity, lifecycle state, provider/model grants, protocol grants, request-feature grants, inference transport policy, and usage timestamp.
 
 ## Provider, account, model, and key relationships
 
@@ -47,7 +47,7 @@ provider routes and random routes apply the same authorization object before pro
 | `models` | Namespaced model catalog and capabilities JSONB |
 | `accounts` | Common indexed account state and non-sensitive metadata |
 | `account_credentials` | Versioned encrypted secret payloads |
-| `api_keys` | Hash, display prefix, lifecycle state, expiry, quota envelope, and usage timestamp |
+| `api_keys` | Hash, display prefix, lifecycle state, expiry, per-key inference transport policy, quota envelope, and usage timestamp |
 | `api_key_provider_grants` | Key-to-provider authorization and current/future model policy |
 | `api_key_model_grants` | Explicit model restrictions under a provider grant |
 | `api_key_protocol_grants` | Allowed public OpenAI protocol families |

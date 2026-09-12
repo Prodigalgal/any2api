@@ -9,6 +9,7 @@ import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout
 
 export function ApiKeyDetailPage({ id }: { id: string }) {
   const detail = useQuery({ queryKey: ["api-key-detail", id], queryFn: () => api.apiKeyDetail(id), refetchInterval: 15_000 });
+  const transportMode = detail.data?.key.transportMode ?? "AUTO";
   return <PageContainer>
     <PageHeader title={detail.data?.key.name ?? "密钥详情"} description={detail.data ? `${detail.data.key.prefix}... · 创建于 ${formatTime(detail.data.key.createdAt)}` : "使用范围与调用统计"} actions={<Button component={Link} href="/api-keys" startIcon={<ArrowBackOutlined />}>返回密钥列表</Button>} />
     {detail.isLoading ? <LinearProgress /> : null}
@@ -22,10 +23,11 @@ export function ApiKeyDetailPage({ id }: { id: string }) {
       </Box>
       <DataSurface>
         <SectionHeader title="授权范围" />
-        <Box sx={{ p: 2, display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 2 }}>
+        <Box sx={{ p: 2, display: "grid", gridTemplateColumns: "1.4fr repeat(3, 1fr)", gap: 2 }}>
           <Box><Label>厂商与模型</Label><Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>{Object.entries(detail.data.key.providerModels).map(([provider, models]) => <Chip key={provider} size="small" variant="outlined" label={`${provider} · ${models.length ? `${models.length} 模型` : "全部模型"}`} />)}</Stack></Box>
           <Box><Label>协议</Label><Typography sx={{ fontSize: 12 }}>{detail.data.key.protocols.join(" · ")}</Typography></Box>
           <Box><Label>功能</Label><Typography sx={{ fontSize: 12 }}>{detail.data.key.features.length ? detail.data.key.features.join(" · ") : "仅文本"}</Typography></Box>
+          <Box><Label>推理通道</Label><Typography sx={{ fontSize: 12 }}>{transportModeLabel(transportMode)}</Typography><Typography color="text.secondary" sx={{ mt: 0.35, fontSize: 10.5 }}>{transportMode === "AUTO" ? "API 优先，必要时回退 Runtime" : "普通直连遵循 KEY 设置；随机入口固定为自动"}</Typography></Box>
         </Box>
       </DataSurface>
       <DataSurface>
@@ -46,3 +48,4 @@ function number(value: number) { return value.toLocaleString("zh-CN"); }
 function rate(success: number, total: number) { return total ? `${((success / total) * 100).toFixed(2)}%` : "-"; }
 function duration(value: number) { return value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`; }
 function formatTime(value: string | null) { return value ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "-"; }
+function transportModeLabel(mode: "API" | "RUNTIME" | "AUTO" | null | undefined) { return mode === "API" ? "API" : mode === "RUNTIME" ? "Runtime" : "自动（API 优先）"; }

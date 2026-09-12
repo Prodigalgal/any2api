@@ -1,5 +1,6 @@
 package com.any2api.auth;
 
+import com.any2api.provider.ProviderTransportMode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
@@ -26,5 +27,6 @@ class ApiKeyGrantTest {
         assertThat(grant.allowsModel("beta", "model-b")).isTrue();
         assertThat(grant.allowsModel("beta", "other-model")).isFalse();
         assertThat(grant.allowsModel("gamma", "model-b")).isFalse();
+        assertThat(grant.transportMode()).isEqualTo(ProviderTransportMode.AUTO);
     }
 }

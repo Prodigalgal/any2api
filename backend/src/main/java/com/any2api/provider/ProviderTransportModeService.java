@@ -28,23 +28,36 @@ public class ProviderTransportModeService {
     }
 
     public TransportPlan plan(InferenceProvider provider) {
+        return plan(provider, configured.get().getOrDefault(
+            provider.manifest().id(), provider.defaultTransportMode()));
+    }
+
+    /**
+     * Resolves a request-level policy without changing the persisted provider policy.
+     * A non-null value from an API key is authoritative for that request; null preserves
+     * the provider-level setting used by internal probes and catalog refreshes.
+     */
+    public TransportPlan plan(
+        InferenceProvider provider,
+        ProviderTransportMode requested
+    ) {
         var supported = supported(provider);
-        var requested = configured.get().getOrDefault(
-            provider.manifest().id(), provider.defaultTransportMode());
-        if (requested == ProviderTransportMode.AUTO) {
+        var selected = requested == null ? configured.get().getOrDefault(
+            provider.manifest().id(), provider.defaultTransportMode()) : requested;
+        if (selected == ProviderTransportMode.AUTO) {
             var primary = supported.contains(ProviderTransportMode.API)
                 ? ProviderTransportMode.API : ProviderTransportMode.RUNTIME;
             var fallback = primary == ProviderTransportMode.API
                 && supported.contains(ProviderTransportMode.RUNTIME)
                 ? ProviderTransportMode.RUNTIME : null;
-            return new TransportPlan(requested, primary, fallback);
+            return new TransportPlan(selected, primary, fallback);
         }
-        if (!supported.contains(requested)) {
-            throw new IllegalStateException(
+        if (!supported.contains(selected)) {
+            throw new IllegalArgumentException(
                 "provider " + provider.manifest().id()
-                    + " does not support transport mode " + requested);
+                    + " does not support transport mode " + selected);
         }
-        return new TransportPlan(requested, requested, null);
+        return new TransportPlan(selected, selected, null);
     }
 
     public ProviderTransportMode set(

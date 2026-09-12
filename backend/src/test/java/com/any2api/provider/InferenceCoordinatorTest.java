@@ -33,6 +33,21 @@ import tools.jackson.databind.node.JsonNodeFactory;
 class InferenceCoordinatorTest {
 
     @Test
+    void appliesApiKeyTransportModeToTheInferencePlan() {
+        var accounts = mock(AccountSelectionService.class);
+        var transportModes = mock(ProviderTransportModeService.class);
+        when(transportModes.plan(any(), eq(ProviderTransportMode.API))).thenReturn(
+            new ProviderTransportModeService.TransportPlan(
+                ProviderTransportMode.API, ProviderTransportMode.API, null));
+        var coordinator = coordinator(new TestProvider(false), accounts, transportModes);
+
+        coordinator.execute(
+            request("alpha"), UUID.randomUUID(), ProviderTransportMode.API);
+
+        verify(transportModes).plan(any(), eq(ProviderTransportMode.API));
+    }
+
+    @Test
     void releasesPreleasedRandomAccountWhenProviderValidationFails() {
         var accounts = mock(AccountSelectionService.class);
         var leased = leased("alpha");
@@ -247,6 +262,14 @@ class InferenceCoordinatorTest {
         InferenceProvider provider,
         AccountSelectionService accounts
     ) {
+        return coordinator(provider, accounts, mock(ProviderTransportModeService.class));
+    }
+
+    private InferenceCoordinator coordinator(
+        InferenceProvider provider,
+        AccountSelectionService accounts,
+        ProviderTransportModeService transportModes
+    ) {
         var telemetry = mock(InferenceTelemetryService.class);
         var started = mock(InferenceTelemetryService.Started.class);
         when(telemetry.start(
@@ -255,7 +278,6 @@ class InferenceCoordinatorTest {
         var catalog = mock(ModelCatalogCache.class);
         when(catalog.find(anyString(), anyString()))
             .thenReturn(Mono.just(java.util.Optional.empty()));
-        var transportModes = mock(ProviderTransportModeService.class);
         when(transportModes.plan(any())).thenReturn(new ProviderTransportModeService.TransportPlan(
             ProviderTransportMode.RUNTIME, ProviderTransportMode.RUNTIME, null));
         return new InferenceCoordinator(

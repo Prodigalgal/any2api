@@ -9,6 +9,7 @@ import com.any2api.provider.InferenceCoordinator;
 import com.any2api.routing.ProviderRouteResolver;
 import com.any2api.routing.RandomInferenceRouter;
 import com.any2api.provider.RandomModelRole;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.observability.RequestIdWebFilter;
 import tools.jackson.databind.node.ObjectNode;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -114,7 +115,10 @@ public class OpenAiGatewayController {
         var canonical = requestParser.parse(
             protocol, route, request, RequestIdWebFilter.get(exchange));
         return responseWriter.write(
-            canonical, coordinator.execute(canonical, grant.keyId()), exchange);
+            canonical,
+            coordinator.execute(
+                canonical, grant.keyId(), authorization.transportMode(grant)),
+            exchange);
     }
 
     private Mono<Void> executeRandom(
@@ -141,7 +145,8 @@ public class OpenAiGatewayController {
                 "X-Any2API-Model", canonical.model());
             return responseWriter.write(
                 canonical,
-                coordinator.execute(canonical, selection.account(), grant.keyId()),
+                coordinator.execute(
+                    canonical, selection.account(), grant.keyId(), ProviderTransportMode.AUTO),
                 exchange);
         });
     }

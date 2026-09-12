@@ -48,6 +48,7 @@ import {
   type CreatedDistributionApiKey,
   type DistributionApiKey,
   type ProviderOption,
+  type ProviderTransportMode,
 } from "@/lib/api";
 import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout";
 
@@ -61,6 +62,12 @@ const featureOptions: Array<[ApiKeyFeature, string]> = [
   ["MULTIMODAL_INPUT", "多模态输入"],
   ["FILE_UPLOADS", "文件上传"],
   ["TOOL_CALLING", "工具调用"],
+];
+
+const transportModeOptions: Array<[ProviderTransportMode, string]> = [
+  ["API", "API"],
+  ["RUNTIME", "Runtime"],
+  ["AUTO", "自动"],
 ];
 
 export function ApiKeys() {
@@ -110,12 +117,13 @@ export function ApiKeys() {
       <DataSurface>
         {keys.isFetching ? <LinearProgress sx={{ position: "absolute", inset: "0 0 auto", height: 2 }} /> : null}
         <TableContainer>
-          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 1040 }}>
+          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 1160 }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 130 }}>名称</TableCell>
                 <TableCell sx={{ width: 110 }}>密钥前缀</TableCell>
                 <TableCell sx={{ width: 220 }}>厂商与模型范围</TableCell>
+                <TableCell sx={{ width: 112 }}>推理通道</TableCell>
                 <TableCell sx={{ width: 145 }}>协议</TableCell>
                 <TableCell sx={{ width: 145 }}>请求功能</TableCell>
                 <TableCell sx={{ width: 110 }}>最近使用</TableCell>
@@ -140,7 +148,7 @@ export function ApiKeys() {
               ))}
               {!keys.isLoading && !keys.data?.length ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ height: 260, color: "text.secondary" }}>
+                  <TableCell colSpan={10} align="center" sx={{ height: 260, color: "text.secondary" }}>
                     <KeyOutlined sx={{ display: "block", mx: "auto", mb: 1, fontSize: 25, color: "#95a2a7" }} />
                     暂无分发密钥
                   </TableCell>
@@ -190,6 +198,7 @@ function ApiKeyRow({
   onToggle: (enabled: boolean) => void;
   onDelete: () => void;
 }) {
+  const mode = apiKey.transportMode ?? "AUTO";
   return (
     <TableRow hover>
       <TableCell>
@@ -212,6 +221,18 @@ function ApiKeyRow({
             />
           ))}
         </Stack>
+      </TableCell>
+      <TableCell>
+        <Chip
+          size="small"
+          variant="outlined"
+          label={transportModeLabel(mode)}
+        />
+        {mode === "AUTO" ? (
+          <Typography color="text.secondary" sx={{ mt: 0.35, fontSize: 10.5 }}>
+            API 优先
+          </Typography>
+        ) : null}
       </TableCell>
       <TableCell>
         <Typography noWrap sx={{ fontSize: 11.5 }}>
@@ -276,12 +297,14 @@ function CreateApiKeyDialog({
     new Set(["CHAT_COMPLETIONS", "RESPONSES"]),
   );
   const [features, setFeatures] = useState<Set<ApiKeyFeature>>(new Set());
+  const [transportMode, setTransportMode] = useState<ProviderTransportMode>("AUTO");
   const create = useMutation({
     mutationFn: () => api.createApiKey({
       name,
       expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
       protocols: [...protocols],
       features: [...features],
+      transportMode,
       providerModels: Object.fromEntries([...selectedProviders].map((provider) => [
         provider,
         allModels.has(provider) ? [] : (selectedModels[provider] ?? []),
@@ -311,6 +334,28 @@ function CreateApiKeyDialog({
               onChange={(event) => setExpiresAt(event.target.value)}
               slotProps={{ inputLabel: { shrink: true } }}
             />
+          </Box>
+
+          <Box>
+            <Typography sx={{ mb: 0.75, fontSize: 12.5, fontWeight: 700 }}>推理通道</Typography>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={transportMode}
+              onChange={(_, value: ProviderTransportMode | null) => {
+                if (value) setTransportMode(value);
+              }}
+              aria-label="推理通道"
+            >
+              {transportModeOptions.map(([mode, label]) => (
+                <ToggleButton key={mode} value={mode} sx={{ minWidth: 92 }}>
+                  {label}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+            <Typography color="text.secondary" sx={{ mt: 0.65, fontSize: 11 }}>
+              自动模式优先使用 API；遇到可回退的上游失败时再使用 Runtime。两个随机入口固定使用自动模式。
+            </Typography>
           </Box>
 
           <Box>
@@ -504,6 +549,11 @@ function protocolLabel(protocol: ApiKeyProtocol) {
 
 function featureLabel(feature: ApiKeyFeature) {
   return featureOptions.find(([value]) => value === feature)?.[1] ?? feature;
+}
+
+function transportModeLabel(mode: ProviderTransportMode | null | undefined) {
+  return transportModeOptions.find(([value]) => value === (mode ?? "AUTO"))?.[1]
+    ?? "自动";
 }
 
 function formatTime(value: string | null) {

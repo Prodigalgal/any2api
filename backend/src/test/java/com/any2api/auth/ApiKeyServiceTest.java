@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.any2api.provider.InferenceProvider;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.ProviderTransportMode;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,7 +42,8 @@ class ApiKeyServiceTest {
                 key.getId(), key.getName(),
                 Map.of("mimo", ApiKeyProviderScope.allModels("mimo")),
                 Set.of(ApiKeyProtocol.CHAT_COMPLETIONS),
-                Set.of(ApiKeyFeature.FILE_UPLOADS), key.getExpiresAt(), false);
+                Set.of(ApiKeyFeature.FILE_UPLOADS), key.getExpiresAt(), false,
+                key.getTransportMode());
         });
         var service = new ApiKeyService(
             keys, grants, authenticator, providers, mock(JdbcClient.class));
@@ -49,7 +51,7 @@ class ApiKeyServiceTest {
         var created = service.create(new ApiKeyService.CreateCommand(
             "desktop client", Map.of("mimo", List.of()),
             Set.of(ApiKeyProtocol.CHAT_COMPLETIONS),
-            Set.of(ApiKeyFeature.FILE_UPLOADS), null));
+            Set.of(ApiKeyFeature.FILE_UPLOADS), null, ProviderTransportMode.API));
 
         var entity = ArgumentCaptor.forClass(ApiKeyEntity.class);
         verify(keys).saveAndFlush(entity.capture());
@@ -58,6 +60,8 @@ class ApiKeyServiceTest {
             .isEqualTo(ApiKeyAuthenticator.hash(created.secret()))
             .doesNotContain(created.secret());
         assertThat(entity.getValue().getPrefix()).isEqualTo(created.key().prefix());
+        assertThat(entity.getValue().getTransportMode()).isEqualTo(ProviderTransportMode.API);
+        assertThat(created.key().transportMode()).isEqualTo(ProviderTransportMode.API);
         verify(grants).replace(
             entity.getValue().getId(),
             Map.of("mimo", ApiKeyProviderScope.allModels("mimo")),

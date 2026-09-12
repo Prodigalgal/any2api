@@ -1,7 +1,10 @@
 package com.any2api.auth;
 
+import com.any2api.provider.ProviderTransportMode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
@@ -27,6 +30,10 @@ public class ApiKeyEntity {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "transport_mode", nullable = false, length = 16)
+    private ProviderTransportMode transportMode = ProviderTransportMode.AUTO;
+
     @Column(name = "last_used_at")
     private Instant lastUsedAt;
 
@@ -48,12 +55,23 @@ public class ApiKeyEntity {
         String keyHash,
         Instant expiresAt
     ) {
+        return create(name, prefix, keyHash, expiresAt, ProviderTransportMode.AUTO);
+    }
+
+    static ApiKeyEntity create(
+        String name,
+        String prefix,
+        String keyHash,
+        Instant expiresAt,
+        ProviderTransportMode transportMode
+    ) {
         var key = new ApiKeyEntity();
         key.id = UUID.randomUUID();
         key.name = name;
         key.prefix = prefix;
         key.keyHash = keyHash;
         key.expiresAt = expiresAt;
+        key.transportMode = transportMode == null ? ProviderTransportMode.AUTO : transportMode;
         return key;
     }
 
@@ -61,6 +79,9 @@ public class ApiKeyEntity {
     void beforeInsert() {
         var now = Instant.now();
         if (createdAt == null) createdAt = now;
+        if (transportMode == null) {
+            transportMode = ProviderTransportMode.AUTO;
+        }
         updatedAt = now;
     }
 
@@ -74,6 +95,7 @@ public class ApiKeyEntity {
     public String getPrefix() { return prefix; }
     public String getKeyHash() { return keyHash; }
     public boolean isEnabled() { return enabled; }
+    public ProviderTransportMode getTransportMode() { return transportMode; }
     public Instant getLastUsedAt() { return lastUsedAt; }
     public Instant getExpiresAt() { return expiresAt; }
     public Instant getCreatedAt() { return createdAt; }

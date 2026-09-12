@@ -24,6 +24,25 @@ account, then selects one of that provider's role-qualified enabled models. Conc
 rejected on these endpoints. Responses expose the selected route through
 `X-Any2API-Provider` and `X-Any2API-Model`.
 
+### Distribution-key transport policy
+
+`POST /api/admin/v1/api-keys` accepts the optional `transportMode` field with one of
+`API`, `RUNTIME`, or `AUTO`. The value is stored on the distribution key and is returned by
+the key list, creation, and detail responses. Omitted values and keys created before this
+contract default to `AUTO`.
+
+For ordinary provider-specific and unified direct inference routes, the key policy is resolved
+before account acquisition: `API` uses only the provider API channel, `RUNTIME` uses only the
+Camoufox browser Runtime channel, and `AUTO` prefers API and may fall back to Runtime only after
+a classified retryable API failure. An explicit channel never silently changes to the other one.
+The policy applies to Chat Completions and Responses inference; lifecycle actions and the current
+`/v1/images/*` media handlers retain their existing provider-specific Runtime-only boundary.
+
+The two random route families, `/random/v1/*` and `/multimodal-random/v1/*`, always force `AUTO`
+for the selected account and model, regardless of the calling key's stored mode. This preserves
+the random router's provider-agnostic API-first/fallback behavior while keeping the key's provider,
+model, protocol, and feature authorization checks intact.
+
 `GET /v1/models` reads the PostgreSQL runtime catalog and namespaces IDs as
 `provider/upstream-model`. `GET /{provider}/v1/models` returns the same catalog without the namespace.
 Catalog membership and callability are separate: `cataloged` reports discovery, while `available`

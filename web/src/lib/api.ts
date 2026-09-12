@@ -384,6 +384,7 @@ export type DistributionApiKey = {
   providerModels: Record<string, string[]>;
   protocols: ApiKeyProtocol[];
   features: ApiKeyFeature[];
+  transportMode: ProviderTransportMode;
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;

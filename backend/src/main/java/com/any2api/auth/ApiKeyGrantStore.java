@@ -127,7 +127,7 @@ final class ApiKeyGrantStore {
         });
         return new ApiKeyGrant(
             key.getId(), key.getName(), immutable, protocols, features,
-            key.getExpiresAt(), false);
+            key.getExpiresAt(), false, key.getTransportMode());
     }
 
     private record GrantRow(int kind, String providerId, String value, boolean allModels) {}

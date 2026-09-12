@@ -1,6 +1,7 @@
 package com.any2api.auth;
 
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.ProviderTransportMode;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
@@ -17,6 +18,10 @@ public class ApiKeyAuthorization {
     public Optional<ApiKeyGrant> current(ServerWebExchange exchange) {
         var grant = exchange.getAttribute(GRANT_ATTRIBUTE);
         return grant instanceof ApiKeyGrant value ? Optional.of(value) : Optional.empty();
+    }
+
+    public ProviderTransportMode transportMode(ApiKeyGrant grant) {
+        return grant.fullAccess() ? ProviderTransportMode.AUTO : grant.transportMode();
     }
 
     public void require(

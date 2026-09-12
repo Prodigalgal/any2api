@@ -1,6 +1,7 @@
 package com.any2api.provider;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -48,6 +49,39 @@ class ProviderTransportModeServiceTest {
         assertThat(plan.fallback()).isEqualTo(ProviderTransportMode.RUNTIME);
         assertThat(ProviderTransportMode.parse("camoufox_browser_runtime"))
             .isEqualTo(ProviderTransportMode.RUNTIME);
+    }
+
+    @Test
+    void requestPolicyOverridesThePersistedProviderPolicy() {
+        var provider = new TestProvider(Set.of(
+            ProviderTransportMode.API, ProviderTransportMode.RUNTIME));
+        var jdbc = mock(JdbcClient.class);
+        var statement = mock(JdbcClient.StatementSpec.class);
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.update()).thenReturn(1);
+        var service = new ProviderTransportModeService(jdbc);
+
+        service.set(provider, ProviderTransportMode.RUNTIME);
+        var apiPlan = service.plan(provider, ProviderTransportMode.API);
+        var autoPlan = service.plan(provider, ProviderTransportMode.AUTO);
+
+        assertThat(apiPlan.requested()).isEqualTo(ProviderTransportMode.API);
+        assertThat(apiPlan.primary()).isEqualTo(ProviderTransportMode.API);
+        assertThat(apiPlan.fallback()).isNull();
+        assertThat(autoPlan.requested()).isEqualTo(ProviderTransportMode.AUTO);
+        assertThat(autoPlan.primary()).isEqualTo(ProviderTransportMode.API);
+        assertThat(autoPlan.fallback()).isEqualTo(ProviderTransportMode.RUNTIME);
+    }
+
+    @Test
+    void explicitUnsupportedRequestPolicyFailsAsAClientError() {
+        var provider = new TestProvider(Set.of(ProviderTransportMode.RUNTIME));
+
+        assertThatThrownBy(() -> new ProviderTransportModeService(mock(JdbcClient.class))
+            .plan(provider, ProviderTransportMode.API))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("does not support transport mode API");
     }
 
     private static final class TestProvider implements InferenceProvider {

@@ -120,7 +120,9 @@ async def _chat_input(
         "POST",
         "/api/v1/chats/new",
         headers=headers,
-        body=json.dumps(provider_command["chat"], ensure_ascii=True, separators=(",", ":")),
+        body=json.dumps(
+            {"chat": provider_command["chat"]}, ensure_ascii=True, separators=(",", ":")
+        ),
         proxy_url=proxy_url,
         timeout_seconds=120,
         impersonate=str(current.get("browser_profile") or "chrome146"),

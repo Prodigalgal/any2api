@@ -165,10 +165,13 @@ async def test_glm_api_prepares_signed_completion_and_chat_session(monkeypatch) 
     import any2api_automation.providers.glm_api_actions as module
 
     calls: list[str] = []
+    chat_bodies: list[dict[str, object]] = []
 
     def fake_request(base_url, method, path, **kwargs):
-        del base_url, method, kwargs
+        del base_url, method
         calls.append(path)
+        if path == "/api/v1/chats/new":
+            chat_bodies.append(json.loads(kwargs["body"]))
         return {"status": 200, "body": '{"id":"chat-1"}'}
 
     monkeypatch.setattr(module, "api_request_sync", fake_request)
@@ -186,6 +189,8 @@ async def test_glm_api_prepares_signed_completion_and_chat_session(monkeypatch) 
     )
 
     assert calls == ["/api/v1/chats/new"]
+    assert chat_bodies[0]["chat"]["models"] == ["glm-5.2"]
+    assert "models" not in chat_bodies[0]
     assert urlsplit(path).path == "/api/v2/chat/completions"
     assert "signature_timestamp" in parse_qs(urlsplit(path).query)
     assert json.loads(body)["chat_id"] == "chat-1"

@@ -346,12 +346,14 @@ def _request_headers(
 
 
 def _captcha_ticket(request: ProviderActionRequest, current: dict[str, Any]) -> str:
-    for source in (request.payload.get("runtime_options"), current):
+    provider_options = request.semantic_command.get("providerOptions")
+    for source in (provider_options, request.payload.get("runtime_options"), current):
         if not isinstance(source, dict):
             continue
         for name in ("captcha_verify_param", "captcha_ticket"):
-            value = str(source.get(name) or "").strip()
-            if value:
+            raw_value = source.get(name)
+            value = raw_value.strip() if isinstance(raw_value, str) else ""
+            if value and len(value) <= 16_384:
                 return value
     return ""
 

@@ -14,6 +14,7 @@ import com.any2api.coordination.AccountLease;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.proxy.ProxyPoolService;
+import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import com.any2api.transport.OfficialBrowserTransportClient;
 import java.time.Duration;
@@ -156,5 +157,31 @@ class GlmProviderTest {
 
         assertThat(failure.type()).isEqualTo("anti_bot_rejected");
         assertThat(failure.retryable()).isTrue();
+    }
+
+    @Test
+    void classifiesExplicitAntiBotCodeEvenWhenUpstreamUsesHttp400() {
+        var provider = new GlmProvider(
+            new GlmProperties(), mock(ProxyPoolService.class), mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        var failure = provider.classify(new GlmUpstreamException(
+            400, "GLM upstream returned anti_bot_rejected"));
+
+        assertThat(failure.type()).isEqualTo("anti_bot_rejected");
+        assertThat(failure.detail())
+            .containsEntry("challenge", "provider_verification");
+    }
+
+    @Test
+    void exposesOnlyTheTypedProviderIssuedCaptchaOption() {
+        var provider = new GlmProvider(
+            new GlmProperties(), mock(ProxyPoolService.class), mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        assertThat(provider.protocolContract().providerOptions())
+            .containsEntry("captcha_verify_param", ProviderProtocolContract.OptionType.STRING);
     }
 }

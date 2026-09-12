@@ -147,7 +147,7 @@ normal Action result, while SSE exposes the status before data or error frames.
 |---|---|---|---|---|---|
 | Arena | HTML direct-page catalog | direct mode and search | Unsupported; use Runtime/AUTO | Unsupported; use Runtime/AUTO | accepts only a provider-issued reCAPTCHA v3 token; no token generation or v2 escalation in API |
 | DeepSeek | `/api/v0/client/settings` | session + PoW + completion SSE | Unsupported | Unsupported | PoW is solved locally from the provider challenge; account token/device ID required |
-| GLM | `/api/models` | `/api/v2/chat/completions` with current signature fields | multipart `/api/v1/files/` for vision models | Unsupported | frontend version/signature key must match the deployed web protocol; provider-issued captcha ticket is optional input, not generated here |
+| GLM | `/api/models` | `/api/v2/chat/completions` with current signature fields | multipart `/api/v1/files/` for vision models | Unsupported | frontend version/signature key must match the deployed web protocol; `provider_options.glm.captcha_verify_param` only accepts an existing provider-issued ticket and is never generated here |
 | LongCat | Not declared | `/api/v1/session-create` + `/api/v1/chat-completion-V2` | `/api/v1/appendix-upload` | `/api/v1/appendix-upload` | authenticated cookie/access token and returned `fileUrl`/`fileKey` are required |
 | MiMo | `/open-apis/bot/config` | `/open-apis/bot/chat` | signed upload + parse flow | Unsupported | `xiaomichatbot_ph` and provider-issued object-storage upload data are required |
 | MiniMax | `/archon/api/v1/config` | signed session message SSE | Unsupported; use Runtime/AUTO | Unsupported; use Runtime/AUTO | API signing/account binding remains provider-specific |
@@ -158,6 +158,13 @@ silently instantiate Runtime. `AUTO` may retry inference or official model disco
 Runtime only after a classified, retryable API failure and only when the provider declares Runtime
 as a supported fallback. Lifecycle actions (registration, reauthentication, keepalive, and daily
 check-in) remain Runtime-only even for providers that expose API inference.
+
+For GLM, an upstream `anti_bot_rejected` is a verification challenge, not evidence that the
+account credential is invalid. The explicit API channel returns that typed failure and does not
+schedule credential reauthentication. `AUTO` may switch to the provider's Runtime flow, where
+the verification and the signed completion remain in the same provider-owned browser context;
+the API channel only forwards an already provider-issued `captcha_verify_param` when the caller
+supplies one.
 
 The table describes adapter behavior, not an upstream compatibility promise. A field is only
 accepted when the selected provider contract has a deterministic translation or an explicitly

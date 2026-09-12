@@ -129,7 +129,7 @@ final class GlmEventDecoder {
             failures++;
             output.add(new CanonicalEvent.Failed(
                 1, requestId, next(), errorType,
-                "GLM completion error class=" + errorType, Map.of()));
+                failureMessage(errorType), failureDetail(errorType)));
             return;
         }
         var delta = firstContent(payload, "delta_content", "content", "delta", "output_text");
@@ -210,6 +210,10 @@ final class GlmEventDecoder {
 
     private String errorType(JsonNode payload) {
         var text = errorText(payload).toLowerCase(java.util.Locale.ROOT);
+        if (text.contains("anti_bot_rejected") || text.contains("anti-bot")
+            || text.contains("recaptcha")) {
+            return "anti_bot_rejected";
+        }
         if (text.contains("permission") || text.contains("forbidden")) {
             return "permission_denied";
         }
@@ -246,6 +250,17 @@ final class GlmEventDecoder {
             }
         }
         return "<missing>";
+    }
+
+    private String failureMessage(String errorType) {
+        return "anti_bot_rejected".equals(errorType)
+            ? "GLM upstream requires provider-issued anti-bot verification"
+            : "GLM completion error class=" + errorType;
+    }
+
+    private Map<String, Object> failureDetail(String errorType) {
+        return "anti_bot_rejected".equals(errorType)
+            ? Map.of("challenge", "provider_verification") : Map.of();
     }
 
     private String errorText(JsonNode payload) {

@@ -159,6 +159,20 @@ class GlmProtocolTest {
     }
 
     @Test
+    void classifiesExplicitAntiBotCodeWithoutDependingOnCaptchaWording() {
+        var decoder = new GlmEventDecoder("r8", mapper);
+        var events = new ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode(("data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"error\":{\"code\":\"anti_bot_rejected\","
+            + "\"message\":\"request rejected\"}}}\n\n")
+            .getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("anti_bot_rejected")
+            && "provider_verification".equals(failed.detail().get("challenge")));
+    }
+
+    @Test
     void discoversNestedModelsAndSkipsInactiveEntries() {
         var root = mapper.readTree("""
             {"data":{"models":[

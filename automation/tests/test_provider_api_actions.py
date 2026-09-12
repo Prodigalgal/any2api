@@ -177,7 +177,7 @@ async def test_glm_api_prepares_signed_completion_and_chat_session(monkeypatch) 
     monkeypatch.setattr(module, "api_request_sync", fake_request)
     request = _request(
         "glm",
-        _command("glm-5.2"),
+        _command("glm-5.2", options={"captcha_verify_param": "issued-ticket"}),
         {"email": "user@example.test", "token": "token", "user_id": "user-1"},
     )
 
@@ -193,7 +193,9 @@ async def test_glm_api_prepares_signed_completion_and_chat_session(monkeypatch) 
     assert "models" not in chat_bodies[0]
     assert urlsplit(path).path == "/api/v2/chat/completions"
     assert "signature_timestamp" in parse_qs(urlsplit(path).query)
-    assert json.loads(body)["chat_id"] == "chat-1"
+    completion = json.loads(body)
+    assert completion["chat_id"] == "chat-1"
+    assert completion["captcha_verify_param"] == "issued-ticket"
     assert headers["X-FE-Version"].startswith("prod-fe-")
     assert headers["X-Signature"]
     assert headers["User-Agent"] == core_settings().provider_user_agent

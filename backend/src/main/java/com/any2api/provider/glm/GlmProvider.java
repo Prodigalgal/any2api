@@ -38,7 +38,8 @@ public final class GlmProvider implements InferenceProvider {
             "enable_thinking", ProviderProtocolContract.OptionType.BOOLEAN,
             "reasoning_effort", ProviderProtocolContract.OptionType.STRING,
             "web_search", ProviderProtocolContract.OptionType.BOOLEAN,
-            "preview_mode", ProviderProtocolContract.OptionType.BOOLEAN),
+            "preview_mode", ProviderProtocolContract.OptionType.BOOLEAN,
+            "captcha_verify_param", ProviderProtocolContract.OptionType.STRING),
         java.util.Set.of(
             "temperature", "top_p", "max_tokens", "max_completion_tokens",
             "max_output_tokens", "reasoning", "reasoning_effort", "web_search",
@@ -249,15 +250,18 @@ public final class GlmProvider implements InferenceProvider {
         var status = status(error);
         if (status > 0) {
             var message = message(error).toLowerCase(java.util.Locale.ROOT);
-            var antiBot = status == 403 && (
-                message.contains("captcha")
-                    || message.contains("aliyun")
-                    || message.contains("traceless")
-                    || message.contains("human verification"));
+            var antiBot = message.contains("anti_bot_rejected")
+                || message.contains("anti-bot")
+                || message.contains("recaptcha validation failed")
+                || status >= 400 && status < 500 && (
+                    message.contains("captcha")
+                        || message.contains("aliyun")
+                        || message.contains("traceless")
+                        || message.contains("human verification"));
             if (antiBot) {
                 return new ProviderFailure(
                     "anti_bot_rejected", message(error), true,
-                    Map.of("status", status));
+                    Map.of("status", status, "challenge", "provider_verification"));
             }
             var retryable = status >= 500 || List.of(408, 409, 425, 429).contains(status);
             var type = switch (status) {

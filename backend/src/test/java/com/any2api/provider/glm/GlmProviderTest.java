@@ -184,4 +184,14 @@ class GlmProviderTest {
         assertThat(provider.protocolContract().providerOptions())
             .containsEntry("captcha_verify_param", ProviderProtocolContract.OptionType.STRING);
     }
+
+    @Test
+    void disablesBroadScheduledProbesThatWouldRunWithoutProviderVerification() {
+        var provider = new GlmProvider(
+            new GlmProperties(), mock(ProxyPoolService.class), mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        assertThat(provider.scheduledModelProbeEnabled()).isFalse();
+    }
 }

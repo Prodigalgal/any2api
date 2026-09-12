@@ -164,7 +164,8 @@ account credential is invalid. The explicit API channel returns that typed failu
 schedule credential reauthentication. `AUTO` may switch to the provider's Runtime flow, where
 the verification and the signed completion remain in the same provider-owned browser context;
 the API channel only forwards an already provider-issued `captcha_verify_param` when the caller
-supplies one.
+supplies one. Broad scheduled GLM model probes are disabled because they cannot provide that
+provider verification context; explicit readiness probes and real requests remain available.
 
 The table describes adapter behavior, not an upstream compatibility promise. A field is only
 accepted when the selected provider contract has a deterministic translation or an explicitly

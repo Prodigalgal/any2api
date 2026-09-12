@@ -98,6 +98,9 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
 
+    @Override
+    public boolean scheduledModelProbeEnabled() { return false; }
+
     @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override

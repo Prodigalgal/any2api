@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -71,6 +72,47 @@ class GlmProviderTest {
         when(semanticCommands.chat(any())).thenReturn(mapper.createObjectNode());
         when(transport.stream(anyString(), anyString(), any(), any(), anyMap(), anyString()))
             .thenReturn(Flux.concat(Flux.just(status, data), Flux.never()));
+
+        var events = provider.generate(request, context, account)
+            .collectList()
+            .block(Duration.ofSeconds(2));
+
+        assertThat(events).isNotNull()
+            .anyMatch(CanonicalEvent.Completed.class::isInstance)
+            .anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta delta
+                && delta.delta().equals("ok"));
+    }
+
+    @Test
+    void restoresSseBoundariesForNormalizedApiActionFrames() {
+        var transport = mock(OfficialBrowserTransportClient.class);
+        var semanticCommands = mock(OfficialBrowserSemanticCommandFactory.class);
+        var provider = new GlmProvider(
+            new GlmProperties(), mock(ProxyPoolService.class), mapper, transport, semanticCommands);
+        var request = new CanonicalRequest(
+            "glm-api-frame", CanonicalRequest.Protocol.CHAT_COMPLETIONS, "glm", "glm-5.2",
+            false,
+            List.of(mapper.createObjectNode().put("role", "user").put("content", "hello")),
+            Map.of(), Map.of(), List.of(), Map.of(), mapper.createObjectNode());
+        var accountId = UUID.randomUUID();
+        var account = new LeasedProviderAccount(
+            accountId, "glm", "external", "user@example.test", 1, null,
+            mapper.createObjectNode().put("token", "token").put("user_id", "user"), Map.of(),
+            new AccountLease("glm", accountId, "owner", 1, Instant.now().plusSeconds(60)));
+        var context = new com.any2api.provider.ProviderExecutionContext(
+            request.requestId(), accountId, "1", "owner", 1, Instant.now().plusSeconds(60),
+            com.any2api.provider.ProviderTransportMode.API);
+        var status = mapper.createObjectNode().put("type", "status").put("status", 200);
+        var answer = mapper.createObjectNode().put("type", "data").put("data",
+            "{\"type\":\"chat:completion\",\"data\":{"
+                + "\"phase\":\"answer\",\"delta_content\":\"ok\"}}");
+        var done = mapper.createObjectNode().put("type", "data").put("data",
+            "{\"type\":\"chat:completion\",\"data\":{"
+                + "\"phase\":\"done\",\"done\":true}}");
+        when(semanticCommands.chat(any())).thenReturn(mapper.createObjectNode());
+        when(transport.stream(anyString(), anyString(), any(), any(), anyMap(), anyString(),
+            anyMap(), eq(com.any2api.provider.ProviderTransportMode.API)))
+            .thenReturn(Flux.concat(Flux.just(status, answer, done), Flux.never()));
 
         var events = provider.generate(request, context, account)
             .collectList()

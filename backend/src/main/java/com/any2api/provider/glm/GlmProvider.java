@@ -150,7 +150,13 @@ public final class GlmProvider implements InferenceProvider {
                 } else if ("data".equals(type)
                     && status.get() >= 200
                     && status.get() < 300) {
-                    sink.next(frame.path("data").asText("").getBytes(StandardCharsets.UTF_8));
+                    var data = frame.path("data").asText("");
+                    if (context.transportMode() == ProviderTransportMode.API) {
+                        // The API Action normalizes one SSE data line per frame. Rebuild the
+                        // delimiter expected by the provider decoder before parsing it.
+                        data = "data: " + data + "\n\n";
+                    }
+                    sink.next(data.getBytes(StandardCharsets.UTF_8));
                 } else if ("credential_patch".equals(type)) {
                     context.acceptCredentialPatch(frame.path("data"));
                 }

@@ -331,6 +331,11 @@ async def _guard_action_stream(
         yield transport_frame("status", status=501)
         yield transport_frame("error", data=sanitize(str(exc)))
     except Exception as exc:  # noqa: BLE001 - normalized stream boundary
+        logger.warning(
+            "provider_action_stream_failed error_type=%s detail=%s",
+            type(exc).__name__,
+            sanitize(str(exc) or type(exc).__name__),
+        )
         yield transport_frame("status", status=502)
         yield transport_frame(
             "error",

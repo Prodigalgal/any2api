@@ -174,6 +174,95 @@ def test_api_request_uses_bounded_direct_http_without_browser(monkeypatch) -> No
     assert calls[1][2]["proxy"] == "http://proxy.example:8080"
 
 
+def test_api_multipart_request_uses_curl_mime_not_requests_files(monkeypatch) -> None:
+    calls = []
+
+    class Mime:
+        def __init__(self):
+            self.parts = []
+            self.closed = False
+
+        def addpart(self, **kwargs):
+            self.parts.append(kwargs)
+
+        def close(self):
+            self.closed = True
+
+    class Response:
+        status_code = 201
+
+        def __init__(self):
+            self.headers = {"content-type": "application/json"}
+
+        def iter_content(self, chunk_size):
+            assert chunk_size == 64 * 1024
+            yield b'{"uploaded":true}'
+
+    class Stream:
+        def __enter__(self):
+            return Response()
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    class Client:
+        def __init__(self, impersonate):
+            calls.append(("client", impersonate))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def stream(self, method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            assert "files" not in kwargs
+            assert kwargs["multipart"].parts == [
+                {
+                    "name": "file",
+                    "filename": "sample.png",
+                    "content_type": "image/png",
+                    "data": b"png",
+                }
+            ]
+            return Stream()
+
+    mime_instances = []
+
+    def create_mime():
+        value = Mime()
+        mime_instances.append(value)
+        return value
+
+    monkeypatch.setattr(api_transport, "CurlMime", create_mime)
+    monkeypatch.setattr(api_transport, "CurlSession", Client)
+
+    result = api_transport.api_multipart_request_sync(
+        "https://longcat.chat",
+        "POST",
+        "/api/v1/appendix-upload",
+        file_field="file",
+        filename="sample.png",
+        content=b"png",
+        mime_type="image/png",
+        headers={"Content-Type": "application/json"},
+        form={"scope": "chat"},
+        proxy_url="http://proxy.example:8080",
+        impersonate="chrome146",
+    )
+
+    assert result == {
+        "status": 201,
+        "body": '{"uploaded":true}',
+        "content_type": "application/json",
+        "transport_mode": "api",
+    }
+    assert calls[0] == ("client", "chrome146")
+    assert calls[1][2]["data"] == {"scope": "chat"}
+    assert mime_instances[0].closed is True
+
+
 @pytest.mark.asyncio
 async def test_api_stream_emits_status_and_sse_data(monkeypatch) -> None:
     class Headers(dict):

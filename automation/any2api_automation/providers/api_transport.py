@@ -9,6 +9,7 @@ from http.cookies import CookieError, SimpleCookie
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from curl_cffi import CurlMime
 from curl_cffi.requests import Session as CurlSession
 
 from ..config import settings as core_settings
@@ -284,20 +285,31 @@ def api_multipart_request_sync(
     request_headers = _safe_headers(headers or {})
     request_headers.pop("Content-Type", None)
     request_headers.pop("content-type", None)
-    files = {file_field: (filename, content, mime_type)}
-    with (
-        CurlSession(impersonate=_impersonation(impersonate)) as client,
-        client.stream(
-            normalized_method,
-            url,
-            data=dict(form or {}),
-            files=files,
-            headers=request_headers,
-            proxy=proxy_url or None,
-            timeout=timeout_seconds or core_settings().registration_timeout_seconds,
-        ) as response,
-    ):
-        return _response(response, _read_response(response, max_response_bytes=max_response_bytes))
+    multipart = CurlMime()
+    multipart.addpart(
+        name=file_field,
+        filename=filename,
+        content_type=mime_type,
+        data=content,
+    )
+    try:
+        with (
+            CurlSession(impersonate=_impersonation(impersonate)) as client,
+            client.stream(
+                normalized_method,
+                url,
+                data=dict(form or {}),
+                multipart=multipart,
+                headers=request_headers,
+                proxy=proxy_url or None,
+                timeout=timeout_seconds or core_settings().registration_timeout_seconds,
+            ) as response,
+        ):
+            return _response(
+                response, _read_response(response, max_response_bytes=max_response_bytes)
+            )
+    finally:
+        multipart.close()
 
 
 def api_provider_put_sync(

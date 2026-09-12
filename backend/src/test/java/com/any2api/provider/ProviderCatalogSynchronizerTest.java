@@ -29,7 +29,7 @@ class ProviderCatalogSynchronizerTest {
 
         var synchronizer = new ProviderCatalogSynchronizer(
             registry, jdbc, null, mock(ObjectMapper.class), null, null,
-            mock(ModelCatalogCache.class));
+            mock(ModelCatalogCache.class), mock(ProviderTransportModeService.class));
         synchronizer.synchronizeInstalledProviders();
 
         var sql = ArgumentCaptor.forClass(String.class);

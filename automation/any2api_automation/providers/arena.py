@@ -22,7 +22,12 @@ from .arena_browser import (
     account_status_is_healthy,
     register_with_magic_link,
 )
-from .base import AutomationProvider, AutomationProviderManifest
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from .runtime_rules import parse_runtime_plan
 from .transport_support import transport_frame, transport_proxy_lease
 
@@ -40,6 +45,7 @@ class ArenaAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("model_discovery", "chat"),
         registration_attempt_mode="single_identity",
         registration_max_target=1,
@@ -62,6 +68,12 @@ class ArenaAutomationProvider(AutomationProvider):
             )
             self._transports[base_url] = transport
         return transport
+
+    def action_bindings(self):
+        from .api_transport import api_action_bindings
+        from .arena_api_actions import ArenaApiActionHandler
+
+        return api_action_bindings(self, ArenaApiActionHandler())
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace = RegistrationTrace(self.manifest.id)

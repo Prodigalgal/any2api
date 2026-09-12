@@ -101,4 +101,18 @@ class GlmProviderTest {
         assertThat(provider.modelContract(models.get(1)).multimodal().input())
             .containsExactly("text");
     }
+
+    @Test
+    void classifiesAliyunCaptchaAsRuntimeFallbackCandidate() {
+        var provider = new GlmProvider(
+            new GlmProperties(), mock(ProxyPoolService.class), mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        var failure = provider.classify(
+            new GlmUpstreamException(403, "aliyun captcha required"));
+
+        assertThat(failure.type()).isEqualTo("anti_bot_rejected");
+        assertThat(failure.retryable()).isTrue();
+    }
 }

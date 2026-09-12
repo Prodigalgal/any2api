@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from any2api_automation.main import app
@@ -8,6 +9,7 @@ from any2api_automation.providers.minmax import (
     _minmax_attachments,
     _minmax_proxy_affinity,
     _optional_proxy_parameters,
+    _select_agent,
     _signed_request,
     _transport_input,
 )
@@ -33,6 +35,11 @@ def test_transport_allowlist_preserves_official_agent_query() -> None:
     assert _transport_input(
         {"method": "GET", "path": "/archon/api/v1/agent?limit=20"}, stream=False
     ) == ("GET", "/archon/api/v1/agent?limit=20", "")
+
+
+def test_minmax_agent_selection_does_not_parse_error_pages_as_json() -> None:
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        _select_agent({"status": 403, "body": "forbidden"}, "mavis")
 
 
 def test_transport_allowlist_accepts_only_the_official_media_operations() -> None:

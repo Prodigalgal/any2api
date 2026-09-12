@@ -1,5 +1,6 @@
 import logging
 import time
+from collections.abc import AsyncIterator, Iterable
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,11 +8,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .captcha.policy import CaptchaAiPolicy, bind_captcha_policy
-from .observability import OperationFailure, bind_operation, failure_details
+from .observability import OperationFailure, bind_operation, failure_details, sanitize
 from .providers import provider_registry
 from .providers.actions import ProviderAction, ProviderActionRequest
+from .providers.api_transport import ApiActionError
 from .providers.base import CAMOUFOX_BROWSER_RUNTIME
 from .providers.channels import ActionNotSupported
+from .providers.transport_support import transport_frame
 from .resources import lanes
 from .security import require_internal_token
 
@@ -251,6 +254,11 @@ async def _execute_action(request: ProviderActionRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ActionNotSupported as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except ApiActionError as exc:
+        raise HTTPException(
+            status_code=_api_error_status(exc.status),
+            detail=_api_error_detail(exc),
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -268,12 +276,20 @@ async def _stream_action(request: ProviderActionRequest) -> StreamingResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ActionNotSupported as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except ApiActionError as exc:
+        raise HTTPException(
+            status_code=_api_error_status(exc.status),
+            detail=_api_error_detail(exc),
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
             detail=f"provider action failed ({type(exc).__name__})",
         ) from exc
-    return StreamingResponse(stream, media_type="application/x-ndjson")
+    return StreamingResponse(
+        _guard_action_stream(stream),
+        media_type="application/x-ndjson",
+    )
 
 
 def _require_action_provider(request: ProviderActionRequest) -> None:
@@ -281,3 +297,42 @@ def _require_action_provider(request: ProviderActionRequest) -> None:
         provider_registry.require(request.provider_id)
     except (TypeError, ValueError) as exc:
         raise LookupError(str(exc)) from exc
+
+
+def _api_error_status(status: int) -> int:
+    return status if 400 <= status <= 599 else 502
+
+
+def _api_error_detail(error: ApiActionError) -> str:
+    detail = f"{error}: {error.body}" if error.body else str(error)
+    return sanitize(detail)
+
+
+async def _guard_action_stream(
+    stream: AsyncIterator[bytes] | Iterable[bytes],
+) -> AsyncIterator[bytes]:
+    try:
+        if hasattr(stream, "__aiter__"):
+            async for chunk in stream:
+                yield chunk
+        else:
+            for chunk in stream:
+                yield chunk
+    except ApiActionError as exc:
+        yield transport_frame(
+            "status",
+            status=_api_error_status(exc.status),
+        )
+        yield transport_frame("error", data=_api_error_detail(exc))
+    except (TypeError, ValueError) as exc:
+        yield transport_frame("status", status=400)
+        yield transport_frame("error", data=sanitize(str(exc)))
+    except ActionNotSupported as exc:
+        yield transport_frame("status", status=501)
+        yield transport_frame("error", data=sanitize(str(exc)))
+    except Exception as exc:  # noqa: BLE001 - normalized stream boundary
+        yield transport_frame("status", status=502)
+        yield transport_frame(
+            "error",
+            data=f"provider action failed ({type(exc).__name__})",
+        )

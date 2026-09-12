@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -36,7 +37,7 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** Arena Web adapter. It deliberately exposes no official/API channel. */
+/** Arena Web adapter with Runtime and direct API inference channels. */
 @Component
 public final class ArenaProvider implements InferenceProvider {
     private static final Logger LOGGER = LoggerFactory.getLogger(ArenaProvider.class);
@@ -93,6 +94,11 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
+    @Override
+    public Set<ProviderTransportMode> supportedTransportModes() {
+        return Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
+    }
+
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
     @Override
@@ -106,12 +112,17 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override
     public void validateCredential(JsonNode credential) {
+        validateCredential(credential, ProviderTransportMode.RUNTIME);
+    }
+
+    private void validateCredential(JsonNode credential, ProviderTransportMode transportMode) {
         var identity = first(credential, "arena_user_id", "user_id", "userId", "external_id");
         var email = credential.path("email").asText("").trim();
         if (identity.isBlank() && email.isBlank()) {
             throw new IllegalArgumentException("Arena credential requires an account identity");
         }
-        if (!credential.path("browser_execution_context").isObject()) {
+        if (transportMode == ProviderTransportMode.RUNTIME
+            && !credential.path("browser_execution_context").isObject()) {
             throw new IllegalArgumentException(
                 "Arena credential requires a browser_execution_context");
         }
@@ -144,20 +155,21 @@ public final class ArenaProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
-        validateCredential(account.credential());
+        validateCredential(account.credential(), context.transportMode());
         requestMapper.validate(request);
         return Flux.defer(() -> {
             var decoder = new ArenaEventDecoder(request.requestId());
             var status = new AtomicInteger(-1);
             var frameCount = new AtomicInteger();
-            return transport.stream(
-                    MANIFEST.id(),
-                    "chat",
-                    semanticCommands.chat(request),
-                    account.credential(),
-                    proxyPool(),
-                    proxyAffinityKey(account),
-                    runtimeOptions())
+            var upstream = context.transportMode() == ProviderTransportMode.API
+                ? transport.stream(
+                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    proxyPool(), proxyAffinityKey(account), runtimeOptions(),
+                    context.transportMode())
+                : transport.stream(
+                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    proxyPool(), proxyAffinityKey(account), runtimeOptions());
+            return upstream
                 .handle((frame, sink) -> {
                     var type = frame.path("type").asText("");
                     if ("status".equals(type)) {
@@ -175,7 +187,9 @@ public final class ArenaProvider implements InferenceProvider {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new ArenaUpstreamException(
                             code, summarize(code, frame.path("data").asText(""))));
-                    } else if ("data".equals(type) && status.get() < 400) {
+                    } else if ("data".equals(type)
+                        && status.get() >= 200
+                        && status.get() < 300) {
                         var data = frame.path("data").asText("");
                         if (frameCount.getAndIncrement() < 64) {
                             LOGGER.info(
@@ -192,9 +206,10 @@ public final class ArenaProvider implements InferenceProvider {
                 .cast(byte[].class)
                 .concatMapIterable(bytes -> decoder.decode(
                     new String(bytes, StandardCharsets.UTF_8)))
-                .concatWith(Flux.defer(() -> status.get() >= 400
+                .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                     ? Flux.error(new ArenaUpstreamException(
-                        status.get(), "Arena upstream returned HTTP " + status.get()))
+                        status.get() < 0 ? 502 : status.get(),
+                        "Arena upstream returned HTTP " + status.get()))
                     : Flux.fromIterable(decoder.finish())))
                 .takeUntil(event -> event instanceof CanonicalEvent.Completed
                     || event instanceof CanonicalEvent.Failed);
@@ -203,15 +218,23 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        validateCredential(account.credential());
-        return transport.request(
-                MANIFEST.id(),
-                "models",
-                semanticCommands.models(),
-                account.credential(),
-                proxyPool(),
-                proxyAffinityKey(account),
-                runtimeOptions())
+        return discoverModels(account, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(
+        LeasedProviderAccount account,
+        ProviderTransportMode transportMode
+    ) {
+        validateCredential(account.credential(), transportMode);
+        var upstream = transportMode == ProviderTransportMode.API
+            ? transport.request(
+                MANIFEST.id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions(), transportMode)
+            : transport.request(
+                MANIFEST.id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions());
+        return upstream
             .flatMap(response -> {
                 if (response.status() < 200 || response.status() >= 300) {
                     return Mono.error(new ArenaUpstreamException(
@@ -248,11 +271,15 @@ public final class ArenaProvider implements InferenceProvider {
             var status = upstream.status();
             var message = upstream.getMessage() == null
                 ? "" : upstream.getMessage().toLowerCase(Locale.ROOT);
-            if ((status == 429 && message.contains("prompt failed"))
-                || message.contains("recaptcha_v2_required")) {
+            var promptChallenge = status == 429 && message.contains("prompt failed");
+            var v2Required = message.contains("recaptcha_v2_required");
+            var v3Rejected = status == 403 && message.contains("recaptcha validation failed");
+            if (promptChallenge || v2Required || v3Rejected) {
                 return new ProviderFailure(
                     "anti_bot_rejected", upstream.getMessage(), false,
-                    Map.of("status", status, "challenge", "recaptcha_v2"));
+                    Map.of(
+                        "status", status,
+                        "challenge", v3Rejected ? "recaptcha_v3" : "recaptcha_v2"));
             }
             var retryable = status >= 500 || Set.of(408, 409, 425, 429).contains(status);
             var type = switch (status) {

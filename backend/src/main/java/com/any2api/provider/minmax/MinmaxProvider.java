@@ -134,7 +134,9 @@ public final class MinmaxProvider implements InferenceProvider {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new MinmaxUpstreamException(
                             code, summarize(code, frame.path("data").asText(""))));
-                    } else if ("data".equals(type) && status.get() < 400) {
+                    } else if ("data".equals(type)
+                        && status.get() >= 200
+                        && status.get() < 300) {
                         sink.next(frame.path("data").asText(""));
                     } else if ("credential_patch".equals(type)) {
                         context.acceptCredentialPatch(frame.path("data"));
@@ -142,23 +144,33 @@ public final class MinmaxProvider implements InferenceProvider {
                 })
                 .cast(String.class)
                 .concatMapIterable(decoder::decode)
-                .concatWith(Flux.defer(() -> status.get() >= 400
+                .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                     ? Flux.error(new MinmaxUpstreamException(
-                        status.get(), "MinMax upstream returned HTTP " + status.get()))
+                        status.get() < 0 ? 502 : status.get(),
+                        "MinMax upstream returned HTTP " + status.get()))
                     : Flux.fromIterable(decoder.finish())));
         });
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
+        return discoverModels(account, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(
+        LeasedProviderAccount account,
+        ProviderTransportMode transportMode
+    ) {
         MinmaxCredential.from(account);
-        return transport.request(
-                manifest().id(),
-                "models",
-                semanticCommands.models(),
-                account.credential(),
-                proxyPool(),
-                proxyAffinityKey(account))
+        var upstream = transportMode == ProviderTransportMode.API
+            ? transport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), Map.of(), transportMode)
+            : transport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account));
+        return upstream
             .flatMap(response -> responseJson(response, null))
             .map(this::parseModels);
     }

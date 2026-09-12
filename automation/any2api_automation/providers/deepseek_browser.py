@@ -15,6 +15,9 @@ from .runtime_rules import RuntimePlan
 
 _RATE_BYTES = 136
 _MASK = (1 << 64) - 1
+DEEPSEEK_SESSION_PATH = "/api/v0/chat_session/create"
+DEEPSEEK_POW_PATH = "/api/v0/chat/create_pow_challenge"
+DEEPSEEK_COMPLETION_PATH = "/api/v0/chat/completion"
 _ROUND_CONSTANTS = (
     0x0000000000000001,
     0x0000000000008082,
@@ -130,7 +133,7 @@ class DeepseekOfficialBrowserTransport(PageFetchBrowserRuntime):
             endpoint_key="pow",
             headers=_headers(credential, runtime_options),
             body=json.dumps(
-                {"target_path": "/api/v0/chat/completion"},
+                {"target_path": DEEPSEEK_COMPLETION_PATH},
                 ensure_ascii=True,
                 separators=(",", ":"),
             ),
@@ -138,20 +141,7 @@ class DeepseekOfficialBrowserTransport(PageFetchBrowserRuntime):
         )
         challenge = _challenge(pow_result)
         answer = await asyncio.to_thread(solve_pow, challenge)
-        proof = base64.b64encode(
-            json.dumps(
-                {
-                    "algorithm": challenge["algorithm"],
-                    "challenge": challenge["challenge"],
-                    "salt": challenge["salt"],
-                    "answer": answer,
-                    "signature": challenge["signature"],
-                    "target_path": "/api/v0/chat/completion",
-                },
-                ensure_ascii=True,
-                separators=(",", ":"),
-            ).encode()
-        ).decode()
+        proof = build_pow_proof(challenge, answer)
         headers = _headers(credential, runtime_options)
         headers["X-DS-PoW-Response"] = proof
         body = build_deepseek_request(semantic_command, session_id)
@@ -192,6 +182,31 @@ def solve_pow(challenge: dict[str, Any]) -> int:
         if _hash_matches(prefix, answer, target):
             return answer
     raise RuntimeError("DeepSeek POW challenge has no solution in its search range")
+
+
+def build_pow_proof(challenge: dict[str, Any], answer: int) -> str:
+    """Serialize the provider-signed PoW result for the completion endpoint."""
+
+    _validate_challenge(challenge)
+    if isinstance(answer, bool) or not isinstance(answer, int):
+        raise TypeError("DeepSeek POW answer must be an integer")
+    difficulty = int(challenge["difficulty"])
+    if answer < 0 or answer >= difficulty:
+        raise ValueError("DeepSeek POW answer is outside the challenge range")
+    return base64.b64encode(
+        json.dumps(
+            {
+                "algorithm": challenge["algorithm"],
+                "challenge": challenge["challenge"],
+                "salt": challenge["salt"],
+                "answer": answer,
+                "signature": challenge["signature"],
+                "target_path": challenge["target_path"],
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode()
+    ).decode()
 
 
 def _hash_matches(prefix: bytes, answer: int, target: bytes) -> bool:
@@ -307,7 +322,7 @@ def _challenge(result: dict[str, Any]) -> dict[str, Any]:
 
 def _json_body(result: dict[str, Any]) -> dict[str, Any]:
     status = int(result.get("status") or 502)
-    if status >= 400:
+    if status < 200 or status >= 300:
         raise RuntimeError(f"DeepSeek upstream returned HTTP {status}")
     try:
         value = json.loads(str(result.get("body") or ""))
@@ -389,6 +404,8 @@ def _validate_challenge(value: dict[str, Any]) -> None:
     for field in ("salt", "signature", "target_path"):
         if not str(value.get(field) or "").strip():
             raise ValueError("DeepSeek POW challenge is incomplete")
+    if str(value["target_path"]).strip() != DEEPSEEK_COMPLETION_PATH:
+        raise ValueError("DeepSeek POW challenge target path is unsupported")
     difficulty = int(value.get("difficulty") or 0)
     if difficulty < 1 or difficulty > 2_000_000:
         raise ValueError("DeepSeek POW difficulty is outside the safe range")

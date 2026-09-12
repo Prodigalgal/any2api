@@ -23,7 +23,12 @@ from ..lifecycle.browser import (
 )
 from ..lifecycle.mail import Mailbox
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
-from .base import AutomationProvider, AutomationProviderManifest
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from .longcat_browser import LongcatOfficialBrowserTransport, _conversation_id
 from .longcat_challenge import solve_yoda_if_present, yoda_visible
 from .longcat_settings import settings
@@ -42,6 +47,7 @@ class LongcatAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("chat",),
     )
 
@@ -55,6 +61,12 @@ class LongcatAutomationProvider(AutomationProvider):
             transport = LongcatOfficialBrowserTransport(base_url)
             self._transports[base_url] = transport
         return transport
+
+    def action_bindings(self):
+        from .api_transport import api_action_bindings
+        from .longcat_api_actions import LongcatApiActionHandler
+
+        return api_action_bindings(self, LongcatApiActionHandler())
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_failure: RuntimeError | None = None

@@ -128,6 +128,37 @@ The current Runtime mappers make that translation explicit:
 | MinMax | flattened `content` with role sections | unsupported standard generation fields are rejected | model `variant`, `enable_team`, `worktreeMode` | rejected | Runtime same-session `attachments`; API currently text-only |
 | Qwen | native message graph with `fid`, parent/children and `files` | native `temperature`, `top_p`, `max_tokens` | `feature_config.thinking_mode`, `thinking_budget`, `auto_search` | only search tools; function tools rejected | same-session native image upload |
 
+The direct API channel reuses the same semantic command contract but performs the provider's
+HTTP/SSE and upload protocol without creating a browser session. It may extract legal non-empty
+`Set-Cookie` values into a bounded `credential_patch`; multi-step adapters merge that patch into
+their in-memory account snapshot before the next provider request, and the Java boundary persists
+it only against the leased credential version. The following is the current
+implemented boundary; it is deliberately narrower where the upstream requires a page-owned
+signature, challenge token, or uploader:
+
+When a multi-step API action fails before its final completion request, the Automation Action
+boundary preserves an upstream 4xx/5xx status through `ApiActionError` and includes only a bounded,
+sanitized response summary. The Java provider can therefore keep credential rejection, anti-bot,
+rate limiting, and retryable upstream failures distinct; redirects and missing HTTP status remain
+transport failures. A direct API completion response still carries its provider status in the
+normal Action result, while SSE exposes the status before data or error frames.
+
+| Provider | API model discovery | API text/SSE | API image | API PDF/file | API prerequisite or limitation |
+|---|---|---|---|---|---|
+| Arena | HTML direct-page catalog | direct mode and search | Unsupported; use Runtime/AUTO | Unsupported; use Runtime/AUTO | accepts only a provider-issued reCAPTCHA v3 token; no token generation or v2 escalation in API |
+| DeepSeek | `/api/v0/client/settings` | session + PoW + completion SSE | Unsupported | Unsupported | PoW is solved locally from the provider challenge; account token/device ID required |
+| GLM | `/api/models` | `/api/v2/chat/completions` with current signature fields | multipart `/api/v1/files/` for vision models | Unsupported | frontend version/signature key must match the deployed web protocol; provider-issued captcha ticket is optional input, not generated here |
+| LongCat | Not declared | `/api/v1/session-create` + `/api/v1/chat-completion-V2` | `/api/v1/appendix-upload` | `/api/v1/appendix-upload` | authenticated cookie/access token and returned `fileUrl`/`fileKey` are required |
+| MiMo | `/open-apis/bot/config` | `/open-apis/bot/chat` | signed upload + parse flow | Unsupported | `xiaomichatbot_ph` and provider-issued object-storage upload data are required |
+| MiniMax | `/archon/api/v1/config` | signed session message SSE | Unsupported; use Runtime/AUTO | Unsupported; use Runtime/AUTO | API signing/account binding remains provider-specific |
+| Qwen | `/api/v2/models/` | `/api/v2/chats/new` + completion SSE | STS + Aliyun OSS V4 upload | Unsupported | direct mode uses stored token and optional provider-issued Baxia headers; no Runtime risk browser is started |
+
+An explicitly selected API channel fails closed when its prerequisite is absent; it does not
+silently instantiate Runtime. `AUTO` may retry inference or official model discovery through
+Runtime only after a classified, retryable API failure and only when the provider declares Runtime
+as a supported fallback. Lifecycle actions (registration, reauthentication, keepalive, and daily
+check-in) remain Runtime-only even for providers that expose API inference.
+
 The table describes adapter behavior, not an upstream compatibility promise. A field is only
 accepted when the selected provider contract has a deterministic translation or an explicitly
 documented emulation; otherwise Java rejects it before account leasing. The shared Action
@@ -225,16 +256,18 @@ aliases, while provider capability, model metadata, and source policy decide whe
 proceed. Audio and video are not declared as LongCat chat input capabilities; their presence in
 other LongCat product flows does not change this contract.
 
-Arena is a Web-only Runtime provider. The public request may use either the typed
+Arena supports both direct API and Runtime inference. The public request may use either the typed
 `provider_options.arena.web_search` option or the provider-contract `web_search` parameter; both
 are normalized to the same semantic boolean and the page mapper emits Arena's native
 `modality: "search"`. Media blocks must be user-message inputs with inline base64 data URLs. The
 Camoufox page locates the current Arena-exported `uploadFile` function, obtains Arena's signed
 upload URL through the page-owned action, uploads the bytes, and sends only the returned
-`experimental_attachments` objects in `create-evaluation`. The current UI declaration is PNG,
-JPEG, WebP, and PDF; audio, video, remote URLs, file IDs, and unsupported document MIME types fail
-closed before the browser stream. A successful model catalog response is not an inference-ready
-account; Arena still requires a real text probe after registration.
+`experimental_attachments` objects in `create-evaluation`. Runtime supports the current UI
+declaration of PNG, JPEG, WebP, and PDF. The direct API channel supports text/search only because
+the current signed uploader and reCAPTCHA escalation are page-owned; audio, video, remote URLs,
+file IDs, and unsupported document MIME types fail closed before either channel. A successful
+model catalog response is not an inference-ready account; Arena still requires a real text probe
+after registration.
 
 Grok channels remain code-installed but may be administratively hot-unplugged. Disabling them does
 not weaken protocol validation for the enabled providers.

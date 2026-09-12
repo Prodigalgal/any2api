@@ -13,6 +13,7 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -80,6 +81,11 @@ public final class DeepseekProvider implements InferenceProvider {
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
+    @Override
+    public Set<ProviderTransportMode> supportedTransportModes() {
+        return Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
+    }
+
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
     @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
@@ -138,14 +144,15 @@ public final class DeepseekProvider implements InferenceProvider {
         return Flux.defer(() -> {
             var decoder = new DeepseekEventDecoder(request.requestId(), mapper);
             var status = new AtomicInteger(-1);
-            return transport.stream(
-                    MANIFEST.id(),
-                    "chat",
-                    semanticCommands.chat(request),
-                    account.credential(),
-                    proxyPool(),
-                    proxyAffinityKey(account),
-                    runtimeOptions())
+            var upstream = context.transportMode() == ProviderTransportMode.API
+                ? transport.stream(
+                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    proxyPool(), proxyAffinityKey(account), runtimeOptions(),
+                    context.transportMode())
+                : transport.stream(
+                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    proxyPool(), proxyAffinityKey(account), runtimeOptions());
+            return upstream
                 .handle((frame, sink) -> {
                     var type = frame.path("type").asText("");
                     if ("status".equals(type)) {
@@ -154,7 +161,9 @@ public final class DeepseekProvider implements InferenceProvider {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new DeepseekUpstreamException(
                             code, summarize(code, frame.path("data").asText(""))));
-                    } else if ("data".equals(type) && status.get() < 400) {
+                    } else if ("data".equals(type)
+                        && status.get() >= 200
+                        && status.get() < 300) {
                         sink.next(frame.path("data").asText(""));
                     } else if ("credential_patch".equals(type)) {
                         context.acceptCredentialPatch(frame.path("data"));
@@ -163,24 +172,33 @@ public final class DeepseekProvider implements InferenceProvider {
                 .cast(String.class)
                 .takeUntil(data -> "[DONE]".equals(data.trim()))
                 .concatMapIterable(decoder::decode)
-                .concatWith(Flux.defer(() -> status.get() >= 400
+                .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                     ? Flux.error(new DeepseekUpstreamException(
-                        status.get(), "DeepSeek upstream returned HTTP " + status.get()))
+                        status.get() < 0 ? 502 : status.get(),
+                        "DeepSeek upstream returned HTTP " + status.get()))
                     : Flux.fromIterable(decoder.finish())));
         });
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
+        return discoverModels(account, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(
+        LeasedProviderAccount account,
+        ProviderTransportMode transportMode
+    ) {
         validateCredential(account.credential());
-        return transport.request(
-                MANIFEST.id(),
-                "models",
-                semanticCommands.models(),
-                account.credential(),
-                proxyPool(),
-                proxyAffinityKey(account),
-                runtimeOptions())
+        var upstream = transportMode == ProviderTransportMode.API
+            ? transport.request(
+                MANIFEST.id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions(), transportMode)
+            : transport.request(
+                MANIFEST.id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions());
+        return upstream
             .flatMap(response -> {
                 if (response.status() < 200 || response.status() >= 300) {
                     return Mono.error(new DeepseekUpstreamException(
@@ -221,6 +239,19 @@ public final class DeepseekProvider implements InferenceProvider {
     @Override
     public ProviderFailure classify(Throwable error) {
         if (error instanceof DeepseekUpstreamException upstream) {
+            var message = upstream.getMessage() == null
+                ? "" : upstream.getMessage().toLowerCase(java.util.Locale.ROOT);
+            var antiBot = upstream.status() == 403 && (
+                message.contains("hcaptcha")
+                    || message.contains("recaptcha")
+                    || message.contains("captcha")
+                    || message.contains("x-amzn-waf")
+                    || message.contains("waf challenge"));
+            if (antiBot) {
+                return new ProviderFailure(
+                    "anti_bot_rejected", upstream.getMessage(), true,
+                    Map.of("status", upstream.status()));
+            }
             var retryable = upstream.status() >= 500
                 || List.of(408, 409, 425, 429).contains(upstream.status());
             var type = switch (upstream.status()) {

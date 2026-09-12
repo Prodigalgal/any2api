@@ -30,6 +30,7 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
     private final AccountSelectionService accounts;
     private final ExecutorService databaseExecutor;
     private final ModelCatalogCache modelCatalog;
+    private final ProviderTransportModeService transportModes;
 
     public ProviderCatalogSynchronizer(
         ProviderRegistry registry,
@@ -38,7 +39,8 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
         ObjectMapper objectMapper,
         AccountSelectionService accounts,
         ExecutorService databaseExecutor,
-        ModelCatalogCache modelCatalog
+        ModelCatalogCache modelCatalog,
+        ProviderTransportModeService transportModes
     ) {
         this.registry = registry;
         this.jdbc = jdbc;
@@ -47,11 +49,15 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
         this.accounts = accounts;
         this.databaseExecutor = databaseExecutor;
         this.modelCatalog = modelCatalog;
+        this.transportModes = transportModes;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        transactions.executeWithoutResult(ignored -> synchronizeInstalledProviders());
+        transactions.executeWithoutResult(ignored -> {
+            transportModes.refresh();
+            synchronizeInstalledProviders();
+        });
     }
 
     void synchronizeInstalledProviders() {
@@ -81,9 +87,10 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
 
     private Mono<Void> discover(InferenceProvider provider) {
         var providerId = provider.manifest().id();
+        var transportPlan = transportModes.plan(provider);
         return Flux.usingWhen(
                 accounts.acquire(providerId),
-                account -> provider.discoverModels(account)
+                account -> discoverModels(provider, account, transportPlan)
                     .flatMap(models -> Mono.fromRunnable(() -> transactions.executeWithoutResult(
                         ignored -> {
                             synchronizeModels(provider, models, "OFFICIAL");
@@ -99,6 +106,30 @@ public class ProviderCatalogSynchronizer implements ApplicationRunner {
                     providerId, error.getMessage());
                 return Mono.empty();
             });
+    }
+
+    private Mono<java.util.List<DiscoveredModel>> discoverModels(
+        InferenceProvider provider,
+        com.any2api.account.LeasedProviderAccount account,
+        ProviderTransportModeService.TransportPlan transportPlan
+    ) {
+        return provider.discoverModels(account, transportPlan.primary())
+            .onErrorResume(error -> {
+                if (transportPlan.fallback() == null
+                    || !shouldFallbackToRuntime(provider, error)) {
+                    return Mono.error(error);
+                }
+                log.warn(
+                    "Official model catalog API failed for provider {}, retrying with Runtime: {}",
+                    provider.manifest().id(), error.getMessage());
+                return provider.discoverModels(account, transportPlan.fallback());
+            });
+    }
+
+    private boolean shouldFallbackToRuntime(InferenceProvider provider, Throwable error) {
+        var failure = provider.classify(error);
+        return failure.retryable()
+            && ProviderTransportFallbackPolicy.allowsRuntimeFallback(failure.type());
     }
 
     private void synchronizeManifest(InferenceProvider provider) {

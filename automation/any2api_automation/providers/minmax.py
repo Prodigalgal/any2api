@@ -484,6 +484,9 @@ def _boolean_option(value: Any, fallback: bool) -> bool:
 
 
 def _select_agent(response: dict[str, Any], role: str) -> str:
+    status = int(response.get("status") or 502)
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"MinMax agent list returned HTTP {status}")
     try:
         body = json.loads(str(response.get("body") or ""))
     except json.JSONDecodeError as error:

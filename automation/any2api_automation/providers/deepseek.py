@@ -35,7 +35,12 @@ from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import correlation_id
-from .base import AutomationProvider, AutomationProviderManifest
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from .deepseek_browser import DeepseekOfficialBrowserTransport
 from .deepseek_challenge import DeepseekHcaptchaChallenge
 from .deepseek_settings import settings
@@ -64,6 +69,7 @@ class DeepseekAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("model_discovery", "chat"),
         registration_attempt_mode="single_identity",
     )
@@ -222,6 +228,12 @@ class DeepseekAutomationProvider(AutomationProvider):
         for transport in transports:
             await transport.close()
 
+    def action_bindings(self):
+        from .api_transport import api_action_bindings
+        from .deepseek_api_actions import DeepseekApiActionHandler
+
+        return api_action_bindings(self, DeepseekApiActionHandler())
+
 
 def _runtime_base_url(payload: dict[str, Any]) -> str:
     options = payload.get("runtime_options")
@@ -270,8 +282,10 @@ def _catalog_available(body: dict[str, Any]) -> bool:
     settings_value = data.get("biz_data")
     if not isinstance(settings_value, dict):
         return False
-    models = settings_value.get("settings", {}).get("model_configs")
-    return isinstance(models, dict)
+    settings_body = settings_value.get("settings")
+    if not isinstance(settings_body, dict):
+        return False
+    return isinstance(settings_body.get("model_configs"), dict)
 
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile(

@@ -1,6 +1,6 @@
 # ADR-0008：Provider 边界与 Arena Direct Runtime 闭环
 
-- 状态：Accepted
+- 状态：Accepted（0.16.5 基线；API 双通道增量见 ADR-0009）
 - 日期：2026-09-11
 - 适用版本：0.16.5
 - 关联：ADR-0007《统一 Action 契约并拆分 Runtime / API Channel》

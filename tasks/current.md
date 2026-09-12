@@ -1,6 +1,20 @@
-# 当前任务：Arena 接入与 Grok 之外六家 Runtime 全链路闭环
+# 当前任务：Grok 之外七家 Provider 的 Runtime/API 双通道闭环
 
-## 本轮推进：Provider 边界、Arena Direct 与生命周期稳定性（0.16.5）
+## 本轮推进：全厂商 API Channel（0.17.0）
+
+- 业务范围为 Arena、DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen；Grok 三通道继续排除。
+- Java `ProviderTransportModeService` 统一选择 `API`、`RUNTIME` 或 `AUTO`；`InferenceCoordinator`、模型发现和就绪探针均把最终模式传入 Provider。
+- Automation 已为七家 Provider 注册独立 API Action binding；生命周期注册、重新认证、保活、打卡保持 Runtime-only，API 不创建浏览器、不转发任意 URL/JS/rawRequest。
+- 公共 API 层提供 HTTPS allowlist、同源路径校验、有界响应、代理租约、SSE 背压、取消清理和受限 `Set-Cookie` credential patch 传播；厂商模块各自负责路径、请求体、签名、上传、错误与事件协议。公共与 MiniMax SSE 均使用有界队列，取消时主动关闭上游响应。
+- 当前 API 代码边界：Arena 文本/Search（reCAPTCHA 仅接受厂商签发 token，媒体保留 Runtime/AUTO）；DeepSeek 文本/PoW；GLM 文本/图片；LongCat 文本/图片/PDF；MiMo 文本/图片；MiniMax 文本；Qwen 文本/图片。
+- `AUTO` 的推理、模型发现和账号就绪探针均按同一分类策略支持 API -> Runtime 回退；显式 `API` 仍失败即止。
+- 逐厂商收口了 API 的状态和凭证边界：七家适配器的多步骤前置请求在解析前严格要求
+  2xx；Automation 通过 `ApiActionError` 保留上游 4xx/5xx 及有界脱敏摘要，Java SSE 对
+  3xx 和无状态尾流均失败关闭；GLM 签名 query 与实际 `User-Agent` 共用同一默认配置。
+- `0.17.0` 已完成代码级 binding、映射和本地夹具覆盖；在完成 K8S 每家 API 非流式/SSE 真实样本前，不把任何 API provider 标记为运行态 `READY`。
+- 验证约束：本机不执行编译、构建或测试构建；Backend、Automation、WEB 的编译与测试统一由 `.github/workflows/build-and-deploy.yml` 的 GitHub Actions 执行。
+
+## 上一版本：Provider 边界、Arena Direct 与生命周期稳定性（0.16.5）
 
 - 公共框架职责与 Provider 职责已整理到 [ADR-0008](../docs/adr/0008-provider-boundaries-and-arena-direct.md)：框架负责 Action/Channel 契约、账号租约、浏览器预算、邮箱策略、生命周期、错误模型和观测；Provider 负责厂商协议、页面脚本、认证、媒体上传、事件解码和 provider-local 重试。
 - Arena 对外只接受 `direct` 语义；官方新会话所需的 wire `mode=direct-battle` 仅作为内部协议值保留，不开放 Battle/Side-by-side，不发送 `modelBId`。
@@ -8,7 +22,7 @@
 - Arena 对话已加入官方 Enterprise V3 → V2 escalation：仅当上游明确返回 `recaptcha validation failed` 或 `prompt failed` 时渲染官方 V2 widget；没有官方 callback token 时返回 `recaptcha_v2_required`，不伪造或绕过验证。
 - 0.16.5 新增受控的 Automation 响应缓冲（默认 8 MiB，允许范围 256 KiB–32 MiB），修复浏览器状态上下文回传时的 `DataBufferLimitException`，同时保留 OOM 上限；本地、CI、GitOps 和 K8S 验证均已通过。
 
-## Arena 适配（0.16.5，K8S 真实验收完成，健康窗口观察中）
+## 上一版本 Arena 适配（0.16.5，K8S 真实验收完成，健康窗口观察中）
 
 - 已新增 `arena` Automation Provider 与 Java `ArenaProvider`，仅启用 `camoufox_browser_runtime`，不注册官方 API/CLI Channel。
 - 注册使用共享 `TempMailClient` 的 email magic link：每个 `register` 操作只创建一个临时邮箱，先快照历史邮件 ID，再提交 `/nextjs-api/sign-up/magic-link`，验证新链接并通过 `/api/me` 核对身份；Manifest 与 Java 调度器均限制 `target=1`、`maxAttempts=1`。
@@ -18,7 +32,7 @@
 - `provider_options.arena.web_search=true`（或契约允许的 `web_search`）映射为 Arena 原生 `modality="search"`；Search 能力按当前模型目录 `outputCapabilities.search` 做检查。
 - K8S 已保留真实 Arena 注册账号，不删除、不重置；0.16.5 已取得 Direct 文本、Search、图片和 PDF 非流式/SSE 的真实成功样本。模型健康窗口仍为 `DEGRADED`，在成功率/P95 和长期账号切换证据达标前不得标记 `Ready`。
 
-## 当前推进（2026-09-12）
+## 0.16.5 收尾记录（2026-09-12）
 
 - 当前源码候选为 `0.16.5`；修复点是 Java `LifecycleAutomationClient` 与 `AutomationProviderCatalog` 的响应解码上限，不取消上限、不扩大浏览器并发。配置键为 `ANY2API_AUTOMATION_MAX_RESPONSE_BYTES`，默认 `8388608`。
 - 0.16.5 K8S 运行态已稳定：Argo CD `Synced/Healthy/Succeeded`，当前 server、automation、web 使用验收记录提交 `61f0f8c` 生成的同一不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现 `OOMKilled`、`OOMKilling` 或发布后的 `DataBufferLimitException`。

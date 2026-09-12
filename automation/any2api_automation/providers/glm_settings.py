@@ -5,6 +5,9 @@ from .provider_config import AutomationProviderSettings
 
 class GlmSettings(AutomationProviderSettings):
     glm_base_url: str = "https://chat.z.ai"
+    glm_frontend_version: str = "1.1.93"
+    glm_signature_key: str = "key-@@@@)))()((9))-xxxx&&&%%%%%"
+    glm_region: str = "overseas"
     glm_captcha_script_url: str = (
         "https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"
     )

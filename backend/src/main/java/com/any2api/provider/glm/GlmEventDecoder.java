@@ -224,7 +224,10 @@ final class GlmEventDecoder {
         if (text.contains("quota") || text.contains("credit") || text.contains("balance")) {
             return "quota_exhausted";
         }
-        if (text.contains("captcha") || text.contains("verify")) return "captcha_rejected";
+        if (text.contains("captcha") || text.contains("aliyun")
+            || text.contains("traceless") || text.contains("human verification")) {
+            return "anti_bot_rejected";
+        }
         if (text.contains("rate") || text.contains("too many")) return "rate_limited";
         if (text.contains("token") || text.contains("auth") || text.contains("login")) {
             return "credential_rejected";

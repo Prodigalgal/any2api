@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -85,6 +86,11 @@ public final class LongcatProvider implements InferenceProvider {
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
+    @Override
+    public Set<ProviderTransportMode> supportedTransportModes() {
+        return Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
+    }
+
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
     @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
@@ -127,14 +133,15 @@ public final class LongcatProvider implements InferenceProvider {
             var decoder = new LongcatEventDecoder(
                 request.requestId(), reasoningEnabled, toolPlan, toolProtocol);
             var status = new AtomicInteger(-1);
-            return transport.stream(
-                    MANIFEST.id(),
-                    "chat",
-                    semanticCommands.chat(request),
-                    account.credential(),
-                    proxyPool(),
-                    proxyAffinityKey(account),
-                    runtimeOptions())
+            var upstream = context.transportMode() == ProviderTransportMode.API
+                ? transport.stream(
+                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    proxyPool(), proxyAffinityKey(account), runtimeOptions(),
+                    context.transportMode())
+                : transport.stream(
+                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    proxyPool(), proxyAffinityKey(account), runtimeOptions());
+            return upstream
                 .handle((frame, sink) -> {
                     var type = frame.path("type").asText("");
                     if ("status".equals(type)) {
@@ -143,7 +150,9 @@ public final class LongcatProvider implements InferenceProvider {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new LongcatUpstreamException(
                             code, summarize(code, frame.path("data").asText(""))));
-                    } else if ("data".equals(type) && status.get() < 400) {
+                    } else if ("data".equals(type)
+                        && status.get() >= 200
+                        && status.get() < 300) {
                         sink.next(frame.path("data").asText(""));
                     } else if ("credential_patch".equals(type)) {
                         context.acceptCredentialPatch(frame.path("data"));
@@ -152,9 +161,10 @@ public final class LongcatProvider implements InferenceProvider {
                 .cast(String.class)
                 .takeUntil(data -> "[DONE]".equals(data.trim()))
                 .concatMapIterable(decoder::decode)
-                .concatWith(Flux.defer(() -> status.get() >= 400
+                .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                     ? Flux.error(new LongcatUpstreamException(
-                        status.get(), "LongCat upstream returned HTTP " + status.get()))
+                        status.get() < 0 ? 502 : status.get(),
+                        "LongCat upstream returned HTTP " + status.get()))
                     : Flux.fromIterable(decoder.finish())));
         });
     }

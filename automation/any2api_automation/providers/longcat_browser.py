@@ -333,7 +333,7 @@ def _headers(runtime_options: dict[str, Any] | None) -> dict[str, str]:
 
 def _conversation_id(result: dict[str, Any]) -> str:
     status = int(result.get("status") or 502)
-    if status >= 400:
+    if status < 200 or status >= 300:
         raise RuntimeError(f"LongCat session-create returned HTTP {status}")
     try:
         body = json.loads(str(result.get("body") or ""))
@@ -350,7 +350,10 @@ def _conversation_id(result: dict[str, Any]) -> str:
         if message:
             detail += f" message={message}"
         raise RuntimeError(f"LongCat session-create was rejected{detail}")
-    value = str((body.get("data") or {}).get("conversationId") or "").strip()
+    data = body.get("data")
+    if not isinstance(data, dict):
+        raise TypeError("LongCat session-create returned an invalid data object")
+    value = str(data.get("conversationId") or "").strip()
     if not value:
         raise RuntimeError("LongCat session-create returned no conversationId")
     return value

@@ -11,6 +11,7 @@ from any2api_automation.providers.actions import (
     ProviderActionRequest,
 )
 from any2api_automation.providers.base import (
+    API_TRANSPORT,
     CAMOUFOX_BROWSER_RUNTIME,
     AutomationProvider,
     AutomationProviderManifest,
@@ -145,6 +146,25 @@ async def test_dispatcher_rejects_chat_before_provider_binding_executes() -> Non
         )
 
 
+@pytest.mark.asyncio
+async def test_dispatcher_rejects_an_explicit_operation_mismatch() -> None:
+    provider = DummyProvider()
+    providers = SimpleNamespace(require=lambda provider_id: provider)
+    bindings = ActionBindingRegistry([provider])
+    dispatcher = ProviderActionDispatcher(providers, bindings)
+
+    with pytest.raises(ValueError, match="does not match operation"):
+        await dispatcher.execute(
+            ProviderActionRequest(
+                provider_id="dummy",
+                action=ProviderAction.KEEPALIVE,
+                channel=CAMOUFOX_BROWSER_RUNTIME,
+                operation="register",
+                payload={},
+            )
+        )
+
+
 def test_minmax_exposes_api_and_runtime_actions_separately() -> None:
     manifest = next(item for item in provider_registry.public_manifests() if item["id"] == "minmax")
     actions = {(item["channel"], item["action"]) for item in manifest["actions"]}
@@ -187,6 +207,34 @@ def test_runtime_action_matrix_matches_each_provider_manifest() -> None:
         lifecycle_actions = {str(operation) for operation in manifest["operations"]}
         assert runtime_actions - lifecycle_actions == expected[provider_id]
         assert set(manifest["inference_actions"]) == expected[provider_id]
+
+
+def test_api_action_matrix_matches_declared_api_mode() -> None:
+    expected_api = {
+        "arena": {"model_discovery", "chat"},
+        "deepseek": {"model_discovery", "chat"},
+        "glm": {"model_discovery", "chat"},
+        "longcat": {"chat"},
+        "mimo": {"model_discovery", "chat"},
+        "minmax": {
+            "model_discovery",
+            "chat",
+            "provider_query",
+            "media_policy",
+            "media_callback",
+            "raw_request",
+        },
+        "qwen": {"model_discovery", "chat"},
+    }
+
+    for manifest in provider_registry.public_manifests():
+        provider_id = str(manifest["id"])
+        actions = {(str(item["channel"]), str(item["action"])) for item in manifest["actions"]}
+        api_actions = {action for channel, action in actions if channel == API_TRANSPORT}
+        if API_TRANSPORT in manifest["inference_modes"]:
+            assert api_actions == expected_api[provider_id]
+        else:
+            assert api_actions == set()
 
 
 def test_lifecycle_actions_are_runtime_only_for_all_installed_providers() -> None:

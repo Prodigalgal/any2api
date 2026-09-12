@@ -13,11 +13,14 @@ import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.ProviderTransportMode;
+import com.any2api.provider.ProviderTransportModeService;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,7 +30,8 @@ class InferenceReadinessProbeTest {
     @Test
     void requiresMarkerOutputAndCompletionFromTheSpecificAccount() {
         var probe = new InferenceReadinessProbe(
-            ProviderRegistry.allEnabled(List.of(provider(true))), mapper);
+            ProviderRegistry.allEnabled(List.of(provider(true))), mapper,
+            transportModes());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -40,7 +44,8 @@ class InferenceReadinessProbeTest {
     @Test
     void preservesProviderFailureTypeWhenTheProbeCannotInfer() {
         var probe = new InferenceReadinessProbe(
-            ProviderRegistry.allEnabled(List.of(provider(false))), mapper);
+            ProviderRegistry.allEnabled(List.of(provider(false))), mapper,
+            transportModes());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -52,7 +57,8 @@ class InferenceReadinessProbeTest {
     @Test
     void acceptsAnyNonBlankCompletedResponseForRealtimeAvailability() {
         var probe = new InferenceReadinessProbe(
-            ProviderRegistry.allEnabled(List.of(provider(true, "pong"))), mapper);
+            ProviderRegistry.allEnabled(List.of(provider(true, "pong"))), mapper,
+            transportModes());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -63,7 +69,8 @@ class InferenceReadinessProbeTest {
     @Test
     void probesTheExplicitlySelectedModel() {
         var probe = new InferenceReadinessProbe(
-            ProviderRegistry.allEnabled(List.of(provider(true))), mapper);
+            ProviderRegistry.allEnabled(List.of(provider(true))), mapper,
+            transportModes());
 
         var result = probe.probe(
             new LeasedProviderAccount(
@@ -79,17 +86,42 @@ class InferenceReadinessProbeTest {
         assertThat(result.model()).isEqualTo("alpha-explicit");
     }
 
+    @Test
+    void autoProbeFallsBackToRuntimeAfterRetryableApiFailure() {
+        var transportModes = org.mockito.Mockito.mock(ProviderTransportModeService.class);
+        org.mockito.Mockito.when(transportModes.plan(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ProviderTransportModeService.TransportPlan(
+                ProviderTransportMode.AUTO, ProviderTransportMode.API, ProviderTransportMode.RUNTIME));
+        var probe = new InferenceReadinessProbe(
+            ProviderRegistry.allEnabled(List.of(provider(true, "pong", true))), mapper,
+            transportModes);
+
+        var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.ready()).isTrue();
+        assertThat(result.output()).isEqualTo("pong");
+    }
+
     private AccountEntity account() {
         var account = AccountEntity.create("alpha", "external", null, null, Map.of());
         account.updateState(AccountStatus.PENDING, false);
         return account;
     }
 
+    private ProviderTransportModeService transportModes() {
+        return new ProviderTransportModeService(org.mockito.Mockito.mock(JdbcClient.class));
+    }
+
     private InferenceProvider provider(boolean ready) {
-        return provider(ready, "ANY2API_PROBE_OK");
+        return provider(ready, "ANY2API_PROBE_OK", false);
     }
 
     private InferenceProvider provider(boolean ready, String output) {
+        return provider(ready, output, false);
+    }
+
+    private InferenceProvider provider(boolean ready, String output, boolean failApi) {
         return new InferenceProvider() {
             @Override
             public ProviderManifest manifest() {
@@ -107,9 +139,11 @@ class InferenceReadinessProbeTest {
                 ProviderExecutionContext context,
                 LeasedProviderAccount account
             ) {
-                if (!ready) {
+                if (!ready || (failApi && context.transportMode() == ProviderTransportMode.API)) {
                     return Flux.just(new CanonicalEvent.Failed(
-                        1, request.requestId(), 1, "credential_rejected", "rejected", Map.of()));
+                        1, request.requestId(), 1,
+                        failApi ? "provider_upstream_error" : "credential_rejected",
+                        "rejected", Map.of()));
                 }
                 return Flux.just(
                     new CanonicalEvent.ResponseStarted(

@@ -13,6 +13,7 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -86,6 +87,11 @@ public final class QwenProvider implements InferenceProvider {
     @Override
     public ProviderProtocolContract protocolContract() {
         return PROTOCOL;
+    }
+
+    @Override
+    public Set<ProviderTransportMode> supportedTransportModes() {
+        return Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
     }
 
     @Override
@@ -174,14 +180,14 @@ public final class QwenProvider implements InferenceProvider {
     ) {
         var decoder = new QwenEventDecoder(request.requestId());
         var status = new java.util.concurrent.atomic.AtomicInteger(-1);
-        return transport.stream(
-                manifest().id(),
-                "chat",
-                semanticCommands.chat(request),
-                account.credential(),
-                proxyPool(),
-                proxyAffinityKey(account),
-                runtimeOptions())
+        var upstream = context.transportMode() == ProviderTransportMode.API
+            ? transport.stream(
+                manifest().id(), "chat", semanticCommands.chat(request), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions(), context.transportMode())
+            : transport.stream(
+                manifest().id(), "chat", semanticCommands.chat(request), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions());
+        return upstream
             .handle((frame, sink) -> {
                 var type = frame.path("type").asText("");
                 if ("status".equals(type)) {
@@ -190,7 +196,9 @@ public final class QwenProvider implements InferenceProvider {
                     var code = status.get() < 0 ? 502 : status.get();
                     sink.error(new QwenUpstreamException(
                         code, summarize(code, frame.path("data").asText(""))));
-                } else if ("data".equals(type) && status.get() < 400) {
+                } else if ("data".equals(type)
+                    && status.get() >= 200
+                    && status.get() < 300) {
                     sink.next(frame.path("data").asText(""));
                 } else if ("credential_patch".equals(type)) {
                     context.acceptCredentialPatch(frame.path("data"));
@@ -199,22 +207,31 @@ public final class QwenProvider implements InferenceProvider {
             .cast(String.class)
             .takeUntil(data -> "[DONE]".equals(data.trim()))
             .concatMapIterable(decoder::decode)
-            .concatWith(Flux.defer(() -> status.get() >= 400
+            .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                 ? Flux.error(new QwenUpstreamException(
-                    status.get(), "Qwen upstream returned HTTP " + status.get()))
+                    status.get() < 0 ? 502 : status.get(),
+                    "Qwen upstream returned HTTP " + status.get()))
                 : Flux.fromIterable(decoder.finish())));
     }
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        return transport.request(
-                manifest().id(),
-                "models",
-                semanticCommands.models(),
-                account.credential(),
-                proxyPool(),
-                proxyAffinityKey(account),
-                runtimeOptions())
+        return discoverModels(account, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(
+        LeasedProviderAccount account,
+        ProviderTransportMode transportMode
+    ) {
+        var upstream = transportMode == ProviderTransportMode.API
+            ? transport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions(), transportMode)
+            : transport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions());
+        return upstream
             .flatMap(response -> response.status() >= 200 && response.status() < 300
                 ? Mono.just(parseModels(json(response.body())))
                 : Mono.error(new QwenUpstreamException(

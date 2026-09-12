@@ -72,4 +72,15 @@ public interface InferenceProvider {
         return Mono.error(new UnsupportedOperationException(
             "provider does not implement official model discovery: " + manifest().id()));
     }
+
+    /**
+     * Discover models through the selected inference channel. Providers that support API and
+     * Runtime must override this overload so catalog health reflects the configured channel.
+     */
+    default Mono<java.util.List<DiscoveredModel>> discoverModels(
+        LeasedProviderAccount account,
+        ProviderTransportMode transportMode
+    ) {
+        return discoverModels(account);
+    }
 }

@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -81,6 +82,11 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
+    @Override
+    public java.util.Set<ProviderTransportMode> supportedTransportModes() {
+        return java.util.Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
+    }
+
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
     @Override
@@ -125,9 +131,14 @@ public final class GlmProvider implements InferenceProvider {
         var proxyPool = proxyPools.runtimeForProvider(
             manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
         var status = new AtomicInteger(-1);
-        return officialTransport.stream(
+        var upstream = context.transportMode() == ProviderTransportMode.API
+            ? officialTransport.stream(
+                manifest().id(), "chat", semanticCommands.chat(request), account.credential(),
+                proxyPool, proxyAffinityKey(account), runtimeOptions(), context.transportMode())
+            : officialTransport.stream(
                 manifest().id(), "chat", semanticCommands.chat(request),
-                account.credential(), proxyPool, proxyAffinityKey(account))
+                account.credential(), proxyPool, proxyAffinityKey(account));
+        return upstream
             .handle((frame, sink) -> {
                 var type = frame.path("type").asText("");
                 if ("status".equals(type)) {
@@ -136,7 +147,9 @@ public final class GlmProvider implements InferenceProvider {
                     var code = status.get() < 0 ? 502 : status.get();
                     sink.error(new GlmUpstreamException(
                         code, summarize(code, frame.path("data").asText(""))));
-                } else if ("data".equals(type) && status.get() < 400) {
+                } else if ("data".equals(type)
+                    && status.get() >= 200
+                    && status.get() < 300) {
                     sink.next(frame.path("data").asText("").getBytes(StandardCharsets.UTF_8));
                 } else if ("credential_patch".equals(type)) {
                     context.acceptCredentialPatch(frame.path("data"));
@@ -144,9 +157,10 @@ public final class GlmProvider implements InferenceProvider {
             })
             .cast(byte[].class)
             .concatMapIterable(decoder::decode)
-            .concatWith(Flux.defer(() -> status.get() >= 400
+            .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                 ? Flux.error(new GlmUpstreamException(
-                    status.get(), "GLM upstream returned HTTP " + status.get()))
+                    status.get() < 0 ? 502 : status.get(),
+                    "GLM upstream returned HTTP " + status.get()))
                 : Flux.fromIterable(decoder.finish())))
             .takeUntil(event -> event instanceof CanonicalEvent.Completed
                 || event instanceof CanonicalEvent.Failed);
@@ -154,14 +168,22 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
-        return officialTransport.request(
-                manifest().id(),
-                "models",
-                semanticCommands.models(),
-                account.credential(),
-                proxyPool(),
-                proxyAffinityKey(account),
-                Map.of("base_url", properties.getBaseUrl()))
+        return discoverModels(account, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(
+        LeasedProviderAccount account,
+        ProviderTransportMode transportMode
+    ) {
+        var upstream = transportMode == ProviderTransportMode.API
+            ? officialTransport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions(), transportMode)
+            : officialTransport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), runtimeOptions());
+        return upstream
             .flatMap(response -> {
                 if (response.status() < 200 || response.status() >= 300) {
                     return Mono.error(new GlmUpstreamException(
@@ -220,6 +242,17 @@ public final class GlmProvider implements InferenceProvider {
     public ProviderFailure classify(Throwable error) {
         var status = status(error);
         if (status > 0) {
+            var message = message(error).toLowerCase(java.util.Locale.ROOT);
+            var antiBot = status == 403 && (
+                message.contains("captcha")
+                    || message.contains("aliyun")
+                    || message.contains("traceless")
+                    || message.contains("human verification"));
+            if (antiBot) {
+                return new ProviderFailure(
+                    "anti_bot_rejected", message(error), true,
+                    Map.of("status", status));
+            }
             var retryable = status >= 500 || List.of(408, 409, 425, 429).contains(status);
             var type = switch (status) {
                 case 401, 403 -> "credential_rejected";
@@ -252,6 +285,10 @@ public final class GlmProvider implements InferenceProvider {
     private Map<String, Object> proxyPool() {
         return proxyPools.runtimeForProvider(manifest().id(), ProxyTrafficScope.INFERENCE)
             .orElse(Map.of());
+    }
+
+    private Map<String, Object> runtimeOptions() {
+        return Map.of("base_url", properties.getBaseUrl());
     }
 
     private String summarize(int status, String body) {

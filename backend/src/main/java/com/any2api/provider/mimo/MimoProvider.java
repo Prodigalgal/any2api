@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -92,6 +93,11 @@ public final class MimoProvider implements InferenceProvider {
     }
 
     @Override
+    public java.util.Set<ProviderTransportMode> supportedTransportModes() {
+        return java.util.Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
     public Duration accountProbeTimeout() {
         return BROWSER_ACCOUNT_PROBE_TIMEOUT;
     }
@@ -143,14 +149,24 @@ public final class MimoProvider implements InferenceProvider {
 
     @Override
     public Mono<List<DiscoveredModel>> discoverModels(LeasedProviderAccount account) {
+        return discoverModels(account, ProviderTransportMode.RUNTIME);
+    }
+
+    @Override
+    public Mono<List<DiscoveredModel>> discoverModels(
+        LeasedProviderAccount account,
+        ProviderTransportMode transportMode
+    ) {
         MimoCredential.from(account);
-        return officialTransport.request(
-                manifest().id(),
-                "models",
-                semanticCommands.models(),
-                account.credential(),
-                proxyPool(),
-                proxyAffinityKey(account))
+        var upstream = transportMode == ProviderTransportMode.API
+            ? officialTransport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account), Map.of("base_url", properties.getBaseUrl()),
+                transportMode)
+            : officialTransport.request(
+                manifest().id(), "models", semanticCommands.models(), account.credential(),
+                proxyPool(), proxyAffinityKey(account));
+        return upstream
             .flatMap(response -> responseJson(response, null))
             .map(this::parseModels);
     }
@@ -190,13 +206,15 @@ public final class MimoProvider implements InferenceProvider {
                 prepared.toolRequired(),
                 prepared.parallelToolCalls());
             var status = new java.util.concurrent.atomic.AtomicInteger(-1);
-            return officialTransport.stream(
-                    manifest().id(),
-                    "chat",
-                    semanticCommand,
-                    rawCredential,
-                    proxyPool,
-                    affinityKey)
+            var upstream = context.transportMode() == ProviderTransportMode.API
+                ? officialTransport.stream(
+                    manifest().id(), "chat", semanticCommand, rawCredential, proxyPool,
+                    affinityKey, Map.of("base_url", properties.getBaseUrl()),
+                    context.transportMode())
+                : officialTransport.stream(
+                    manifest().id(), "chat", semanticCommand, rawCredential, proxyPool,
+                    affinityKey);
+            return upstream
                 .handle((frame, sink) -> {
                     var type = frame.path("type").asText("");
                     if ("status".equals(type)) {
@@ -206,7 +224,9 @@ public final class MimoProvider implements InferenceProvider {
                         sink.error(new MimoUpstreamException(
                             code,
                             summarize(code, frame.path("data").asText(""))));
-                    } else if ("data".equals(type) && status.get() < 400) {
+                    } else if ("data".equals(type)
+                        && status.get() >= 200
+                        && status.get() < 300) {
                         sink.next(frame.path("data").asText(""));
                     } else if ("credential_patch".equals(type)) {
                         context.acceptCredentialPatch(frame.path("data"));
@@ -215,9 +235,9 @@ public final class MimoProvider implements InferenceProvider {
                 .cast(String.class)
                 .takeUntil(data -> "[DONE]".equals(data.trim()))
                 .concatMapIterable(decoder::decode)
-                .concatWith(Flux.defer(() -> status.get() >= 400
+                .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                     ? Flux.error(new MimoUpstreamException(
-                        status.get(),
+                        status.get() < 0 ? 502 : status.get(),
                         "MiMo upstream returned HTTP " + status.get()))
                     : Flux.fromIterable(decoder.finish())));
         });

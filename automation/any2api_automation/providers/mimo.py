@@ -23,7 +23,12 @@ from ..lifecycle.browser import (
 )
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
-from .base import AutomationProvider, AutomationProviderManifest
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from .mimo_browser import MimoOfficialBrowserTransport, default_runtime_plan
 from .mimo_protocol import XiaomiProtocolClient
 from .mimo_settings import settings
@@ -50,8 +55,15 @@ class MimoAutomationProvider(AutomationProvider):
         operations=("register", "reauthenticate", "keepalive"),
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("model_discovery", "chat"),
     )
+
+    def action_bindings(self):
+        from .api_transport import api_action_bindings
+        from .mimo_api_actions import MimoApiActionHandler
+
+        return api_action_bindings(self, MimoApiActionHandler())
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         mail, mailbox, password = await prepare_registration(

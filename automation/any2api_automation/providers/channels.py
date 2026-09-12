@@ -65,7 +65,18 @@ class ApiChannel(ProviderActionChannel):
 def _bind_legacy_operation(
     binding: ActionBinding, request: ProviderActionRequest
 ) -> ProviderActionRequest:
-    if request.operation or not binding.legacy_operation:
+    if request.operation:
+        if (
+            binding.legacy_operation
+            and request.operation != binding.legacy_operation
+            and request.action is not ProviderAction.RAW_REQUEST
+        ):
+            raise ValueError(
+                f"provider action {request.action.value} does not match operation "
+                f"{request.operation}"
+            )
+        return request
+    if not binding.legacy_operation:
         return request
     return replace(request, operation=binding.legacy_operation)
 
@@ -108,6 +119,20 @@ class ActionBindingRegistry:
                 if (CAMOUFOX_BROWSER_RUNTIME, action) not in indexed:
                     raise ValueError(
                         f"inference provider has no Runtime action binding: "
+                        f"provider={provider.manifest.id} action={action.value}"
+                    )
+            api_declared = API_TRANSPORT in provider.manifest.inference_modes
+            for declared_action in provider.manifest.inference_actions:
+                action = ProviderAction.parse(declared_action)
+                api_binding = indexed.get((API_TRANSPORT, action))
+                if api_declared and api_binding is None:
+                    raise ValueError(
+                        f"inference provider has no API action binding: "
+                        f"provider={provider.manifest.id} action={action.value}"
+                    )
+                if not api_declared and api_binding is not None:
+                    raise ValueError(
+                        f"provider exposes an API action without declaring API mode: "
                         f"provider={provider.manifest.id} action={action.value}"
                     )
         return indexed

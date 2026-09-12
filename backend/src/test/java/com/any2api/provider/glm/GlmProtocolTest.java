@@ -146,6 +146,19 @@ class GlmProtocolTest {
     }
 
     @Test
+    void classifiesAliyunCaptchaAsAntiBotFailure() {
+        var decoder = new GlmEventDecoder("r7", mapper);
+        var events = new ArrayList<CanonicalEvent>();
+        events.addAll(decoder.decode(("data: {\"type\":\"chat:completion\",\"data\":{"
+            + "\"error\":{\"code\":\"aliyun_captcha_required\","
+            + "\"message\":\"human verification required\"}}}\n\n")
+            .getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+            && failed.errorType().equals("anti_bot_rejected"));
+    }
+
+    @Test
     void discoversNestedModelsAndSkipsInactiveEntries() {
         var root = mapper.readTree("""
             {"data":{"models":[

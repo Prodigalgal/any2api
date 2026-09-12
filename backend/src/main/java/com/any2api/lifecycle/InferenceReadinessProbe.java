@@ -9,6 +9,8 @@ import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderTransportFallbackPolicy;
+import com.any2api.provider.ProviderTransportModeService;
 import com.any2api.provider.RandomModelRole;
 import java.time.Duration;
 import java.time.Instant;
@@ -31,10 +33,16 @@ final class InferenceReadinessProbe {
 
     private final ProviderRegistry providers;
     private final ObjectMapper mapper;
+    private final ProviderTransportModeService transportModes;
 
-    InferenceReadinessProbe(ProviderRegistry providers, ObjectMapper mapper) {
+    InferenceReadinessProbe(
+        ProviderRegistry providers,
+        ObjectMapper mapper,
+        ProviderTransportModeService transportModes
+    ) {
         this.providers = providers;
         this.mapper = mapper;
+        this.transportModes = transportModes;
     }
 
     Mono<Result> probe(
@@ -65,10 +73,10 @@ final class InferenceReadinessProbe {
             return Mono.error(new IllegalArgumentException("probe timeout must be positive"));
         }
         var provider = providers.require(account.providerId());
+        var transportPlan = transportModes.plan(provider);
         var model = requestedModel == null || requestedModel.isBlank()
             ? probeModel(provider.manifest()) : requestedModel.trim();
         var requestId = "probe-" + UUID.randomUUID();
-        var startedAt = System.nanoTime();
         var message = mapper.createObjectNode()
             .put("role", "user")
             .put("content", "Reply briefly with " + MARKER);
@@ -79,10 +87,36 @@ final class InferenceReadinessProbe {
             requestId, CanonicalRequest.Protocol.CHAT_COMPLETIONS,
             account.providerId(), model, false, List.of(message),
             Map.of(), Map.of(), List.of(), Map.of(), raw);
+        return probeAttempt(provider, account, request, timeout, transportPlan.primary())
+            .flatMap(result -> {
+                if (transportPlan.fallback() == null || result.ready()
+                    || !shouldFallbackToRuntime(result.errorClass())) {
+                    return Mono.just(result);
+                }
+                LOGGER.warn(
+                    "Inference readiness API probe failed provider={}, retrying with Runtime: {}",
+                    account.providerId(), result.errorClass());
+                return probeAttempt(
+                    provider, account, request, timeout, transportPlan.fallback())
+                    .map(fallback -> new Result(
+                        fallback.ready(), fallback.model(), fallback.errorClass(),
+                        fallback.output(), fallback.durationMs(),
+                        mergeCredentialPatches(result.credentialPatch(), fallback.credentialPatch())));
+            });
+    }
+
+    private Mono<Result> probeAttempt(
+        com.any2api.provider.InferenceProvider provider,
+        LeasedProviderAccount account,
+        CanonicalRequest request,
+        Duration timeout,
+        com.any2api.provider.ProviderTransportMode transportMode
+    ) {
+        var startedAt = System.nanoTime();
         var context = new ProviderExecutionContext(
-            requestId, account.accountId(), Long.toString(account.credentialVersion()),
+            request.requestId(), account.accountId(), Long.toString(account.credentialVersion()),
             account.lease().ownerToken(), account.lease().fencingToken(),
-            Instant.now().plus(timeout));
+            Instant.now().plus(timeout), transportMode);
         return Flux.defer(() -> {
                 ProviderRequestValidation.requireSupportedRequest(
                     request, provider.manifest(), provider.protocolContract());
@@ -93,7 +127,7 @@ final class InferenceReadinessProbe {
             .timeout(timeout)
             .collectList()
             .map(events -> result(
-                model, events, elapsedMillis(startedAt), context.credentialPatch()))
+                request.model(), events, elapsedMillis(startedAt), context.credentialPatch()))
             .onErrorResume(error -> {
                 var failure = provider.classify(error);
                 LOGGER.warn(
@@ -101,9 +135,24 @@ final class InferenceReadinessProbe {
                     account.providerId(), error.getClass().getSimpleName(), failure.type(),
                     safeDetail(error));
                 return Mono.just(Result.failed(
-                    model, failure.type(), "", elapsedMillis(startedAt),
+                    request.model(), failure.type(), "", elapsedMillis(startedAt),
                     context.credentialPatch()));
             });
+    }
+
+    private JsonNode mergeCredentialPatches(JsonNode first, JsonNode second) {
+        var merged = mapper.createObjectNode();
+        if (first != null && first.isObject()) {
+            merged.setAll((tools.jackson.databind.node.ObjectNode) first);
+        }
+        if (second != null && second.isObject()) {
+            merged.setAll((tools.jackson.databind.node.ObjectNode) second);
+        }
+        return merged;
+    }
+
+    private static boolean shouldFallbackToRuntime(String failureType) {
+        return ProviderTransportFallbackPolicy.allowsRuntimeFallback(failureType);
     }
 
     private Result result(

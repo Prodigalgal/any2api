@@ -12,7 +12,6 @@ import com.any2api.observability.RequestCorrelation;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Service;
@@ -373,8 +372,6 @@ public class InferenceCoordinator {
     ) {}
 
     private boolean shouldFallbackToRuntime(String failureType) {
-        return Set.of(
-            "provider_transport_error", "provider_upstream_error", "upstream_unavailable",
-            "network_error", "upstream_5xx").contains(failureType);
+        return ProviderTransportFallbackPolicy.allowsRuntimeFallback(failureType);
     }
 }

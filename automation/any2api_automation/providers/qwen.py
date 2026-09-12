@@ -24,7 +24,13 @@ from ..lifecycle.browser import (
     run_browser_flow,
 )
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
-from .base import AutomationProvider, AutomationProviderManifest, validate_semantic_command
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+    validate_semantic_command,
+)
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
 from .qwen_challenge import QwenSignupChallenge, pace
 from .qwen_fingerprint import (
@@ -59,6 +65,7 @@ class QwenAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("model_discovery", "chat"),
     )
 
@@ -173,6 +180,12 @@ class QwenAutomationProvider(AutomationProvider):
         from .qwen_risk import router
 
         return (router,)
+
+    def action_bindings(self):
+        from .api_transport import api_action_bindings
+        from .qwen_api_actions import QwenApiActionHandler
+
+        return api_action_bindings(self, QwenApiActionHandler())
 
     async def close(self) -> None:
         from .qwen_risk import native_transport

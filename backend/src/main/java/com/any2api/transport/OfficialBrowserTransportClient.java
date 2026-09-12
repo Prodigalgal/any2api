@@ -5,6 +5,7 @@ import com.any2api.observability.RequestCorrelation;
 import com.any2api.provider.ProviderAction;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.runtime.ProviderRuntimeRuleService;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -110,8 +111,10 @@ public final class OfficialBrowserTransportClient {
                 .bodyValue(command(
                     operation, semanticCommand, plan, credential, proxyPool, affinityKey,
                     runtimeOptions, transportMode))
-                .retrieve()
-                .bodyToMono(JsonNode.class);
+                .exchangeToMono(response -> response.bodyToMono(String.class)
+                    .defaultIfEmpty("")
+                    .map(body -> decodeActionResponse(
+                        response.statusCode().value(), body)));
     }
 
     public Flux<JsonNode> stream(
@@ -180,8 +183,16 @@ public final class OfficialBrowserTransportClient {
                 .bodyValue(command(
                     operation, semanticCommand, plan, credential, proxyPool, affinityKey,
                     runtimeOptions, transportMode))
-                .retrieve()
-                .bodyToFlux(JsonNode.class);
+                .exchangeToFlux(response -> {
+                    var status = response.statusCode().value();
+                    if (response.statusCode().is2xxSuccessful()) {
+                        return response.bodyToFlux(JsonNode.class);
+                    }
+                    return response.bodyToMono(String.class)
+                        .defaultIfEmpty("")
+                        .flatMapMany(body -> Flux.just(
+                            statusFrame(status), errorFrame(status, body)));
+                });
     }
 
     private Map<String, Object> command(
@@ -275,6 +286,47 @@ public final class OfficialBrowserTransportClient {
             ProviderRuntimeRuleService.CanaryStatus.valueOf(
                 value.path("status").asText("").toUpperCase(java.util.Locale.ROOT)),
             value.path("reason").asText(""));
+    }
+
+    private JsonNode decodeActionResponse(int status, String body) {
+        if (status >= 200 && status < 300) {
+            try {
+                var value = mapper.readTree(body);
+                if (value != null) return value;
+            } catch (RuntimeException ignored) {
+                // Preserve the bounded body so the provider can classify malformed JSON.
+            }
+        }
+        return mapper.createObjectNode()
+            .put("status", status)
+            .put("body", boundedBody(body));
+    }
+
+    private JsonNode statusFrame(int status) {
+        return mapper.createObjectNode()
+            .put("type", "status")
+            .put("status", status);
+    }
+
+    private JsonNode errorFrame(int status, String body) {
+        return mapper.createObjectNode()
+            .put("type", "error")
+            .put("data", summarize(status, body));
+    }
+
+    private String summarize(int status, String body) {
+        var compact = body == null ? "" : body.replaceAll("\\s+", " ").trim();
+        if (compact.length() > 16_384) compact = compact.substring(0, 16_384);
+        return compact.isBlank()
+            ? "automation action returned HTTP " + status
+            : "automation action returned HTTP " + status + ": " + compact;
+    }
+
+    private String boundedBody(String body) {
+        var value = body == null ? "" : body;
+        var bytes = value.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length <= 16_384) return value;
+        return new String(bytes, 0, 16_384, StandardCharsets.UTF_8);
     }
 
     private void headers(HttpHeaders headers) {

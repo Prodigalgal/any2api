@@ -55,4 +55,33 @@ class DeepseekProviderTest {
             "let profile={appVersion:\"2.3.0\",clientPlatform:\"web\"}"))
             .isEqualTo("2.3.0");
     }
+
+    @Test
+    void classifiesWafCaptchaAsRuntimeFallbackCandidate() {
+        var properties = new DeepseekProperties();
+        var provider = new DeepseekProvider(
+            mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper),
+            mock(ProxyPoolService.class), properties, mapper);
+
+        var failure = provider.classify(
+            new DeepseekUpstreamException(403, "x-amzn-waf-action: challenge"));
+
+        assertThat(failure.type()).isEqualTo("anti_bot_rejected");
+        assertThat(failure.retryable()).isTrue();
+    }
+
+    @Test
+    void keepsPlainForbiddenAsCredentialRejection() {
+        var properties = new DeepseekProperties();
+        var provider = new DeepseekProvider(
+            mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper),
+            mock(ProxyPoolService.class), properties, mapper);
+
+        var failure = provider.classify(new DeepseekUpstreamException(403, "forbidden"));
+
+        assertThat(failure.type()).isEqualTo("credential_rejected");
+        assertThat(failure.retryable()).isFalse();
+    }
 }

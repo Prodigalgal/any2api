@@ -192,6 +192,22 @@ class ArenaProtocolTest {
     }
 
     @Test
+    void classifiesDirectApiRecaptchaValidationAsV3AntiBotChallenge() {
+        var provider = new ArenaProvider(
+            new ArenaProperties(),
+            mock(ProxyPoolService.class),
+            mapper,
+            mock(OfficialBrowserTransportClient.class),
+            mock(OfficialBrowserSemanticCommandFactory.class));
+
+        var failure = provider.classify(new ArenaUpstreamException(
+            403, "Arena upstream returned HTTP 403: {\"error\":\"recaptcha validation failed\"}"));
+
+        assertThat(failure.type()).isEqualTo("anti_bot_rejected");
+        assertThat(failure.detail()).containsEntry("challenge", "recaptcha_v3");
+    }
+
+    @Test
     void derivesPerModelMediaContractFromArenaCatalogCapabilities() {
         var provider = new ArenaProvider(
             new ArenaProperties(),

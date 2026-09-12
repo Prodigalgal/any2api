@@ -30,7 +30,12 @@ from ..lifecycle.browser import (
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.proxy import proxy_attempt_payload
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
-from .base import AutomationProvider, AutomationProviderManifest
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from .glm_challenge import GlmAliyunChallenge
 from .glm_runtime import GlmOfficialBrowserTransport
 from .glm_settings import settings
@@ -51,9 +56,16 @@ class GlmAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("model_discovery", "chat"),
         registration_attempt_mode="single_identity",
     )
+
+    def action_bindings(self):
+        from .api_transport import api_action_bindings
+        from .glm_api_actions import GlmApiActionHandler
+
+        return api_action_bindings(self, GlmApiActionHandler())
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace = RegistrationTrace(self.manifest.id)

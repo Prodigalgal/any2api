@@ -167,6 +167,15 @@ the API channel only forwards an already provider-issued `captcha_verify_param` 
 supplies one. Broad scheduled GLM model probes are disabled because they cannot provide that
 provider verification context; explicit readiness probes and real requests remain available.
 
+All API providers use the same conservative failure boundary for known provider verification
+signals. `anti_bot_rejected` is kept distinct from `credential_rejected`, puts the affected
+account/model into a short cooldown, and lets `AUTO` consider the provider's Runtime channel
+when declared. A provider-specific mapper must still submit only its observed native path,
+headers, body fields, signature inputs, and upload protocol; no generic OpenAI field or caller
+supplied raw header is copied to the upstream. A verification ticket, risk header, PoW result,
+or signed upload authorization is accepted only when it was issued by that provider. The system
+does not generate, solve, or bypass a provider anti-bot challenge in the API channel.
+
 The table describes adapter behavior, not an upstream compatibility promise. A field is only
 accepted when the selected provider contract has a deterministic translation or an explicitly
 documented emulation; otherwise Java rejects it before account leasing. The shared Action

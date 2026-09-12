@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
@@ -241,16 +242,11 @@ public final class DeepseekProvider implements InferenceProvider {
         if (error instanceof DeepseekUpstreamException upstream) {
             var message = upstream.getMessage() == null
                 ? "" : upstream.getMessage().toLowerCase(java.util.Locale.ROOT);
-            var antiBot = upstream.status() == 403 && (
-                message.contains("hcaptcha")
-                    || message.contains("recaptcha")
-                    || message.contains("captcha")
-                    || message.contains("x-amzn-waf")
-                    || message.contains("waf challenge"));
+            var antiBot = ProviderFailureSignals.isAntiBot(upstream.status(), message);
             if (antiBot) {
                 return new ProviderFailure(
                     "anti_bot_rejected", upstream.getMessage(), true,
-                    Map.of("status", upstream.status()));
+                    Map.of("status", upstream.status(), "challenge", "provider_verification"));
             }
             var retryable = upstream.status() >= 500
                 || List.of(408, 409, 425, 429).contains(upstream.status());

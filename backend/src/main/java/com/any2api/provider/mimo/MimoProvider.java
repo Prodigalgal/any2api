@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
@@ -278,6 +279,13 @@ public final class MimoProvider implements InferenceProvider {
             if (isObjectStorageSignatureFailure(upstream)) {
                 return new ProviderFailure("provider_upstream_error", upstream.getMessage(),
                     true, Map.of("status", upstream.status(), "stage", "object_upload"));
+            }
+            var antiBot = ProviderFailureSignals.isAntiBot(
+                upstream.status(), upstream.getMessage());
+            if (antiBot) {
+                return new ProviderFailure(
+                    "anti_bot_rejected", upstream.getMessage(), true,
+                    Map.of("status", upstream.status(), "challenge", "provider_verification"));
             }
             var retryable = upstream.status() >= 500
                 || List.of(408, 409, 425, 429).contains(upstream.status());

@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
@@ -274,12 +275,15 @@ public final class ArenaProvider implements InferenceProvider {
             var promptChallenge = status == 429 && message.contains("prompt failed");
             var v2Required = message.contains("recaptcha_v2_required");
             var v3Rejected = status == 403 && message.contains("recaptcha validation failed");
-            if (promptChallenge || v2Required || v3Rejected) {
+            if (promptChallenge || v2Required || v3Rejected
+                || ProviderFailureSignals.isAntiBot(status, message)) {
+                var challenge = v3Rejected ? "recaptcha_v3"
+                    : promptChallenge || v2Required ? "recaptcha_v2" : "provider_verification";
                 return new ProviderFailure(
                     "anti_bot_rejected", upstream.getMessage(), false,
                     Map.of(
                         "status", status,
-                        "challenge", v3Rejected ? "recaptcha_v3" : "recaptcha_v2"));
+                        "challenge", challenge));
             }
             var retryable = status >= 500 || Set.of(408, 409, 425, 429).contains(status);
             var type = switch (status) {

@@ -9,6 +9,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
@@ -224,6 +225,13 @@ public final class MinmaxProvider implements InferenceProvider {
     @Override
     public ProviderFailure classify(Throwable error) {
         if (error instanceof MinmaxUpstreamException upstream) {
+            var antiBot = ProviderFailureSignals.isAntiBot(
+                upstream.status(), upstream.getMessage());
+            if (antiBot) {
+                return new ProviderFailure(
+                    "anti_bot_rejected", upstream.getMessage(), true,
+                    Map.of("status", upstream.status(), "challenge", "provider_verification"));
+            }
             var retryable = upstream.status() >= 500
                 || List.of(408, 409, 425, 429).contains(upstream.status());
             var type = switch (upstream.status()) {

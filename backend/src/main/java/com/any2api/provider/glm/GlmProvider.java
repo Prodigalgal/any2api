@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
@@ -253,12 +254,10 @@ public final class GlmProvider implements InferenceProvider {
         var status = status(error);
         if (status > 0) {
             var message = message(error).toLowerCase(java.util.Locale.ROOT);
-            var antiBot = message.contains("anti_bot_rejected")
-                || message.contains("anti-bot")
+            var antiBot = ProviderFailureSignals.isAntiBot(status, message)
                 || message.contains("recaptcha validation failed")
                 || status >= 400 && status < 500 && (
-                    message.contains("captcha")
-                        || message.contains("aliyun")
+                    message.contains("aliyun")
                         || message.contains("traceless")
                         || message.contains("human verification"));
             if (antiBot) {

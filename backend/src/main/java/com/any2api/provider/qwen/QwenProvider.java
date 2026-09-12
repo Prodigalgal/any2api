@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
+import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
@@ -289,9 +290,8 @@ public final class QwenProvider implements InferenceProvider {
     @Override
     public ProviderFailure classify(Throwable error) {
         if (error instanceof QwenUpstreamException upstream) {
-            var antiBot = upstream.status() == 403 && (
-                upstream.getMessage().contains("anti-bot challenge")
-                    || upstream.getMessage().contains("FAIL_SYS_USER_VALIDATE"));
+            var antiBot = ProviderFailureSignals.isAntiBot(
+                upstream.status(), upstream.getMessage());
             var retryable = antiBot || upstream.status() >= 500
                 || List.of(408, 409, 425, 429).contains(upstream.status());
             var type = antiBot ? "anti_bot_rejected" : switch (upstream.status()) {
@@ -300,7 +300,9 @@ public final class QwenProvider implements InferenceProvider {
                 default -> "provider_upstream_error";
             };
             return new ProviderFailure(type, upstream.getMessage(), retryable,
-                Map.of("status", upstream.status()));
+                antiBot
+                    ? Map.of("status", upstream.status(), "challenge", "provider_verification")
+                    : Map.of("status", upstream.status()));
         }
         return new ProviderFailure("provider_transport_error",
             error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),

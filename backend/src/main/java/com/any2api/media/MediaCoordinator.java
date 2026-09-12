@@ -4,6 +4,7 @@ import com.any2api.account.AccountSelectionService;
 import java.time.Duration;
 import com.any2api.provider.ProviderFailureDisposition;
 import com.any2api.provider.ProviderRegistry;
+import com.any2api.provider.ProviderTransportMode;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import com.any2api.observability.InferenceTelemetryService;
@@ -41,7 +42,8 @@ public final class MediaCoordinator {
         var handler = handlers.require(request);
         var observed = telemetry.start(new InferenceTelemetryService.InferenceTrace(
             request.requestId(), request.providerId(), request.model(),
-            request.operation().name(), apiKeyId, "INFERENCE", request.rawRequest()), 1);
+            request.operation().name(), apiKeyId, "INFERENCE", request.rawRequest(),
+            ProviderTransportMode.RUNTIME.externalName()), 1);
         return Mono.usingWhen(
             accounts.acquire(request.providerId(), request.model(), account ->
                 handler.supportsAccount(request, account)),

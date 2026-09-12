@@ -48,8 +48,9 @@ public final class InferenceTelemetryService {
 
     public Started start(InferenceTrace request, int attempt, long queueMs) {
         log.info(
-            "inference_started correlation_id={} provider={} model={} protocol={} attempt={}",
-            request.requestId(), request.providerId(), request.model(), request.protocol(), attempt);
+            "inference_started correlation_id={} provider={} model={} protocol={} channel={} attempt={}",
+            request.requestId(), request.providerId(), request.model(), request.protocol(),
+            request.channel(), attempt);
         return new Started(request, attempt, Instant.now(), queueMs);
     }
 
@@ -214,6 +215,7 @@ public final class InferenceTelemetryService {
                 .tag("provider", request.providerId())
                 .tag("model", request.model())
                 .tag("protocol", request.protocol())
+                .tag("channel", request.channel())
                 .tag("outcome", snapshot.success() ? "success" : "failure")
                 .register(meters)
                 .record(Duration.ofMillis(snapshot.durationMs()));
@@ -223,9 +225,9 @@ public final class InferenceTelemetryService {
             recordStage("generation", snapshot.generationMs());
             log.atLevel(snapshot.success() ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN)
                 .log(
-                    "inference_finished correlation_id={} provider={} model={} protocol={} attempt={} account_id={} status={} error_code={} duration_ms={} queue_ms={} account_acquire_ms={} ttfb_ms={} generation_ms={} input_tokens={} output_tokens={} cache_read_tokens={} usage_source={}",
+                    "inference_finished correlation_id={} provider={} model={} protocol={} channel={} attempt={} account_id={} status={} error_code={} duration_ms={} queue_ms={} account_acquire_ms={} ttfb_ms={} generation_ms={} input_tokens={} output_tokens={} cache_read_tokens={} usage_source={}",
                     request.requestId(), request.providerId(), request.model(),
-                    request.protocol(), attempt, snapshot.accountId(),
+                    request.protocol(), request.channel(), attempt, snapshot.accountId(),
                     snapshot.success() ? "SUCCEEDED" : "FAILED",
                     snapshot.errorCode() == null ? "" : snapshot.errorCode(),
                     snapshot.durationMs(), snapshot.queueMs(), snapshot.accountAcquireMs(),
@@ -266,7 +268,8 @@ public final class InferenceTelemetryService {
         String protocol,
         UUID apiKeyId,
         String requestKind,
-        JsonNode input
+        JsonNode input,
+        String channel
     ) {
         public InferenceTrace(
             String requestId,
@@ -275,7 +278,7 @@ public final class InferenceTelemetryService {
             String protocol,
             UUID apiKeyId
         ) {
-            this(requestId, providerId, model, protocol, apiKeyId, "INFERENCE", null);
+            this(requestId, providerId, model, protocol, apiKeyId, "INFERENCE", null, "unknown");
         }
 
         public InferenceTrace(
@@ -286,7 +289,19 @@ public final class InferenceTelemetryService {
             UUID apiKeyId,
             String requestKind
         ) {
-            this(requestId, providerId, model, protocol, apiKeyId, requestKind, null);
+            this(requestId, providerId, model, protocol, apiKeyId, requestKind, null, "unknown");
+        }
+
+        public InferenceTrace(
+            String requestId,
+            String providerId,
+            String model,
+            String protocol,
+            UUID apiKeyId,
+            String requestKind,
+            JsonNode input
+        ) {
+            this(requestId, providerId, model, protocol, apiKeyId, requestKind, input, "unknown");
         }
 
         public InferenceTrace {
@@ -304,6 +319,7 @@ public final class InferenceTelemetryService {
             }
             requestKind = requestKind == null || requestKind.isBlank()
                 ? "INFERENCE" : requestKind;
+            channel = channel == null || channel.isBlank() ? "unknown" : channel;
         }
     }
 

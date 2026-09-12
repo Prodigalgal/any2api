@@ -185,7 +185,8 @@ public class InferenceCoordinator {
         var attemptEvents = Flux.defer(() -> {
             var observed = telemetry.start(new InferenceTelemetryService.InferenceTrace(
                 request.requestId(), request.providerId(), request.model(),
-                request.protocol().name(), apiKeyId, requestKind, request.rawRequest()),
+                request.protocol().name(), apiKeyId, requestKind, request.rawRequest(),
+                transportMode.externalName()),
                 attempt, queueMs);
             return usage.normalize(request,
                     executeWithLease(

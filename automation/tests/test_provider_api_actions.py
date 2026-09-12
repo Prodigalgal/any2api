@@ -543,6 +543,8 @@ async def test_longcat_api_uploads_an_inline_image_before_completion(monkeypatch
 async def test_mimo_api_uploads_and_parses_an_inline_image(monkeypatch) -> None:
     import any2api_automation.providers.mimo_api_actions as module
 
+    upload_headers = []
+
     def fake_request(base_url, method, path, **kwargs):
         del base_url, method, kwargs
         if "genUploadInfo" in path:
@@ -566,7 +568,10 @@ async def test_mimo_api_uploads_and_parses_an_inline_image(monkeypatch) -> None:
     monkeypatch.setattr(
         module,
         "api_provider_put_sync",
-        lambda url, content, **kwargs: {"status": 200, "body": ""},
+        lambda url, content, **kwargs: (
+            upload_headers.append(dict(kwargs["headers"]))
+            or {"status": 200, "body": ""}
+        ),
     )
     command = _command(
         "mimo-v2.5",
@@ -590,6 +595,7 @@ async def test_mimo_api_uploads_and_parses_an_inline_image(monkeypatch) -> None:
     )
 
     assert json.loads(body)["multiMedias"][0]["url"] == "media-1"
+    assert upload_headers == [{"Content-Type": "image/png"}]
 
 
 @pytest.mark.asyncio

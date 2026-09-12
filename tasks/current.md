@@ -14,7 +14,7 @@
 - `0.17.1` 在 `0.17.0` API Channel 基础上补齐 GLM `anti_bot_rejected` 的 HTTP/SSE 分类、厂商签发 ticket 参数边界，并关闭无验证上下文的广泛定时模型探针；在完成 K8S 每家 API 非流式/SSE 真实样本前，不把任何 API provider 标记为运行态 `READY`。
 - `0.17.2` 将已知 provider verification 信号统一收敛到 `ProviderFailureSignals`；DeepSeek、LongCat、MiMo、MinMax、Qwen、Arena、GLM 的 API 风控响应不再误判为凭证失效，统一进入 anti-bot 冷却/`AUTO` 回退边界。各 API handler 继续只提交 provider-native 参数，未引入验证码生成或绕过。
 - 2026-09-12 E2E API 真实验收已取得 DeepSeek、LongCat、MiMo 的文本非流式/SSE HTTP 200；LongCat、MiMo 的图片非流式 HTTP 200。LongCat PDF 的上传、会话和 completion 返回 200，但当前测试文档未被模型读取，不能算 API 文档通过；GLM 非流式真实返回 `anti_bot_rejected`，SSE 随后因冷却返回 `account_unavailable`。Arena、MiniMax、Qwen 因没有可用账号暂不验收，详见 [API Channel K8S 真实验收记录](../docs/reports/REAL_API_CHANNEL_ACCEPTANCE_2026-09-12.md)。
-- `0.17.3` 将最终 `ProviderTransportMode` 写入 inference start/finish 日志与 `any2api.inference.duration` 指标的 `channel` 标签；API/Runtime 的真实验收不再只依赖数据库模式快照判读。兼容旧的 `InferenceTrace` 构造方式，媒体动作明确标为 Runtime。
+- `0.17.3` 将最终 `ProviderTransportMode` 写入 inference start/finish 日志与 `any2api.inference.duration` 指标的 `channel` 标签；API/Runtime 的真实验收不再只依赖数据库模式快照判读。兼容旧的 `InferenceTrace` 构造方式，媒体动作明确标为 Runtime。GitHub Actions `34689733061` 已通过，`70926ef` 已滚动到 E2E；新版本 MiMo API smoke HTTP 200 且日志确认 `channel=api`。滚动初始阶段仅出现一次 PostgreSQL DNS 瞬态启动失败，恢复后 `healthz/readyz` 均 200，无 OOM；生产未更新。
 - 验证约束：本机不执行编译、构建或测试构建；Backend、Automation、WEB 的编译与测试统一由 `.github/workflows/build-and-deploy.yml` 的 GitHub Actions 执行。
 
 ## 上一版本：Provider 边界、Arena Direct 与生命周期稳定性（0.16.5）

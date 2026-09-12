@@ -1,6 +1,6 @@
 # 当前任务：Grok 之外七家 Provider 的 Runtime/API 双通道闭环
 
-## 本轮推进：全厂商 API Channel（0.17.0）
+## 本轮推进：全厂商 API Channel（0.17.1）
 
 - 业务范围为 Arena、DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen；Grok 三通道继续排除。
 - Java `ProviderTransportModeService` 统一选择 `API`、`RUNTIME` 或 `AUTO`；`InferenceCoordinator`、模型发现和就绪探针均把最终模式传入 Provider。
@@ -11,7 +11,7 @@
 - 逐厂商收口了 API 的状态和凭证边界：七家适配器的多步骤前置请求在解析前严格要求
   2xx；Automation 通过 `ApiActionError` 保留上游 4xx/5xx 及有界脱敏摘要，Java SSE 对
   3xx 和无状态尾流均失败关闭；GLM 签名 query 与实际 `User-Agent` 共用同一默认配置。
-- `0.17.0` 已完成代码级 binding、映射和本地夹具覆盖；在完成 K8S 每家 API 非流式/SSE 真实样本前，不把任何 API provider 标记为运行态 `READY`。
+- `0.17.1` 在 `0.17.0` API Channel 基础上补齐 GLM `anti_bot_rejected` 的 HTTP/SSE 分类、厂商签发 ticket 参数边界，并关闭无验证上下文的广泛定时模型探针；在完成 K8S 每家 API 非流式/SSE 真实样本前，不把任何 API provider 标记为运行态 `READY`。
 - 验证约束：本机不执行编译、构建或测试构建；Backend、Automation、WEB 的编译与测试统一由 `.github/workflows/build-and-deploy.yml` 的 GitHub Actions 执行。
 
 ## 上一版本：Provider 边界、Arena Direct 与生命周期稳定性（0.16.5）

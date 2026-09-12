@@ -146,4 +146,22 @@ class MimoProtocolTest {
             .isInstanceOf(OpenAiRequestException.class)
             .hasMessageContaining("below its 65536 token output ceiling");
     }
+
+    @Test
+    void doesNotQuarantineAnAccountForPresignedObjectStorageSignatureFailure() {
+        var provider = new MimoProvider(
+            mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper),
+            mock(ProxyPoolService.class),
+            new MimoProperties(), mock(MimoRequestMapper.class), mapper);
+
+        var failure = provider.classify(new MimoUpstreamException(
+            403,
+            "MiMo upstream returned HTTP 403: MiMo object upload returned HTTP 403: "
+                + "Galaxy FDS Error: Signature Does Not Match"));
+
+        assertThat(failure.type()).isEqualTo("provider_upstream_error");
+        assertThat(failure.retryable()).isTrue();
+        assertThat(failure.detail()).containsEntry("stage", "object_upload");
+    }
 }

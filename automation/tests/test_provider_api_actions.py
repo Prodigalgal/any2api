@@ -594,7 +594,7 @@ async def test_mimo_api_uploads_and_parses_an_inline_image(monkeypatch) -> None:
     )
 
     assert json.loads(body)["multiMedias"][0]["url"] == "media-1"
-    assert upload_headers == [{"Content-Type": "image/png"}]
+    assert upload_headers == [{"Content-Type": "application/octet-stream"}]
 
 
 @pytest.mark.asyncio

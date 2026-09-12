@@ -275,6 +275,10 @@ public final class MimoProvider implements InferenceProvider {
     @Override
     public ProviderFailure classify(Throwable error) {
         if (error instanceof MimoUpstreamException upstream) {
+            if (isObjectStorageSignatureFailure(upstream)) {
+                return new ProviderFailure("provider_upstream_error", upstream.getMessage(),
+                    true, Map.of("status", upstream.status(), "stage", "object_upload"));
+            }
             var retryable = upstream.status() >= 500
                 || List.of(408, 409, 425, 429).contains(upstream.status());
             var type = switch (upstream.status()) {
@@ -288,6 +292,15 @@ public final class MimoProvider implements InferenceProvider {
         return new ProviderFailure("provider_transport_error",
             error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
             true, Map.of());
+    }
+
+    private boolean isObjectStorageSignatureFailure(MimoUpstreamException error) {
+        var message = error.getMessage();
+        if (message == null) return false;
+        var normalized = message.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("object upload")
+            && (normalized.contains("signature does not match")
+                || normalized.contains("galaxy fds error"));
     }
 
     private String summarize(int status, String body) {

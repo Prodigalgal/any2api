@@ -152,7 +152,7 @@ async def _upload_media(
     if sources and not phase:
         raise ValueError("MiMo media upload requires xiaomichatbot_ph")
     for source in sources:
-        mime_type, content = decode_inline_data_url(
+        _mime_type, content = decode_inline_data_url(
             source["dataUrl"],
             "MiMo image",
             max_bytes=_MAX_UPLOAD_BYTES,
@@ -181,11 +181,13 @@ async def _upload_media(
             raise RuntimeError("MiMo media upload information was rejected")
         _require_https(upload_url, "MiMo upload URL")
         _require_https(resource_url, "MiMo resource URL")
+        # The official page explicitly sets application/octet-stream on fetch. The Blob
+        # MIME type does not replace that header, and the pre-signed URL covers this value.
         uploaded_response = await asyncio.to_thread(
             api_provider_put_sync,
             upload_url,
             content,
-            headers={"Content-Type": mime_type},
+            headers={"Content-Type": "application/octet-stream"},
             proxy_url=proxy_url,
             timeout_seconds=180,
         )

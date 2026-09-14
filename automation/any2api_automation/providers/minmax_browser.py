@@ -217,6 +217,8 @@ _UPLOAD_MEDIA = r"""async input => {
   const objectKeys = [];
   const policyBuckets = [];
   const callbackObjectKeys = [];
+  const policyFileIds = [];
+  const policyOssPaths = [];
   const policyBodies = [];
   const rememberPolicyCallback = body => {
     let payload = body;
@@ -241,8 +243,11 @@ _UPLOAD_MEDIA = r"""async input => {
     if (!payload || typeof payload !== 'object') return;
     policyBodies.push({kind: 'callback_response', payload});
     const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
-    const objectKey = data.ossPath || data.oss_path || data.objectKey || data.object_key || '';
-    if (String(objectKey).trim()) callbackObjectKeys.push(String(objectKey).trim());
+    const fileID = data.fileID || data.file_id || data.fileId || '';
+    const ossPath = data.ossPath || data.oss_path || data.objectKey || data.object_key || '';
+    if (String(fileID).trim()) policyFileIds.push(String(fileID).trim());
+    if (String(ossPath).trim()) policyOssPaths.push(String(ossPath).trim());
+    if (String(ossPath).trim()) callbackObjectKeys.push(String(ossPath).trim());
   };
   const originalFetch = window.fetch;
   const xhrPrototype = window.XMLHttpRequest?.prototype;
@@ -326,6 +331,8 @@ _UPLOAD_MEDIA = r"""async input => {
       return objectKey;
     };
     const policyBucket = policyBuckets.shift() || '';
+    const policyFileId = policyFileIds.shift() || '';
+    const policyOssPath = policyOssPaths.shift() || '';
     const rawUrlObjectKey = objectKeyFromValue(cdnUrl);
     const inferredBucket = policyBucket || rawUrlObjectKey.split('/', 1)[0] || '';
     const callbackObjectKey = objectKeyFromValue(
@@ -333,37 +340,38 @@ _UPLOAD_MEDIA = r"""async input => {
     );
     const policyObjectKey = objectKeyFromValue(objectKeys.shift() || '', inferredBucket);
     const urlObjectKey = objectKeyFromValue(cdnUrl, inferredBucket);
-    // Ownership is registered by the policy_callback request (dir/fileName),
-    // not the later ossPath echo. Prefer that key for message attachments.
-    const objectKey = explicitObjectKey || policyObjectKey || callbackObjectKey || urlObjectKey;
-    const objectKeySource = explicitObjectKey ? 'uploader'
+    // policy_callback returns the backend-owned fileID; that is the ownership key.
+    const objectKey = policyFileId || explicitObjectKey || policyObjectKey
+      || callbackObjectKey || urlObjectKey;
+    const objectKeySource = policyFileId ? 'policy_file_id'
+      : explicitObjectKey ? 'uploader'
       : policyObjectKey ? 'policy_callback'
       : callbackObjectKey ? 'policy_response'
       : urlObjectKey ? 'cdn_path' : '';
-    if (!uploadId || !cdnUrl) {
+    const ownedUploadId = policyFileId || uploadId;
+    const ownedUrl = policyOssPath || cdnUrl;
+    if (!ownedUploadId || !ownedUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }
     output.push({
       type: 'image',
-      file_key: uploadId,
+      file_key: ownedUploadId,
       file_path: filename,
       file_name: filename,
       mime_type: contentType,
       file_size: bytes.length,
-      preview_url: cdnUrl,
-      cdn_url: cdnUrl,
+      preview_url: ownedUrl,
+      cdn_url: ownedUrl,
       object_key: objectKey,
       object_key_source: objectKeySource,
       object_key_bucket: inferredBucket,
       object_key_bucket_removed: Boolean(
         inferredBucket && rawUrlObjectKey.startsWith(`${inferredBucket}/`)
       ),
-      data_url: cdnUrl,
+      data_url: ownedUrl,
       uploader_keys: Object.keys(uploaded).slice(0, 30),
-      uploader_object_key: String(
-        uploaded.objectKey || uploaded.object_key || uploaded.objectName || uploaded.object_name || ''
-      ).slice(0, 120),
-      uploader_oss_path: String(uploaded.ossPath || uploaded.oss_path || '').slice(0, 120),
+      policy_file_id: policyFileId,
+      policy_oss_path: policyOssPath.slice(0, 160),
       policy_callback_keys: String(policyObjectKey || '').slice(0, 160),
       policy_response_keys: String(callbackObjectKey || '').slice(0, 160),
       policy_bodies: JSON.stringify(policyBodies).slice(0, 1200),
@@ -496,22 +504,15 @@ class MinmaxOfficialBrowserTransport:
                 object_key = str(item.get("object_key") or "").strip()
                 logger.info(
                     "minmax_official_media_upload_result upload_id_present=%s "
-                    "object_key_present=%s object_key_source=%s object_key_length=%s "
-                    "object_key_bucket=%s object_key_bucket_removed=%s "
-                    "cdn_host=%s cdn_path=%s uploader_keys=%s "
-                    "policy_callback_keys=%s policy_response_keys=%s policy_bodies=%s",
+                    "object_key_present=%s object_key_source=%s object_key=%s "
+                    "policy_file_id=%s cdn_host=%s cdn_path=%s",
                     bool(str(item.get("file_key") or "").strip()),
                     bool(object_key),
                     str(item.get("object_key_source") or "unknown"),
-                    len(object_key),
-                    str(item.get("object_key_bucket") or ""),
-                    bool(item.get("object_key_bucket_removed")),
+                    object_key[:80],
+                    str(item.get("policy_file_id") or ""),
                     parsed_url.hostname or "",
-                    parsed_url.path[:240],
-                    ",".join(item.get("uploader_keys") or []) or "none",
-                    str(item.get("policy_callback_keys") or "")[:120],
-                    str(item.get("policy_response_keys") or "")[:120],
-                    str(item.get("policy_bodies") or "")[:800],
+                    parsed_url.path[:200],
                 )
             return list(result)
 

@@ -679,7 +679,20 @@ class QwenNativeBrowserTransport:
                         str(error)[:300],
                     )
                     if attempt == 0:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.6)
+                        message = str(error)
+                        if "Execution context" in message or "navigation" in message.lower():
+                            base_url = settings().qwen_base_url.rstrip("/")
+                            target = base_url + request.referer_path
+                            try:
+                                await session.page.goto(
+                                    target, wait_until="domcontentloaded", timeout=60_000
+                                )
+                            except Exception as goto_error:  # noqa: BLE001
+                                logger.warning(
+                                    "qwen_media_upload_reload_failed error=%s",
+                                    str(goto_error)[:200],
+                                )
                         await self._prepare_authenticated_surface(session, request)
                         continue
                     raise RuntimeError(f"Qwen media upload failed: {str(error)[:200]}") from error

@@ -512,9 +512,7 @@ def _decode_json_payload(raw: str, label: str) -> Any:
                 return json.loads(candidate)
             except json.JSONDecodeError:
                 pass
-    raise RuntimeError(
-        f"MinMax {label} returned invalid JSON body={_body_snippet(text)!r}"
-    )
+    raise RuntimeError(f"MinMax {label} returned invalid JSON body={_body_snippet(text)!r}")
 
 
 def _select_agent(response: dict[str, Any], role: str) -> str:

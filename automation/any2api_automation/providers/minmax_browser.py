@@ -330,17 +330,12 @@ _UPLOAD_MEDIA = r"""async input => {
     );
     const policyObjectKey = objectKeyFromValue(objectKeys.shift() || '', inferredBucket);
     const urlObjectKey = objectKeyFromValue(cdnUrl, inferredBucket);
-    const objectKey = explicitObjectKey || callbackObjectKey || policyObjectKey || urlObjectKey;
-    // MiniMax ownership checks expect the bucket-prefixed object key when the
-    // policy callback only returns the moss/ path.
-    const ownedObjectKey = (() => {
-      if (!objectKey || !inferredBucket) return objectKey;
-      if (objectKey.startsWith(`${inferredBucket}/`)) return objectKey;
-      return `${inferredBucket}/${objectKey}`;
-    })();
+    // Ownership is registered by the policy_callback request (dir/fileName),
+    // not the later ossPath echo. Prefer that key for message attachments.
+    const objectKey = explicitObjectKey || policyObjectKey || callbackObjectKey || urlObjectKey;
     const objectKeySource = explicitObjectKey ? 'uploader'
-      : callbackObjectKey ? 'policy_response'
       : policyObjectKey ? 'policy_callback'
+      : callbackObjectKey ? 'policy_response'
       : urlObjectKey ? 'cdn_path' : '';
     if (!uploadId || !cdnUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
@@ -354,7 +349,7 @@ _UPLOAD_MEDIA = r"""async input => {
       file_size: bytes.length,
       preview_url: cdnUrl,
       cdn_url: cdnUrl,
-      object_key: ownedObjectKey,
+      object_key: objectKey,
       object_key_source: objectKeySource,
       object_key_bucket: inferredBucket,
       object_key_bucket_removed: Boolean(

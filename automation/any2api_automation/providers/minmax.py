@@ -483,38 +483,65 @@ def _boolean_option(value: Any, fallback: bool) -> bool:
     return value if isinstance(value, bool) else fallback
 
 
-def _body_snippet(raw: str, limit: int = 160) -> str:
-    return " ".join(str(raw or "").split())[:limit]
+def _body_snippet(raw: Any, limit: int = 200) -> str:
+    text = raw if isinstance(raw, str) else repr(raw)
+    return " ".join(str(text or "").split())[:limit]
 
 
-def _decode_json_payload(raw: str, label: str) -> Any:
+def _decode_json_payload(raw: Any, label: str) -> Any:
+    if isinstance(raw, (dict, list)):
+        return raw
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw).decode("utf-8", errors="replace")
     text = str(raw or "").strip().lstrip("﻿")
+    # Common anti-XSSI / JSON-hijacking prefixes.
+    for prefix in (")]}'", ")]}'\n", "while(1);", "for(;;);"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :].lstrip()
+            break
     if not text:
         raise RuntimeError(f"MinMax {label} returned an empty body")
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
-        pass
-    start = min(
-        (index for index in (text.find("{"), text.find("[")) if index >= 0),
-        default=-1,
-    )
-    if start > 0:
-        try:
-            return json.loads(text[start:])
-        except json.JSONDecodeError:
-            pass
-    if text.startswith("```"):
+        parsed = None
+    if parsed is None:
+        start = min(
+            (index for index in (text.find("{"), text.find("[")) if index >= 0),
+            default=-1,
+        )
+        if start > 0:
+            try:
+                parsed = json.loads(text[start:])
+            except json.JSONDecodeError:
+                parsed = None
+    if parsed is None and text.startswith("```"):
         lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
         candidate = "\n".join(lines).strip()
         if candidate:
             try:
-                return json.loads(candidate)
+                parsed = json.loads(candidate)
             except json.JSONDecodeError:
-                pass
-    raise RuntimeError(
-        f"MinMax {label} returned invalid JSON body={_body_snippet(text)!r}"
-    )
+                parsed = None
+    if parsed is None and text.startswith('"') and text.endswith('"'):
+        try:
+            inner = json.loads(text)
+            if isinstance(inner, str):
+                return _decode_json_payload(inner, label)
+        except json.JSONDecodeError:
+            pass
+    if parsed is None:
+        raise RuntimeError(
+            f"MinMax {label} returned invalid JSON body={_body_snippet(text)!r}"
+        )
+    if isinstance(parsed, str):
+        stripped = parsed.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                return parsed
+    return parsed
 
 
 def _select_agent(response: dict[str, Any], role: str) -> str:
@@ -522,11 +549,19 @@ def _select_agent(response: dict[str, Any], role: str) -> str:
     if status < 200 or status >= 300:
         raise RuntimeError(f"MinMax agent list returned HTTP {status}")
     body = _decode_json_payload(response.get("body"), "agent list")
-    agents: Any = []
+    agents: Any = body if isinstance(body, list) else []
     if isinstance(body, dict):
         agents = body.get("agents") or body.get("data") or body.get("list") or []
         if isinstance(agents, dict):
-            agents = agents.get("agents") or agents.get("list") or agents.get("items") or []
+            agents = (
+                agents.get("agents")
+                or agents.get("list")
+                or agents.get("items")
+                or agents.get("data")
+                or []
+            )
+            if isinstance(agents, dict):
+                agents = agents.get("list") or agents.get("items") or []
     if not isinstance(agents, list):
         agents = []
     for agent in agents:

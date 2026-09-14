@@ -340,10 +340,12 @@ _UPLOAD_MEDIA = r"""async input => {
     );
     const policyObjectKey = objectKeyFromValue(objectKeys.shift() || '', inferredBucket);
     const urlObjectKey = objectKeyFromValue(cdnUrl, inferredBucket);
-    // policy_callback returns the backend-owned fileID; that is the ownership key.
-    const objectKey = policyFileId || explicitObjectKey || policyObjectKey
-      || callbackObjectKey || urlObjectKey;
-    const objectKeySource = policyFileId ? 'policy_file_id'
+    // policy_callback returns backend-owned fileID + ossPath. Try ossPath as
+    // the owned object_key and keep fileID as upload_id.
+    const objectKey = policyOssPath || policyFileId || explicitObjectKey
+      || policyObjectKey || callbackObjectKey || urlObjectKey;
+    const objectKeySource = policyOssPath ? 'policy_oss_path'
+      : policyFileId ? 'policy_file_id'
       : explicitObjectKey ? 'uploader'
       : policyObjectKey ? 'policy_callback'
       : callbackObjectKey ? 'policy_response'

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import re
 import time
 import uuid
@@ -13,6 +14,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse
+
+logger = logging.getLogger("any2api_automation.providers.minmax")
 
 from ..config import settings as core_settings
 from ..lifecycle.account import (
@@ -350,7 +353,7 @@ def build_minmax_request(command: dict[str, Any]) -> dict[str, Any]:
     return {
         "content": _minmax_prompt(command.get("messages")),
         "model": model,
-        "session_model": "minimax/" + model_id,
+        "session_model": model_id,
         "agent_id": agent_id,
         "agent_role": role,
         "enable_team": _boolean_option(options.get("enable_team"), True),
@@ -562,6 +565,19 @@ def _select_agent(response: dict[str, Any], role: str) -> str:
                 agents = agents.get("list") or agents.get("items") or []
     if not isinstance(agents, list):
         agents = []
+    if agents:
+        sample = agents[0] if isinstance(agents[0], dict) else {}
+        modelish = {
+            key: sample.get(key)
+            for key in sample
+            if "model" in key.lower() or key in {"name", "id", "agent_role", "role"}
+        }
+        logger.info(
+            "minmax_agent_list count=%s sample_keys=%s modelish=%s",
+            len(agents),
+            list(sample)[:20],
+            _body_snippet(modelish, 300),
+        )
     for agent in agents:
         if not isinstance(agent, dict):
             continue

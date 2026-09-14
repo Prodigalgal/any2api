@@ -485,7 +485,7 @@ def _minmax_message_attachments(
                 "cloud": {
                     "upload_id": upload_id,
                     "url": legacy_url,
-                    "object_key": bare_object_key,
+                    "object_key": upload_id,
                 },
             }
         )

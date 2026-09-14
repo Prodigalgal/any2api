@@ -131,10 +131,20 @@ _BUFFERED_REQUEST = rf"""async request => {{
       }} else if (payload instanceof ArrayBuffer) {{
         bytes = new Uint8Array(payload);
       }} else if (payload == null) {{
-        const keys = Object.keys(response).slice(0, 16).join(',');
-        throw new Error(
-          'MinMax official bridge returned an empty payload keys=' + keys
-        );
+        const metaKeys = new Set([
+          'status', 'statusCode', 'code', 'ok', 'headers', 'contentType',
+          'content_type', 'url', 'type'
+        ]);
+        const businessKeys = Object.keys(response).filter(key => !metaKeys.has(key));
+        if (businessKeys.length > 0) {{
+          // Official bridge often returns already-parsed JSON objects.
+          bytes = encodeText(response);
+        }} else {{
+          const keys = Object.keys(response).slice(0, 16).join(',');
+          throw new Error(
+            'MinMax official bridge returned an empty payload keys=' + keys
+          );
+        }}
       }} else {{
         bytes = encodeText(payload);
       }}

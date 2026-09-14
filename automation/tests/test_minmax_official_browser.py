@@ -38,7 +38,7 @@ def test_minmax_media_upload_stays_inside_the_browser_runtime() -> None:
     assert "policyObjectKey" in _UPLOAD_MEDIA
     assert "urlObjectKey" in _UPLOAD_MEDIA
     assert (
-        "explicitObjectKey || callbackObjectKey || policyObjectKey || urlObjectKey" in _UPLOAD_MEDIA
+        "explicitObjectKey || policyObjectKey || callbackObjectKey || urlObjectKey" in _UPLOAD_MEDIA
     )
     assert "const objectKey = explicitObjectKey || uploadId" not in _UPLOAD_MEDIA
     assert "policy_callback" in _UPLOAD_MEDIA

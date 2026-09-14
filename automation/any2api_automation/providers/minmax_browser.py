@@ -290,6 +290,13 @@ _UPLOAD_MEDIA = r"""async input => {
     if (!uploaded || typeof uploaded !== 'object') {
       throw new Error('MinMax official media uploader returned an invalid result');
     }
+    console.info('minmax_uploader_result', JSON.stringify({
+      keys: Object.keys(uploaded).slice(0, 30),
+      uploadId: uploaded.uploadId || uploaded.upload_id || uploaded.fileID || uploaded.fileId || '',
+      objectKey: uploaded.objectKey || uploaded.object_key || uploaded.objectName || uploaded.object_name || '',
+      ossPath: uploaded.ossPath || uploaded.oss_path || '',
+      cdnUrl: uploaded.cdnUrl || uploaded.cdn_url || uploaded.url || '',
+    }).slice(0, 500));
     const uploadId = String(
       uploaded.uploadId || uploaded.upload_id || uploaded.fileID || uploaded.fileId || ''
     ).trim();
@@ -346,7 +353,12 @@ _UPLOAD_MEDIA = r"""async input => {
       object_key_bucket_removed: Boolean(
         inferredBucket && rawUrlObjectKey.startsWith(`${inferredBucket}/`)
       ),
-      data_url: cdnUrl
+      data_url: cdnUrl,
+      uploader_keys: Object.keys(uploaded).slice(0, 30),
+      uploader_object_key: String(
+        uploaded.objectKey || uploaded.object_key || uploaded.objectName || uploaded.object_name || ''
+      ).slice(0, 120),
+      uploader_oss_path: String(uploaded.ossPath || uploaded.oss_path || '').slice(0, 120),
     });
   }
   return output;
@@ -478,7 +490,7 @@ class MinmaxOfficialBrowserTransport:
                     "minmax_official_media_upload_result upload_id_present=%s "
                     "object_key_present=%s object_key_source=%s object_key_length=%s "
                     "object_key_bucket=%s object_key_bucket_removed=%s "
-                    "cdn_host=%s cdn_path=%s",
+                    "cdn_host=%s cdn_path=%s uploader_keys=%s uploader_object_key=%s uploader_oss_path=%s",
                     bool(str(item.get("file_key") or "").strip()),
                     bool(object_key),
                     str(item.get("object_key_source") or "unknown"),
@@ -487,6 +499,9 @@ class MinmaxOfficialBrowserTransport:
                     bool(item.get("object_key_bucket_removed")),
                     parsed_url.hostname or "",
                     parsed_url.path[:240],
+                    ",".join(item.get("uploader_keys") or []) or "none",
+                    str(item.get("uploader_object_key") or "")[:80],
+                    str(item.get("uploader_oss_path") or "")[:80],
                 )
             return list(result)
 
@@ -944,13 +959,16 @@ def _log_message_attachment_shape(request: Any) -> None:
     ]
     logger.info(
         "minmax_official_message_attachment_shape count=%s cloud_fields=%s "
-        "upload_id_present=%s url_present=%s object_key_present=%s object_key_lengths=%s",
+        "upload_id_present=%s url_present=%s object_key_present=%s object_key_lengths=%s "
+        "object_key_heads=%s",
         len(attachments),
         ",".join(cloud_fields) or "none",
         any(bool(str(value.get("upload_id") or "").strip()) for value in cloud_values),
         any(bool(str(value.get("url") or "").strip()) for value in cloud_values),
         any(bool(str(value.get("object_key") or "").strip()) for value in cloud_values),
         ",".join(str(len(str(value.get("object_key") or "").strip())) for value in cloud_values)
+        or "none",
+        ",".join(repr(str(value.get("object_key") or "")[:32]) for value in cloud_values)
         or "none",
     )
 

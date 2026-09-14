@@ -508,7 +508,7 @@ def _session_id(response: dict[str, Any]) -> str:
     except json.JSONDecodeError as error:
         raise RuntimeError("MinMax session creation returned invalid JSON") from error
     if not isinstance(body, dict):
-        raise RuntimeError("MinMax session creation returned no session_id")
+        raise TypeError("MinMax session creation returned an invalid payload")
     for key in ("session_id", "sessionId"):
         value = str(body.get(key) or "").strip()
         if value:

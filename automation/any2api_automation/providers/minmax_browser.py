@@ -89,7 +89,7 @@ _BUFFERED_REQUEST = rf"""async request => {{
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
   try {{
-    const init = {{method: request.method, signal: controller.signal}};
+    const init = {{method: request.method, signal: controller.signal, stream: !!request.stream}};
     if (!['GET', 'HEAD'].includes(request.method)) init.body = request.body;
     const response = await bridge(request.path, init, {{stream: request.stream}});
     let bytes;

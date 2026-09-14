@@ -26,7 +26,7 @@ public class MinmaxProperties {
     private int screenWidth = 1440;
     private int screenHeight = 900;
     private int maxUploadBytes = 20 * 1024 * 1024;
-    private String profileAssetHosts = "cdn.hailuoai.com";
+    private String profileAssetHosts = "cdn.hailuo.ai,cdn.hailuoai.com";
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = trim(baseUrl); }

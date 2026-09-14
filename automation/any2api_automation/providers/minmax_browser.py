@@ -355,6 +355,25 @@ _UPLOAD_MEDIA = r"""async input => {
     if (!ownedUploadId || !ownedUrl) {
       throw new Error('MinMax official media uploader returned an incomplete result');
     }
+    const locateAttachmentHints = () => {
+      const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
+      const hits = [];
+      for (const chunkName of chunkNames) {
+        const chunks = window[chunkName];
+        if (!Array.isArray(chunks)) continue;
+        let runtime;
+        chunks.push([['any2api-att-' + Date.now()], {}, require => { runtime = require; }]);
+        if (!runtime || !runtime.m) continue;
+        for (const [id, factory] of Object.entries(runtime.m)) {
+          const source = String(factory);
+          if (source.includes('object_key') && (source.includes('attachment') || source.includes('upload_id'))) {
+            hits.push({id, snippet: source.slice(0, 240)});
+            if (hits.length >= 5) return hits;
+          }
+        }
+      }
+      return hits;
+    };
     output.push({
       type: 'image',
       file_key: ownedUploadId,
@@ -377,6 +396,7 @@ _UPLOAD_MEDIA = r"""async input => {
       policy_callback_keys: String(policyObjectKey || '').slice(0, 160),
       policy_response_keys: String(callbackObjectKey || '').slice(0, 160),
       policy_bodies: JSON.stringify(policyBodies).slice(0, 1200),
+      attachment_module_hits: JSON.stringify(locateAttachmentHints()).slice(0, 1500),
     });
   }
   return output;
@@ -506,15 +526,11 @@ class MinmaxOfficialBrowserTransport:
                 object_key = str(item.get("object_key") or "").strip()
                 logger.info(
                     "minmax_official_media_upload_result upload_id_present=%s "
-                    "object_key_present=%s object_key_source=%s object_key=%s "
-                    "policy_file_id=%s cdn_host=%s cdn_path=%s",
+                    "object_key=%s policy_file_id=%s attachment_module_hits=%s",
                     bool(str(item.get("file_key") or "").strip()),
-                    bool(object_key),
-                    str(item.get("object_key_source") or "unknown"),
                     object_key[:80],
                     str(item.get("policy_file_id") or ""),
-                    parsed_url.hostname or "",
-                    parsed_url.path[:200],
+                    str(item.get("attachment_module_hits") or "")[:800],
                 )
             return list(result)
 

@@ -93,7 +93,22 @@ _BUFFERED_REQUEST = rf"""async request => {{
     const init = {{method: request.method, signal: controller.signal}};
     if (!['GET', 'HEAD'].includes(request.method)) init.body = request.body;
     const response = await bridge(request.path, init, {{stream: request.stream}});
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    let bytes;
+    if (response && typeof response.arrayBuffer === 'function') {{
+      bytes = new Uint8Array(await response.arrayBuffer());
+    }} else if (response && typeof response.text === 'function') {{
+      bytes = new TextEncoder().encode(await response.text());
+    }} else if (response && typeof response.body === 'string') {{
+      bytes = new TextEncoder().encode(response.body);
+    }} else if (response && typeof response === 'object' &&
+               typeof response.status === 'number') {{
+      const payload = response.body ?? response.data ?? response.text ?? '';
+      bytes = new TextEncoder().encode(
+        typeof payload === 'string' ? payload : JSON.stringify(payload)
+      );
+    }} else {{
+      throw new Error('MinMax official bridge returned an unsupported response type');
+    }}
     if (bytes.length > request.maximumBytes) {{
       throw new Error('MinMax browser response exceeds the buffered byte limit');
     }}
@@ -101,9 +116,13 @@ _BUFFERED_REQUEST = rf"""async request => {{
     for (let index = 0; index < bytes.length; index += 32768) {{
       binary += String.fromCharCode(...bytes.subarray(index, index + 32768));
     }}
+    const contentType = (response && response.headers &&
+      typeof response.headers.get === 'function')
+      ? response.headers.get('content-type')
+      : (response && (response.contentType || response.content_type)) || '';
     return {{
-      status: response.status,
-      contentType: response.headers.get('content-type') || 'application/octet-stream',
+      status: response && response.status != null ? response.status : 502,
+      contentType: contentType || 'application/octet-stream',
       bodyBase64: btoa(binary)
     }};
   }} finally {{

@@ -57,10 +57,13 @@ final class LongcatEventDecoder {
                     finishOutput(output, event.path("finishType").asText("").equals("sensitive")
                         ? "content_filter" : "stop", finalText);
                 }
-                case "event_error" -> {
+                case "event_error", "eventError" -> {
+                    var detail = event.path("message").asText("");
+                    if (detail.isBlank()) detail = event.path("content").asText("");
+                    if (detail.isBlank()) detail = "LongCat request failed";
                     output.add(new CanonicalEvent.Failed(1, requestId, next(),
-                        "provider_upstream_error", event.path("message").asText(
-                            event.path("content").asText("LongCat request failed")), Map.of()));
+                        "provider_upstream_error", detail, Map.of(
+                            "subType", event.path("subType").asText(""))));
                     completed = true;
                 }
                 default -> {

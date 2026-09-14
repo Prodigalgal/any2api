@@ -151,5 +151,5 @@ any2api:
       signature-salt: ${ANY2API_PROVIDER_MINMAX_SIGNATURE_SALT:I*7Cf%WZ#S&%1RlZJ&C2}
       yy-salt: ${ANY2API_PROVIDER_MINMAX_YY_SALT:ooui}
       version-code: ${ANY2API_PROVIDER_MINMAX_VERSION_CODE:22201}
-      profile-asset-hosts: ${ANY2API_PROVIDER_MINMAX_PROFILE_ASSET_HOSTS:cdn.hailuoai.com}
+      profile-asset-hosts: ${ANY2API_PROVIDER_MINMAX_PROFILE_ASSET_HOSTS:cdn.hailuo.ai,cdn.hailuoai.com}
       max-upload-bytes: ${ANY2API_PROVIDER_MINMAX_MAX_UPLOAD_BYTES:20971520}

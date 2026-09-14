@@ -366,10 +366,17 @@ _UPLOAD_MEDIA = r"""async input => {
         if (!runtime || !runtime.m) continue;
         for (const [id, factory] of Object.entries(runtime.m)) {
           const source = String(factory);
-          if (source.includes('object_key') && (source.includes('attachment') || source.includes('upload_id'))) {
-            hits.push({id, snippet: source.slice(0, 240)});
-            if (hits.length >= 5) return hits;
+          if (!source.includes('object_key')) continue;
+          if (!(source.includes('attachment') || source.includes('upload_id') || source.includes('fileID'))) {
+            continue;
           }
+          const idx = source.indexOf('object_key');
+          const windowStart = Math.max(0, idx - 200);
+          hits.push({
+            id,
+            around: source.slice(windowStart, windowStart + 500),
+          });
+          if (hits.length >= 3) return hits;
         }
       }
       return hits;

@@ -968,8 +968,7 @@ def _log_message_attachment_shape(request: Any) -> None:
         any(bool(str(value.get("object_key") or "").strip()) for value in cloud_values),
         ",".join(str(len(str(value.get("object_key") or "").strip())) for value in cloud_values)
         or "none",
-        ",".join(repr(str(value.get("object_key") or "")[:32]) for value in cloud_values)
-        or "none",
+        ",".join(repr(str(value.get("object_key") or "")[:32]) for value in cloud_values) or "none",
     )
 
 

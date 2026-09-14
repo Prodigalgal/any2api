@@ -5,6 +5,7 @@ from any2api_automation.main import app
 from any2api_automation.providers.minmax import (
     _browser_name,
     _client_hint_headers,
+    _decode_json_payload,
     _impersonate,
     _minmax_attachments,
     _minmax_proxy_affinity,
@@ -135,3 +136,27 @@ def test_minmax_session_id_accepts_nested_payloads() -> None:
     assert _session_id({"status": 200, "body": '{"session":{"id":"inner"}}'}) == "inner"
     with pytest.raises(RuntimeError, match="no session_id"):
         _session_id({"status": 200, "body": '{"ok":true}'})
+
+
+def test_minmax_decode_json_payload_strips_noise() -> None:
+    assert _decode_json_payload('prefix {"a":1}', "agent list") == {"a": 1}
+    assert _decode_json_payload('```json\n{"a":1}\n```', "agent list") == {"a": 1}
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        _decode_json_payload("<html>error</html>", "agent list")
+
+
+def test_minmax_select_agent_accepts_wrapped_lists() -> None:
+    assert _select_agent(
+        {
+            "status": 200,
+            "body": '{"data":{"agents":[{"agent_role":"mavis","name":"agent-one"}]}}',
+        },
+        "mavis",
+    ) == "agent-one"
+    assert _select_agent(
+        {
+            "status": 200,
+            "body": '{"list":[{"role":"mavis","id":"agent-two"}]}',
+        },
+        "mavis",
+    ) == "agent-two"

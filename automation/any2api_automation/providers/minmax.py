@@ -483,30 +483,79 @@ def _boolean_option(value: Any, fallback: bool) -> bool:
     return value if isinstance(value, bool) else fallback
 
 
+def _body_snippet(raw: str, limit: int = 160) -> str:
+    return " ".join(str(raw or "").split())[:limit]
+
+
+def _decode_json_payload(raw: str, label: str) -> Any:
+    text = str(raw or "").strip().lstrip("﻿")
+    if not text:
+        raise RuntimeError(f"MinMax {label} returned an empty body")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start = min(
+        (index for index in (text.find("{"), text.find("[")) if index >= 0),
+        default=-1,
+    )
+    if start > 0:
+        try:
+            return json.loads(text[start:])
+        except json.JSONDecodeError:
+            pass
+    if text.startswith("```"):
+        lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
+        candidate = "\n".join(lines).strip()
+        if candidate:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+    raise RuntimeError(
+        f"MinMax {label} returned invalid JSON body={_body_snippet(text)!r}"
+    )
+
+
 def _select_agent(response: dict[str, Any], role: str) -> str:
     status = int(response.get("status") or 502)
     if status < 200 or status >= 300:
         raise RuntimeError(f"MinMax agent list returned HTTP {status}")
-    try:
-        body = json.loads(str(response.get("body") or ""))
-    except json.JSONDecodeError as error:
-        raise RuntimeError("MinMax agent list returned invalid JSON") from error
-    for agent in body.get("agents", []) if isinstance(body, dict) else []:
-        if isinstance(agent, dict) and str(agent.get("agent_role") or "").lower() == role.lower():
-            value = str(agent.get("name") or "").strip()
-            if value:
-                return value
-    raise RuntimeError(f"MinMax agent list has no role {role}")
+    body = _decode_json_payload(response.get("body"), "agent list")
+    agents: Any = []
+    if isinstance(body, dict):
+        agents = body.get("agents") or body.get("data") or body.get("list") or []
+        if isinstance(agents, dict):
+            agents = agents.get("agents") or agents.get("list") or agents.get("items") or []
+    if not isinstance(agents, list):
+        agents = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        role_value = str(
+            agent.get("agent_role") or agent.get("agentRole") or agent.get("role") or ""
+        ).lower()
+        if role_value != role.lower():
+            continue
+        value = str(agent.get("name") or agent.get("agent_name") or agent.get("id") or "").strip()
+        if value:
+            return value
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        value = str(agent.get("name") or agent.get("agent_name") or agent.get("id") or "").strip()
+        if value:
+            return value
+    raise RuntimeError(
+        f"MinMax agent list has no role {role} body={_body_snippet(response.get('body'))!r}"
+    )
 
 
 def _session_id(response: dict[str, Any]) -> str:
     status = int(response.get("status") or 502)
     if status < 200 or status >= 300:
         raise RuntimeError(f"MinMax session creation returned HTTP {status}")
-    try:
-        body = json.loads(str(response.get("body") or ""))
-    except json.JSONDecodeError as error:
-        raise RuntimeError("MinMax session creation returned invalid JSON") from error
+    body = _decode_json_payload(response.get("body"), "session creation")
     if not isinstance(body, dict):
         raise TypeError("MinMax session creation returned an invalid payload")
     for key in ("session_id", "sessionId"):
@@ -521,7 +570,9 @@ def _session_id(response: dict[str, Any]) -> str:
             value = str(nested.get(key) or "").strip()
             if value:
                 return value
-    raise RuntimeError("MinMax session creation returned no session_id")
+    raise RuntimeError(
+        f"MinMax session creation returned no session_id body={_body_snippet(response.get('body'))!r}"
+    )
 
 
 def _minmax_catalog_available(body: str) -> bool:

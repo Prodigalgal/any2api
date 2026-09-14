@@ -463,6 +463,17 @@ def _minmax_message_attachments(
             raise ValueError("MinMax uploaded attachment URL is missing")
         if not object_key:
             raise ValueError("MinMax uploaded attachment object key is missing")
+        # Official ownership check accepts either a registered object key or an
+        # allowlisted legacy CDN URL. Prefer the bare moss/ path and the
+        # profile asset host used by the official frontend.
+        bare_object_key = object_key
+        for prefix in ("hailuo-video/", "hailuo/"):
+            if bare_object_key.startswith(prefix):
+                bare_object_key = bare_object_key[len(prefix) :]
+                break
+        legacy_url = cdn_url
+        if "cdn.hailuoai.video/" in legacy_url:
+            legacy_url = legacy_url.replace("cdn.hailuoai.video/", "cdn.hailuo.ai/", 1)
         result.append(
             {
                 "meta": {
@@ -473,9 +484,8 @@ def _minmax_message_attachments(
                 },
                 "cloud": {
                     "upload_id": upload_id,
-                    "url": cdn_url,
-                    "data_url": cdn_url,
-                    "object_key": object_key,
+                    "url": legacy_url,
+                    "object_key": bare_object_key,
                 },
             }
         )

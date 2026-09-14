@@ -521,8 +521,6 @@ class MinmaxOfficialBrowserTransport:
             ):
                 raise RuntimeError("MinMax media upload returned an incomplete result")
             for item in result:
-                cdn_url = str(item.get("cdn_url") or item.get("preview_url") or "").strip()
-                parsed_url = urlparse(cdn_url)
                 object_key = str(item.get("object_key") or "").strip()
                 logger.info(
                     "minmax_official_media_upload_result upload_id_present=%s "

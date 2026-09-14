@@ -217,12 +217,14 @@ _UPLOAD_MEDIA = r"""async input => {
   const objectKeys = [];
   const policyBuckets = [];
   const callbackObjectKeys = [];
+  const policyBodies = [];
   const rememberPolicyCallback = body => {
     let payload = body;
     if (typeof payload === 'string') {
       try { payload = JSON.parse(payload); } catch (_) { return; }
     }
     if (!payload || typeof payload !== 'object') return;
+    policyBodies.push({kind: 'callback_request', payload});
     const directory = String(payload.dir || '').trim().replace(/\/+$/, '');
     const filename = String(payload.fileName || '').trim().replace(/^\/+/, '');
     const bucket = String(payload.bucketName || payload.bucket_name || '').trim();
@@ -237,6 +239,7 @@ _UPLOAD_MEDIA = r"""async input => {
       try { payload = JSON.parse(payload); } catch (_) { return; }
     }
     if (!payload || typeof payload !== 'object') return;
+    policyBodies.push({kind: 'callback_response', payload});
     const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
     const objectKey = data.ossPath || data.oss_path || data.objectKey || data.object_key || '';
     if (String(objectKey).trim()) callbackObjectKeys.push(String(objectKey).trim());
@@ -361,6 +364,9 @@ _UPLOAD_MEDIA = r"""async input => {
         uploaded.objectKey || uploaded.object_key || uploaded.objectName || uploaded.object_name || ''
       ).slice(0, 120),
       uploader_oss_path: String(uploaded.ossPath || uploaded.oss_path || '').slice(0, 120),
+      policy_callback_keys: String(policyObjectKey || '').slice(0, 160),
+      policy_response_keys: String(callbackObjectKey || '').slice(0, 160),
+      policy_bodies: JSON.stringify(policyBodies).slice(0, 1200),
     });
   }
   return output;
@@ -492,7 +498,8 @@ class MinmaxOfficialBrowserTransport:
                     "minmax_official_media_upload_result upload_id_present=%s "
                     "object_key_present=%s object_key_source=%s object_key_length=%s "
                     "object_key_bucket=%s object_key_bucket_removed=%s "
-                    "cdn_host=%s cdn_path=%s uploader_keys=%s uploader_object_key=%s uploader_oss_path=%s",
+                    "cdn_host=%s cdn_path=%s uploader_keys=%s "
+                    "policy_callback_keys=%s policy_response_keys=%s policy_bodies=%s",
                     bool(str(item.get("file_key") or "").strip()),
                     bool(object_key),
                     str(item.get("object_key_source") or "unknown"),
@@ -502,8 +509,9 @@ class MinmaxOfficialBrowserTransport:
                     parsed_url.hostname or "",
                     parsed_url.path[:240],
                     ",".join(item.get("uploader_keys") or []) or "none",
-                    str(item.get("uploader_object_key") or "")[:80],
-                    str(item.get("uploader_oss_path") or "")[:80],
+                    str(item.get("policy_callback_keys") or "")[:120],
+                    str(item.get("policy_response_keys") or "")[:120],
+                    str(item.get("policy_bodies") or "")[:800],
                 )
             return list(result)
 

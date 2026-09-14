@@ -96,7 +96,7 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 | LongCat | PASS（2884） | PASS | PASS | PASS（≥32px 棋盘/256px） | PASS | API | 极小纯色 PNG 可 `empty_model_response` |
 | GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
 | Qwen | PASS（55927） | PASS（Runtime） | FAIL | — | — | Runtime | API SSE 502；Runtime `NS_BINDING_ABORTED` 间歇 |
-| MiniMax | 历史 PASS（313） | FAIL | FAIL | — | — | 待修复 | profile 已修；`arrayBuffer` 桥接 bug 待部署 |
+| MiniMax | PASS（签到后） | PASS | PASS | 未测 | 未测 | Runtime+签名 fetch | daily_checkin 已恢复；探针 READY |
 | Arena | 历史 PASS（59） | FAIL | FAIL | — | — | 阻断 | 生产 9/9 账号 EXPIRED；reauth 需交互认证 |
 
 ### 本轮已落地修复

@@ -670,7 +670,7 @@ class QwenNativeBrowserTransport:
                 try:
                     result = await session.page.evaluate(_UPLOAD_MEDIA, payload)
                     break
-                except Exception as error:  # noqa: BLE001 - normalized below
+                except Exception as error:
                     last_error = error
                     logger.warning(
                         "qwen_media_upload_failed attempt=%s path=%s error=%s",

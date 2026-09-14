@@ -507,10 +507,21 @@ def _session_id(response: dict[str, Any]) -> str:
         body = json.loads(str(response.get("body") or ""))
     except json.JSONDecodeError as error:
         raise RuntimeError("MinMax session creation returned invalid JSON") from error
-    value = str(body.get("session_id") or "") if isinstance(body, dict) else ""
-    if not value:
+    if not isinstance(body, dict):
         raise RuntimeError("MinMax session creation returned no session_id")
-    return value
+    for key in ("session_id", "sessionId"):
+        value = str(body.get(key) or "").strip()
+        if value:
+            return value
+    for nest_key in ("data", "result", "session"):
+        nested = body.get(nest_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in ("session_id", "sessionId", "id"):
+            value = str(nested.get(key) or "").strip()
+            if value:
+                return value
+    raise RuntimeError("MinMax session creation returned no session_id")
 
 
 def _minmax_catalog_available(body: str) -> bool:

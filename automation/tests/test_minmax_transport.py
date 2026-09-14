@@ -10,6 +10,7 @@ from any2api_automation.providers.minmax import (
     _minmax_proxy_affinity,
     _optional_proxy_parameters,
     _select_agent,
+    _session_id,
     _signed_request,
     _transport_input,
 )
@@ -125,3 +126,12 @@ def test_minmax_media_is_prepared_for_browser_upload() -> None:
 
     assert attachments[0]["mime_type"] == "image/png"
     assert len(attachments[0]["file_md5"]) == 32
+
+
+def test_minmax_session_id_accepts_nested_payloads() -> None:
+    assert _session_id({"status": 200, "body": '{"session_id":"abc"}'}) == "abc"
+    assert _session_id({"status": 200, "body": '{"data":{"session_id":"nested"}}'}) == "nested"
+    assert _session_id({"status": 200, "body": '{"data":{"sessionId":"camel"}}'}) == "camel"
+    assert _session_id({"status": 200, "body": '{"session":{"id":"inner"}}'}) == "inner"
+    with pytest.raises(RuntimeError, match="no session_id"):
+        _session_id({"status": 200, "body": '{"ok":true}'})

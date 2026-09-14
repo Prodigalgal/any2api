@@ -531,12 +531,10 @@ def _decode_json_payload(raw: Any, label: str) -> Any:
         except json.JSONDecodeError:
             pass
     if parsed is None:
-        raise RuntimeError(
-            f"MinMax {label} returned invalid JSON body={_body_snippet(text)!r}"
-        )
+        raise RuntimeError(f"MinMax {label} returned invalid JSON body={_body_snippet(text)!r}")
     if isinstance(parsed, str):
         stripped = parsed.strip()
-        if stripped.startswith("{") or stripped.startswith("["):
+        if stripped.startswith(("{", "[")):
             try:
                 return json.loads(stripped)
             except json.JSONDecodeError:

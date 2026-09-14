@@ -176,6 +176,17 @@ _BUFFERED_REQUEST = rf"""async request => {{
   }}
 }}"""
 
+_SIGNED_FETCH = r"""async request => {
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+    credentials: 'include',
+  });
+  const bodyText = await response.text();
+  return {status: response.status, body: bodyText};
+}"""
+
 _UPLOAD_MEDIA = r"""async input => {
   const locateUploader = () => {
     const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
@@ -487,9 +498,23 @@ class MinmaxOfficialBrowserTransport:
         body: str,
         proxy_url: str,
     ) -> AsyncIterator[dict[str, Any]]:
-        # Official Camoufox bridge JSON-parses stream:false bodies, which breaks
-        # SSE. Request stream:true, buffer the complete text, then emit frames.
-        result = await self.request(credential, method, path, body, proxy_url, stream=True)
+        # Official bridge always JSON-parses chat responses, which breaks SSE.
+        # Sign with the shared profile and fetch as text from the official page.
+        from .minmax import _signed_request
+
+        url, headers = _signed_request(
+            path, method, body, credential, stream=True, proxy_url=proxy_url
+        )
+        async with self._account_operation(credential):
+            session = await self._session_for(credential, proxy_url)
+            await self._inject_context(session, credential)
+            result = await session.page.evaluate(
+                _SIGNED_FETCH,
+                {"url": url, "method": method, "body": body, "headers": headers},
+            )
+            patch = await self._credential_patch(session, credential)
+        if not isinstance(result, dict):
+            raise TypeError("MinMax official signed fetch returned an invalid response")
         status = int(result.get("status") or 502)
         yield {"type": "status", "status": status}
         if status < 200 or status >= 300:
@@ -510,9 +535,7 @@ class MinmaxOfficialBrowserTransport:
             saw_data = True
             yield {"type": "data", "data": payload}
         if not saw_data and text.strip():
-            # Some official responses return a single JSON object instead of SSE.
             yield {"type": "data", "data": text.strip()}
-        patch = result.get("credential_patch")
         if isinstance(patch, dict) and patch:
             yield {"type": "credential_patch", "data": patch}
 

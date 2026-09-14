@@ -121,32 +121,30 @@ _BUFFERED_REQUEST = rf"""async request => {{
     }} else if (response && typeof response === 'object') {{
       statusValue = response.status ?? response.statusCode ?? response.code ?? 200;
       if (typeof statusValue !== 'number') statusValue = 200;
-      let payload = pickPayload(response);
-      if (payload == null && typeof response.body === 'string') {{
-        // Prefer any non-empty sibling field over an empty body string.
-        payload = response.body;
-      }}
-      if (payload instanceof Uint8Array) {{
-        bytes = payload;
-      }} else if (payload instanceof ArrayBuffer) {{
-        bytes = new Uint8Array(payload);
-      }} else if (payload == null) {{
-        const metaKeys = new Set([
-          'status', 'statusCode', 'code', 'ok', 'headers', 'contentType',
-          'content_type', 'url', 'type'
-        ]);
-        const businessKeys = Object.keys(response).filter(key => !metaKeys.has(key));
-        if (businessKeys.length > 0) {{
-          // Official bridge often returns already-parsed JSON objects.
-          bytes = encodeText(response);
-        }} else {{
+      const metaKeys = new Set([
+        'status', 'statusCode', 'code', 'ok', 'headers', 'contentType',
+        'content_type', 'url', 'type'
+      ]);
+      const businessKeys = Object.keys(response).filter(key => !metaKeys.has(key));
+      // Official bridge returns already-parsed envelopes such as
+      // {{base_resp, data}} or {{agents, base_resp}}. Keep the full object
+      // so provider parsers still see base_resp + data.
+      if (businessKeys.length > 0) {{
+        bytes = encodeText(response);
+      }} else {{
+        const payload = pickPayload(response);
+        if (payload instanceof Uint8Array) {{
+          bytes = payload;
+        }} else if (payload instanceof ArrayBuffer) {{
+          bytes = new Uint8Array(payload);
+        }} else if (payload == null) {{
           const keys = Object.keys(response).slice(0, 16).join(',');
           throw new Error(
             'MinMax official bridge returned an empty payload keys=' + keys
           );
+        }} else {{
+          bytes = encodeText(payload);
         }}
-      }} else {{
-        bytes = encodeText(payload);
       }}
     }} else {{
       const kind = response === null ? 'null' : typeof response;
@@ -185,37 +183,82 @@ _STREAM_REQUEST = rf"""async request => {{
   const emit = event => window.__any2apiMinmaxEmit({{requestId: request.requestId, ...event}});
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+  const flushSseText = async text => {{
+    const lines = String(text || '').split(/\r?\n/);
+    for (const line of lines) {{
+      if (line.startsWith('data:') && line.slice(5).trim()) {{
+        await emit({{type: 'data', data: line.slice(5).trim()}});
+      }}
+    }}
+  }};
   try {{
     const response = await bridge(request.path, {{
       method: request.method,
       body: request.body,
       signal: controller.signal
     }}, {{stream: true}});
-    await emit({{type: 'status', status: response.status}});
-    if (!response.ok) {{
-      await emit({{type: 'error', data: (await response.text()).slice(0, 16384)}});
+    const statusValue = response && response.status != null ? response.status : 200;
+    await emit({{type: 'status', status: statusValue}});
+    const ok = response && (response.ok === true
+      || (typeof statusValue === 'number' && statusValue >= 200 && statusValue < 300));
+    if (!ok) {{
+      let detail = '';
+      if (response && typeof response.text === 'function') {{
+        try {{ detail = await response.text(); }} catch (_) {{ detail = ''; }}
+      }}
+      if (!detail && response && typeof response === 'object') {{
+        try {{ detail = JSON.stringify(response).slice(0, 16384); }} catch (_) {{ detail = ''; }}
+      }}
+      await emit({{type: 'error', data: String(detail || 'official stream failed').slice(0, 16384)}});
       return;
     }}
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('MinMax official response has no stream body');
-    const decoder = new TextDecoder();
-    let pending = '';
-    while (true) {{
-      const {{done, value}} = await reader.read();
-      if (done) break;
-      pending += decoder.decode(value, {{stream: true}});
-      const lines = pending.split(/\r?\n/);
-      pending = lines.pop() || '';
-      for (const line of lines) {{
-        if (line.startsWith('data:') && line.slice(5).trim()) {{
-          await emit({{type: 'data', data: line.slice(5).trim()}});
+    const reader = response && response.body && typeof response.body.getReader === 'function'
+      ? response.body.getReader() : null;
+    if (reader) {{
+      const decoder = new TextDecoder();
+      let pending = '';
+      while (true) {{
+        const {{done, value}} = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, {{stream: true}});
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() || '';
+        for (const line of lines) {{
+          if (line.startsWith('data:') && line.slice(5).trim()) {{
+            await emit({{type: 'data', data: line.slice(5).trim()}});
+          }}
         }}
       }}
+      pending += decoder.decode();
+      await flushSseText(pending);
+      return;
     }}
-    pending += decoder.decode();
-    if (pending.startsWith('data:') && pending.slice(5).trim()) {{
-      await emit({{type: 'data', data: pending.slice(5).trim()}});
+    if (response && typeof response.text === 'function') {{
+      await flushSseText(await response.text());
+      return;
     }}
+    if (response && typeof response === 'object') {{
+      const payload = response.body ?? response.data ?? response.content ??
+        response.text ?? response.result ?? response.payload ?? null;
+      if (typeof payload === 'string') {{
+        await flushSseText(payload);
+        return;
+      }}
+      if (payload != null) {{
+        await emit({{type: 'data', data: JSON.stringify(payload)}});
+        return;
+      }}
+      const metaKeys = new Set([
+        'status', 'statusCode', 'code', 'ok', 'headers', 'contentType',
+        'content_type', 'url', 'type'
+      ]);
+      const businessKeys = Object.keys(response).filter(key => !metaKeys.has(key));
+      if (businessKeys.length > 0) {{
+        await emit({{type: 'data', data: JSON.stringify(response)}});
+        return;
+      }}
+    }}
+    throw new Error('MinMax official response has no stream body');
   }} finally {{
     clearTimeout(timeout);
   }}

@@ -95,6 +95,20 @@ _BUFFERED_REQUEST = rf"""async request => {{
     const response = await bridge(request.path, init, {{stream: request.stream}});
     let bytes;
     let statusValue = 502;
+    const encodeText = value => new TextEncoder().encode(
+      typeof value === 'string' ? value : JSON.stringify(value ?? '')
+    );
+    const pickPayload = root => {{
+      const keys = ['body', 'data', 'content', 'text', 'result', 'payload', 'json', 'response'];
+      for (const key of keys) {{
+        const value = root[key];
+        if (value == null) continue;
+        if (typeof value === 'string' && value === '') continue;
+        if (value instanceof Uint8Array || value instanceof ArrayBuffer) return value;
+        return value;
+      }}
+      return null;
+    }};
     if (typeof response === 'string') {{
       bytes = new TextEncoder().encode(response);
       statusValue = 200;
@@ -104,17 +118,26 @@ _BUFFERED_REQUEST = rf"""async request => {{
     }} else if (response && typeof response.text === 'function') {{
       bytes = new TextEncoder().encode(await response.text());
       statusValue = response.status != null ? response.status : 200;
-    }} else if (response && typeof response.body === 'string') {{
-      bytes = new TextEncoder().encode(response.body);
-      statusValue = response.status != null ? response.status : 200;
     }} else if (response && typeof response === 'object') {{
-      const payload = response.body ?? response.data ?? response.content ??
-        response.text ?? response.result ?? response.payload ?? '';
-      bytes = new TextEncoder().encode(
-        typeof payload === 'string' ? payload : JSON.stringify(payload ?? '')
-      );
       statusValue = response.status ?? response.statusCode ?? response.code ?? 200;
       if (typeof statusValue !== 'number') statusValue = 200;
+      let payload = pickPayload(response);
+      if (payload == null && typeof response.body === 'string') {{
+        // Prefer any non-empty sibling field over an empty body string.
+        payload = response.body;
+      }}
+      if (payload instanceof Uint8Array) {{
+        bytes = payload;
+      }} else if (payload instanceof ArrayBuffer) {{
+        bytes = new Uint8Array(payload);
+      }} else if (payload == null) {{
+        const keys = Object.keys(response).slice(0, 16).join(',');
+        throw new Error(
+          'MinMax official bridge returned an empty payload keys=' + keys
+        );
+      }} else {{
+        bytes = encodeText(payload);
+      }}
     }} else {{
       const kind = response === null ? 'null' : typeof response;
       const keys = (response && typeof response === 'object')

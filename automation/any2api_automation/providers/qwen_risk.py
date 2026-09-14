@@ -623,6 +623,19 @@ class QwenNativeBrowserTransport:
                     }
                     return self._response(request, result, challenge_body, credential_patch)
                 result, body = await self._evaluate(session, request)
+            if (
+                "/chat/completions" in request.path
+                and b"data:" not in body
+                and int(result.get("status") or 0) == 200
+            ):
+                logger.warning(
+                    "qwen_native_browser_completion_retry path=%s bytes=%s",
+                    request.path,
+                    len(body),
+                )
+                await asyncio.sleep(0.8)
+                await self._prepare_authenticated_surface(session, request)
+                result, body = await self._evaluate(session, request)
             credential_patch = await self._credential_patch(session, request)
             return self._response(request, result, body, credential_patch)
 

@@ -177,93 +177,6 @@ _BUFFERED_REQUEST = rf"""async request => {{
   }}
 }}"""
 
-_STREAM_REQUEST = rf"""async request => {{
-  const locate = {_LOCATE_BRIDGE};
-  const bridge = locate();
-  const emit = event => window.__any2apiMinmaxEmit({{requestId: request.requestId, ...event}});
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
-  const flushSseText = async text => {{
-    const lines = String(text || '').split(/\r?\n/);
-    for (const line of lines) {{
-      if (line.startsWith('data:') && line.slice(5).trim()) {{
-        await emit({{type: 'data', data: line.slice(5).trim()}});
-      }}
-    }}
-  }};
-  try {{
-    const response = await bridge(request.path, {{
-      method: request.method,
-      body: request.body,
-      signal: controller.signal
-    }}, {{stream: true}});
-    const statusValue = response && response.status != null ? response.status : 200;
-    await emit({{type: 'status', status: statusValue}});
-    const ok = response && (response.ok === true
-      || (typeof statusValue === 'number' && statusValue >= 200 && statusValue < 300));
-    if (!ok) {{
-      let detail = '';
-      if (response && typeof response.text === 'function') {{
-        try {{ detail = await response.text(); }} catch (_) {{ detail = ''; }}
-      }}
-      if (!detail && response && typeof response === 'object') {{
-        try {{ detail = JSON.stringify(response).slice(0, 16384); }} catch (_) {{ detail = ''; }}
-      }}
-      await emit({{type: 'error', data: String(detail || 'official stream failed').slice(0, 16384)}});
-      return;
-    }}
-    const reader = response && response.body && typeof response.body.getReader === 'function'
-      ? response.body.getReader() : null;
-    if (reader) {{
-      const decoder = new TextDecoder();
-      let pending = '';
-      while (true) {{
-        const {{done, value}} = await reader.read();
-        if (done) break;
-        pending += decoder.decode(value, {{stream: true}});
-        const lines = pending.split(/\r?\n/);
-        pending = lines.pop() || '';
-        for (const line of lines) {{
-          if (line.startsWith('data:') && line.slice(5).trim()) {{
-            await emit({{type: 'data', data: line.slice(5).trim()}});
-          }}
-        }}
-      }}
-      pending += decoder.decode();
-      await flushSseText(pending);
-      return;
-    }}
-    if (response && typeof response.text === 'function') {{
-      await flushSseText(await response.text());
-      return;
-    }}
-    if (response && typeof response === 'object') {{
-      const payload = response.body ?? response.data ?? response.content ??
-        response.text ?? response.result ?? response.payload ?? null;
-      if (typeof payload === 'string') {{
-        await flushSseText(payload);
-        return;
-      }}
-      if (payload != null) {{
-        await emit({{type: 'data', data: JSON.stringify(payload)}});
-        return;
-      }}
-      const metaKeys = new Set([
-        'status', 'statusCode', 'code', 'ok', 'headers', 'contentType',
-        'content_type', 'url', 'type'
-      ]);
-      const businessKeys = Object.keys(response).filter(key => !metaKeys.has(key));
-      if (businessKeys.length > 0) {{
-        await emit({{type: 'data', data: JSON.stringify(response)}});
-        return;
-      }}
-    }}
-    throw new Error('MinMax official response has no stream body');
-  }} finally {{
-    clearTimeout(timeout);
-  }}
-}}"""
-
 _UPLOAD_MEDIA = r"""async input => {
   const locateUploader = () => {
     const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
@@ -573,63 +486,34 @@ class MinmaxOfficialBrowserTransport:
         body: str,
         proxy_url: str,
     ) -> AsyncIterator[dict[str, Any]]:
-        async with self._account_operation(credential):
-            session = await self._session_for(credential, proxy_url)
-            await self._inject_context(session, credential)
-            request_id = uuid4().hex
-            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-            session.active_stream_id = request_id
-            session.active_stream_queue = queue
-
-            async def execute() -> None:
-                try:
-                    await session.page.evaluate(
-                        _STREAM_REQUEST,
-                        {
-                            "requestId": request_id,
-                            "method": method,
-                            "path": path,
-                            "body": body,
-                            "timeoutMs": core_settings().registration_timeout_seconds * 1000,
-                        },
-                    )
-                except Exception as error:  # noqa: BLE001 - normalized into stream protocol
-                    logger.warning(
-                        "minmax_official_browser_stream_failed error_type=%s detail=%s",
-                        type(error).__name__,
-                        str(error)[:500],
-                    )
-                    await queue.put(
-                        {
-                            "type": "error",
-                            "data": f"official browser stream failed ({type(error).__name__})",
-                        }
-                    )
-                finally:
-                    await queue.put({"type": "done"})
-
-            task = asyncio.create_task(execute())
-            pending_error: dict[str, Any] | None = None
-            try:
-                while True:
-                    event = await queue.get()
-                    if event.get("type") == "done":
-                        break
-                    if event.get("type") == "error":
-                        pending_error = event
-                        continue
-                    yield event
-                patch = await self._credential_patch(session, credential)
-                if patch:
-                    yield {"type": "credential_patch", "data": patch}
-                if pending_error is not None:
-                    yield pending_error
-            finally:
-                session.active_stream_id = ""
-                session.active_stream_queue = None
-                if not task.done():
-                    task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+        # Official Camoufox bridge often returns a non-Response payload for
+        # stream:true. Buffer the complete SSE body, then emit data frames.
+        result = await self.request(credential, method, path, body, proxy_url)
+        status = int(result.get("status") or 502)
+        yield {"type": "status", "status": status}
+        if status < 200 or status >= 300:
+            detail = str(result.get("body") or "")[:16384]
+            yield {
+                "type": "error",
+                "data": detail or f"official browser stream failed status={status}",
+            }
+            return
+        text = str(result.get("body") or "")
+        saw_data = False
+        for line in text.splitlines():
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if not payload:
+                continue
+            saw_data = True
+            yield {"type": "data", "data": payload}
+        if not saw_data and text.strip():
+            # Some official responses return a single JSON object instead of SSE.
+            yield {"type": "data", "data": text.strip()}
+        patch = result.get("credential_patch")
+        if isinstance(patch, dict) and patch:
+            yield {"type": "credential_patch", "data": patch}
 
     async def close(self) -> None:
         self._unregister_budget_evictors()

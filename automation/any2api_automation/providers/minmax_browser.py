@@ -519,6 +519,11 @@ class MinmaxOfficialBrowserTransport:
         yield {"type": "status", "status": status}
         if status < 200 or status >= 300:
             detail = str(result.get("body") or "")[:16384]
+            logger.warning(
+                "minmax_official_signed_fetch_failed status=%s body=%s",
+                status,
+                detail[:500],
+            )
             yield {
                 "type": "error",
                 "data": detail or f"official browser stream failed status={status}",

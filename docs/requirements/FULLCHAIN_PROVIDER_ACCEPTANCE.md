@@ -95,7 +95,7 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 | MiMo | PASS（2812） | PASS | PASS | PASS | PASS | API | 纯色极小图可能拒答 |
 | LongCat | PASS（2884） | PASS | PASS | PASS（≥32px 棋盘/256px） | PASS | API | 极小纯色 PNG 可 `empty_model_response` |
 | GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
-| Qwen | PASS（55927） | PASS（Runtime） | FAIL | — | — | Runtime | API SSE 502；Runtime `NS_BINDING_ABORTED` 间歇 |
+| Qwen | PASS（55927） | PASS（Runtime） | PASS（Runtime，含 pong） | 待补 | 待补 | Runtime | completion 失败已加一次重试；延迟偏高 |
 | MiniMax | PASS（签到后） | PASS | PASS | FAIL（400 ownership） | FAIL | Runtime+签名 fetch | 文本双通道 READY；图片 attachment `invalid_params` |
 | Arena | 历史 PASS（59） | FAIL | FAIL | — | — | 阻断 | 生产 9/9 账号 EXPIRED；reauth 需交互认证 |
 

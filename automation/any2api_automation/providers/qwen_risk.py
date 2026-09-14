@@ -658,15 +658,33 @@ class QwenNativeBrowserTransport:
         async with self._request_lock, proxy_context as proxy_binding:
             session = await self._session_for(request, proxy_binding)
             await self._prepare_authenticated_surface(session, request)
-            result = await session.page.evaluate(
-                _UPLOAD_MEDIA,
-                {
-                    "stsPath": request.path,
-                    "sources": sources,
-                    "maximumBytes": maximum_bytes,
-                    "userId": user_id,
-                },
-            )
+            payload = {
+                "stsPath": request.path,
+                "sources": sources,
+                "maximumBytes": maximum_bytes,
+                "userId": user_id,
+            }
+            result: Any = None
+            last_error: Exception | None = None
+            for attempt in range(2):
+                try:
+                    result = await session.page.evaluate(_UPLOAD_MEDIA, payload)
+                    break
+                except Exception as error:  # noqa: BLE001 - normalized below
+                    last_error = error
+                    logger.warning(
+                        "qwen_media_upload_failed attempt=%s path=%s error=%s",
+                        attempt + 1,
+                        request.path,
+                        str(error)[:300],
+                    )
+                    if attempt == 0:
+                        await asyncio.sleep(0.5)
+                        await self._prepare_authenticated_surface(session, request)
+                        continue
+                    raise RuntimeError(f"Qwen media upload failed: {str(error)[:200]}") from error
+            if result is None:
+                raise RuntimeError("Qwen media upload returned no result") from last_error
             if not isinstance(result, list) or len(result) != len(sources):
                 raise RuntimeError("Qwen media upload returned an incomplete file list")
             if any(not isinstance(item, dict) for item in result):

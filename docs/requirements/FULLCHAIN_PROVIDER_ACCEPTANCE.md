@@ -40,6 +40,20 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 | 11 | 显式 API 失败关闭 | API | 不静默改走 Runtime |
 | 12 | daily_checkin | Runtime | 仅 MiniMax，自然调度真实结果 |
 
+## 生产真实验收矩阵（2026-09-14，namespace=any2api）
+
+通道约定：AUTO KEY 优先 API；另建 API-only / RUNTIME-only KEY 对照。smoke 不携带 `max_tokens`。
+
+| Provider | 文本collect | 文本SSE | 图片collect | 图片SSE | keepalive | 主要阻断 |
+|---|---|---|---|---|---|---|
+| deepseek | PASS | PASS | N/A text-only | N/A | PASS 1864 | 首字节延迟偏高 |
+| mimo | PASS | PASS | PASS* | PASS | PASS 2812 | *32x32 返回拒答文案但 HTTP 200 |
+| longcat | PASS | PASS | FAIL empty | FAIL empty | PASS 2884 | 双通道图片均 empty_model_response |
+| glm | PASS | PASS | FAIL | FAIL | PASS 2687 | API 图片 400 Content Security；Runtime 流失败；部分 anti_bot |
+| arena | PASS (Runtime) | 待补 | 待补 | 待补 | PASS 59 | API 401 User not found；reauth interactive_auth_required |
+| qwen | PASS | 部分 | 待补 | 待补 | PASS 55927 | 间歇 502 RuntimeError；reauth QwenReauthenticationRequired |
+| minmax | FAIL | FAIL | 待补 | 待补 | 历史 PASS | 探针/推理 model_unavailable；user/info 200 后动作仍 502 |
+
 ## 现状基线（2026-09-13 盘点）
 
 ### 生产账号（any2api）
@@ -71,28 +85,33 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 - E2E：`deepseek/glm/longcat/mimo/qwen` = `API`；`arena/minmax` = 默认
 - 生产：7 家均未写 `inference_transport_mode`（走 AUTO 默认）
 
-### 2026-09-14 生产真实验收矩阵
+### 2026-09-14 生产真实验收矩阵（实测）
 
-图例：`PASS` 真实成功；`FAIL` 有明确错误；`STALE` 需新鲜探针；`N/A` 未声明能力。
+图例：`PASS` 真实成功；`FAIL` 有明确错误；`N/A` 未声明能力。
 
-| Provider | keepalive | 文本 collect | 文本 SSE | 图片 collect | 图片 SSE | API 通道 | 备注 |
+| Provider | keepalive | 文本 collect | 文本 SSE | 图片 collect | 图片 SSE | 主用通道 | 备注 |
 |---|---|---|---|---|---|---|---|
-| DeepSeek | PASS | PASS | PASS | N/A | N/A | API | text-only；首字节偏慢 |
-| MiMo | PASS | PASS | PASS | PASS | PASS | API | 图片走 API 成功 |
-| LongCat | PASS | PASS | PASS | FAIL | FAIL | API+Runtime | `empty_model_response`，上传后无输出 |
-| GLM | PASS | PASS | PASS | FAIL | — | API 文本 OK | Runtime 图片 RuntimeError；API 图片 HTTP 400 |
-| Qwen | PASS | PASS | — | — | — | API | 文本通；探针/上游偶发 502 |
-| Arena | PASS | PASS(Runtime) | — | STALE | — | API 401 | Runtime 文本通；API `User not found` |
-| MiniMax | 历史 PASS | STALE | — | — | — | 签名 profile | 探针 `provider_upstream_error` |
+| DeepSeek | PASS（历史 1864） | PASS | PASS | N/A | N/A | API | text-only；首字 50–120s |
+| MiMo | PASS（2812） | PASS | PASS | PASS | PASS | API | 纯色极小图可能拒答 |
+| LongCat | PASS（2884） | PASS | PASS | PASS（≥32px 棋盘/256px） | PASS | API | 极小纯色 PNG 可 `empty_model_response` |
+| GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
+| Qwen | PASS（55927） | PASS（Runtime） | FAIL | — | — | Runtime | API SSE 502；Runtime `NS_BINDING_ABORTED` 间歇 |
+| MiniMax | 历史 PASS（313） | FAIL | FAIL | — | — | 待修复 | profile 已修；`arrayBuffer` 桥接 bug 待部署 |
+| Arena | 历史 PASS（59） | FAIL | FAIL | — | — | 阻断 | 生产 9/9 账号 EXPIRED；reauth 需交互认证 |
+
+### 本轮已落地修复
+
+1. **MiniMax request profile**：GitOps `b7cd0b2` 将 `ANY2API_AUTOMATION_MINMAX_{SIGNATURE_SALT,YY_SALT,VERSION_CODE}` 注入 Automation；重启后 `_official_profile()` 可解析。
+2. **MiniMax arrayBuffer 桥接**：分支提交 `1fe3b8b` 已兼容非 `Response` 对象；**生产镜像仍为 `d68dc20`，待 CI 发布**。
+3. **LongCat event_error**：兼容 `eventError` 字段名（工作树）。
+4. **参数契约**：多家 Provider 不接受 `max_tokens`，smoke 必须按厂商契约发参。
 
 ### 当前阻断点
 
-1. **模型可用性门禁**：探针新鲜度仅 30 分钟。GLM/Arena/MiniMax 无近期成功 usage 时必须先 `POST /api/admin/v1/models/probe`。
-2. **LongCat 图片**：Runtime/API 均 `empty_model_response`，需查上传 `files` 与上游 completion。
-3. **GLM 图片**：Runtime 页桥流失败；API `/api/v1/files/` 返回 400。
-4. **Arena API 鉴权**：Runtime cookie 不能直接用于 Web API，需补齐 API 凭据传播。
-5. **MiniMax API**：签名 salt/yy_salt/version_code 已写入 automation 默认值；运行态曾缺配置导致 profile unavailable。
-6. **Qwen probe vs chat**：chat 可成功，但 model probe 可能走 Runtime 并失败。
+1. **MiniMax**：需部署含 `1fe3b8b` 的 Automation 镜像（`arrayBuffer` 修复）。
+2. **Arena 账号池枯竭**：9/9 EXPIRED；`arena_interactive_auth_required` × 222，无法自动 reauth。
+3. **Qwen 流式**：Runtime SSE `NS_BINDING_ABORTED`；非流式 Runtime 可用。
+4. **模型可用性门禁**：探针新鲜度窗口内无成功 usage 时返回 `model_unavailable`。
 
 ## 实施阶段
 

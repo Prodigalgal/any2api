@@ -13,7 +13,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
-from uuid import uuid4
 
 from patchright.async_api import async_playwright
 

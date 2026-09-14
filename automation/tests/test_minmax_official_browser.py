@@ -76,37 +76,13 @@ def test_minmax_upstream_network_diagnostics_strip_query_parameters() -> None:
 
 
 @pytest.mark.asyncio
-async def test_minmax_stream_persists_context_before_forwarding_an_error() -> None:
+async def test_minmax_stream_buffers_sse_and_forwards_errors() -> None:
     transport = MinmaxOfficialBrowserTransport("https://agent.minimax.io")
 
-    class Page:
-        async def evaluate(self, _script: str, payload: dict[str, object]) -> None:
-            request_id = str(payload["requestId"])
-            transport._emit(
-                session,
-                {"requestId": request_id, "type": "status", "status": 403},
-            )
-            transport._emit(
-                session,
-                {"requestId": request_id, "type": "error", "data": "challenge"},
-            )
+    async def failed_request(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"status": 403, "body": "challenge", "credential_patch": {"token": "t"}}
 
-    session = _Session(
-        key="account",
-        browser=object(),
-        context=object(),
-        page=Page(),
-        backend="camoufox",
-        state_digest="",
-        input_digest="",
-        proxy_url="",
-    )
-    transport._session_for = AsyncMock(return_value=session)
-    transport._inject_context = AsyncMock()
-    transport._credential_patch = AsyncMock(
-        return_value={"browser_execution_context": {"schema_version": 1}}
-    )
-
+    transport.request = failed_request  # type: ignore[method-assign]
     events = [
         event
         async for event in transport.stream(
@@ -117,12 +93,35 @@ async def test_minmax_stream_persists_context_before_forwarding_an_error() -> No
             "",
         )
     ]
+    assert [event["type"] for event in events] == ["status", "error"]
+    assert events[0]["status"] == 403
 
+    async def ok_request(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "status": 200,
+            "body": 'data: {"a":1}\n\ndata: {"b":2}\n\ndata: [DONE]\n\n',
+            "credential_patch": {"token": "t2"},
+        }
+
+    transport.request = ok_request  # type: ignore[method-assign]
+    events = [
+        event
+        async for event in transport.stream(
+            {"token": "token", "user_id": "user"},
+            "POST",
+            "/archon/api/v1/session/1/message",
+            "{}",
+            "",
+        )
+    ]
     assert [event["type"] for event in events] == [
         "status",
+        "data",
+        "data",
+        "data",
         "credential_patch",
-        "error",
     ]
+    assert events[1]["data"] == '{"a":1}'
 
 
 @pytest.mark.asyncio

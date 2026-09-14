@@ -595,8 +595,9 @@ class MinmaxOfficialBrowserTransport:
                     )
                 except Exception as error:  # noqa: BLE001 - normalized into stream protocol
                     logger.warning(
-                        "minmax_official_browser_stream_failed error_type=%s",
+                        "minmax_official_browser_stream_failed error_type=%s detail=%s",
                         type(error).__name__,
+                        str(error)[:500],
                     )
                     await queue.put(
                         {

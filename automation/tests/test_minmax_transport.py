@@ -138,6 +138,36 @@ def test_minmax_session_id_accepts_nested_payloads() -> None:
         _session_id({"status": 200, "body": '{"ok":true}'})
 
 
+def test_minmax_decode_json_payload_tolerates_common_wrappers() -> None:
+    assert _decode_json_payload('{"a":1}', "x") == {"a": 1}
+    assert _decode_json_payload(")]}'\n{\"a\":1}", "x") == {"a": 1}
+    assert _decode_json_payload('"{\\"a\\":1}"', "x") == {"a": 1}
+    assert _decode_json_payload({"already": "object"}, "x") == {"already": "object"}
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        _decode_json_payload("<html>nope</html>", "x")
+
+
+def test_minmax_select_agent_accepts_list_and_nested_shapes() -> None:
+    assert (
+        _select_agent(
+            {"status": 200, "body": '{"agents":[{"agent_role":"mavis","name":"agent-one"}]}'},
+            "mavis",
+        )
+        == "agent-one"
+    )
+    assert (
+        _select_agent(
+            {"status": 200, "body": '{"data":{"list":[{"name":"agent-two"}]}}'},
+            "mavis",
+        )
+        == "agent-two"
+    )
+    assert (
+        _select_agent({"status": 200, "body": '[{"name":"agent-three"}]'}, "mavis")
+        == "agent-three"
+    )
+
+
 def test_minmax_decode_json_payload_strips_noise() -> None:
     assert _decode_json_payload('prefix {"a":1}', "agent list") == {"a": 1}
     assert _decode_json_payload('```json\n{"a":1}\n```', "agent list") == {"a": 1}

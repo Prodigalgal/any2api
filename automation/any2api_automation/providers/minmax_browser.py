@@ -94,20 +94,36 @@ _BUFFERED_REQUEST = rf"""async request => {{
     if (!['GET', 'HEAD'].includes(request.method)) init.body = request.body;
     const response = await bridge(request.path, init, {{stream: request.stream}});
     let bytes;
-    if (response && typeof response.arrayBuffer === 'function') {{
+    let statusValue = 502;
+    if (typeof response === 'string') {{
+      bytes = new TextEncoder().encode(response);
+      statusValue = 200;
+    }} else if (response && typeof response.arrayBuffer === 'function') {{
       bytes = new Uint8Array(await response.arrayBuffer());
+      statusValue = response.status != null ? response.status : 200;
     }} else if (response && typeof response.text === 'function') {{
       bytes = new TextEncoder().encode(await response.text());
+      statusValue = response.status != null ? response.status : 200;
     }} else if (response && typeof response.body === 'string') {{
       bytes = new TextEncoder().encode(response.body);
-    }} else if (response && typeof response === 'object' &&
-               typeof response.status === 'number') {{
-      const payload = response.body ?? response.data ?? response.text ?? '';
+      statusValue = response.status != null ? response.status : 200;
+    }} else if (response && typeof response === 'object') {{
+      const payload = response.body ?? response.data ?? response.content ??
+        response.text ?? response.result ?? response.payload ?? '';
       bytes = new TextEncoder().encode(
-        typeof payload === 'string' ? payload : JSON.stringify(payload)
+        typeof payload === 'string' ? payload : JSON.stringify(payload ?? '')
       );
+      statusValue = response.status ?? response.statusCode ?? response.code ?? 200;
+      if (typeof statusValue !== 'number') statusValue = 200;
     }} else {{
-      throw new Error('MinMax official bridge returned an unsupported response type');
+      const kind = response === null ? 'null' : typeof response;
+      const keys = (response && typeof response === 'object')
+        ? Object.keys(response).slice(0, 12).join(',')
+        : '';
+      throw new Error(
+        'MinMax official bridge returned an unsupported response type kind='
+        + kind + ' keys=' + keys
+      );
     }}
     if (bytes.length > request.maximumBytes) {{
       throw new Error('MinMax browser response exceeds the buffered byte limit');
@@ -121,7 +137,7 @@ _BUFFERED_REQUEST = rf"""async request => {{
       ? response.headers.get('content-type')
       : (response && (response.contentType || response.content_type)) || '';
     return {{
-      status: response && response.status != null ? response.status : 502,
+      status: statusValue,
       contentType: contentType || 'application/octet-stream',
       bodyBase64: btoa(binary)
     }};

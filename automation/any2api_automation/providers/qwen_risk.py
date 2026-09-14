@@ -695,10 +695,39 @@ class QwenNativeBrowserTransport:
             "maximumBytes": maximum,
             "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
         }
-        result, body = await self._fetch_in_main_world(session, payload)
+        result, body = await self._fetch_in_main_world_with_retry(session, payload)
         if len(body) > maximum:
             raise RuntimeError("Qwen browser response exceeds the buffered byte limit")
         return result, body
+
+    async def _fetch_in_main_world_with_retry(
+        self,
+        session: _AccountBrowserSession,
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], bytes]:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return await self._fetch_in_main_world(session, payload)
+            except RuntimeError as error:
+                last_error = error
+                message = str(error)
+                transient = (
+                    "NS_BINDING_ABORTED" in message or "browser request failed: Error" in message
+                )
+                if attempt == 0 and transient:
+                    logger.warning(
+                        "qwen_native_browser_request_retry attempt=%s path=%s error=%s",
+                        attempt + 1,
+                        payload.get("path"),
+                        message[:240],
+                    )
+                    await asyncio.sleep(0.4)
+                    continue
+                raise
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Qwen browser request failed")
 
     async def _fetch_in_main_world(
         self,

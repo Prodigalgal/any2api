@@ -331,6 +331,13 @@ _UPLOAD_MEDIA = r"""async input => {
     const policyObjectKey = objectKeyFromValue(objectKeys.shift() || '', inferredBucket);
     const urlObjectKey = objectKeyFromValue(cdnUrl, inferredBucket);
     const objectKey = explicitObjectKey || callbackObjectKey || policyObjectKey || urlObjectKey;
+    // MiniMax ownership checks expect the bucket-prefixed object key when the
+    // policy callback only returns the moss/ path.
+    const ownedObjectKey = (() => {
+      if (!objectKey || !inferredBucket) return objectKey;
+      if (objectKey.startsWith(`${inferredBucket}/`)) return objectKey;
+      return `${inferredBucket}/${objectKey}`;
+    })();
     const objectKeySource = explicitObjectKey ? 'uploader'
       : callbackObjectKey ? 'policy_response'
       : policyObjectKey ? 'policy_callback'
@@ -347,7 +354,7 @@ _UPLOAD_MEDIA = r"""async input => {
       file_size: bytes.length,
       preview_url: cdnUrl,
       cdn_url: cdnUrl,
-      object_key: objectKey,
+      object_key: ownedObjectKey,
       object_key_source: objectKeySource,
       object_key_bucket: inferredBucket,
       object_key_bucket_removed: Boolean(

@@ -451,20 +451,12 @@ def _minmax_message_attachments(
             or attachment.get("data_url")
             or ""
         ).strip()
-        object_key = str(
-            attachment.get("object_key")
-            or attachment.get("objectKey")
-            or attachment.get("oss_path")
-            or ""
-        ).strip()
         if not upload_id or not file_name or not mime_type or not isinstance(file_size, int):
             raise ValueError("MinMax uploaded attachment metadata is incomplete")
         if not cdn_url:
             raise ValueError("MinMax uploaded attachment URL is missing")
-        if not object_key:
-            raise ValueError("MinMax uploaded attachment object key is missing")
-        # Official ownership check keys off the policy_callback object
-        # (dir/fileName). Keep that path; only rewrite known CDN hosts.
+        # Official ownership check accepts an allowlisted legacy CDN URL when
+        # object_key is absent. Uploader only returns uploadId + cdnUrl.
         legacy_url = cdn_url
         if "cdn.hailuoai.video/" in legacy_url:
             legacy_url = legacy_url.replace("cdn.hailuoai.video/", "cdn.hailuo.ai/", 1)
@@ -479,7 +471,6 @@ def _minmax_message_attachments(
                 "cloud": {
                     "upload_id": upload_id,
                     "url": legacy_url,
-                    "object_key": object_key,
                 },
             }
         )

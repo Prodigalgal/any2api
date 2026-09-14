@@ -503,7 +503,7 @@ class MinmaxOfficialBrowserTransport:
         from .minmax import _signed_request
 
         url, headers = _signed_request(
-            path, method, body, credential, stream=True, proxy_url=proxy_url
+            path, method, body, credential, stream=False, proxy_url=proxy_url
         )
         async with self._account_operation(credential):
             session = await self._session_for(credential, proxy_url)

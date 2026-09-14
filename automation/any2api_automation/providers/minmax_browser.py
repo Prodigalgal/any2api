@@ -489,9 +489,7 @@ class MinmaxOfficialBrowserTransport:
     ) -> AsyncIterator[dict[str, Any]]:
         # Official Camoufox bridge JSON-parses stream:false bodies, which breaks
         # SSE. Request stream:true, buffer the complete text, then emit frames.
-        result = await self.request(
-            credential, method, path, body, proxy_url, stream=True
-        )
+        result = await self.request(credential, method, path, body, proxy_url, stream=True)
         status = int(result.get("status") or 502)
         yield {"type": "status", "status": status}
         if status < 200 or status >= 300:

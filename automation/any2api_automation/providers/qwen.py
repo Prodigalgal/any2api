@@ -428,31 +428,25 @@ async def _qwen_media_upload(
     sources: list[dict[str, Any]],
     referer_path: str,
 ) -> dict[str, Any]:
-    from .qwen_risk import NativeBrowserRequest, native_transport
+    # Page evaluate for STS/OSS upload races with SPA navigation. Use the
+    # signed HTTP upload path that the API channel already validates.
+    from .actions import ProviderAction, ProviderActionRequest
+    from .qwen_api_actions import _upload_media as api_upload_media
+    from .qwen_settings import settings as qwen_settings
 
-    token = _qwen_token(current)
-    raw_account_id = str(payload.get("account_id") or "").strip()
-    account_id = raw_account_id if _uuid(raw_account_id) else ""
-    binding_id = hashlib.sha256(proxy_url.encode()).hexdigest()[:32] if proxy_url else ""
-    request = NativeBrowserRequest(
-        method="POST",
-        path=_runtime_path(plan, "upload", "/api/v2/files/getstsToken"),
-        bearer_token=token,
-        account_id=account_id,
-        cookies=_qwen_cookie_map(current),
-        browser_state=current.get("browser_state") or {},
-        browser_fingerprint=current.get("browser_fingerprint") or {},
-        referer_path=referer_path,
-        timeout_seconds=120,
-        proxy_url=proxy_url,
-        proxy_binding_id=binding_id,
+    if not sources:
+        return {"files": []}
+    base_url = qwen_settings().qwen_base_url.rstrip("/")
+    chat_id = uuid4().hex
+    action_request = ProviderActionRequest(
+        provider_id="qwen",
+        action=ProviderAction.CHAT,
+        channel="api",
+        payload={"credential": current},
+        semantic_command={},
     )
-    return await native_transport.upload_media(
-        request,
-        sources,
-        settings().qwen_max_upload_bytes,
-        user_id=str(current.get("user_id") or current.get("userId") or ""),
-    )
+    files = await api_upload_media(current, base_url, proxy_url, action_request, sources, chat_id)
+    return {"files": files}
 
 
 def build_qwen_request(

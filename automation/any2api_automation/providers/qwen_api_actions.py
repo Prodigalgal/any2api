@@ -4,11 +4,14 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import uuid4
+
+logger = logging.getLogger("any2api_automation.providers.qwen_api_actions")
 
 from ..lifecycle.account import credential
 from .actions import ProviderAction, ProviderActionRequest
@@ -403,9 +406,16 @@ def _hmac(key: bytes, value: str) -> bytes:
 
 def _json(result: dict[str, Any], operation: str) -> dict[str, Any]:
     require_api_success(result, operation)
+    raw_body = str(result.get("body") or "")
     try:
-        value = json.loads(str(result.get("body") or ""))
+        value = json.loads(raw_body)
     except json.JSONDecodeError as error:
+        logger.warning(
+            "qwen_api_json_parse_failed operation=%s status=%s body=%s",
+            operation,
+            result.get("status"),
+            raw_body[:300],
+        )
         raise RuntimeError(f"{operation} returned invalid JSON") from error
     if not isinstance(value, dict):
         raise TypeError(f"{operation} returned an invalid object")

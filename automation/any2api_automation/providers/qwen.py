@@ -49,7 +49,7 @@ from .qwen_session import (
 )
 from .qwen_settings import settings
 from .runtime_rules import RuntimePlan, parse_runtime_plan
-from .transport_support import transport_frame, transport_proxy_lease
+from .transport_support import transport_proxy_lease
 
 logger = logging.getLogger(__name__)
 

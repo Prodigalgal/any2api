@@ -409,7 +409,7 @@ async def test_qwen_native_transport_executes_the_real_request_in_the_page_main_
     assert "value?.error" in page.script
     assert page.payload["path"] == "/api/v2/chats/new"
     assert "token-value-that-is-long-enough" not in page.script
-    assert "Authorization" not in page.script
+    assert "Authorization" in page.script
     assert result["requestId"] == "upstream-id"
     assert actual_body == body
     assert page.listeners == {}

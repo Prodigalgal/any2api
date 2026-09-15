@@ -366,17 +366,18 @@ async def _run_registration_browser(
             }
             if accepted or attempt >= attempts:
                 raise
-            diagnostic = str(error)
-            if not diagnostic.startswith("DeepSeek hCaptcha failed"):
-                diagnostic = "unavailable"
+            diagnostic = " ".join(str(error).split())
+            if len(diagnostic) > 400:
+                diagnostic = diagnostic[:400]
             logger.warning(
                 "DeepSeek registration browser retry correlation_id=%s attempt=%s/%s "
-                "error_type=%s diagnostic=%s",
+                "error_type=%s stage=%s diagnostic=%s",
                 correlation_id(),
                 attempt,
                 attempts,
                 type(error).__name__,
-                diagnostic[:1000],
+                trace.current,
+                diagnostic,
             )
             await asyncio.sleep(random.uniform(2.0, 6.0))
     raise RuntimeError("DeepSeek registration browser attempts were exhausted")
@@ -791,9 +792,9 @@ def _warm_up_hcaptcha(page: Any, base_url: str, *, required: bool = True) -> Non
 def _open_sign_up(page: Any, base_url: str) -> None:
     target = f"{base_url}/sign_up"
     last_error: Exception | None = None
-    for attempt in range(1, 3):
+    for attempt in range(1, 4):
         try:
-            page.goto(target, wait_until="domcontentloaded", timeout=90_000)
+            page.goto(target, wait_until="domcontentloaded", timeout=60_000)
             return
         except Exception as error:  # noqa: BLE001 - navigation can raise several Playwright types
             last_error = error
@@ -803,6 +804,16 @@ def _open_sign_up(page: Any, base_url: str) -> None:
                 type(error).__name__,
                 " ".join(str(error).split())[:200],
             )
+            # The SPA may already have rendered the signup form despite a
+            # cancelled navigation. Prefer the form over another goto.
+            try:
+                if _visible(page, ('input[type="email"]', 'input[placeholder*="email" i]')):
+                    return
+            except Exception as probe_error:  # noqa: BLE001
+                logger.debug(
+                    "DeepSeek signup form probe failed detail=%s",
+                    str(probe_error)[:120],
+                )
             page.wait_for_timeout(1500)
     if last_error is not None:
         raise last_error

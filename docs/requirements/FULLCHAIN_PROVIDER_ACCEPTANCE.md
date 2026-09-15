@@ -108,6 +108,21 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 
 ### 当前阻断点
 
+1. **DeepSeek 注册**：CloudFront WAF 对数据中心 IP 返回 403 `Request blocked`；CF Dynamic 节点不可用，Oracle 节点同样被挡。需要住宅/非常驻 IP 出口。
+2. **Qwen reauth**：密码/API 登录失败 → 已标 `terminal=true`，停止无限重试；账号仍待真正恢复。
+3. **Arena reauth**：`interactive_auth_required` → 已标 `terminal=true`；恢复只能靠 Runtime 注册补号。
+4. **automation_transport_error**：Pod 滚动后 Server→Automation DNS 抖动；需重启 server 或后续做 DNS 重试。
+5. **MiniMax 图片**：attachment `owned object_key` 契约未对齐。
+6. **Qwen 图片 completion**：slider 后空 JSON / captcha。
+
+### 生命周期稳定性改动（2026-09-15）
+
+- 默认注册 `flowMaxAttempts` 3→5、`attemptIntervalSeconds` 0→45，重试间加 jitter。
+- DeepSeek hCaptcha warmup 软失败 + `sign_up` 导航重试 + 表单快照诊断。
+- Qwen/Arena reauth 失败标 `terminal=true`，停止调度器空转。
+- DeepSeek 注册代理从 CF Dynamic 改绑 Self-hosted Oracle（仍被 CloudFront 挡）。
+- MiniMax 签到 envelope 修复后 16 次 SUCCEEDED。
+
 1. **MiniMax**：需部署含 `1fe3b8b` 的 Automation 镜像（`arrayBuffer` 修复）。
 2. **Arena 账号池枯竭**：9/9 EXPIRED；`arena_interactive_auth_required` × 222，无法自动 reauth。
 3. **Qwen 流式**：Runtime SSE `NS_BINDING_ABORTED`；非流式 Runtime 可用。

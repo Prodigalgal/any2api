@@ -742,6 +742,7 @@ class QwenNativeBrowserTransport:
             "requestId": str(uuid4()),
             "maximumBytes": maximum,
             "timezone": datetime.now(QWEN_TIMEZONE).strftime("%a %b %d %Y %H:%M:%S GMT%z"),
+            "token": request.bearer_token or "",
         }
         result, body = await self._fetch_in_main_world_with_retry(session, payload)
         if len(body) > maximum:
@@ -795,6 +796,7 @@ class QwenNativeBrowserTransport:
             'version': request.version
           };
           if (request.path.includes('/chat/completions')) headers['X-Accel-Buffering'] = 'no';
+          if (request.token) headers['Authorization'] = 'Bearer ' + request.token;
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
           let response;

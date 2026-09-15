@@ -661,7 +661,6 @@ class MinmaxOfficialBrowserTransport:
             source = images[0] if images else {}
             data_url = str(source.get("data_url") or "")
             filename = str(source.get("file_name") or "upload.png")
-            mime_type = str(source.get("mime_type") or "image/png")
             payload_b64 = data_url.split(",", 1)[-1] if "," in data_url else ""
             if not payload_b64:
                 raise ValueError("MinMax capture image must be an inline base64 data URL")

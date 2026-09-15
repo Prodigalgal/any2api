@@ -795,7 +795,7 @@ def _open_sign_up(page: Any, base_url: str) -> None:
         try:
             page.goto(target, wait_until="domcontentloaded", timeout=90_000)
             return
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - navigation can raise several Playwright types
             last_error = error
             logger.warning(
                 "DeepSeek sign_up navigation retry attempt=%s error_type=%s detail=%s",

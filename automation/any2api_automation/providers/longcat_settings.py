@@ -24,7 +24,7 @@ class LongcatSettings(AutomationProviderSettings):
     longcat_after_action_ms: int = 6000
     longcat_submit_attempts: int = 4
     longcat_yoda_attempts: int = 2
-    longcat_registration_attempts: int = 3
+    longcat_registration_attempts: int = 4
     longcat_slider_tolerance_px: float = 1.0
     longcat_slider_loop_ms: int = 1400
     longcat_slider_drag_seconds: float = 0.55

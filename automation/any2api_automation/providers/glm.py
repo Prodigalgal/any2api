@@ -324,6 +324,7 @@ async def _run_registration_browser(
                 )
             if attempt >= attempts or not retryable:
                 raise
+            await asyncio.sleep(random.uniform(2.0, 6.0))
     raise RuntimeError("GLM registration browser attempts were exhausted")
 
 

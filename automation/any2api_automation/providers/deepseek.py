@@ -378,6 +378,7 @@ async def _run_registration_browser(
                 type(error).__name__,
                 diagnostic[:1000],
             )
+            await asyncio.sleep(random.uniform(2.0, 6.0))
     raise RuntimeError("DeepSeek registration browser attempts were exhausted")
 
 

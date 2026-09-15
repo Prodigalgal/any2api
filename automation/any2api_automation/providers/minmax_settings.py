@@ -18,6 +18,7 @@ class MinmaxSettings(AutomationProviderSettings):
     minmax_profile_app_id: str = "3001"
     minmax_profile_language: str = "en"
     minmax_max_upload_bytes: int = 20 * 1024 * 1024
+    minmax_registration_attempts: int = 3
 
 
 @lru_cache

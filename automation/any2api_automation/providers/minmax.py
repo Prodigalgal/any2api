@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import logging
+import random
 import re
 import time
 import uuid
@@ -92,7 +93,7 @@ class MinmaxAutomationProvider(AutomationProvider):
         ):
             raise RuntimeError("MinMax overseas registration requires the CF dynamic proxy")
         mail, mailbox, password = await prepare_registration(payload)
-        attempts = flow_max_attempts(payload, 1)
+        attempts = flow_max_attempts(payload, settings().minmax_registration_attempts)
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -122,6 +123,8 @@ class MinmaxAutomationProvider(AutomationProvider):
                 return result.response()
             except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
                 last_error = error
+                if attempt < attempts:
+                    await asyncio.sleep(random.uniform(3.0, 8.0))
         assert last_error is not None
         raise last_error
 

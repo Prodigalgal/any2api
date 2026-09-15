@@ -15,7 +15,7 @@ class DeepseekSettings(AutomationProviderSettings):
     deepseek_hcaptcha_attempts: int = Field(default=5, ge=1, le=10)
     deepseek_hcaptcha_timeout_seconds: int = Field(default=180, ge=30, le=300)
     deepseek_hcaptcha_result_wait_seconds: int = Field(default=12, ge=3, le=30)
-    deepseek_registration_browser_attempts: int = Field(default=4, ge=1, le=8)
+    deepseek_registration_browser_attempts: int = Field(default=6, ge=1, le=8)
 
 
 @lru_cache

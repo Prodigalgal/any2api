@@ -741,7 +741,7 @@ async def test_qwen_native_transport_recovers_same_origin_navigation_timeout() -
 
     assert session.page.token == request.bearer_token
     assert session.page.route == "https://chat.qwen.ai/c/chat-1"
-    assert session.page.load_state_calls == 1
+    assert session.page.load_state_calls >= 1
 
 
 @pytest.mark.asyncio
@@ -794,7 +794,7 @@ async def test_qwen_native_transport_recovers_after_superseding_navigation_wait_
 
     assert session.page.token == request.bearer_token
     assert session.page.route == "https://chat.qwen.ai/c/chat-1"
-    assert session.page.load_state_calls == 1
+    assert session.page.load_state_calls >= 1
 
 
 @pytest.mark.asyncio

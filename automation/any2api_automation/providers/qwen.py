@@ -849,7 +849,8 @@ def _qwen_api_browser(
             metadata={
                 "healthy": False,
                 "auth_expired": True,
-                "terminal": False,
+                # Password/API signin both failed; stop the scheduler loop.
+                "terminal": True,
                 "error_class": "QwenReauthenticationRequired",
             },
         )

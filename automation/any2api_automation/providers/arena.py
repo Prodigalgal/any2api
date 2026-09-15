@@ -208,6 +208,10 @@ def _account_probe_response(result: dict[str, Any], operation: str) -> dict[str,
         "inference_probe_required": authenticated,
         "error_class": error_class,
     }
+    if operation == "reauthenticate" and status in {401, 403}:
+        # Arena reauth cannot recover cookies without interactive magic-link.
+        # Stop the scheduler from burning browser budget on a probe-only path.
+        response["terminal"] = True
     patch = result.get("credential_patch")
     if isinstance(patch, dict) and patch:
         response["credential_patch"] = patch

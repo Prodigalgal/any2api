@@ -706,14 +706,38 @@ class MinmaxOfficialBrowserTransport:
                 )
                 editor = session.page.locator('[data-testid="message-textarea"]').first
                 try:
-                    await editor.wait_for(state="visible", timeout=5000)
-                    await editor.click(timeout=3000)
-                    await editor.type(content[:80], delay=20)
+                    await editor.wait_for(state="attached", timeout=5000)
+                    await editor.click(force=True, timeout=3000)
+                    await editor.type(content[:80], delay=15)
                 except Exception as fill_error:  # noqa: BLE001
                     logger.warning(
                         "minmax_capture_fill_failed detail=%s",
                         str(fill_error)[:160],
                     )
+                    try:
+                        await session.page.evaluate(
+                            """
+                            (text) => {
+                              const el = document.querySelector('[data-testid="message-textarea"]');
+                              if (!el) return false;
+                              el.focus();
+                              if (el.isContentEditable) {
+                                el.textContent = text;
+                                el.dispatchEvent(new InputEvent('input', {bubbles: true}));
+                              } else if ('value' in el) {
+                                el.value = text;
+                                el.dispatchEvent(new Event('input', {bubbles: true}));
+                              }
+                              return true;
+                            }
+                            """,
+                            content[:80],
+                        )
+                    except Exception as js_error:  # noqa: BLE001
+                        logger.warning(
+                            "minmax_capture_js_fill_failed detail=%s",
+                            str(js_error)[:160],
+                        )
                 send_button = session.page.locator(
                     '[data-testid="send-button"], button[type="submit"], '
                     'button:has-text("Send"), button:has-text("发送"), '

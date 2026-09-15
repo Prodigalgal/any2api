@@ -615,58 +615,12 @@ class MinmaxOfficialBrowserTransport:
         body: str,
         proxy_url: str,
     ) -> AsyncIterator[dict[str, Any]]:
-        # Official bridge always JSON-parses chat responses, which breaks SSE.
-        # Sign with the shared profile and fetch as text from the official page.
-        from .minmax import _signed_request
+        # Official chat SSE lives on agent-stream / minimax-cloud, which is
+        # cross-origin from the page. Reuse the signed HTTP SSE client.
+        from .minmax_api_actions import _api_stream
 
-        # Official chat SSE lives on agent-stream / minimax-cloud.
-        use_stream_host = path.startswith("/minimax-cloud/")
-        url, headers = _signed_request(
-            path,
-            method,
-            body,
-            credential,
-            stream=use_stream_host,
-            proxy_url=proxy_url,
-        )
-        async with self._account_operation(credential):
-            session = await self._session_for(credential, proxy_url)
-            await self._inject_context(session, credential)
-            result = await session.page.evaluate(
-                _SIGNED_FETCH,
-                {"url": url, "method": method, "body": body, "headers": headers},
-            )
-            patch = await self._credential_patch(session, credential)
-        if not isinstance(result, dict):
-            raise TypeError("MinMax official signed fetch returned an invalid response")
-        status = int(result.get("status") or 502)
-        yield {"type": "status", "status": status}
-        if status < 200 or status >= 300:
-            detail = str(result.get("body") or "")[:16384]
-            logger.warning(
-                "minmax_official_signed_fetch_failed status=%s body=%s",
-                status,
-                detail[:500],
-            )
-            yield {
-                "type": "error",
-                "data": detail or f"official browser stream failed status={status}",
-            }
-            return
-        text = str(result.get("body") or "")
-        saw_data = False
-        for line in text.splitlines():
-            if not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if not payload:
-                continue
-            saw_data = True
-            yield {"type": "data", "data": payload}
-        if not saw_data and text.strip():
-            yield {"type": "data", "data": text.strip()}
-        if isinstance(patch, dict) and patch:
-            yield {"type": "credential_patch", "data": patch}
+        async for event in _api_stream(credential, method, path, body, proxy_url):
+            yield event
 
     async def capture_official_message(
         self,

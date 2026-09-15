@@ -999,8 +999,11 @@ class QwenNativeBrowserTransport:
             await session.page.wait_for_timeout(1500)
             try:
                 await session.page.wait_for_load_state("networkidle", timeout=10_000)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as idle_error:  # noqa: BLE001
+                logger.debug(
+                    "qwen_networkidle_wait_skipped detail=%s",
+                    str(idle_error)[:120],
+                )
         await self._ensure_baxia_ready_with_recovery(session)
 
     @staticmethod

@@ -324,19 +324,26 @@ async def _semantic_chat_input(
         )
         official_body = captured.get("body")
         if isinstance(official_body, dict) and official_body.get("attachments"):
-            # Replay official body with a fresh turn_id for this request.
             replay = dict(official_body)
             replay["turn_id"] = str(uuid.uuid4())
             if "model" not in replay:
                 replay["model"] = prepared["model"]
+            captured_url = str(captured.get("url") or "")
+            parsed = urlparse(captured_url) if captured_url else None
+            official_path = (
+                parsed.path
+                if parsed and parsed.path.startswith("/minimax-cloud/")
+                else f"/archon/api/v1/session/{session_id}/message"
+            )
             logger.info(
-                "minmax_using_captured_official_message url=%s keys=%s",
-                str(captured.get("url") or "")[:120],
+                "minmax_using_captured_official_message url=%s path=%s keys=%s",
+                captured_url[:120],
+                official_path,
                 sorted(replay.keys())[:20],
             )
             return (
                 "POST",
-                f"/archon/api/v1/session/{session_id}/message",
+                official_path,
                 json.dumps(replay, ensure_ascii=False, separators=(",", ":")),
             )
         prepared = {

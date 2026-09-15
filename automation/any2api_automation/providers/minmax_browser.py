@@ -619,8 +619,15 @@ class MinmaxOfficialBrowserTransport:
         # Sign with the shared profile and fetch as text from the official page.
         from .minmax import _signed_request
 
+        # Official chat SSE lives on agent-stream / minimax-cloud.
+        use_stream_host = path.startswith("/minimax-cloud/")
         url, headers = _signed_request(
-            path, method, body, credential, stream=False, proxy_url=proxy_url
+            path,
+            method,
+            body,
+            credential,
+            stream=use_stream_host,
+            proxy_url=proxy_url,
         )
         async with self._account_operation(credential):
             session = await self._session_for(credential, proxy_url)

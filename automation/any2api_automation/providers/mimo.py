@@ -70,7 +70,7 @@ class MimoAutomationProvider(AutomationProvider):
             payload,
             password_policy=_MIMO_PASSWORD_POLICY,
         )
-        attempts = flow_max_attempts(payload, 1)
+        attempts = flow_max_attempts(payload, settings().mimo_registration_browser_attempts)
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:

@@ -260,7 +260,9 @@ public class RuntimeSettingsService {
         RegistrationCaptchaPolicy.AiMode aiCaptchaMode
     ) {
         public static RegistrationDefaults standard() {
-            return new RegistrationDefaults(1, 3, 1, 0, 5, 2100, 3, 5,
+            // More browser flow retries and a short interval between mailbox
+            // identities reduce same-IP ban/challenge collisions.
+            return new RegistrationDefaults(1, 5, 1, 45, 8, 2100, 5, 8,
                 RegistrationProxyPolicy.PROVIDER_DEFAULT, true, true,
                 RegistrationCaptchaPolicy.AiMode.INTERNAL);
         }

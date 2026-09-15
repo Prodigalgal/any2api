@@ -12,6 +12,7 @@ class MimoSettings(AutomationProviderSettings):
     mimo_registration_aes_iv: str = "0102030405060708"
     mimo_registration_captcha_attempts: int = 10
     mimo_registration_local_captcha_attempts: int = 3
+    mimo_registration_browser_attempts: int = 3
     mimo_timezone: str = "Asia/Shanghai"
 
 

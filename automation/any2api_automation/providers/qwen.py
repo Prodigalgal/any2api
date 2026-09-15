@@ -72,7 +72,7 @@ class QwenAutomationProvider(AutomationProvider):
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         await asyncio.sleep(random.uniform(2.0, 4.0))
         mail, mailbox, password = await prepare_registration(payload)
-        attempts = flow_max_attempts(payload, 1)
+        attempts = flow_max_attempts(payload, settings().qwen_signup_attempts)
         last_error: RuntimeError | None = None
         for attempt in range(1, attempts + 1):
             trace = RegistrationTrace(self.manifest.id)

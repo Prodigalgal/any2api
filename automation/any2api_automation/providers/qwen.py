@@ -381,16 +381,26 @@ async def _qwen_chat_request(
             referer_path=f"/c/{chat_id}",
         )
     else:
-        completion = await _qwen_native_request(
+        from .actions import ProviderAction, ProviderActionRequest
+        from .qwen_api_actions import _request as api_request
+
+        action_request = ProviderActionRequest(
+            provider_id="qwen",
+            action=ProviderAction.CHAT,
+            channel="api",
+            payload={"credential": merged},
+            semantic_command=command,
+        )
+        base_url = settings().qwen_base_url.rstrip("/")
+        completion = await api_request(
+            action_request,
             merged,
+            base_url,
             proxy_url,
-            plan,
-            payload,
-            method="POST",
-            path=f"{completion_path}?chat_id={chat_id}",
-            body=completion_body,
+            "POST",
+            f"{completion_path}?chat_id={chat_id}",
+            completion_body,
             referer_path=f"/c/{chat_id}",
-            timeout_seconds=300,
         )
     patches = [
         session.get("credential_patch"),

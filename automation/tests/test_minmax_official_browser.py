@@ -74,72 +74,53 @@ def test_minmax_upstream_network_diagnostics_strip_query_parameters() -> None:
 
 
 @pytest.mark.asyncio
-async def test_minmax_stream_buffers_sse_and_forwards_errors() -> None:
+async def test_minmax_stream_delegates_to_signed_http_client() -> None:
     transport = MinmaxOfficialBrowserTransport("https://agent.minimax.io")
 
-    class Page:
-        def __init__(self, payload: dict[str, object]) -> None:
-            self._payload = payload
+    async def failed_stream(*_args: object, **_kwargs: object):
+        yield {"type": "status", "status": 403}
+        yield {"type": "error", "data": "challenge"}
 
-        async def evaluate(self, script: str, _payload: dict[str, object]) -> dict[str, object]:
-            assert "_SIGNED_FETCH" not in script  # script is the JS body
-            assert "fetch(request.url" in script
-            return self._payload
+    async def ok_stream(*_args: object, **_kwargs: object):
+        yield {"type": "status", "status": 200}
+        yield {"type": "data", "data": '{"a":1}'}
+        yield {"type": "data", "data": '{"b":2}'}
+        yield {"type": "credential_patch", "data": {"token": "t2"}}
 
-    session = _Session(
-        key="account",
-        browser=object(),
-        context=object(),
-        page=Page({"status": 403, "body": "challenge"}),
-        backend="camoufox",
-        state_digest="",
-        input_digest="",
-        proxy_url="",
-    )
-    transport._session_for = AsyncMock(return_value=session)
-    transport._inject_context = AsyncMock()
-    transport._credential_patch = AsyncMock(return_value={"token": "t"})
     with pytest.MonkeyPatch.context() as patcher:
         patcher.setattr(
-            "any2api_automation.providers.minmax._signed_request",
-            lambda *args, **kwargs: ("https://agent-stream.minimax.io/x", {"h": "1"}),
+            "any2api_automation.providers.minmax_api_actions._api_stream",
+            failed_stream,
         )
         events = [
             event
             async for event in transport.stream(
                 {"token": "token", "user_id": "user", "device_id": "d"},
                 "POST",
-                "/archon/api/v1/session/1/message",
+                "/minimax-cloud/api/v1/session/1/message",
                 "{}",
                 "",
             )
         ]
     assert [event["type"] for event in events] == ["status", "error"]
 
-    session.page = Page(
-        {
-            "status": 200,
-            "body": 'data: {"a":1}\n\ndata: {"b":2}\n\ndata: [DONE]\n\n',
-        }
-    )
     with pytest.MonkeyPatch.context() as patcher:
         patcher.setattr(
-            "any2api_automation.providers.minmax._signed_request",
-            lambda *args, **kwargs: ("https://agent-stream.minimax.io/x", {"h": "1"}),
+            "any2api_automation.providers.minmax_api_actions._api_stream",
+            ok_stream,
         )
         events = [
             event
             async for event in transport.stream(
                 {"token": "token", "user_id": "user", "device_id": "d"},
                 "POST",
-                "/archon/api/v1/session/1/message",
+                "/minimax-cloud/api/v1/session/1/message",
                 "{}",
                 "",
             )
         ]
     assert [event["type"] for event in events] == [
         "status",
-        "data",
         "data",
         "data",
         "credential_patch",

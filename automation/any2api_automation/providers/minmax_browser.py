@@ -773,8 +773,20 @@ class MinmaxOfficialBrowserTransport:
             if isinstance(captured, list) and captured:
                 first = captured[0]
                 if isinstance(first, dict) and isinstance(first.get("body"), dict):
+                    body = first["body"]
+                    attachments = body.get("attachments")
+                    logger.info(
+                        "minmax_captured_official_body keys=%s attachment_count=%s "
+                        "attachment0=%s model=%s",
+                        sorted(body.keys())[:20],
+                        len(attachments) if isinstance(attachments, list) else -1,
+                        json.dumps(
+                            attachments[0] if isinstance(attachments, list) and attachments else {}
+                        )[:800],
+                        json.dumps(body.get("model"))[:200],
+                    )
                     return {
-                        "body": first["body"],
+                        "body": body,
                         "url": str(first.get("url") or ""),
                         "uploader": {},
                         "send_found": True,

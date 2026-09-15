@@ -623,17 +623,21 @@ class QwenNativeBrowserTransport:
                     }
                     return self._response(request, result, challenge_body, credential_patch)
                 result, body = await self._evaluate(session, request)
-            if (
+            # After anti-bot recovery or a non-SSE 200 body, give the page a
+            # moment and re-enter the chat surface before one more attempt.
+            needs_completion_retry = (
                 "/chat/completions" in request.path
                 and b"data:" not in body
-                and int(result.get("status") or 0) == 200
-            ):
+                and int(result.get("status") or 0) in {200, 403}
+            )
+            if needs_completion_retry:
                 logger.warning(
-                    "qwen_native_browser_completion_retry path=%s bytes=%s",
+                    "qwen_native_browser_completion_retry path=%s status=%s bytes=%s",
                     request.path,
+                    result.get("status"),
                     len(body),
                 )
-                await asyncio.sleep(0.8)
+                await asyncio.sleep(1.2)
                 await self._prepare_authenticated_surface(session, request)
                 result, body = await self._evaluate(session, request)
             credential_patch = await self._credential_patch(session, request)
@@ -1200,6 +1204,7 @@ class QwenNativeBrowserTransport:
             )
         finally:
             await self._load_page_runtime(session)
+            await asyncio.sleep(1.0)
 
     async def _session_for(
         self,

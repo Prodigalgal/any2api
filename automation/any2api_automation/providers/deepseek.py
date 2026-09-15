@@ -393,8 +393,8 @@ def _register_browser(
 ) -> BrowserResult:
     base_url = settings().deepseek_base_url.rstrip("/")
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
-    _warm_up_hcaptcha(page, base_url)
-    page.goto(f"{base_url}/sign_up", wait_until="domcontentloaded", timeout=90_000)
+    _warm_up_hcaptcha(page, base_url, required=False)
+    _open_sign_up(page, base_url)
     page.wait_for_timeout(1500)
     if page.get_by_text(re.compile("only phone number registration", re.IGNORECASE)).count():
         raise RuntimeError("DeepSeek email registration is unavailable for the current egress")
@@ -765,26 +765,58 @@ def _recover_registered_user(
     return user if isinstance(user, dict) else {}
 
 
-def _warm_up_hcaptcha(page: Any, base_url: str) -> None:
-    body = _open_sign_in(page, base_url)
+def _warm_up_hcaptcha(page: Any, base_url: str, *, required: bool = True) -> None:
+    try:
+        body = _open_sign_in(page, base_url, timeout_ms=45_000 if not required else 120_000)
+    except Exception as error:
+        if required:
+            raise
+        logger.warning(
+            "DeepSeek hCaptcha warmup skipped error_type=%s detail=%s",
+            type(error).__name__,
+            " ".join(str(error).split())[:200],
+        )
+        return
     feature = (
         (((body.get("data") or {}).get("biz_data") or {}).get("settings") or {})
         .get("chat_hcaptcha", {})
         .get("value")
     )
     if feature is not True:
-        raise RuntimeError("DeepSeek official hCaptcha feature is unavailable")
+        if required:
+            raise RuntimeError("DeepSeek official hCaptcha feature is unavailable")
+        logger.warning("DeepSeek official hCaptcha feature flag is not true; continuing signup")
 
 
-def _open_sign_in(page: Any, base_url: str) -> dict[str, Any]:
+def _open_sign_up(page: Any, base_url: str) -> None:
+    target = f"{base_url}/sign_up"
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            page.goto(target, wait_until="domcontentloaded", timeout=90_000)
+            return
+        except Exception as error:
+            last_error = error
+            logger.warning(
+                "DeepSeek sign_up navigation retry attempt=%s error_type=%s detail=%s",
+                attempt,
+                type(error).__name__,
+                " ".join(str(error).split())[:200],
+            )
+            page.wait_for_timeout(1500)
+    if last_error is not None:
+        raise last_error
+
+
+def _open_sign_in(page: Any, base_url: str, *, timeout_ms: int = 120_000) -> dict[str, Any]:
     def is_main_settings(response: Any) -> bool:
         parsed = urlparse(response.url)
         return parsed.path == "/api/v0/client/settings" and parse_qs(parsed.query).get("scope") == [
             "main"
         ]
 
-    with page.expect_response(is_main_settings, timeout=120_000) as response_info:
-        page.goto(f"{base_url}/sign_in", wait_until="domcontentloaded", timeout=120_000)
+    with page.expect_response(is_main_settings, timeout=timeout_ms) as response_info:
+        page.goto(f"{base_url}/sign_in", wait_until="domcontentloaded", timeout=timeout_ms)
     body = _json_response(response_info.value, "main client settings")
     _require_success(body, "main client settings")
     return body

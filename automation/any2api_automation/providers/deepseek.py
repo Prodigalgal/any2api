@@ -396,12 +396,39 @@ def _register_browser(
     trace.mark(RegistrationStage.BROWSER_LAUNCHED)
     _warm_up_hcaptcha(page, base_url, required=False)
     _open_sign_up(page, base_url)
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(2500)
     if page.get_by_text(re.compile("only phone number registration", re.IGNORECASE)).count():
         raise RuntimeError("DeepSeek email registration is unavailable for the current egress")
-    email = _visible(page, ('input[type="email"]', 'input[placeholder*="email" i]'))
+    email = _visible(
+        page,
+        (
+            'input[type="email"]',
+            'input[placeholder*="email" i]',
+            'input[name*="email" i]',
+            'input[autocomplete="email"]',
+        ),
+    )
     if email is None:
-        raise RuntimeError("DeepSeek email registration form is unavailable")
+        page.wait_for_timeout(2000)
+        email = _visible(
+            page,
+            (
+                'input[type="email"]',
+                'input[placeholder*="email" i]',
+                'input[name*="email" i]',
+                'input[autocomplete="email"]',
+            ),
+        )
+    if email is None:
+        snapshot = _page_form_snapshot(page)
+        raise RuntimeError(
+            "DeepSeek email registration form is unavailable url="
+            + snapshot["url"]
+            + " title="
+            + snapshot["title"]
+            + " text="
+            + snapshot["text"]
+        )
     trace.mark(RegistrationStage.FORM_READY)
     email.fill(mailbox.address)
     send = _visible(
@@ -787,6 +814,22 @@ def _warm_up_hcaptcha(page: Any, base_url: str, *, required: bool = True) -> Non
         if required:
             raise RuntimeError("DeepSeek official hCaptcha feature is unavailable")
         logger.warning("DeepSeek official hCaptcha feature flag is not true; continuing signup")
+
+
+def _page_form_snapshot(page: Any) -> dict[str, str]:
+    try:
+        url = page.url or ""
+    except Exception:  # noqa: BLE001
+        url = ""
+    try:
+        title = page.title() or ""
+    except Exception:  # noqa: BLE001
+        title = ""
+    try:
+        text = " ".join((page.locator("body").inner_text(timeout=3000) or "").split())[:240]
+    except Exception:  # noqa: BLE001
+        text = ""
+    return {"url": url, "title": title, "text": text}
 
 
 def _open_sign_up(page: Any, base_url: str) -> None:

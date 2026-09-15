@@ -809,8 +809,11 @@ def _open_sign_up(page: Any, base_url: str) -> None:
             try:
                 if _visible(page, ('input[type="email"]', 'input[placeholder*="email" i]')):
                     return
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as probe_error:  # noqa: BLE001
+                logger.debug(
+                    "DeepSeek signup form probe failed detail=%s",
+                    str(probe_error)[:120],
+                )
             page.wait_for_timeout(1500)
     if last_error is not None:
         raise last_error

@@ -368,9 +368,11 @@ async def test_qwen_native_transport_executes_the_real_request_in_the_page_main_
             assert predicate(FakeRequest())
             return FakeRequestInfo()
 
-        async def evaluate(self, script: str, payload: dict[str, object]) -> dict[str, object]:
+        async def evaluate(
+            self, script: str, payload: dict[str, object] | None = None
+        ) -> dict[str, object]:
             self.script = script
-            self.payload = payload
+            self.payload = payload if payload is not None else {}
             return {
                 "status": 200,
                 "contentType": "application/json",
@@ -447,7 +449,7 @@ async def test_qwen_native_transport_reports_browser_network_failure() -> None:
             assert predicate(FailedRequest())
             return RequestInfo()
 
-        async def evaluate(self, _script: str, _payload: dict[str, object]) -> None:
+        async def evaluate(self, _script: str, _payload: dict[str, object] | None = None) -> None:
             assert self.listener is not None
             self.listener(FailedRequest())
             raise RuntimeError("Page.evaluate: NetworkError when attempting to fetch resource")

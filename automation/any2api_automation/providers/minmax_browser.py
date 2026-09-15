@@ -418,6 +418,153 @@ _UPLOAD_MEDIA = r"""async input => {
   }
 }"""
 
+_CAPTURE_OFFICIAL_MESSAGE = r"""async input => {
+  const captured = [];
+  const originalFetch = window.fetch;
+  const xhrPrototype = window.XMLHttpRequest?.prototype;
+  const originalXhrOpen = xhrPrototype?.open;
+  const originalXhrSend = xhrPrototype?.send;
+  const remember = (url, body) => {
+    const text = typeof body === 'string' ? body : '';
+    if (!String(url).includes('/message')) return;
+    if (!text) return;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && parsed.attachments) {
+        captured.push({url: String(url), body: parsed});
+      }
+    } catch (_) {}
+  };
+  if (typeof originalFetch === 'function') {
+    window.fetch = function(...args) {
+      const inputUrl = args[0];
+      const url = typeof inputUrl === 'string' ? inputUrl : inputUrl?.url || '';
+      remember(url, args[1]?.body);
+      return originalFetch.apply(this, args);
+    };
+  }
+  if (xhrPrototype && typeof originalXhrOpen === 'function' &&
+      typeof originalXhrSend === 'function') {
+    xhrPrototype.open = function(method, url, ...args) {
+      this.__any2apiMinmaxCaptureUrl = String(url || '');
+      return originalXhrOpen.call(this, method, url, ...args);
+    };
+    xhrPrototype.send = function(body) {
+      remember(this.__any2apiMinmaxCaptureUrl, body);
+      return originalXhrSend.call(this, body);
+    };
+  }
+  try {
+    const locate = (markers, exportNames) => {
+      const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
+      for (const chunkName of chunkNames) {
+        const chunks = window[chunkName];
+        if (!Array.isArray(chunks)) continue;
+        let runtime;
+        chunks.push([['any2api-cap-' + Date.now()], {}, require => { runtime = require; }]);
+        if (!runtime || !runtime.m) continue;
+        for (const [id, factory] of Object.entries(runtime.m)) {
+          const source = String(factory);
+          if (!markers.every(marker => source.includes(marker))) continue;
+          let exports;
+          try { exports = runtime(id); } catch (_) { continue; }
+          const candidates = [];
+          if (typeof exports === 'function') candidates.push(exports);
+          if (exports && typeof exports === 'object') {
+            for (const name of exportNames) {
+              const value = exports[name];
+              if (typeof value === 'function') candidates.push(value);
+            }
+            for (const value of Object.values(exports)) {
+              if (typeof value === 'function') candidates.push(value);
+            }
+            if (exports.default && typeof exports.default === 'object') {
+              for (const value of Object.values(exports.default)) {
+                if (typeof value === 'function') candidates.push(value);
+              }
+            }
+          }
+          for (const candidate of candidates) {
+            const candidateSource = String(candidate);
+            if (markers.some(marker => candidateSource.includes(marker) ||
+                candidateSource.length < 40)) {
+              return {id, fn: candidate};
+            }
+          }
+        }
+      }
+      return null;
+    };
+    const uploaderHit = locate(
+      ['refreshSTSTokenInterval', 'fileMd5', 'ossPath'],
+      ['S', 'upload']
+    );
+    if (!uploaderHit) throw new Error('MinMax official uploader was not found');
+    const match = /^data:([^;]+);base64,(.+)$/s.exec(String(input.images?.[0]?.data_url || ''));
+    if (!match) throw new Error('capture image must be an inline base64 data URL');
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    const filename = String(input.images[0].file_name || 'upload.png');
+    const contentType = String(input.images[0].mime_type || match[1]);
+    const uploaded = await uploaderHit.fn(new File([bytes], filename, {type: contentType}));
+    const sendHit = locate(
+      ['experimental_attachments', 'conversationId'],
+      ['sendMessage', 'chat', 'send']
+    );
+    if (!sendHit) {
+      return {
+        captured: [],
+        uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
+        send_found: false,
+        chunks: Object.keys(window).filter(name => name.startsWith('webpackChunk')).length,
+      };
+    }
+    const conversationId = String(input.conversation_id || '');
+    const agentId = String(input.agent_id || '');
+    const model = input.model || {};
+    const payload = {
+      content: String(input.content || 'ping'),
+      conversationId,
+      agentId,
+      model,
+      experimental_attachments: [uploaded],
+      attachments: [uploaded],
+      files: [uploaded],
+    };
+    try {
+      await sendHit.fn(payload);
+    } catch (error) {
+      try {
+        await sendHit.fn(payload.content, payload.experimental_attachments);
+      } catch (error2) {
+        return {
+          captured,
+          uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
+          send_found: true,
+          send_error: String(error2 || error).slice(0, 300),
+          send_id: sendHit.id,
+        };
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    return {
+      captured,
+      uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
+      send_found: true,
+      send_id: sendHit.id,
+    };
+  } finally {
+    if (typeof originalFetch === 'function') window.fetch = originalFetch;
+    if (xhrPrototype && typeof originalXhrOpen === 'function') {
+      xhrPrototype.open = originalXhrOpen;
+    }
+    if (xhrPrototype && typeof originalXhrSend === 'function') {
+      xhrPrototype.send = originalXhrSend;
+    }
+  }
+}"""
+
 
 @dataclass
 class _Session:
@@ -592,6 +739,65 @@ class MinmaxOfficialBrowserTransport:
             yield {"type": "data", "data": text.strip()}
         if isinstance(patch, dict) and patch:
             yield {"type": "credential_patch", "data": patch}
+
+    async def capture_official_message(
+        self,
+        credential: dict[str, Any],
+        proxy_url: str,
+        *,
+        images: list[dict[str, Any]],
+        content: str,
+        conversation_id: str,
+        agent_id: str,
+        model: dict[str, Any],
+    ) -> dict[str, Any]:
+        async with self._account_operation(credential):
+            session = await self._session_for(credential, proxy_url)
+            await self._inject_context(session, credential)
+            result = await session.page.evaluate(
+                _CAPTURE_OFFICIAL_MESSAGE,
+                {
+                    "images": images,
+                    "content": content,
+                    "conversation_id": conversation_id,
+                    "agent_id": agent_id,
+                    "model": model,
+                },
+            )
+            if not isinstance(result, dict):
+                raise TypeError("MinMax official message capture returned an invalid result")
+            logger.info(
+                "minmax_official_message_capture send_found=%s send_id=%s captured=%s "
+                "uploader_keys=%s send_error=%s",
+                bool(result.get("send_found")),
+                str(result.get("send_id") or "")[:40],
+                len(result.get("captured") or []),
+                ",".join((result.get("uploader") or {}).keys())
+                if isinstance(result.get("uploader"), dict)
+                else "none",
+                str(result.get("send_error") or "")[:160],
+            )
+            captured = result.get("captured")
+            if isinstance(captured, list) and captured:
+                first = captured[0]
+                if isinstance(first, dict) and isinstance(first.get("body"), dict):
+                    return {
+                        "body": first["body"],
+                        "url": str(first.get("url") or ""),
+                        "uploader": result.get("uploader")
+                        if isinstance(result.get("uploader"), dict)
+                        else {},
+                        "send_found": True,
+                    }
+            return {
+                "body": None,
+                "url": "",
+                "uploader": result.get("uploader")
+                if isinstance(result.get("uploader"), dict)
+                else {},
+                "send_found": bool(result.get("send_found")),
+                "send_error": str(result.get("send_error") or "")[:300],
+            }
 
     async def close(self) -> None:
         self._unregister_budget_evictors()

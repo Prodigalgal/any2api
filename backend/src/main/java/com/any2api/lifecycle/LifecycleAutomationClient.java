@@ -77,12 +77,28 @@ final class LifecycleAutomationClient {
                         context.correlationId(), response.statusCode().value(),
                         details.code(), details.stage(), details.message(), null));
                 }))
+            .retryWhen(reactor.util.retry.Retry.max(1)
+                .filter(LifecycleAutomationClient::isTransientDnsOrConnect)
+                .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
             .onErrorMap(error -> error instanceof AutomationInvocationException
                 ? error
                 : new AutomationInvocationException(
                     context.correlationId(), 0, "automation_transport_error", "transport",
                     "automation transport failed (" + error.getClass().getSimpleName() + ")",
                     error));
+    }
+
+    private static boolean isTransientDnsOrConnect(Throwable error) {
+        var current = error;
+        for (int depth = 0; current != null && depth < 5; depth++) {
+            var name = current.getClass().getName();
+            if (name.contains("UnknownHost") || name.contains("ConnectException")
+                || name.contains("ConnectError") || name.contains("NoRouteToHost")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private ErrorDetails errorDetails(String body, int status) {

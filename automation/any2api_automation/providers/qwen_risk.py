@@ -937,7 +937,7 @@ class QwenNativeBrowserTransport:
             {"name": name, "value": value, "url": base_url}
             for name, value in request.cookies.items()
         ]
-        if credential_cookies and not request.browser_state:
+        if credential_cookies:
             await session.context.add_cookies(credential_cookies)
         logger.info(
             "qwen_native_browser_surface path=%s auth_mode=%s credential_cookies=%s",

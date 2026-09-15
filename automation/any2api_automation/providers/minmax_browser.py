@@ -6,13 +6,16 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from patchright.async_api import async_playwright
 
@@ -418,23 +421,20 @@ _UPLOAD_MEDIA = r"""async input => {
   }
 }"""
 
-_CAPTURE_OFFICIAL_MESSAGE = r"""async input => {
-  const captured = [];
-  const originalFetch = window.fetch;
-  const xhrPrototype = window.XMLHttpRequest?.prototype;
-  const originalXhrOpen = xhrPrototype?.open;
-  const originalXhrSend = xhrPrototype?.send;
+_INSTALL_MESSAGE_HOOK = r"""() => {
+  if (window.__any2apiMinmaxCaptured) return true;
+  window.__any2apiMinmaxCaptured = [];
   const remember = (url, body) => {
     const text = typeof body === 'string' ? body : '';
-    if (!String(url).includes('/message')) return;
-    if (!text) return;
+    if (!String(url).includes('/message') || !text) return;
     try {
       const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object' && parsed.attachments) {
-        captured.push({url: String(url), body: parsed});
+      if (parsed && typeof parsed === 'object') {
+        window.__any2apiMinmaxCaptured.push({url: String(url), body: parsed});
       }
     } catch (_) {}
   };
+  const originalFetch = window.fetch;
   if (typeof originalFetch === 'function') {
     window.fetch = function(...args) {
       const inputUrl = args[0];
@@ -443,151 +443,28 @@ _CAPTURE_OFFICIAL_MESSAGE = r"""async input => {
       return originalFetch.apply(this, args);
     };
   }
-  if (xhrPrototype && typeof originalXhrOpen === 'function' &&
-      typeof originalXhrSend === 'function') {
+  const xhrPrototype = window.XMLHttpRequest?.prototype;
+  if (xhrPrototype && typeof xhrPrototype.open === 'function' &&
+      typeof xhrPrototype.send === 'function') {
+    const originalOpen = xhrPrototype.open;
+    const originalSend = xhrPrototype.send;
     xhrPrototype.open = function(method, url, ...args) {
       this.__any2apiMinmaxCaptureUrl = String(url || '');
-      return originalXhrOpen.call(this, method, url, ...args);
+      return originalOpen.call(this, method, url, ...args);
     };
     xhrPrototype.send = function(body) {
       remember(this.__any2apiMinmaxCaptureUrl, body);
-      return originalXhrSend.call(this, body);
+      return originalSend.call(this, body);
     };
   }
-  try {
-    const locate = (markers, exportNames) => {
-      const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
-      for (const chunkName of chunkNames) {
-        const chunks = window[chunkName];
-        if (!Array.isArray(chunks)) continue;
-        let runtime;
-        chunks.push([['any2api-cap-' + Date.now()], {}, require => { runtime = require; }]);
-        if (!runtime || !runtime.m) continue;
-        for (const [id, factory] of Object.entries(runtime.m)) {
-          const source = String(factory);
-          if (!markers.every(marker => source.includes(marker))) continue;
-          let exports;
-          try { exports = runtime(id); } catch (_) { continue; }
-          const candidates = [];
-          if (typeof exports === 'function') candidates.push(exports);
-          if (exports && typeof exports === 'object') {
-            for (const name of exportNames) {
-              const value = exports[name];
-              if (typeof value === 'function') candidates.push(value);
-            }
-            for (const value of Object.values(exports)) {
-              if (typeof value === 'function') candidates.push(value);
-            }
-            if (exports.default && typeof exports.default === 'object') {
-              for (const value of Object.values(exports.default)) {
-                if (typeof value === 'function') candidates.push(value);
-              }
-            }
-          }
-          for (const candidate of candidates) {
-            const candidateSource = String(candidate);
-            if (markers.some(marker => candidateSource.includes(marker) ||
-                candidateSource.length < 40)) {
-              return {id, fn: candidate};
-            }
-          }
-        }
-      }
-      return null;
-    };
-    const uploaderHit = locate(
-      ['refreshSTSTokenInterval', 'fileMd5', 'ossPath'],
-      ['S', 'upload']
-    );
-    if (!uploaderHit) throw new Error('MinMax official uploader was not found');
-    const match = /^data:([^;]+);base64,(.+)$/s.exec(String(input.images?.[0]?.data_url || ''));
-    if (!match) throw new Error('capture image must be an inline base64 data URL');
-    const binary = atob(match[2]);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-    const filename = String(input.images[0].file_name || 'upload.png');
-    const contentType = String(input.images[0].mime_type || match[1]);
-    const uploaded = await uploaderHit.fn(new File([bytes], filename, {type: contentType}));
-    const sendCandidates = [];
-    const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
-    for (const chunkName of chunkNames) {
-      const chunks = window[chunkName];
-      if (!Array.isArray(chunks)) continue;
-      let runtime;
-      chunks.push([['any2api-send-' + Date.now()], {}, require => { runtime = require; }]);
-      if (!runtime || !runtime.m) continue;
-      for (const [id, factory] of Object.entries(runtime.m)) {
-        const source = String(factory);
-        if (!source.includes('experimental_attachments') && !source.includes('/message')) {
-          continue;
-        }
-        let exports;
-        try { exports = runtime(id); } catch (_) { continue; }
-        if (typeof exports === 'function') {
-          sendCandidates.push({id, name: 'default', fn: exports});
-        }
-        if (exports && typeof exports === 'object') {
-          for (const [name, value] of Object.entries(exports)) {
-            if (typeof value === 'function') {
-              sendCandidates.push({id, name, fn: value});
-            }
-          }
-        }
-        if (sendCandidates.length >= 12) break;
-      }
-      if (sendCandidates.length >= 12) break;
-    }
-    const conversationId = String(input.conversation_id || '');
-    const agentId = String(input.agent_id || '');
-    const model = input.model || {};
-    const payload = {
-      content: String(input.content || 'ping'),
-      conversationId,
-      agentId,
-      model,
-      experimental_attachments: [uploaded],
-      attachments: [uploaded],
-      files: [uploaded],
-    };
-    const attemptLabels = [];
-    for (const candidate of sendCandidates) {
-      if (captured.length) break;
-      const attempts = [
-        () => candidate.fn(payload),
-        () => candidate.fn(payload.content, payload.experimental_attachments),
-        () => candidate.fn(payload.content, {attachments: payload.experimental_attachments}),
-      ];
-      for (let index = 0; index < attempts.length; index++) {
-        try {
-          await attempts[index]();
-          attemptLabels.push(candidate.id + ':' + candidate.name + ':' + index + ':ok');
-          await new Promise(resolve => setTimeout(resolve, 1200));
-          break;
-        } catch (error) {
-          attemptLabels.push(
-            candidate.id + ':' + candidate.name + ':' + index + ':' +
-            String(error).slice(0, 60)
-          );
-        }
-      }
-    }
-    return {
-      captured,
-      uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
-      send_found: captured.length > 0,
-      send_id: sendCandidates[0]?.id || '',
-      send_attempts: attemptLabels.slice(0, 20),
-      send_hint_count: sendCandidates.length,
-    };
-  } finally {
-    if (typeof originalFetch === 'function') window.fetch = originalFetch;
-    if (xhrPrototype && typeof originalXhrOpen === 'function') {
-      xhrPrototype.open = originalXhrOpen;
-    }
-    if (xhrPrototype && typeof originalXhrSend === 'function') {
-      xhrPrototype.send = originalXhrSend;
-    }
-  }
+  return true;
+}"""
+
+_READ_CAPTURED_MESSAGES = r"""() => {
+  const captured = Array.isArray(window.__any2apiMinmaxCaptured)
+    ? window.__any2apiMinmaxCaptured
+    : [];
+  return {captured};
 }"""
 
 
@@ -776,31 +653,66 @@ class MinmaxOfficialBrowserTransport:
         agent_id: str,
         model: dict[str, Any],
     ) -> dict[str, Any]:
+        del conversation_id, agent_id, model
         async with self._account_operation(credential):
             session = await self._session_for(credential, proxy_url)
             await self._inject_context(session, credential)
-            result = await session.page.evaluate(
-                _CAPTURE_OFFICIAL_MESSAGE,
-                {
-                    "images": images,
-                    "content": content,
-                    "conversation_id": conversation_id,
-                    "agent_id": agent_id,
-                    "model": model,
-                },
-            )
+            await session.page.evaluate(_INSTALL_MESSAGE_HOOK)
+            source = images[0] if images else {}
+            data_url = str(source.get("data_url") or "")
+            filename = str(source.get("file_name") or "upload.png")
+            mime_type = str(source.get("mime_type") or "image/png")
+            payload_b64 = data_url.split(",", 1)[-1] if "," in data_url else ""
+            if not payload_b64:
+                raise ValueError("MinMax capture image must be an inline base64 data URL")
+            raw = base64.b64decode(payload_b64)
+            temp_path = Path(tempfile.gettempdir()) / f"minmax-capture-{uuid4().hex}-{filename}"
+            temp_path.write_bytes(raw)
+            try:
+                file_input = session.page.locator('input[type="file"]').first
+                await file_input.set_input_files(str(temp_path))
+                await session.page.wait_for_timeout(2500)
+                editor = session.page.locator(
+                    '[contenteditable="true"], textarea, input[type="text"]'
+                ).last
+                try:
+                    await editor.wait_for(state="visible", timeout=5000)
+                    await editor.click()
+                    await editor.fill(content[:80])
+                except Exception as fill_error:  # noqa: BLE001
+                    logger.warning(
+                        "minmax_capture_fill_failed detail=%s",
+                        str(fill_error)[:160],
+                    )
+                send_button = session.page.locator(
+                    'button[type="submit"], button:has-text("Send"), button:has-text("发送"), '
+                    '[aria-label*="Send" i], [data-testid*="send" i]'
+                ).last
+                try:
+                    await send_button.click(timeout=5000)
+                except Exception as click_error:  # noqa: BLE001
+                    logger.warning(
+                        "minmax_capture_click_failed detail=%s",
+                        str(click_error)[:160],
+                    )
+                await session.page.wait_for_timeout(2500)
+            finally:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            result = await session.page.evaluate(_READ_CAPTURED_MESSAGES)
             if not isinstance(result, dict):
                 raise TypeError("MinMax official message capture returned an invalid result")
             logger.info(
-                "minmax_official_message_capture send_found=%s captured=%s "
-                "uploader_keys=%s send_hint_count=%s send_attempts=%s",
-                bool(result.get("send_found")),
+                "minmax_official_message_capture captured=%s keys=%s url=%s",
                 len(result.get("captured") or []),
-                ",".join((result.get("uploader") or {}).keys())
-                if isinstance(result.get("uploader"), dict)
-                else "none",
-                result.get("send_hint_count"),
-                json.dumps(result.get("send_attempts") or [])[:700],
+                sorted((result.get("captured") or [{}])[0].keys())
+                if result.get("captured")
+                else [],
+                str((result.get("captured") or [{}])[0].get("url") or "")[:120]
+                if result.get("captured")
+                else "",
             )
             captured = result.get("captured")
             if isinstance(captured, list) and captured:
@@ -809,9 +721,7 @@ class MinmaxOfficialBrowserTransport:
                     return {
                         "body": first["body"],
                         "url": str(first.get("url") or ""),
-                        "uploader": result.get("uploader")
-                        if isinstance(result.get("uploader"), dict)
-                        else {},
+                        "uploader": {},
                         "send_found": True,
                     }
             return {

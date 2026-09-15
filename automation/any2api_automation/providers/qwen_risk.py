@@ -782,6 +782,7 @@ class QwenNativeBrowserTransport:
         session: _AccountBrowserSession,
         payload: dict[str, Any],
     ) -> tuple[dict[str, Any], bytes]:
+        await self._ensure_baxia_ready_with_recovery(session)
         script = r"""async request => {
           const headers = {
             'Accept': request.path.includes('/chat/completions')
@@ -1157,9 +1158,10 @@ class QwenNativeBrowserTransport:
         if "/chat/completions" in request.path and b"data:" not in body:
             code = _qwen_failure_code(body) or "unknown"
             logger.warning(
-                "qwen_native_browser_unexpected_completion code=%s shape=%s",
+                "qwen_native_browser_unexpected_completion code=%s shape=%s body=%s",
                 code,
                 _qwen_completion_shape(body),
+                body[:400],
             )
         elif "/chat/completions" in request.path:
             error_codes = _qwen_completion_error_codes(body)

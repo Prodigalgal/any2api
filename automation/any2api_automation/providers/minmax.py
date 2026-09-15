@@ -293,16 +293,7 @@ async def _semantic_chat_input(
     proxy_url: str,
 ) -> tuple[str, str, str]:
     prepared = build_minmax_request(command)
-    if prepared["attachments"]:
-        prepared = {
-            **prepared,
-            "attachments": await official_browser_transport.upload_media(
-                current,
-                prepared["attachments"],
-                proxy_url,
-                settings().minmax_max_upload_bytes,
-            ),
-        }
+    raw_attachments = list(prepared["attachments"])
     agent_id = prepared["agent_id"]
     if not agent_id:
         agents = await official_browser_transport.request(
@@ -321,6 +312,37 @@ async def _semantic_chat_input(
         proxy_url,
     )
     session_id = _session_id(session)
+    if raw_attachments:
+        captured = await official_browser_transport.capture_official_message(
+            current,
+            proxy_url,
+            images=raw_attachments,
+            content=prepared["content"][:80],
+            conversation_id=session_id,
+            agent_id=agent_id,
+            model=prepared["model"],
+        )
+        official_body = captured.get("body")
+        if isinstance(official_body, dict) and official_body.get("attachments"):
+            logger.info(
+                "minmax_using_captured_official_message url=%s keys=%s",
+                str(captured.get("url") or "")[:120],
+                sorted(official_body.keys())[:20],
+            )
+            return (
+                "POST",
+                f"/archon/api/v1/session/{session_id}/message",
+                json.dumps(official_body, ensure_ascii=False, separators=(",", ":")),
+            )
+        prepared = {
+            **prepared,
+            "attachments": await official_browser_transport.upload_media(
+                current,
+                raw_attachments,
+                proxy_url,
+                settings().minmax_max_upload_bytes,
+            ),
+        }
     return (
         "POST",
         f"/archon/api/v1/session/{session_id}/message",

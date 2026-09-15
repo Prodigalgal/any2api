@@ -324,15 +324,20 @@ async def _semantic_chat_input(
         )
         official_body = captured.get("body")
         if isinstance(official_body, dict) and official_body.get("attachments"):
+            # Replay official body with a fresh turn_id for this request.
+            replay = dict(official_body)
+            replay["turn_id"] = str(uuid.uuid4())
+            if "model" not in replay:
+                replay["model"] = prepared["model"]
             logger.info(
                 "minmax_using_captured_official_message url=%s keys=%s",
                 str(captured.get("url") or "")[:120],
-                sorted(official_body.keys())[:20],
+                sorted(replay.keys())[:20],
             )
             return (
                 "POST",
                 f"/archon/api/v1/session/{session_id}/message",
-                json.dumps(official_body, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(replay, ensure_ascii=False, separators=(",", ":")),
             )
         prepared = {
             **prepared,
@@ -463,7 +468,10 @@ def _minmax_attachments(messages: Any) -> list[dict[str, Any]]:
 def _minmax_message_attachments(
     attachments: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Map uploaded files to the official web message attachment contract."""
+    """Map uploaded files to the official web message attachment contract.
+
+    Official UI sends upload_id + url + data_url only; object_key is absent.
+    """
     result: list[dict[str, Any]] = []
     for attachment in attachments:
         upload_id = str(attachment.get("file_key") or "").strip()
@@ -476,18 +484,10 @@ def _minmax_message_attachments(
             or attachment.get("data_url")
             or ""
         ).strip()
-        object_key = str(
-            attachment.get("object_key")
-            or attachment.get("objectKey")
-            or attachment.get("oss_path")
-            or ""
-        ).strip()
         if not upload_id or not file_name or not mime_type or not isinstance(file_size, int):
             raise ValueError("MinMax uploaded attachment metadata is incomplete")
         if not cdn_url:
             raise ValueError("MinMax uploaded attachment URL is missing")
-        if not object_key:
-            raise ValueError("MinMax uploaded attachment object key is missing")
         result.append(
             {
                 "meta": {
@@ -499,7 +499,7 @@ def _minmax_message_attachments(
                 "cloud": {
                     "upload_id": upload_id,
                     "url": cdn_url,
-                    "object_key": object_key,
+                    "data_url": cdn_url,
                 },
             }
         )

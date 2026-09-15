@@ -508,44 +508,34 @@ _CAPTURE_OFFICIAL_MESSAGE = r"""async input => {
     const filename = String(input.images[0].file_name || 'upload.png');
     const contentType = String(input.images[0].mime_type || match[1]);
     const uploaded = await uploaderHit.fn(new File([bytes], filename, {type: contentType}));
-    const sendHit = locate(
-      ['experimental_attachments'],
-      ['sendMessage', 'chat', 'send']
-    ) || locate(
-      ['/message', 'attachments'],
-      ['sendMessage', 'chat', 'send']
-    );
-    if (!sendHit) {
-      const sendHints = [];
-      const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
-      for (const chunkName of chunkNames) {
-        const chunks = window[chunkName];
-        if (!Array.isArray(chunks)) continue;
-        let runtime;
-        chunks.push([['any2api-send-' + Date.now()], {}, require => { runtime = require; }]);
-        if (!runtime || !runtime.m) continue;
-        for (const [id, factory] of Object.entries(runtime.m)) {
-          const source = String(factory);
-          if (!source.includes('experimental_attachments') && !source.includes('/message')) {
-            continue;
-          }
-          let exports;
-          try { exports = runtime(id); } catch (_) { continue; }
-          const names = exports && typeof exports === 'object'
-            ? Object.keys(exports).slice(0, 20)
-            : [];
-          sendHints.push({id, names, snippet: source.slice(0, 200)});
-          if (sendHints.length >= 5) break;
+    const sendCandidates = [];
+    const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
+    for (const chunkName of chunkNames) {
+      const chunks = window[chunkName];
+      if (!Array.isArray(chunks)) continue;
+      let runtime;
+      chunks.push([['any2api-send-' + Date.now()], {}, require => { runtime = require; }]);
+      if (!runtime || !runtime.m) continue;
+      for (const [id, factory] of Object.entries(runtime.m)) {
+        const source = String(factory);
+        if (!source.includes('experimental_attachments') && !source.includes('/message')) {
+          continue;
         }
-        if (sendHints.length >= 5) break;
+        let exports;
+        try { exports = runtime(id); } catch (_) { continue; }
+        if (typeof exports === 'function') {
+          sendCandidates.push({id, name: 'default', fn: exports});
+        }
+        if (exports && typeof exports === 'object') {
+          for (const [name, value] of Object.entries(exports)) {
+            if (typeof value === 'function') {
+              sendCandidates.push({id, name, fn: value});
+            }
+          }
+        }
+        if (sendCandidates.length >= 12) break;
       }
-      return {
-        captured: [],
-        uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
-        send_found: false,
-        send_hints: sendHints,
-        chunks: Object.keys(window).filter(name => name.startsWith('webpackChunk')).length,
-      };
+      if (sendCandidates.length >= 12) break;
     }
     const conversationId = String(input.conversation_id || '');
     const agentId = String(input.agent_id || '');
@@ -559,27 +549,35 @@ _CAPTURE_OFFICIAL_MESSAGE = r"""async input => {
       attachments: [uploaded],
       files: [uploaded],
     };
-    try {
-      await sendHit.fn(payload);
-    } catch (error) {
-      try {
-        await sendHit.fn(payload.content, payload.experimental_attachments);
-      } catch (error2) {
-        return {
-          captured,
-          uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
-          send_found: true,
-          send_error: String(error2 || error).slice(0, 300),
-          send_id: sendHit.id,
-        };
+    const attemptLabels = [];
+    for (const candidate of sendCandidates) {
+      if (captured.length) break;
+      const attempts = [
+        () => candidate.fn(payload),
+        () => candidate.fn(payload.content, payload.experimental_attachments),
+        () => candidate.fn(payload.content, {attachments: payload.experimental_attachments}),
+      ];
+      for (let index = 0; index < attempts.length; index++) {
+        try {
+          await attempts[index]();
+          attemptLabels.push(candidate.id + ':' + candidate.name + ':' + index + ':ok');
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          break;
+        } catch (error) {
+          attemptLabels.push(
+            candidate.id + ':' + candidate.name + ':' + index + ':' +
+            String(error).slice(0, 60)
+          );
+        }
       }
     }
-    await new Promise(resolve => setTimeout(resolve, 1500));
     return {
       captured,
       uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
-      send_found: true,
-      send_id: sendHit.id,
+      send_found: captured.length > 0,
+      send_id: sendCandidates[0]?.id || '',
+      send_attempts: attemptLabels.slice(0, 20),
+      send_hint_count: sendCandidates.length,
     };
   } finally {
     if (typeof originalFetch === 'function') window.fetch = originalFetch;
@@ -794,16 +792,15 @@ class MinmaxOfficialBrowserTransport:
             if not isinstance(result, dict):
                 raise TypeError("MinMax official message capture returned an invalid result")
             logger.info(
-                "minmax_official_message_capture send_found=%s send_id=%s captured=%s "
-                "uploader_keys=%s send_error=%s send_hints=%s",
+                "minmax_official_message_capture send_found=%s captured=%s "
+                "uploader_keys=%s send_hint_count=%s send_attempts=%s",
                 bool(result.get("send_found")),
-                str(result.get("send_id") or "")[:40],
                 len(result.get("captured") or []),
                 ",".join((result.get("uploader") or {}).keys())
                 if isinstance(result.get("uploader"), dict)
                 else "none",
-                str(result.get("send_error") or "")[:160],
-                json.dumps(result.get("send_hints") or [])[:600],
+                result.get("send_hint_count"),
+                json.dumps(result.get("send_attempts") or [])[:700],
             )
             captured = result.get("captured")
             if isinstance(captured, list) and captured:

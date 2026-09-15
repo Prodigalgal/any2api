@@ -49,7 +49,7 @@ from .qwen_session import (
 )
 from .qwen_settings import settings
 from .runtime_rules import RuntimePlan, parse_runtime_plan
-from .transport_support import transport_proxy_lease
+from .transport_support import transport_frame, transport_proxy_lease
 
 logger = logging.getLogger(__name__)
 
@@ -157,36 +157,24 @@ class QwenAutomationProvider(AutomationProvider):
         command = payload.get("semantic_command")
         if not isinstance(command, dict):
             raise TypeError("Qwen semantic command must be an object")
+        plan = parse_runtime_plan(payload.get("runtime_plan"), self.manifest.id)
         current = credential(payload)
-        from .actions import ProviderAction, ProviderActionRequest
-        from .qwen_api_actions import _chat_input, api_stream
-        from .transport_support import transport_frame as tf
-
-        action_request = ProviderActionRequest(
-            provider_id="qwen",
-            action=ProviderAction.CHAT,
-            channel="api",
-            payload={"credential": current, **payload},
-            semantic_command=command,
-        )
-        base_url = settings().qwen_base_url.rstrip("/")
         async with transport_proxy_lease(
             payload,
-            check_url=base_url,
+            check_url=settings().qwen_base_url,
         ) as proxy_url:
-            path, body, headers = await _chat_input(action_request, current, base_url, proxy_url)
-            async for event in api_stream(
-                base_url,
-                "POST",
-                path,
-                headers=headers,
-                body=body,
-                proxy_url=proxy_url,
-                timeout_seconds=300,
-                impersonate=str(current.get("browser_profile") or "chrome146"),
-            ):
-                event_type = str(event.get("type") or "error")
-                yield tf(event_type, **{k: v for k, v in event.items() if k != "type"})
+            result = await _qwen_chat_request(current, proxy_url, plan, command, payload)
+        status = int(result.get("status") or 502)
+        yield transport_frame("status", status=status)
+        if status < 400:
+            body = _decode_qwen_body(result)
+            for data in _qwen_sse_data(body):
+                yield transport_frame("data", data=data)
+        else:
+            yield transport_frame("error", data=_qwen_body_excerpt(result))
+        patch = result.get("credential_patch")
+        if isinstance(patch, dict) and patch:
+            yield transport_frame("credential_patch", data=patch)
 
     def routers(self) -> tuple[Any, ...]:
         from .qwen_risk import router

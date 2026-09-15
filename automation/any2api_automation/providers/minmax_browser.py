@@ -687,7 +687,11 @@ class MinmaxOfficialBrowserTransport:
             temp_path = Path(tempfile.gettempdir()) / f"minmax-capture-{uuid4().hex}-{filename}"
             temp_path.write_bytes(raw)
             try:
-                file_input = session.page.locator('input[type="file"]').first
+                file_input = session.page.locator('[data-testid="file-input"]').first
+                try:
+                    await file_input.wait_for(state="attached", timeout=5000)
+                except Exception:  # noqa: BLE001
+                    file_input = session.page.locator('input[type="file"]').first
                 await file_input.set_input_files(str(temp_path))
                 await session.page.wait_for_timeout(2500)
                 snapshot = await session.page.evaluate(_UI_COMPOSER_SNAPSHOT)
@@ -700,20 +704,19 @@ class MinmaxOfficialBrowserTransport:
                     snapshot.get("buttons"),
                     snapshot.get("file_inputs"),
                 )
-                editor = session.page.locator(
-                    '[contenteditable="true"], textarea, input[type="text"]'
-                ).last
+                editor = session.page.locator('[data-testid="message-textarea"]').first
                 try:
                     await editor.wait_for(state="visible", timeout=5000)
                     await editor.click(timeout=3000)
-                    await editor.fill(content[:80])
+                    await editor.type(content[:80], delay=20)
                 except Exception as fill_error:  # noqa: BLE001
                     logger.warning(
                         "minmax_capture_fill_failed detail=%s",
                         str(fill_error)[:160],
                     )
                 send_button = session.page.locator(
-                    'button[type="submit"], button:has-text("Send"), button:has-text("发送"), '
+                    '[data-testid="send-button"], button[type="submit"], '
+                    'button:has-text("Send"), button:has-text("发送"), '
                     '[aria-label*="Send" i], [data-testid*="send" i]'
                 ).last
                 try:
@@ -723,7 +726,7 @@ class MinmaxOfficialBrowserTransport:
                         "minmax_capture_click_failed detail=%s",
                         str(click_error)[:160],
                     )
-                await session.page.wait_for_timeout(2500)
+                await session.page.wait_for_timeout(3000)
             finally:
                 try:
                     temp_path.unlink(missing_ok=True)

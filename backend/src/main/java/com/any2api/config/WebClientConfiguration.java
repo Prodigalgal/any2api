@@ -10,7 +10,8 @@ import reactor.netty.resources.ConnectionProvider;
 
 /**
  * Shared HTTP client for internal service calls.
- * Short DNS TTL avoids stale ClusterIP/pod DNS after rollouts.
+ * Short idle time drops stale ClusterIP connections after pod rollouts;
+ * LifecycleAutomationClient retries one transient DNS/connect failure.
  */
 @Configuration
 public class WebClientConfiguration {
@@ -23,9 +24,6 @@ public class WebClientConfiguration {
             .maxIdleTime(Duration.ofSeconds(30))
             .build();
         var http = HttpClient.create(provider)
-            .resolver(spec -> spec
-                .cacheTimeToLive(Duration.ofSeconds(1))
-                .cacheNegativeTimeToLive(Duration.ZERO))
             .responseTimeout(Duration.ofMinutes(5));
         return WebClient.builder()
             .clientConnector(new ReactorClientHttpConnector(http));

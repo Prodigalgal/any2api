@@ -509,14 +509,41 @@ _CAPTURE_OFFICIAL_MESSAGE = r"""async input => {
     const contentType = String(input.images[0].mime_type || match[1]);
     const uploaded = await uploaderHit.fn(new File([bytes], filename, {type: contentType}));
     const sendHit = locate(
-      ['experimental_attachments', 'conversationId'],
+      ['experimental_attachments'],
+      ['sendMessage', 'chat', 'send']
+    ) || locate(
+      ['/message', 'attachments'],
       ['sendMessage', 'chat', 'send']
     );
     if (!sendHit) {
+      const sendHints = [];
+      const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
+      for (const chunkName of chunkNames) {
+        const chunks = window[chunkName];
+        if (!Array.isArray(chunks)) continue;
+        let runtime;
+        chunks.push([['any2api-send-' + Date.now()], {}, require => { runtime = require; }]);
+        if (!runtime || !runtime.m) continue;
+        for (const [id, factory] of Object.entries(runtime.m)) {
+          const source = String(factory);
+          if (!source.includes('experimental_attachments') && !source.includes('/message')) {
+            continue;
+          }
+          let exports;
+          try { exports = runtime(id); } catch (_) { continue; }
+          const names = exports && typeof exports === 'object'
+            ? Object.keys(exports).slice(0, 20)
+            : [];
+          sendHints.push({id, names, snippet: source.slice(0, 200)});
+          if (sendHints.length >= 5) break;
+        }
+        if (sendHints.length >= 5) break;
+      }
       return {
         captured: [],
         uploader: uploaded && typeof uploaded === 'object' ? uploaded : null,
         send_found: false,
+        send_hints: sendHints,
         chunks: Object.keys(window).filter(name => name.startsWith('webpackChunk')).length,
       };
     }
@@ -768,7 +795,7 @@ class MinmaxOfficialBrowserTransport:
                 raise TypeError("MinMax official message capture returned an invalid result")
             logger.info(
                 "minmax_official_message_capture send_found=%s send_id=%s captured=%s "
-                "uploader_keys=%s send_error=%s",
+                "uploader_keys=%s send_error=%s send_hints=%s",
                 bool(result.get("send_found")),
                 str(result.get("send_id") or "")[:40],
                 len(result.get("captured") or []),
@@ -776,6 +803,7 @@ class MinmaxOfficialBrowserTransport:
                 if isinstance(result.get("uploader"), dict)
                 else "none",
                 str(result.get("send_error") or "")[:160],
+                json.dumps(result.get("send_hints") or [])[:600],
             )
             captured = result.get("captured")
             if isinstance(captured, list) and captured:

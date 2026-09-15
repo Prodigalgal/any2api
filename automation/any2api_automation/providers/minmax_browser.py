@@ -467,6 +467,25 @@ _READ_CAPTURED_MESSAGES = r"""() => {
   return {captured};
 }"""
 
+_UI_COMPOSER_SNAPSHOT = r"""() => {
+  const pick = (selector, limit) => Array.from(document.querySelectorAll(selector))
+    .slice(0, limit)
+    .map(el => ({
+      tag: el.tagName,
+      type: el.getAttribute('type') || '',
+      text: (el.innerText || el.getAttribute('aria-label') || '').slice(0, 40),
+      testid: el.getAttribute('data-testid') || '',
+      cls: (el.className || '').toString().slice(0, 40),
+    }));
+  return {
+    url: location.href,
+    textareas: pick('textarea', 5),
+    editables: pick('[contenteditable="true"]', 5),
+    buttons: pick('button', 12),
+    file_inputs: pick('input[type="file"]', 3),
+  };
+}"""
+
 
 @dataclass
 class _Session:
@@ -671,12 +690,22 @@ class MinmaxOfficialBrowserTransport:
                 file_input = session.page.locator('input[type="file"]').first
                 await file_input.set_input_files(str(temp_path))
                 await session.page.wait_for_timeout(2500)
+                snapshot = await session.page.evaluate(_UI_COMPOSER_SNAPSHOT)
+                logger.info(
+                    "minmax_capture_ui_snapshot url=%s textareas=%s editables=%s "
+                    "buttons=%s file_inputs=%s",
+                    snapshot.get("url"),
+                    snapshot.get("textareas"),
+                    snapshot.get("editables"),
+                    snapshot.get("buttons"),
+                    snapshot.get("file_inputs"),
+                )
                 editor = session.page.locator(
                     '[contenteditable="true"], textarea, input[type="text"]'
                 ).last
                 try:
                     await editor.wait_for(state="visible", timeout=5000)
-                    await editor.click()
+                    await editor.click(timeout=3000)
                     await editor.fill(content[:80])
                 except Exception as fill_error:  # noqa: BLE001
                     logger.warning(

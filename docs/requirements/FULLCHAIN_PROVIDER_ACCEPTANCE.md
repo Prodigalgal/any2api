@@ -95,9 +95,9 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 | MiMo | PASS（2812） | PASS | PASS | PASS | PASS | API | 纯色极小图可能拒答 |
 | LongCat | PASS（2884） | PASS | PASS | PASS（≥32px 棋盘/256px） | PASS | API | 极小纯色 PNG 可 `empty_model_response` |
 | GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
-| Qwen | PASS（55927） | PASS（Runtime） | PASS（Runtime，含 pong） | 待补 | 待补 | Runtime | completion 失败已加一次重试；延迟偏高 |
+| Qwen | PASS（55927） | PASS（Runtime） | PASS（Runtime，含 pong） | 上传 PASS / 完成 FAIL | — | Runtime | 图片 STS 改签名 HTTP 已通；completion `captcha_rejected`/空帧 |
 | MiniMax | PASS（签到后） | PASS | PASS | FAIL（400 ownership） | FAIL | Runtime+签名 fetch | 文本双通道 READY；图片 attachment `invalid_params` |
-| Arena | 注册 PASS / 探针 FAIL | FAIL | FAIL | — | — | Runtime 注册 | 新号已建但 `anti_bot_rejected`；旧号 9/9 EXPIRED |
+| Arena | PASS | PASS | PASS | PASS | PASS | Runtime | 文本/图片/PDF 双通道均 PASS；PDF 读出 `HELLO ARENA PDF` |
 
 ### 本轮已落地修复
 

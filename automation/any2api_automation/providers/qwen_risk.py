@@ -1005,6 +1005,11 @@ class QwenNativeBrowserTransport:
                     str(idle_error)[:120],
                 )
         await self._ensure_baxia_ready_with_recovery(session)
+        logger.info(
+            "qwen_surface_ready path=%s url=%s",
+            request.referer_path,
+            session.page.url[:80],
+        )
 
     @staticmethod
     def _is_navigation_timeout(error: BaseException) -> bool:

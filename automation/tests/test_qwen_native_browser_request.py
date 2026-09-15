@@ -461,7 +461,7 @@ async def test_qwen_native_transport_reports_browser_network_failure() -> None:
         async def evaluate(self, _script: str, _payload: dict[str, object] | None = None) -> None:
             self._eval_count += 1
             if _payload is None:
-                return None
+                return
             assert self.listener is not None
             self.listener(FailedRequest())
             raise RuntimeError("Page.evaluate: NetworkError when attempting to fetch resource")

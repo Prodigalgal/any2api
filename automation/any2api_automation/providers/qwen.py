@@ -380,27 +380,33 @@ async def _qwen_chat_request(
             completion_body,
             referer_path=f"/c/{chat_id}",
         )
-    else:
-        from .actions import ProviderAction, ProviderActionRequest
-        from .qwen_api_actions import _request as api_request
-
-        action_request = ProviderActionRequest(
-            provider_id="qwen",
-            action=ProviderAction.CHAT,
-            channel="api",
-            payload={"credential": merged},
-            semantic_command=command,
+        logger.info(
+            "qwen_completion_response status=%s content_type=%s body_len=%s body_head=%s",
+            completion.get("status"),
+            completion.get("content_type"),
+            len(str(completion.get("body") or "")),
+            str(completion.get("body") or "")[:200],
         )
-        base_url = settings().qwen_base_url.rstrip("/")
-        completion = await api_request(
-            action_request,
+    else:
+        # Text completions: use browser fetch (same channel as chats/new) to
+        # avoid Aliyun WAF blocking signed HTTP from datacenter IPs.
+        completion = await _qwen_native_request(
             merged,
-            base_url,
             proxy_url,
-            "POST",
-            f"{completion_path}?chat_id={chat_id}",
-            completion_body,
+            plan,
+            payload,
+            method="POST",
+            path=f"{completion_path}?chat_id={chat_id}",
+            body=completion_body,
             referer_path=f"/c/{chat_id}",
+            timeout_seconds=300,
+        )
+        logger.info(
+            "qwen_completion_response status=%s content_type=%s body_len=%s body_head=%s",
+            completion.get("status"),
+            completion.get("content_type"),
+            len(str(completion.get("body") or "")),
+            str(completion.get("body") or "")[:200],
         )
     patches = [
         session.get("credential_patch"),

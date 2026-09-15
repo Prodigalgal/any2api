@@ -85,7 +85,7 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 - E2E：`deepseek/glm/longcat/mimo/qwen` = `API`；`arena/minmax` = 默认
 - 生产：7 家均未写 `inference_transport_mode`（走 AUTO 默认）
 
-### 2026-09-14 生产真实验收矩阵（实测）
+### 2026-09-15 生产真实验收矩阵（实测）
 
 图例：`PASS` 真实成功；`FAIL` 有明确错误；`N/A` 未声明能力。
 
@@ -95,7 +95,7 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 | MiMo | PASS（2812） | PASS | PASS | PASS | PASS | API | 纯色极小图可能拒答 |
 | LongCat | PASS（2884） | PASS | PASS | PASS（≥32px 棋盘/256px） | PASS | API | 极小纯色 PNG 可 `empty_model_response` |
 | GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
-| Qwen | PASS（55927） | PASS（Runtime） | PASS（Runtime，含 pong） | 上传 PASS / 完成 FAIL | — | Runtime | 签名 HTTP 上传成功；completion 在 slider 后仍空 JSON/captcha |
+| Qwen | PASS（keepalive OK） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | API | 阿里云 WAF `aliyun_waf_aa` 拦截 chats/new；08:20 UTC 后全挂 |
 | MiniMax | PASS（签到后） | PASS | PASS | PASS | PASS | Runtime+官方抓包 | 图片走官方 UI 抓包 body + agent-stream SSE |
 | Arena | PASS | PASS | PASS | PASS | PASS | Runtime | 文本/图片/PDF 双通道均 PASS；PDF 读出 `HELLO ARENA PDF` |
 
@@ -109,11 +109,11 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 ### 当前阻断点
 
 1. **DeepSeek 注册**：CloudFront WAF 对数据中心 IP 返回 403 `Request blocked`；CF Dynamic 节点不可用，Oracle 节点同样被挡。需要住宅/非常驻 IP 出口。
-2. **Qwen reauth**：密码/API 登录失败 → 已标 `terminal=true`，停止无限重试；账号仍待真正恢复。
-3. **Arena reauth**：`interactive_auth_required` → 已标 `terminal=true`；恢复只能靠 Runtime 注册补号。
-4. **automation_transport_error**：Pod 滚动后 Server→Automation DNS 抖动；需重启 server 或后续做 DNS 重试。
-5. **MiniMax 图片**：attachment `owned object_key` 契约未对齐。
-6. **Qwen 图片 completion**：slider 后空 JSON / captcha。
+2. **Qwen WAF**：阿里云 WAF `aliyun_waf_aa` 拦截 `/api/v2/chats/new`，返回 HTML 而非 JSON。08:20 UTC 后全部失败。已给 Qwen 代理绑定加 `INFERENCE` scope（Self-hosted Oracle 4 节点），待验证代理是否能绕过 WAF。
+3. **Qwen reauth**：密码/API 登录失败 → 已标 `terminal=true`，停止无限重试；账号仍待真正恢复。
+4. **Arena reauth**：`interactive_auth_required` → 已标 `terminal=true`；恢复只能靠 Runtime 注册补号。
+5. **automation_transport_error**：Pod 滚动后 Server→Automation DNS 抖动；需重启 server 或后续做 DNS 重试。
+6. **模型可用性门禁**：探针新鲜度窗口内无成功 usage 时返回 `model_unavailable`；Qwen 探针今日全 FAILED。
 
 ### 生命周期稳定性改动（2026-09-15）
 

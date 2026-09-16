@@ -984,11 +984,24 @@ def _arena_upload_script() -> str:
           }
         }
         lastExportKeys = exportKeys;
-        const uploader = candidates.find(candidate => typeof candidate === 'function'
-          && (/uploadFile|generateUploadUrl|getSignedUrl/.test(String(candidate))));
+        // Match by name, source markers, or minified wrappers around upload logic
+        const uploader = candidates.find(candidate => {
+          if (typeof candidate !== 'function') return false;
+          const src = String(candidate);
+          if (/uploadFile|generateUploadUrl|getSignedUrl/.test(src)) return true;
+          // Minified: check for upload-related API paths or file handling
+          if (/upload|signedUrl|contentType|file/i.test(src) && src.length > 100) return true;
+          return false;
+        });
         if (uploader) {
           window.__any2apiArenaUploadFile = uploader;
           return uploader;
+        }
+        // Fallback: if exactly one function export from a marker factory, use it
+        const fnCandidates = candidates.filter(c => typeof c === 'function');
+        if (fnCandidates.length === 1 && markerFactoryCount === 1) {
+          window.__any2apiArenaUploadFile = fnCandidates[0];
+          return fnCandidates[0];
         }
       }
     }

@@ -1061,6 +1061,31 @@ def _arena_upload_script() -> str:
 }"""
 
 
+def _arena_fetch_interceptor_script() -> str:
+    """Intercept fetch calls to capture Arena's official request format."""
+
+    return r"""(() => {
+  const originalFetch = window.fetch;
+  window.__any2apiArenaFetchLog = [];
+  window.fetch = async function(...args) {
+    const [input, init] = args;
+    const url = typeof input === 'string' ? input : (input?.url || '');
+    if (url.includes('create-evaluation') || url.includes('generateUploadUrl') || url.includes('getSignedUrl')) {
+      const entry = {url: url.slice(0, 200), method: init?.method || 'GET'};
+      if (init?.body) {
+        try {
+          const bodyStr = typeof init.body === 'string' ? init.body : String(init.body);
+          entry.bodyPreview = bodyStr.slice(0, 2000);
+          try { entry.bodyJson = JSON.parse(bodyStr); } catch (_) {}
+        } catch (_) { entry.bodyType = typeof init.body; }
+      }
+      window.__any2apiArenaFetchLog.push(entry);
+    }
+    return originalFetch.apply(this, args);
+  };
+})();"""
+
+
 def _arena_turbopack_uploader_init_script() -> str:
     """Capture Arena's exported uploader while Turbopack evaluates its module."""
 
@@ -1863,6 +1888,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
     ) -> None:
         await super().configure_page(session, credential)
         await session.page.add_init_script(_arena_turbopack_uploader_init_script())
+        await session.page.add_init_script(_arena_fetch_interceptor_script())
 
     async def models(
         self,
@@ -2015,6 +2041,11 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             upload_patch = uploaded.get("credential_patch")
             if isinstance(upload_patch, dict) and upload_patch:
                 yield {"type": "credential_patch", "data": upload_patch}
+            # Diagnostic: capture attachment details
+            if sources:
+                yield {"type": "diagnostic", "data": json.dumps({
+                    "attachments": uploaded.get("attachments", []),
+                }, ensure_ascii=False)[:1500]}
             body = json.dumps(
                 build_arena_request(
                     command,

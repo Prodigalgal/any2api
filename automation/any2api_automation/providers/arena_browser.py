@@ -1031,7 +1031,14 @@ def _arena_upload_script() -> str:
     const url = String(uploaded?.url || '').trim();
     const mimeType = String(uploaded?.mimeType || file.type || '').toLowerCase();
     if (!url || !/^https:\/\//i.test(url) || !mimeType) {
-      throw new Error('Arena official media uploader returned an invalid result');
+      const uploadedKeys = uploaded && typeof uploaded === 'object'
+        ? Object.keys(uploaded).map(k => k + ':' + typeof uploaded[k]).join(', ')
+        : typeof uploaded;
+      throw new Error('Arena official media uploader returned an invalid result'
+        + ' uploaded_type=' + typeof uploaded
+        + ' uploaded_keys=[' + uploadedKeys + ']'
+        + ' url=' + url.slice(0, 80)
+        + ' mimeType=' + mimeType);
     }
     output.push({
       name: String(item.filename || uploaded?.key || 'attachment'),

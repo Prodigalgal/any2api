@@ -541,7 +541,12 @@ def _normalize_arena_attachments(value: Any) -> list[dict[str, Any]]:
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise ValueError("Arena uploader returned a non-HTTPS attachment URL")
-        normalized.append({"name": name, "contentType": content_type, "url": url})
+        normalized_item = {"name": name, "contentType": content_type, "url": url}
+        if item.get("key"):
+            normalized_item["key"] = str(item["key"])
+        if item.get("hash"):
+            normalized_item["hash"] = str(item["hash"])
+        normalized.append(normalized_item)
     return normalized
 
 
@@ -1047,7 +1052,9 @@ def _arena_upload_script() -> str:
     output.push({
       name: String(item.filename || uploaded?.key || 'attachment'),
       contentType: mimeType,
-      url
+      url,
+      key: String(uploaded?.key || ''),
+      hash: String(uploaded?.hash || ''),
     });
   }
   return output;

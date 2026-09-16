@@ -97,7 +97,7 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 | GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
 | Qwen | PASS（keepalive OK） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | API | 阿里云 WAF `aliyun_waf_aa` 拦截 chats/new；08:20 UTC 后全挂 |
 | MiniMax | PASS（签到后） | PASS | PASS | PASS | PASS | Runtime+官方抓包 | 图片走官方 UI 抓包 body + agent-stream SSE |
-| Arena | PASS | PASS | PASS | PASS | PASS | Runtime | 文本/图片/PDF 双通道均 PASS；PDF 读出 `HELLO ARENA PDF` |
+| Arena | PASS | PASS | PASS | — | — | Runtime | 新号 `e4e0b806` ACTIVE；headless=False+humanize+WebRTC block+许可弹窗处理后 reCAPTCHA 通过 |
 
 ### 本轮已落地修复
 

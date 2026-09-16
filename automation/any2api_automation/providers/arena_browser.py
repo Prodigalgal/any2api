@@ -180,6 +180,77 @@ async def _ensure_arena_tou_consent(page: Any) -> str:
     return f"consent_update_http_{consent_status}"
 
 
+def _arena_license_dialog_script() -> str:
+    """Find and accept Arena's pre-chat license / usage agreement dialog."""
+
+    return r"""() => {
+  const visible = element => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== 'hidden'
+      && style.display !== 'none'
+      && Number(style.opacity || 1) > 0
+      && rect.width > 0
+      && rect.height > 0;
+  };
+  const normalized = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const dialogs = Array.from(document.querySelectorAll(
+    '[role="dialog"], [aria-modal="true"], dialog'
+  )).filter(visible);
+  for (const dialog of dialogs) {
+    const text = normalized(dialog.textContent);
+    // Skip the ToU dialog handled elsewhere
+    if (text.includes('terms of use') && text.includes('privacy policy')) continue;
+    // Match license / usage / policy agreement patterns
+    const isLicense = text.includes('license')
+      || text.includes('usage policy')
+      || text.includes('acceptable use')
+      || text.includes('community guideline')
+      || text.includes('i understand')
+      || text.includes('i agree')
+      || text.includes('acknowledge');
+    if (!isLicense) continue;
+    // Check any unchecked checkboxes first
+    const checkboxes = Array.from(dialog.querySelectorAll(
+      'input[type="checkbox"], [role="checkbox"]'
+    )).filter(visible);
+    for (const cb of checkboxes) {
+      const checked = cb.checked ?? cb.getAttribute('aria-checked') === 'true';
+      if (!checked) cb.click();
+    }
+    // Find and click the primary action button
+    const buttons = Array.from(dialog.querySelectorAll(
+      'button, [role="button"]'
+    )).filter(visible).filter(b => !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+    const accept = buttons.find(b => {
+      const label = normalized(b.getAttribute('aria-label') || b.textContent);
+      return label === 'agree' || label === 'accept' || label === 'continue'
+        || label === 'acknowledge' || label === 'i understand'
+        || label === 'i agree' || label === 'confirm' || label === 'got it';
+    });
+    if (!accept) return {status: 'missing_button', dialogText: text.slice(0, 200)};
+    accept.click();
+    return {status: 'accepted', dialogText: text.slice(0, 200)};
+  }
+  return {status: 'absent'};
+}"""
+
+
+async def _accept_arena_license_dialog_if_present(page: Any) -> str:
+    result = await page.evaluate(_arena_license_dialog_script())
+    if not isinstance(result, dict):
+        return "unknown"
+    status = result.get("status")
+    if status == "accepted":
+        await page.wait_for_timeout(500)
+        return "accepted"
+    if status == "absent":
+        return "absent"
+    if status == "missing_button":
+        return "missing_button"
+    return str(status)
+
+
 def _uuid7() -> str:
     """Create a UUIDv7 without adding a third-party dependency to the worker."""
 
@@ -1813,6 +1884,12 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             self._logger.warning("arena_terms state=error error_type=%s", type(error).__name__)
             return
         self._logger.info("arena_terms state=%s", terms_state)
+        try:
+            consent_state = await _accept_arena_license_dialog_if_present(page)
+        except Exception as error:  # noqa: BLE001
+            self._logger.warning("arena_license state=error error_type=%s", type(error).__name__)
+            return
+        self._logger.info("arena_license state=%s", consent_state)
 
     async def upload_attachments(
         self,

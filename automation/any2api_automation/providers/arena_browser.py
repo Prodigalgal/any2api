@@ -953,6 +953,7 @@ def _arena_upload_script() -> str:
     const chunkNames = Object.keys(window).filter(name => name.startsWith('webpackChunk'));
     let runtimeCount = 0;
     let markerFactoryCount = 0;
+    let lastExportKeys = [];
     for (const chunkName of chunkNames) {
       const chunks = window[chunkName];
       if (!Array.isArray(chunks)) continue;
@@ -967,18 +968,22 @@ def _arena_upload_script() -> str:
         let exports;
         try { exports = runtime(id); } catch (_) { continue; }
         const candidates = [];
+        const exportKeys = [];
         if (exports && typeof exports === 'object') {
           for (const [name, value] of Object.entries(exports)) {
+            exportKeys.push(name + ':' + typeof value);
             if (name === 'uploadFile' && typeof value === 'function') return value;
             candidates.push(value);
           }
           if (exports.default && typeof exports.default === 'object') {
             for (const [name, value] of Object.entries(exports.default)) {
+              exportKeys.push('default.' + name + ':' + typeof value);
               if (name === 'uploadFile' && typeof value === 'function') return value;
               candidates.push(value);
             }
           }
         }
+        lastExportKeys = exportKeys;
         const uploader = candidates.find(candidate => typeof candidate === 'function'
           && (/uploadFile|generateUploadUrl|getSignedUrl/.test(String(candidate))));
         if (uploader) {
@@ -990,7 +995,8 @@ def _arena_upload_script() -> str:
     throw new Error('Arena official media uploader was not found'
       + ' chunks=' + chunkNames.length
       + ' runtimes=' + runtimeCount
-      + ' marker_factories=' + markerFactoryCount);
+      + ' marker_factories=' + markerFactoryCount
+      + ' export_keys=[' + lastExportKeys.join(', ') + ']');
   };
   if (!Array.isArray(input.files) || input.files.length === 0) return [];
   if (typeof window.__any2apiArenaUploadFile !== 'function') {

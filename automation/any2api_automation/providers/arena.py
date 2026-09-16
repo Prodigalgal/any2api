@@ -186,7 +186,12 @@ class ArenaAutomationProvider(AutomationProvider):
         )
 
     def browser_launch_profile(self) -> BrowserLaunchProfile:
-        return BrowserLaunchProfile(headless=False, humanize=True, camoufox_os="windows")
+        return BrowserLaunchProfile(
+            headless=False,
+            humanize=True,
+            camoufox_os="windows",
+            block_webrtc=True,
+        )
 
 
 def _account_probe_response(result: dict[str, Any], operation: str) -> dict[str, Any]:

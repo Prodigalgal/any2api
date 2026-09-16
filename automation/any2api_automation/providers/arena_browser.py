@@ -1028,8 +1028,12 @@ def _arena_upload_script() -> str:
       type: String(item.mimeType || match[1]).toLowerCase()
     });
     const uploaded = await uploader(file);
-    const url = String(uploaded?.url || '').trim();
+    let url = String(uploaded?.url || '').trim();
     const mimeType = String(uploaded?.mimeType || file.type || '').toLowerCase();
+    // Resolve relative URLs against the page origin
+    if (url && !/^https?:\/\//i.test(url)) {
+      try { url = new URL(url, window.location.origin).href; } catch (_) {}
+    }
     if (!url || !/^https:\/\//i.test(url) || !mimeType) {
       const uploadedKeys = uploaded && typeof uploaded === 'object'
         ? Object.keys(uploaded).map(k => k + ':' + typeof uploaded[k]).join(', ')

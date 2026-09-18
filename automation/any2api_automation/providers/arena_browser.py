@@ -2043,9 +2043,15 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                 yield {"type": "credential_patch", "data": upload_patch}
             # Diagnostic: capture attachment details
             if sources:
-                yield {"type": "diagnostic", "data": json.dumps({
-                    "attachments": uploaded.get("attachments", []),
-                }, ensure_ascii=False)[:1500]}
+                yield {
+                    "type": "diagnostic",
+                    "data": json.dumps(
+                        {
+                            "attachments": uploaded.get("attachments", []),
+                        },
+                        ensure_ascii=False,
+                    )[:1500],
+                }
             body = json.dumps(
                 build_arena_request(
                     command,

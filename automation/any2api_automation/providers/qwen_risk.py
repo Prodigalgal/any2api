@@ -800,7 +800,9 @@ class QwenNativeBrowserTransport:
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
           let response;
+          window.__any2apiQwenFetchLog = [];
           try {
+            window.__any2apiQwenFetchLog.push('fetch_start:' + request.path);
             response = await fetch(request.url, {
               method: request.method,
               headers,
@@ -810,6 +812,9 @@ class QwenNativeBrowserTransport:
               referrer: request.referrer,
               signal: controller.signal
             });
+            window.__any2apiQwenFetchLog.push(
+              'fetch_response:' + response.status + ':' +
+              (response.headers.get('content-type') || ''));
             const chunks = [];
             let total = 0;
             let tail = '';
@@ -876,13 +881,18 @@ class QwenNativeBrowserTransport:
             for (let index = 0; index < body.length; index += 32768) {
               binary += String.fromCharCode(...body.subarray(index, index + 32768));
             }
+            window.__any2apiQwenFetchLog.push('fetch_done:bytes=' + total);
             return {
               status: response.status,
               contentType: response.headers.get('content-type') || 'application/octet-stream',
               requestId: response.headers.get('x-request-id') || request.requestId,
               retryAfter: response.headers.get('retry-after') || '',
-              bodyBase64: btoa(binary)
+              bodyBase64: btoa(binary),
+              fetchLog: window.__any2apiQwenFetchLog.join('|')
             };
+          } catch (fetchError) {
+            window.__any2apiQwenFetchLog.push('fetch_error:' + String(fetchError));
+            throw fetchError;
           } finally {
             clearTimeout(timeout);
           }
@@ -928,6 +938,9 @@ class QwenNativeBrowserTransport:
             )
         if not isinstance(result, dict):
             raise TypeError("Qwen browser transport returned an invalid response")
+        fetch_log = str(result.get("fetchLog") or "")
+        if fetch_log:
+            logger.info("qwen_fetch_log path=%s log=%s", payload["path"], fetch_log[:500])
         try:
             body = base64.b64decode(str(result.get("bodyBase64") or ""), validate=True)
         except ValueError as error:

@@ -85,7 +85,7 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 - E2E：`deepseek/glm/longcat/mimo/qwen` = `API`；`arena/minmax` = 默认
 - 生产：7 家均未写 `inference_transport_mode`（走 AUTO 默认）
 
-### 2026-09-15 生产真实验收矩阵（实测）
+### 2026-09-19 生产真实验收矩阵（实测）
 
 图例：`PASS` 真实成功；`FAIL` 有明确错误；`N/A` 未声明能力。
 
@@ -95,9 +95,9 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 | MiMo | PASS（2812） | PASS | PASS | PASS | PASS | API | 纯色极小图可能拒答 |
 | LongCat | PASS（2884） | PASS | PASS | PASS（≥32px 棋盘/256px） | PASS | API | 极小纯色 PNG 可 `empty_model_response` |
 | GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
-| Qwen | PASS（keepalive OK） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | API | 阿里云 WAF `aliyun_waf_aa` 拦截 chats/new；08:20 UTC 后全挂 |
+| Qwen | PASS（keepalive OK） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | API | 阿里云 WAF `aliyun_waf_aa` 拦截 chats/new |
 | MiniMax | PASS（签到后） | PASS | PASS | PASS | PASS | Runtime+官方抓包 | 图片走官方 UI 抓包 body + agent-stream SSE |
-| Arena | PASS | PASS | PASS | — | — | Runtime | 新号 `e4e0b806` ACTIVE；headless=False+humanize+WebRTC block+许可弹窗处理后 reCAPTCHA 通过 |
+| Arena | PASS | PASS | PASS | FAIL | — | Runtime+CF Proxy | 新号 `dcf5ac30`；CF Dynamic 代理绕过 reCAPTCHA；图片附件格式待修 |
 
 ### 本轮已落地修复
 
@@ -108,12 +108,20 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 
 ### 当前阻断点
 
-1. **DeepSeek 注册**：CloudFront WAF 对数据中心 IP 返回 403 `Request blocked`；CF Dynamic 节点不可用，Oracle 节点同样被挡。需要住宅/非常驻 IP 出口。
-2. **Qwen WAF**：阿里云 WAF `aliyun_waf_aa` 拦截 `/api/v2/chats/new`，返回 HTML 而非 JSON。08:20 UTC 后全部失败。已给 Qwen 代理绑定加 `INFERENCE` scope（Self-hosted Oracle 4 节点），待验证代理是否能绕过 WAF。
-3. **Qwen reauth**：密码/API 登录失败 → 已标 `terminal=true`，停止无限重试；账号仍待真正恢复。
-4. **Arena reauth**：`interactive_auth_required` → 已标 `terminal=true`；恢复只能靠 Runtime 注册补号。
-5. **automation_transport_error**：Pod 滚动后 Server→Automation DNS 抖动；需重启 server 或后续做 DNS 重试。
-6. **模型可用性门禁**：探针新鲜度窗口内无成功 usage 时返回 `model_unavailable`；Qwen 探针今日全 FAILED。
+1. **DeepSeek 注册**：CloudFront WAF 对数据中心 IP 返回 403 `Request blocked`；需要住宅/非常驻 IP 出口。
+2. **Qwen WAF**：阿里云 WAF `aliyun_waf_aa` 拦截 `/api/v2/chats/new`；Oracle 代理也被拦。
+3. **Arena 图片附件格式**：上传器返回 API 端点 URL，Arena 返回 `Invalid content`；文本已 PASS（CF Proxy）。
+4. **Arena 账号短寿命**：账号约 1 天过期，需持续注册补号。
+5. **automation_transport_error**：Pod 滚动后 Server→Automation DNS 抖动；需重启 server。
+6. **模型可用性门禁**：探针新鲜度窗口内无成功 usage 时返回 `model_unavailable`。
+
+### 2026-09-19 Arena CF Proxy 修复
+
+- **CF Dynamic Overseas 池启用**：订阅 `proxy.omnnu.xyz`，绑定 Arena INFERENCE+REGISTRATION+LIFECYCLE。
+- **reCAPTCHA v3 通过**：CF 住宅 IP 信誉优于数据中心，不再触发 v2 升级。
+- **文本推理 PASS**：`Say hi` → `Hi there! How can I help you today?`
+- **图片推理 FAIL**：附件格式问题（非 reCAPTCHA），上传器返回 `/api/chat/workspace/cas/...` 端点。
+- **环境修复**：headless=False + humanize=True + block_webrtc=True + 许可弹窗处理。
 
 ### 生命周期稳定性改动（2026-09-15）
 

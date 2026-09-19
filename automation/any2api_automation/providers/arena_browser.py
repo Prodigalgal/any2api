@@ -2068,9 +2068,9 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                     "data": json.dumps(
                         {
                             "body_preview": body[:2000],
-                            "attachments_in_body": request_body.get(
-                                "userMessage", {}
-                            ).get("experimental_attachments", []),
+                            "attachments_in_body": request_body.get("userMessage", {}).get(
+                                "experimental_attachments", []
+                            ),
                         },
                         ensure_ascii=False,
                     )[:2000],

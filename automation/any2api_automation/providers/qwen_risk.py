@@ -837,6 +837,11 @@ class QwenNativeBrowserTransport:
                   }
                   if (delta.status === 'finished' &&
                       !['thinking', 'thinking_summary'].includes(delta.phase)) return true;
+                  // Qwen native SSE format: event=finish with finishType/status
+                  if (value?.event === 'finish' || value?.finishType) return true;
+                  if (value?.loadingStatus === 'complete' ||
+                      value?.loadingStatus === 'finished') return true;
+                  if (value?.lastOne === true && value?.event === 'finish') return true;
                 } catch (_) {}
               }
               return false;

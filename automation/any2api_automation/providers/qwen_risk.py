@@ -922,13 +922,13 @@ class QwenNativeBrowserTransport:
                     timeout=evaluate_timeout / 1000,
                 )
             browser_request = await request_info.value
-        except asyncio.TimeoutError:
+        except TimeoutError:
             fetch_log = ""
             try:
                 fetch_log = await session.page.evaluate(
                     "window.__any2apiQwenFetchLog ? window.__any2apiQwenFetchLog.join('|') : 'no_log'"
                 )
-            except Exception:
+            except (RuntimeError, ValueError):
                 pass
             logger.warning(
                 "qwen_native_browser_evaluate_timeout path=%s timeout_ms=%s fetch_log=%s",

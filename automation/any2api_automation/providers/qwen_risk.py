@@ -785,9 +785,10 @@ class QwenNativeBrowserTransport:
     ) -> tuple[dict[str, Any], bytes]:
         await self._ensure_baxia_ready_with_recovery(session)
         script = r"""async request => {
+          const isCompletion = request.path.includes('/chat/completions');
           const headers = {
-            'Accept': request.path.includes('/chat/completions')
-              ? 'application/json'
+            'Accept': isCompletion
+              ? 'text/event-stream, application/json'
               : 'application/json, text/plain, */*',
             'Content-Type': 'application/json',
             'source': 'web',
@@ -795,7 +796,7 @@ class QwenNativeBrowserTransport:
             'X-Request-Id': request.requestId,
             'version': request.version
           };
-          if (request.path.includes('/chat/completions')) headers['X-Accel-Buffering'] = 'no';
+          if (isCompletion) headers['X-Accel-Buffering'] = 'no';
           if (request.token) headers['Authorization'] = 'Bearer ' + request.token;
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), request.timeoutMs);

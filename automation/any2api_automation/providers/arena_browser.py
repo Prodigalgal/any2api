@@ -850,6 +850,38 @@ def _arena_ndjson_stream_script(
         }} catch (_) {{
           finish('');
         }}
+        // Auto-click the reCAPTCHA checkbox after it renders
+        const autoClick = async () => {{
+          for (let i = 0; i < 30; i++) {{
+            await new Promise(r => setTimeout(r, 1000));
+            try {{
+              const iframe = container.querySelector('iframe[src*="recaptcha"]');
+              if (iframe) {{
+                const rect = iframe.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {{
+                  // Click the checkbox area (left side of the iframe)
+                  const clickX = rect.left + 30;
+                  const clickY = rect.top + rect.height / 2;
+                  const el = document.elementFromPoint(clickX, clickY);
+                  if (el) {{
+                    el.click();
+                    // Also try dispatching mouse events on the iframe
+                    iframe.dispatchEvent(new MouseEvent('click', {{
+                      bubbles: true, cancelable: true,
+                      clientX: clickX, clientY: clickY
+                    }}));
+                  }}
+                }}
+              }}
+              // Also look for any clickable checkbox-like elements
+              const checkbox = container.querySelector(
+                '.recaptcha-checkbox, [role="checkbox"], input[type="checkbox"]'
+              );
+              if (checkbox) checkbox.click();
+            }} catch (_) {{}}
+          }}
+        }};
+        autoClick();
         setTimeout(() => finish(''), {recaptcha_v2_timeout_ms});
       }});
     }} finally {{

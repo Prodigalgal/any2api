@@ -541,7 +541,13 @@ def _normalize_arena_attachments(value: Any) -> list[dict[str, Any]]:
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise ValueError("Arena uploader returned a non-HTTPS attachment URL")
-        normalized_item = {"name": name, "contentType": content_type, "url": url}
+        # Arena may expect imageUrl instead of url
+        normalized_item = {
+            "name": name,
+            "contentType": content_type,
+            "url": url,
+            "imageUrl": url,
+        }
         if item.get("key"):
             normalized_item["key"] = str(item["key"])
         if item.get("hash"):

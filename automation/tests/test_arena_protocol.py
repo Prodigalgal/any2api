@@ -186,11 +186,13 @@ def test_arena_mapper_translates_search_and_signed_attachments() -> None:
             "name": "sample.png",
             "contentType": "image/png",
             "url": "https://storage.example.test/sample.png",
+            "imageUrl": "https://storage.example.test/sample.png",
         },
         {
             "name": "brief.pdf",
             "contentType": "application/pdf",
             "url": "https://storage.example.test/brief.pdf",
+            "imageUrl": "https://storage.example.test/brief.pdf",
         },
     ]
     assert "rawRequest" not in json.dumps(body)

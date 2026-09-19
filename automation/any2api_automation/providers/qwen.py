@@ -310,10 +310,9 @@ async def _qwen_chat_request(
         timeout_seconds=120,
     )
     logger.info(
-        "qwen_chats_new_response status=%s body_len=%s body_head=%s",
+        "qwen_chats_new_response status=%s body_base64_len=%s",
         session.get("status"),
-        len(str(session.get("body") or "")),
-        str(session.get("body") or "")[:200],
+        len(str(session.get("body_base64") or "")),
     )
     session_status = int(session.get("status") or 502)
     if session_status < 200 or session_status >= 300:
@@ -376,11 +375,10 @@ async def _qwen_chat_request(
         timeout_seconds=300,
     )
     logger.info(
-        "qwen_completion_response status=%s content_type=%s body_len=%s body_head=%s",
+        "qwen_completion_response status=%s content_type=%s body_base64_len=%s",
         completion.get("status"),
         completion.get("content_type"),
-        len(str(completion.get("body") or "")),
-        str(completion.get("body") or "")[:200],
+        len(str(completion.get("body_base64") or "")),
     )
     patches = [
         session.get("credential_patch"),

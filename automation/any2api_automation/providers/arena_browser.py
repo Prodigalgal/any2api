@@ -2052,15 +2052,29 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                         ensure_ascii=False,
                     )[:1500],
                 }
+            request_body = build_arena_request(
+                command,
+                model_id=arena_model_id,
+                attachments=uploaded.get("attachments", []),
+            )
             body = json.dumps(
-                build_arena_request(
-                    command,
-                    model_id=arena_model_id,
-                    attachments=uploaded.get("attachments", []),
-                ),
+                request_body,
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
+            if sources:
+                yield {
+                    "type": "diagnostic",
+                    "data": json.dumps(
+                        {
+                            "body_preview": body[:2000],
+                            "attachments_in_body": request_body.get(
+                                "userMessage", {}
+                            ).get("experimental_attachments", []),
+                        },
+                        ensure_ascii=False,
+                    )[:2000],
+                }
         except (TypeError, ValueError, json.JSONDecodeError):
             yield {"type": "status", "status": 422}
             yield {"type": "error", "data": "Arena model or semantic command is invalid"}

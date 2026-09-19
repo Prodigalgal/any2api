@@ -184,6 +184,8 @@ public final class ArenaProvider implements InferenceProvider {
                             frame.path("available").asBoolean(false),
                             frame.path("tokenLength").asInt(0),
                             frame.path("triggerReason").asText(""));
+                    } else if ("diagnostic".equals(type)) {
+                        LOGGER.info("arena_diagnostic data={}", frame.path("data").asText(""));
                     } else if ("error".equals(type)) {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new ArenaUpstreamException(

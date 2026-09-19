@@ -298,27 +298,16 @@ async def _qwen_chat_request(
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    # Use signed HTTP via proxy for chats/new
-    from .actions import ProviderAction, ProviderActionRequest
-    from .qwen_api_actions import _request as api_request
-
-    action_request = ProviderActionRequest(
-        provider_id="qwen",
-        action=ProviderAction.CHAT,
-        channel="api",
-        payload={"credential": current},
-        semantic_command=command,
-    )
-    base_url = settings().qwen_base_url.rstrip("/")
-    session = await api_request(
-        action_request,
+    session = await _qwen_native_request(
         current,
-        base_url,
         proxy_url,
-        "POST",
-        session_path,
-        session_body,
+        plan,
+        payload,
+        method="POST",
+        path=session_path,
+        body=session_body,
         referer_path="/c/new-chat",
+        timeout_seconds=120,
     )
     logger.info(
         "qwen_chats_new_response status=%s body_len=%s body_head=%s",
@@ -374,27 +363,17 @@ async def _qwen_chat_request(
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    # Use signed HTTP for completions via proxy. Browser fetch hangs on SSE.
-    from .actions import ProviderAction, ProviderActionRequest
-    from .qwen_api_actions import _request as api_request
-
-    action_request = ProviderActionRequest(
-        provider_id="qwen",
-        action=ProviderAction.CHAT,
-        channel="api",
-        payload={"credential": merged},
-        semantic_command=command,
-    )
-    base_url = settings().qwen_base_url.rstrip("/")
-    completion = await api_request(
-        action_request,
+    # Use browser fetch for completions via CF Proxy
+    completion = await _qwen_native_request(
         merged,
-        base_url,
         proxy_url,
-        "POST",
-        f"{completion_path}?chat_id={chat_id}",
-        completion_body,
+        plan,
+        payload,
+        method="POST",
+        path=f"{completion_path}?chat_id={chat_id}",
+        body=completion_body,
         referer_path=f"/c/{chat_id}",
+        timeout_seconds=300,
     )
     logger.info(
         "qwen_completion_response status=%s content_type=%s body_len=%s body_head=%s",

@@ -908,6 +908,7 @@ class QwenNativeBrowserTransport:
 
         session.page.on("requestfailed", capture_request_failure)
         try:
+            evaluate_timeout = min(payload.get("timeoutMs", 300000), 60000)
             async with session.page.expect_request(
                 lambda request: (
                     request.url == target_url
@@ -916,8 +917,28 @@ class QwenNativeBrowserTransport:
                 ),
                 timeout=30_000,
             ) as request_info:
-                result = await session.page.evaluate(script, payload)
+                result = await asyncio.wait_for(
+                    session.page.evaluate(script, payload),
+                    timeout=evaluate_timeout / 1000,
+                )
             browser_request = await request_info.value
+        except asyncio.TimeoutError:
+            fetch_log = ""
+            try:
+                fetch_log = await session.page.evaluate(
+                    "window.__any2apiQwenFetchLog ? window.__any2apiQwenFetchLog.join('|') : 'no_log'"
+                )
+            except Exception:
+                pass
+            logger.warning(
+                "qwen_native_browser_evaluate_timeout path=%s timeout_ms=%s fetch_log=%s",
+                payload["path"],
+                evaluate_timeout,
+                fetch_log[:300],
+            )
+            raise RuntimeError(
+                f"Qwen browser evaluate timeout after {evaluate_timeout}ms"
+            ) from None
         except Exception as error:
             reason = failure_reasons[-1] if failure_reasons else type(error).__name__
             logger.warning(

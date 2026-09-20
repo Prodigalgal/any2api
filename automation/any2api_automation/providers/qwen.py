@@ -562,9 +562,9 @@ def build_qwen_request(
         }
         upstream_messages.append(message)
     result: dict[str, Any] = {
-        "stream": False,
+        "stream": True,
         "version": str((command.get("runtimeOptions") or {}).get("request_version") or "2.1"),
-        "incremental_output": False,
+        "incremental_output": True,
         "model": str(command.get("model") or ""),
         "chatId": chat_id,
         "parentId": "",

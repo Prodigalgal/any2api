@@ -804,6 +804,53 @@ class QwenNativeBrowserTransport:
           window.__any2apiQwenFetchLog = [];
           try {
             window.__any2apiQwenFetchLog.push('fetch_start:' + request.path);
+            // Use XMLHttpRequest for completion endpoint to bypass WAF fetch detection
+            if (isCompletion) {
+              window.__any2apiQwenFetchLog.push('using_xhr');
+              const xhrResult = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open(request.method, request.url, true);
+                for (const [k, v] of Object.entries(headers)) {
+                  try { xhr.setRequestHeader(k, v); } catch (_) {}
+                }
+                xhr.withCredentials = true;
+                xhr.responseType = 'text';
+                xhr.timeout = request.timeoutMs;
+                xhr.onload = () => {
+                  window.__any2apiQwenFetchLog.push('xhr_load:' + xhr.status);
+                  resolve({
+                    status: xhr.status,
+                    contentType: xhr.getResponseHeader('content-type') || '',
+                    requestId: xhr.getResponseHeader('x-request-id') || request.requestId,
+                    retryAfter: xhr.getResponseHeader('retry-after') || '',
+                    body: xhr.responseText || '',
+                    viaXhr: true
+                  });
+                };
+                xhr.onerror = () => {
+                  window.__any2apiQwenFetchLog.push('xhr_error');
+                  reject(new Error('XHR network error'));
+                };
+                xhr.ontimeout = () => {
+                  window.__any2apiQwenFetchLog.push('xhr_timeout');
+                  reject(new Error('XHR timeout'));
+                };
+                xhr.send(request.body || null);
+              });
+              // Convert XHR result to expected format
+              const binary = new TextEncoder().encode(xhrResult.body || '');
+              let bin = '';
+              for (let i = 0; i < binary.length; i++) bin += String.fromCharCode(binary[i]);
+              window.__any2apiQwenFetchLog.push('xhr_done:bytes=' + binary.length);
+              return {
+                status: xhrResult.status,
+                contentType: xhrResult.contentType,
+                requestId: xhrResult.requestId,
+                retryAfter: xhrResult.retryAfter,
+                bodyBase64: btoa(bin),
+                fetchLog: window.__any2apiQwenFetchLog.join('|')
+              };
+            }
             response = await fetch(request.url, {
               method: request.method,
               headers,

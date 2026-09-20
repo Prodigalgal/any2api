@@ -826,7 +826,7 @@ class QwenNativeBrowserTransport:
             window.__any2apiQwenFetchLog.push('fetch_start:' + request.path);
             // Use XMLHttpRequest for completion endpoint to bypass WAF fetch detection
             if (isCompletion) {
-              window.__any2apiQwenFetchLog.push('using_xhr');
+              window.__any2apiQwenFetchLog.push('using_xhr_stream');
               const xhrResult = await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
                 xhr.open(request.method, request.url, true);
@@ -836,23 +836,61 @@ class QwenNativeBrowserTransport:
                 xhr.withCredentials = true;
                 xhr.responseType = 'text';
                 xhr.timeout = request.timeoutMs;
-                xhr.onload = () => {
-                  window.__any2apiQwenFetchLog.push('xhr_load:' + xhr.status + ':len=' + (xhr.responseText || '').length);
+                let collected = '';
+                let lastLen = 0;
+                let settled = false;
+                const finish = () => {
+                  if (settled) return;
+                  settled = true;
+                  window.__any2apiQwenFetchLog.push('xhr_finish:bytes=' + collected.length);
                   resolve({
-                    status: xhr.status,
+                    status: xhr.status || 200,
                     contentType: xhr.getResponseHeader('content-type') || '',
                     requestId: xhr.getResponseHeader('x-request-id') || request.requestId,
                     retryAfter: xhr.getResponseHeader('retry-after') || '',
-                    body: xhr.responseText || ''
+                    body: collected
                   });
+                };
+                xhr.onprogress = () => {
+                  const text = xhr.responseText || '';
+                  if (text.length > lastLen) {
+                    collected = text;
+                    lastLen = text.length;
+                    window.__any2apiQwenFetchLog.push('xhr_progress:' + text.length);
+                    // Check for SSE terminal events
+                    if (text.includes('[DONE]') || text.includes('"finish_reason"')
+                        || text.includes('"event":"finish"')
+                        || text.includes('"loadingStatus":"complete"')
+                        || text.includes('"ret":[')) {
+                      window.__any2apiQwenFetchLog.push('xhr_terminal');
+                      setTimeout(finish, 500);
+                    }
+                  }
+                };
+                xhr.onload = () => {
+                  window.__any2apiQwenFetchLog.push('xhr_load:' + xhr.status + ':len=' + (xhr.responseText || '').length);
+                  if (!settled) {
+                    collected = xhr.responseText || collected;
+                    finish();
+                  }
                 };
                 xhr.onerror = () => {
                   window.__any2apiQwenFetchLog.push('xhr_error');
-                  reject(new Error('XHR network error'));
+                  if (!settled) {
+                    settled = true;
+                    reject(new Error('XHR network error'));
+                  }
                 };
                 xhr.ontimeout = () => {
-                  window.__any2apiQwenFetchLog.push('xhr_timeout');
-                  reject(new Error('XHR timeout'));
+                  window.__any2apiQwenFetchLog.push('xhr_timeout:collected=' + collected.length);
+                  if (!settled) {
+                    if (collected.length > 0) {
+                      finish();
+                    } else {
+                      settled = true;
+                      reject(new Error('XHR timeout'));
+                    }
+                  }
                 };
                 xhr.send(request.body || null);
               });

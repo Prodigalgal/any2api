@@ -375,7 +375,7 @@ async def _qwen_chat_request(
         f"{completion_path}?chat_id={chat_id}",
         len(completion_body),
     )
-    # Use browser fetch for completions via CF Proxy
+    # Use browser fetch for completions
     completion = await _qwen_native_request(
         merged,
         proxy_url,

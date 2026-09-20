@@ -393,6 +393,13 @@ async def _qwen_chat_request(
         completion.get("content_type"),
         len(str(completion.get("body_base64") or "")),
     )
+    # Decode and log response body for diagnostics
+    try:
+        body_bytes = base64.b64decode(str(completion.get("body_base64") or ""))
+        body_text = body_bytes.decode("utf-8", errors="replace")[:500]
+        logger.info("qwen_completion_body content=%s", body_text)
+    except (ValueError, UnicodeDecodeError) as decode_error:
+        logger.warning("qwen_completion_body_decode_failed error=%s", decode_error)
     patches = [
         session.get("credential_patch"),
         upload.get("credential_patch") if media_sources else None,

@@ -637,9 +637,29 @@ class QwenNativeBrowserTransport:
                     result.get("status"),
                     len(body),
                 )
-                await asyncio.sleep(1.2)
+                await asyncio.sleep(2.0)
                 await self._prepare_authenticated_surface(session, request)
+                # Re-initialize baxia after challenge recovery
+                try:
+                    await self._ensure_baxia_ready(session)
+                except RuntimeError:
+                    pass
                 result, body = await self._evaluate(session, request)
+                # One more retry if still not SSE
+                if b"data:" not in body and int(result.get("status") or 0) in {200, 403}:
+                    logger.warning(
+                        "qwen_native_browser_completion_retry2 path=%s status=%s bytes=%s",
+                        request.path,
+                        result.get("status"),
+                        len(body),
+                    )
+                    await asyncio.sleep(3.0)
+                    await self._prepare_authenticated_surface(session, request)
+                    try:
+                        await self._ensure_baxia_ready(session)
+                    except RuntimeError:
+                        pass
+                    result, body = await self._evaluate(session, request)
             credential_patch = await self._credential_patch(session, request)
             return self._response(request, result, body, credential_patch)
 

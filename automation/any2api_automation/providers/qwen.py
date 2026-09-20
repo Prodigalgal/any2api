@@ -325,7 +325,9 @@ async def _qwen_chat_request(
     logger.info(
         "qwen_chat_id_extracted chat_id=%s session_keys=%s",
         chat_id,
-        list(session_json.keys())[:10] if isinstance(session_json, dict) else type(session_json).__name__,
+        list(session_json.keys())[:10]
+        if isinstance(session_json, dict)
+        else type(session_json).__name__,
     )
     if not chat_id:
         return {**session, "status": 502, "body": "Qwen chats/new returned no chat id"}

@@ -85,19 +85,19 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 - E2E：`deepseek/glm/longcat/mimo/qwen` = `API`；`arena/minmax` = 默认
 - 生产：7 家均未写 `inference_transport_mode`（走 AUTO 默认）
 
-### 2026-09-19 生产真实验收矩阵（实测）
+### 2026-09-20 生产真实验收矩阵（实测）
 
 图例：`PASS` 真实成功；`FAIL` 有明确错误；`N/A` 未声明能力。
 
 | Provider | keepalive | 文本 collect | 文本 SSE | 图片 collect | 图片 SSE | 主用通道 | 备注 |
 |---|---|---|---|---|---|---|---|
-| DeepSeek | PASS（历史 1864） | PASS | PASS | N/A | N/A | API | text-only；首字 50–120s |
-| MiMo | PASS（2812） | PASS | PASS | PASS | PASS | API | 纯色极小图可能拒答 |
-| LongCat | PASS（2884） | PASS | PASS | PASS（≥32px 棋盘/256px） | PASS | API | 极小纯色 PNG 可 `empty_model_response` |
-| GLM | PASS（2687） | PASS | PASS | PASS（`glm-4.6v`） | PASS | API | 文本/图片均 40–70s |
-| Qwen | PASS（keepalive OK） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | FAIL（WAF） | API | 阿里云 WAF `aliyun_waf_aa` 拦截 chats/new |
-| MiniMax | PASS（签到后） | PASS | PASS | PASS | PASS | Runtime+官方抓包 | 图片走官方 UI 抓包 body + agent-stream SSE |
-| Arena | PASS | PASS | PASS | FAIL | — | Runtime+CF Proxy | 新号 `dcf5ac30`；CF Dynamic 代理绕过 reCAPTCHA；图片附件格式待修 |
+| DeepSeek | PASS | PASS | PASS | N/A | N/A | API | text-only |
+| MiMo | PASS | PASS | PASS | PASS | PASS | API | |
+| LongCat | PASS | PASS | PASS | PASS | PASS | API | |
+| GLM | PASS | PASS | PASS | PASS | PASS | API | |
+| Qwen | PASS | PARTIAL | PARTIAL | FAIL | FAIL | XHR+CF Proxy | XHR 绕过 WAF；滑块可清；偶发成功；baxia 验证码仍频繁触发 |
+| MiniMax | PASS | PASS | PASS | PASS | PASS | Runtime+官方抓包 | |
+| Arena | PASS | PASS | PASS | FAIL | — | Runtime+CF Proxy | CF Proxy 绕过 reCAPTCHA；图片附件格式待修 |
 
 ### 本轮已落地修复
 
@@ -108,20 +108,19 @@ Grok / Grok Console / Grok Web 不在本轮业务范围。
 
 ### 当前阻断点
 
-1. **DeepSeek 注册**：CloudFront WAF 对数据中心 IP 返回 403 `Request blocked`；需要住宅/非常驻 IP 出口。
-2. **Qwen WAF**：阿里云 WAF `aliyun_waf_aa` 拦截 `/api/v2/chats/new`；Oracle 代理也被拦。
-3. **Arena 图片附件格式**：上传器返回 API 端点 URL，Arena 返回 `Invalid content`；文本已 PASS（CF Proxy）。
-4. **Arena 账号短寿命**：账号约 1 天过期，需持续注册补号。
-5. **automation_transport_error**：Pod 滚动后 Server→Automation DNS 抖动；需重启 server。
+1. **Qwen baxia 验证码**：XHR 绕过 WAF 后，baxia 反爬频繁触发 `FAIL_SYS_USER_VALIDATE`；滑块可清但 completion 仍偶发被拒。偶发成功已验证 SSE 格式正确。
+2. **Arena 图片附件格式**：上传器返回 API 端点 URL，Arena 返回 `Invalid content`。
+3. **Arena 账号短寿命**：账号约 1 天过期，需持续注册补号。
+4. **DeepSeek 注册**：CloudFront WAF 对数据中心 IP 返回 403。
+5. **automation_transport_error**：Pod 滚动后 Server→Automation DNS 抖动。
 6. **模型可用性门禁**：探针新鲜度窗口内无成功 usage 时返回 `model_unavailable`。
 
-### 2026-09-19 Arena CF Proxy 修复
+### 2026-09-20 Qwen XHR 突破
 
-- **CF Dynamic Overseas 池启用**：订阅 `proxy.omnnu.xyz`，绑定 Arena INFERENCE+REGISTRATION+LIFECYCLE。
-- **reCAPTCHA v3 通过**：CF 住宅 IP 信誉优于数据中心，不再触发 v2 升级。
-- **文本推理 PASS**：`Say hi` → `Hi there! How can I help you today?`
-- **图片推理 FAIL**：附件格式问题（非 reCAPTCHA），上传器返回 `/api/chat/workspace/cas/...` 端点。
-- **环境修复**：headless=False + humanize=True + block_webrtc=True + 许可弹窗处理。
+- **XHR 绕过 WAF**：`XMLHttpRequest` 替代 `fetch`，completion 端点可访问。
+- **滑块挑战恢复**：baxia slider 可自动清除（`challenge_cleared`）。
+- **偶发成功**：`data: {"response.created":...}` + 2947 bytes SSE 数据已获取。
+- **遗留**：baxia 验证码仍频繁触发，需进一步降低触发率或提高重试成功率。
 
 ### 生命周期稳定性改动（2026-09-15）
 

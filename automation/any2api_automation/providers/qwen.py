@@ -322,6 +322,11 @@ async def _qwen_chat_request(
     except (UnicodeDecodeError, json.JSONDecodeError, RuntimeError):
         return {**session, "status": 502, "body": "Qwen chats/new returned invalid JSON"}
     chat_id = _qwen_chat_id(session_json)
+    logger.info(
+        "qwen_chat_id_extracted chat_id=%s session_keys=%s",
+        chat_id,
+        list(session_json.keys())[:10] if isinstance(session_json, dict) else type(session_json).__name__,
+    )
     if not chat_id:
         return {**session, "status": 502, "body": "Qwen chats/new returned no chat id"}
     merged = {**current, **(session.get("credential_patch") or {})}
@@ -361,6 +366,12 @@ async def _qwen_chat_request(
         build_qwen_request(command, chat_id, uploaded_files=uploaded_files),
         ensure_ascii=False,
         separators=(",", ":"),
+    )
+    logger.info(
+        "qwen_completion_start chat_id=%s path=%s body_len=%s",
+        chat_id,
+        f"{completion_path}?chat_id={chat_id}",
+        len(completion_body),
     )
     # Use browser fetch for completions via CF Proxy
     completion = await _qwen_native_request(

@@ -34,6 +34,8 @@ public class InferenceCoordinator {
     private final ModelCatalogCache catalog;
     private final ModelRequestLimitGuard requestLimits;
     private final ProviderTransportModeService transportModes;
+    private final com.any2api.protocol.SmartContextWindowManager contextManager;
+    private final com.any2api.cache.PromptExactCacheManager promptCache;
 
     public InferenceCoordinator(
         ProviderRegistry providers,
@@ -47,6 +49,47 @@ public class InferenceCoordinator {
         ModelRequestLimitGuard requestLimits,
         ProviderTransportModeService transportModes
     ) {
+        this(providers, accounts, failures, telemetry, runtime, usage, availability, catalog,
+            requestLimits, transportModes,
+            new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper()),
+            null);
+    }
+
+    public InferenceCoordinator(
+        ProviderRegistry providers,
+        AccountSelectionService accounts,
+        ProviderFailureDisposition failures,
+        InferenceTelemetryService telemetry,
+        ModelRuntimeGuard runtime,
+        UsageNormalizer usage,
+        ModelAvailabilityGuard availability,
+        ModelCatalogCache catalog,
+        ModelRequestLimitGuard requestLimits,
+        ProviderTransportModeService transportModes,
+        org.springframework.beans.factory.ObjectProvider<com.any2api.protocol.SmartContextWindowManager> contextManagers,
+        org.springframework.beans.factory.ObjectProvider<com.any2api.cache.PromptExactCacheManager> promptCaches
+    ) {
+        this(providers, accounts, failures, telemetry, runtime, usage, availability, catalog,
+            requestLimits, transportModes,
+            contextManagers.getIfAvailable(() ->
+                new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper())),
+            promptCaches.getIfAvailable());
+    }
+
+    public InferenceCoordinator(
+        ProviderRegistry providers,
+        AccountSelectionService accounts,
+        ProviderFailureDisposition failures,
+        InferenceTelemetryService telemetry,
+        ModelRuntimeGuard runtime,
+        UsageNormalizer usage,
+        ModelAvailabilityGuard availability,
+        ModelCatalogCache catalog,
+        ModelRequestLimitGuard requestLimits,
+        ProviderTransportModeService transportModes,
+        com.any2api.protocol.SmartContextWindowManager contextManager,
+        com.any2api.cache.PromptExactCacheManager promptCache
+    ) {
         this.providers = providers;
         this.accounts = accounts;
         this.failures = failures;
@@ -57,6 +100,10 @@ public class InferenceCoordinator {
         this.catalog = catalog;
         this.requestLimits = requestLimits;
         this.transportModes = transportModes;
+        this.contextManager = contextManager == null
+            ? new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper())
+            : contextManager;
+        this.promptCache = promptCache;
     }
 
     public Flux<CanonicalEvent> execute(CanonicalRequest request) {
@@ -91,16 +138,24 @@ public class InferenceCoordinator {
             : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
-            validateRequest(request, provider, modelCapabilities);
+            var safeRequest = contextManager.guard(request, modelCapabilities);
+            validateRequest(safeRequest, provider, modelCapabilities);
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
-                request, entry.capabilities()));
-            var execution = runtime.execute(request, admission -> executeWithRetries(
-                request, provider, accountLease(request, provider), false, 1, apiKeyId,
+                safeRequest, entry.capabilities()));
+            var execution = runtime.execute(safeRequest, admission -> executeWithRetries(
+                safeRequest, provider, accountLease(safeRequest, provider), false, 1, apiKeyId,
                 requestKind, admission.queueMs(), transportPlan.primary(),
                 transportPlan.fallback(), modelCapabilities));
-            return "PROBE".equals(requestKind) ? execution
-                : availability.requireCallable(request.providerId(), request.model())
+            var liveEvents = "PROBE".equals(requestKind) ? execution
+                : availability.requireCallable(safeRequest.providerId(), safeRequest.model())
                     .thenMany(execution);
+            if (promptCache == null || !promptCache.isEligibleForCache(safeRequest) || "PROBE".equals(requestKind)) {
+                return liveEvents;
+            }
+            return promptCache.get(safeRequest)
+                .flatMapMany(Flux::fromIterable)
+                .switchIfEmpty(Flux.defer(() -> liveEvents.collectList().flatMapMany(events ->
+                    promptCache.put(safeRequest, events).thenReturn(events).flatMapMany(Flux::fromIterable))));
         });
     }
 
@@ -153,19 +208,27 @@ public class InferenceCoordinator {
             : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
+            var safeRequest = contextManager.guard(request, modelCapabilities);
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
-                request, entry.capabilities()));
-            var execution = runtime.execute(request, admission ->
-                    executeWithRetries(request, provider, reactor.core.publisher.Mono.just(account),
+                safeRequest, entry.capabilities()));
+            var execution = runtime.execute(safeRequest, admission ->
+                    executeWithRetries(safeRequest, provider, reactor.core.publisher.Mono.just(account),
                         true, 1, apiKeyId, requestKind, admission.queueMs(),
                         transportPlan.primary(), transportPlan.fallback(), modelCapabilities))
                 .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
                     error -> accounts.release(account).thenMany(Flux.error(error)));
-            if ("PROBE".equals(requestKind)) return execution;
-            return availability.requireCallable(request.providerId(), request.model())
-                .thenMany(execution)
-                .onErrorResume(ModelAvailabilityGuard.ModelUnavailableException.class,
-                    error -> accounts.release(account).thenMany(Flux.error(error)));
+            var liveEvents = "PROBE".equals(requestKind) ? execution
+                : availability.requireCallable(safeRequest.providerId(), safeRequest.model())
+                    .thenMany(execution)
+                    .onErrorResume(ModelAvailabilityGuard.ModelUnavailableException.class,
+                        error -> accounts.release(account).thenMany(Flux.error(error)));
+            if (promptCache == null || !promptCache.isEligibleForCache(safeRequest) || "PROBE".equals(requestKind)) {
+                return liveEvents;
+            }
+            return promptCache.get(safeRequest)
+                .flatMapMany(Flux::fromIterable)
+                .switchIfEmpty(Flux.defer(() -> liveEvents.collectList().flatMapMany(events ->
+                    promptCache.put(safeRequest, events).thenReturn(events).flatMapMany(Flux::fromIterable))));
         });
     }
 

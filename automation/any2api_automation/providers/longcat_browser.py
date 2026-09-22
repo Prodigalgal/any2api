@@ -38,8 +38,10 @@ _LONGCAT_FILE_EXTENSIONS = {
 }
 _LONGCAT_MIME_EXTENSIONS = {
     "image/jpeg": "jpg",
+    "image/jpg": "jpg",
     "image/png": "png",
     "application/pdf": "pdf",
+    "application/x-pdf": "pdf",
     "application/msword": "doc",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
     "application/vnd.ms-excel": "xls",

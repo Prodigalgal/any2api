@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @RestController
@@ -133,21 +134,54 @@ public class OpenAiGatewayController {
                 "API key does not allow this protocol");
         }
         authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
-        return randomRouter.select(
-            protocol, request, role, grant, RequestIdWebFilter.get(exchange)).flatMap(selection -> {
-            var canonical = selection.request();
-            exchange.getAttributes().put(
-                RequestIdWebFilter.PROVIDER_ATTRIBUTE, canonical.providerId());
-            exchange.getAttributes().put(RequestIdWebFilter.MODEL_ATTRIBUTE, canonical.model());
-            exchange.getResponse().getHeaders().set(
-                "X-Any2API-Provider", canonical.providerId());
-            exchange.getResponse().getHeaders().set(
-                "X-Any2API-Model", canonical.model());
-            return responseWriter.write(
-                canonical,
-                coordinator.execute(
-                    canonical, selection.account(), grant.keyId(), ProviderTransportMode.AUTO),
-                exchange);
-        });
+        var requestId = RequestIdWebFilter.get(exchange);
+        var candidates = randomRouter.selectCandidates(
+            protocol, request, role, grant, requestId);
+        return executeCascadingRandom(candidates, exchange, grant.keyId());
     }
+
+    private Mono<Void> executeCascadingRandom(
+        Flux<RandomInferenceRouter.RandomSelection> candidates,
+        ServerWebExchange exchange,
+        java.util.UUID apiKeyId
+    ) {
+        return candidates
+            .concatMap(selection -> {
+                var canonical = selection.request();
+                var events = coordinator.execute(
+                    canonical, selection.account(), apiKeyId, ProviderTransportMode.AUTO);
+                if (!canonical.stream()) {
+                    return events.collectList().map(collected ->
+                        new AttemptOutcome(canonical, selection, Flux.fromIterable(collected),
+                            collected.stream().anyMatch(com.any2api.protocol.CanonicalEvent.Failed.class::isInstance)));
+                } else {
+                    return events.switchOnFirst((signal, streamFlux) -> {
+                        boolean failed = signal.hasValue() && signal.get() instanceof com.any2api.protocol.CanonicalEvent.Failed;
+                        return Mono.just(new AttemptOutcome(canonical, selection, streamFlux, failed));
+                    });
+                }
+            })
+            .filter(outcome -> !outcome.failed())
+            .next()
+            .flatMap(successful -> {
+                var canonical = successful.canonical();
+                exchange.getAttributes().put(
+                    RequestIdWebFilter.PROVIDER_ATTRIBUTE, canonical.providerId());
+                exchange.getAttributes().put(
+                    RequestIdWebFilter.MODEL_ATTRIBUTE, canonical.model());
+                exchange.getResponse().getHeaders().set(
+                    "X-Any2API-Provider", canonical.providerId());
+                exchange.getResponse().getHeaders().set(
+                    "X-Any2API-Model", canonical.model());
+                return responseWriter.write(canonical, successful.events(), exchange);
+            })
+            .switchIfEmpty(Mono.error(new com.any2api.account.AccountUnavailableException("random")));
+    }
+
+    private record AttemptOutcome(
+        CanonicalRequest canonical,
+        RandomInferenceRouter.RandomSelection selection,
+        Flux<com.any2api.protocol.CanonicalEvent> events,
+        boolean failed
+    ) {}
 }

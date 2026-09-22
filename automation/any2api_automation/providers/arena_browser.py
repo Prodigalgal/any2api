@@ -48,8 +48,8 @@ _MEDIA_BLOCK_TYPES = frozenset(
     }
 )
 _MAX_MODELS = 512
-_SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
-_SUPPORTED_DOCUMENT_MIME_TYPES = frozenset({"application/pdf"})
+_SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/jpg", "image/webp"})
+_SUPPORTED_DOCUMENT_MIME_TYPES = frozenset({"application/pdf", "application/x-pdf"})
 _SUPPORTED_ATTACHMENT_MIME_TYPES = _SUPPORTED_IMAGE_MIME_TYPES | _SUPPORTED_DOCUMENT_MIME_TYPES
 _SUPPORTED_ATTACHMENT_BLOCK_TYPES = frozenset(
     {"image", "image_url", "input_image", "file", "input_file", "attachment"}
@@ -495,12 +495,18 @@ def _find_data_url(value: Any, *, depth: int = 0) -> str | None:
 
 
 def _decode_arena_data_url(source: str, block_type: str) -> tuple[str, bytes]:
-    match = re.fullmatch(r"data:([^;,\s]+);base64,([A-Za-z0-9+/=]+)", source.strip())
+    raw = str(source or "").strip()
+    match = re.fullmatch(r"data:([^;,\s]+)(?:;[^;,]*)?;base64,([A-Za-z0-9+/=\s]+)", raw, re.IGNORECASE)
     if match is None:
         raise ValueError(f"Arena {block_type} upload requires data:<mime>;base64,<payload>")
     mime_type = match.group(1).lower()
+    if mime_type == "image/jpg":
+        mime_type = "image/jpeg"
+    elif mime_type == "application/x-pdf":
+        mime_type = "application/pdf"
+    clean_b64 = "".join(match.group(2).split())
     try:
-        payload = base64.b64decode(match.group(2), validate=True)
+        payload = base64.b64decode(clean_b64, validate=True)
     except (binascii.Error, ValueError) as error:
         raise ValueError("Arena media data URL is not valid base64") from error
     if not payload:

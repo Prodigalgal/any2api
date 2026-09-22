@@ -35,6 +35,7 @@ public class RandomInferenceRouter {
     private final CanonicalRequestParser parser;
     private final ExecutorService databaseExecutor;
     private final ModelRuntimeGuard runtimeGuard;
+    private final ModelHealthTracker healthTracker;
     private final Object shuffleLock = new Object();
     private final Map<String, ArrayDeque<String>> providerBags = new HashMap<>();
 
@@ -46,12 +47,39 @@ public class RandomInferenceRouter {
         ExecutorService databaseExecutor,
         ModelRuntimeGuard runtimeGuard
     ) {
+        this(catalog, providers, accounts, parser, databaseExecutor, runtimeGuard,
+            new ModelHealthTracker());
+    }
+
+    public RandomInferenceRouter(
+        RandomRouteCatalog catalog,
+        ProviderRegistry providers,
+        AccountSelectionService accounts,
+        CanonicalRequestParser parser,
+        ExecutorService databaseExecutor,
+        ModelRuntimeGuard runtimeGuard,
+        org.springframework.beans.factory.ObjectProvider<ModelHealthTracker> healthTrackers
+    ) {
+        this(catalog, providers, accounts, parser, databaseExecutor, runtimeGuard,
+            healthTrackers.getIfAvailable(ModelHealthTracker::new));
+    }
+
+    public RandomInferenceRouter(
+        RandomRouteCatalog catalog,
+        ProviderRegistry providers,
+        AccountSelectionService accounts,
+        CanonicalRequestParser parser,
+        ExecutorService databaseExecutor,
+        ModelRuntimeGuard runtimeGuard,
+        ModelHealthTracker healthTracker
+    ) {
         this.catalog = catalog;
         this.providers = providers;
         this.accounts = accounts;
         this.parser = parser;
         this.databaseExecutor = databaseExecutor;
         this.runtimeGuard = runtimeGuard;
+        this.healthTracker = healthTracker == null ? new ModelHealthTracker() : healthTracker;
     }
 
     public Mono<RandomSelection> select(
@@ -78,6 +106,18 @@ public class RandomInferenceRouter {
         ApiKeyGrant grant,
         String requestId
     ) {
+        return selectCandidates(protocol, request, role, grant, requestId)
+            .next()
+            .switchIfEmpty(Mono.error(new AccountUnavailableException("random")));
+    }
+
+    public Flux<RandomSelection> selectCandidates(
+        CanonicalRequest.Protocol protocol,
+        ObjectNode request,
+        RandomModelRole role,
+        ApiKeyGrant grant,
+        String requestId
+    ) {
         return Mono.fromCallable(() -> candidatesBlocking(
                 protocol, request, role, grant, requestId))
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
@@ -90,9 +130,7 @@ public class RandomInferenceRouter {
                         account -> provider.supportsAccount(candidate, account))
                     .map(account -> new RandomSelection(candidate, account))
                     .onErrorResume(AccountUnavailableException.class, ignored -> Mono.empty());
-            })
-            .next()
-            .switchIfEmpty(Mono.error(new AccountUnavailableException("random")));
+            });
     }
 
     private List<CanonicalRequest> candidatesBlocking(
@@ -136,15 +174,28 @@ public class RandomInferenceRouter {
         }
         var candidates = new ArrayList<CanonicalRequest>();
         var providerIds = byProvider.keySet().stream().sorted().toList();
-        for (var providerId : providerOrder(role, providerIds)) {
+        for (var providerId : providerOrder(role, providerIds, byProvider)) {
             var models = new ArrayList<>(byProvider.get(providerId));
             Collections.shuffle(models);
+            // Health and latency aware prioritization: sort models by score descending
+            models.sort((m1, m2) -> {
+                double s1 = healthTracker.healthScore(m1.providerId(), m1.model());
+                double s2 = healthTracker.healthScore(m2.providerId(), m2.model());
+                if (Math.abs(s1 - s2) > 0.15) {
+                    return Double.compare(s2, s1);
+                }
+                return 0;
+            });
             candidates.addAll(models);
         }
         return candidates;
     }
 
-    private List<String> providerOrder(RandomModelRole role, List<String> providerIds) {
+    private List<String> providerOrder(
+        RandomModelRole role,
+        List<String> providerIds,
+        Map<String, List<CanonicalRequest>> byProvider
+    ) {
         var key = role.catalogValue() + ":" + String.join(",", providerIds);
         String preferred;
         synchronized (shuffleLock) {
@@ -152,6 +203,12 @@ public class RandomInferenceRouter {
             if (bag.isEmpty()) {
                 var shuffled = new ArrayList<>(providerIds);
                 Collections.shuffle(shuffled);
+                // Deprioritize providers where all models are cooling
+                shuffled.sort((p1, p2) -> {
+                    boolean c1 = isProviderAllCooling(p1, byProvider.get(p1));
+                    boolean c2 = isProviderAllCooling(p2, byProvider.get(p2));
+                    return Boolean.compare(c1, c2);
+                });
                 bag.addAll(shuffled);
             }
             preferred = bag.removeFirst();
@@ -159,10 +216,20 @@ public class RandomInferenceRouter {
         var remaining = new ArrayList<>(providerIds);
         remaining.remove(preferred);
         Collections.shuffle(remaining);
+        remaining.sort((p1, p2) -> {
+            boolean c1 = isProviderAllCooling(p1, byProvider.get(p1));
+            boolean c2 = isProviderAllCooling(p2, byProvider.get(p2));
+            return Boolean.compare(c1, c2);
+        });
         var ordered = new ArrayList<String>();
         ordered.add(preferred);
         ordered.addAll(remaining);
         return ordered;
+    }
+
+    private boolean isProviderAllCooling(String providerId, List<CanonicalRequest> requests) {
+        if (requests == null || requests.isEmpty()) return false;
+        return requests.stream().allMatch(r -> healthTracker.isCooling(r.providerId(), r.model()));
     }
 
     private void requireRandomModel(ObjectNode request) {

@@ -365,6 +365,7 @@ async def _drag_slider_to_piece_target(
         piece = float(last_piece if observed_piece is None else observed_piece)
         error = target - piece
         if abs(error) <= settings().qwen_slider_tolerance_px:
+            await page.wait_for_timeout(random.randint(45, 110))
             await page.mouse.up()
             return piece, time.time() - started, samples
         piece_delta = piece - last_piece
@@ -383,6 +384,7 @@ async def _drag_slider_to_piece_target(
             steps=max(2, min(6, int(abs(step) / 4))),
         )
         samples += 1
+    await page.wait_for_timeout(random.randint(45, 110))
     await page.mouse.up()
     final = float(await _read_piece_left(page) or last_piece)
     return final, time.time() - started, samples

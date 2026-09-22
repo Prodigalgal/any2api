@@ -27,13 +27,16 @@ public class PublicApiKeyWebFilter implements WebFilter {
 
     private final Any2ApiProperties properties;
     private final ApiKeyAuthenticator authenticator;
+    private final ApiKeyRateLimiter rateLimiter;
 
     public PublicApiKeyWebFilter(
         Any2ApiProperties properties,
-        ApiKeyAuthenticator authenticator
+        ApiKeyAuthenticator authenticator,
+        ApiKeyRateLimiter rateLimiter
     ) {
         this.properties = properties;
         this.authenticator = authenticator;
+        this.rateLimiter = rateLimiter;
     }
 
     @Override
@@ -63,8 +66,33 @@ public class PublicApiKeyWebFilter implements WebFilter {
                     return exchange.getResponse().writeWith(Mono.just(
                         exchange.getResponse().bufferFactory().wrap(body)));
                 }
-                exchange.getAttributes().put(ApiKeyAuthorization.GRANT_ATTRIBUTE, grant.get());
-                return chain.filter(exchange);
+                var apiKeyGrant = grant.get();
+                var rateLimitResult = rateLimiter.tryAcquire(apiKeyGrant.keyId());
+                if (!rateLimitResult.permitted()) {
+                    exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
+                    exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                    exchange.getResponse().getHeaders().add("Retry-After", "5");
+                    exchange.getResponse().getHeaders().add("X-RateLimit-Limit-Requests",
+                        String.valueOf(rateLimiter.getMaxRpm()));
+                    exchange.getResponse().getHeaders().add("X-RateLimit-Remaining-Requests", "0");
+                    var requestId = RequestIdWebFilter.get(exchange);
+                    var body = ("{\"error\":{\"type\":\"rate_limit_error\","
+                        + "\"code\":\"" + rateLimitResult.code() + "\",\"message\":\""
+                        + rateLimitResult.message() + "\",\"param\":null,\"retryable\":true,"
+                        + "\"provider\":null,\"model\":null,\"request_id\":\"" + requestId + "\"}}")
+                        .getBytes(StandardCharsets.UTF_8);
+                    return exchange.getResponse().writeWith(Mono.just(
+                        exchange.getResponse().bufferFactory().wrap(body)));
+                }
+
+                exchange.getAttributes().put(ApiKeyAuthorization.GRANT_ATTRIBUTE, apiKeyGrant);
+                exchange.getResponse().getHeaders().add("X-RateLimit-Limit-Requests",
+                    String.valueOf(rateLimiter.getMaxRpm()));
+                exchange.getResponse().getHeaders().add("X-RateLimit-Remaining-Requests",
+                    String.valueOf(rateLimiter.getRemainingRpm(apiKeyGrant.keyId())));
+
+                return chain.filter(exchange)
+                    .doFinally(signalType -> rateLimiter.release(apiKeyGrant.keyId()));
             });
     }
 

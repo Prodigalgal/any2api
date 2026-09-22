@@ -1,12 +1,13 @@
 "use client";
 
-import { CloseOutlined, RefreshOutlined, SearchOutlined, VisibilityOutlined } from "@mui/icons-material";
+import { CheckCircleOutlined, CloseOutlined, ContentCopyOutlined, RefreshOutlined, SearchOutlined, SpeedOutlined, TerminalOutlined, VisibilityOutlined } from "@mui/icons-material";
 import { Alert, Box, Button, Chip, Dialog, DialogContent, DialogTitle, IconButton, LinearProgress, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Tooltip, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, providerOptions, type UsageEvent } from "@/lib/api";
 import { DataSurface, PageContainer, PageHeader, ToolbarSurface } from "@/components/page-layout";
+import { tokens } from "@/theme/theme";
 
 export function RequestRecords() {
   const [page, setPage] = useState(0);
@@ -53,7 +54,7 @@ export function RequestRecords() {
           <TableCell align="right"><Typography sx={mono}>{item.inputTokens} / {item.outputTokens}</Typography><Typography color="text.secondary" sx={subtle}>{item.usageSource} · cache {item.cacheReadTokens}</Typography></TableCell>
           <TableCell align="right"><Tooltip title={`排队 ${duration(item.queueMs)} · 取号 ${duration(item.accountAcquireMs)} · TTFB ${duration(item.ttfbMs)} · 生成 ${duration(item.generationMs)}`}><Typography sx={mono}>{duration(item.durationMs)}</Typography></Tooltip></TableCell>
           <TableCell sx={{ fontSize: 11.5 }}>{formatTime(item.createdAt)}</TableCell>
-          <TableCell align="right"><Tooltip title="查看完整输入输出"><IconButton size="small" onClick={() => setSelected(item)}><VisibilityOutlined sx={{ fontSize: 18 }} /></IconButton></Tooltip></TableCell>
+          <TableCell align="right"><Tooltip title="查看全链路时延与数据详情"><IconButton size="small" onClick={() => setSelected(item)}><VisibilityOutlined sx={{ fontSize: 18 }} /></IconButton></Tooltip></TableCell>
         </TableRow>)}{!requests.isLoading && (requests.data?.items.length ?? 0) === 0 ? <TableRow><TableCell colSpan={9} align="center" sx={{ py: 8, color: "text.secondary" }}>没有符合条件的请求</TableCell></TableRow> : null}</TableBody>
       </Table></TableContainer>
       <TablePagination component="div" count={requests.data?.totalElements ?? 0} page={page} rowsPerPage={size} rowsPerPageOptions={[20, 50, 100]} onPageChange={(_, value) => setPage(value)} onRowsPerPageChange={(event) => { setSize(Number(event.target.value)); setPage(0); }} labelRowsPerPage="每页" />
@@ -64,16 +65,153 @@ export function RequestRecords() {
 
 function RequestDetailDialog({ request, onClose }: { request: UsageEvent; onClose: () => void }) {
   const detail = useQuery({ queryKey: ["request-log-detail", request.requestId, request.attempt], queryFn: () => api.requestLogDetail(request.requestId, request.attempt) });
-  return <Dialog open onClose={onClose} maxWidth="xl" fullWidth>
-    <DialogTitle sx={{ display: "flex", alignItems: "center", py: 1.5 }}><Box sx={{ minWidth: 0 }}><Typography sx={{ fontSize: 14, fontWeight: 750 }}>请求内容</Typography><Typography noWrap color="text.secondary" sx={mono}>{request.requestId} · attempt {request.attempt}</Typography></Box><Box sx={{ flex: 1 }} /><IconButton onClick={onClose}><CloseOutlined /></IconButton></DialogTitle>
-    <DialogContent dividers sx={{ p: 0 }}>{detail.isLoading ? <LinearProgress /> : null}{detail.error ? <Alert severity="error" sx={{ m: 2 }}>{detail.error.message}</Alert> : null}{detail.data ? <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, minHeight: 620 }}><JsonPane title="输入" value={detail.data.input} /><JsonPane title="输出" value={detail.data.output} border /></Box> : null}</DialogContent>
+  const [copiedCurl, setCopiedCurl] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
+
+  const total = Math.max(1, request.durationMs);
+  const qPct = Math.max(0, Math.min(100, (request.queueMs / total) * 100));
+  const acqPct = Math.max(0, Math.min(100, (request.accountAcquireMs / total) * 100));
+  const ttfbPct = Math.max(0, Math.min(100, (request.ttfbMs / total) * 100));
+  const genPct = Math.max(0, Math.min(100, (request.generationMs / total) * 100));
+
+  const copyCurl = () => {
+    const input = detail.data?.input;
+    const bodyStr = input ? JSON.stringify(input, null, 2) : JSON.stringify({ model: request.modelId, messages: [{ role: "user", content: "Hello" }] }, null, 2);
+    const curl = `curl -X POST "http://localhost:8080/v1/chat/completions" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer <API_KEY>" \\\n  -d '${bodyStr.replace(/'/g, "'\\''")}'`;
+    navigator.clipboard.writeText(curl);
+    setCopiedCurl(true);
+    setTimeout(() => setCopiedCurl(false), 2000);
+  };
+
+  const copyId = () => {
+    navigator.clipboard.writeText(request.requestId);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
+  };
+
+  return <Dialog open onClose={onClose} maxWidth="xl" fullWidth slotProps={{ paper: { sx: { bgcolor: tokens.canvas, border: `1px solid ${tokens.border}`, borderRadius: "16px", backgroundImage: "none" } } }}>
+    <DialogTitle sx={{ display: "flex", alignItems: "center", py: 2, px: 3, borderBottom: `1px solid ${tokens.border}`, bgcolor: tokens.canvasSubtle }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+        <Box sx={{ width: 36, height: 36, borderRadius: "10px", bgcolor: request.success ? "rgba(16, 185, 129, 0.12)" : "rgba(244, 63, 94, 0.12)", border: `1px solid ${request.success ? "rgba(16, 185, 129, 0.25)" : "rgba(244, 63, 94, 0.25)"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {request.success ? <CheckCircleOutlined sx={{ fontSize: 20, color: tokens.status.emerald }} /> : <SpeedOutlined sx={{ fontSize: 20, color: tokens.status.rose }} />}
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography sx={{ fontSize: 15, fontWeight: 700, color: tokens.text.primary }}>全链路请求追踪 (Trace Inspector)</Typography>
+            <Chip size="small" variant="outlined" color={request.success ? "success" : "error"} label={request.success ? "成功 200" : (request.errorClass || "失败")} sx={{ height: 20, fontSize: 10.5 }} />
+            <Chip size="small" label={`Attempt ${request.attempt}`} sx={{ height: 20, fontSize: 10.5, bgcolor: tokens.surface, color: tokens.text.secondary }} />
+          </Box>
+          <Typography noWrap color="text.secondary" sx={{ ...mono, fontSize: 11, mt: 0.25 }}>ID: {request.requestId}</Typography>
+        </Box>
+      </Box>
+      <Box sx={{ flex: 1 }} />
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Button size="small" variant="outlined" startIcon={<TerminalOutlined sx={{ fontSize: 16 }} />} onClick={copyCurl} sx={{ height: 32, fontSize: 11.5, borderColor: tokens.border, color: tokens.text.secondary }}>
+          {copiedCurl ? "已复制 cURL" : "复制 cURL"}
+        </Button>
+        <Button size="small" variant="outlined" startIcon={<ContentCopyOutlined sx={{ fontSize: 16 }} />} onClick={copyId} sx={{ height: 32, fontSize: 11.5, borderColor: tokens.border, color: tokens.text.secondary }}>
+          {copiedId ? "已复制 ID" : "复制 ID"}
+        </Button>
+        <IconButton onClick={onClose} sx={{ color: tokens.text.secondary }}><CloseOutlined sx={{ fontSize: 18 }} /></IconButton>
+      </Box>
+    </DialogTitle>
+
+    <DialogContent sx={{ p: 3 }}>
+      {/* Waterfall Timeline */}
+      <Box sx={{ mb: 3, p: 2.5, bgcolor: tokens.canvasSubtle, border: `1px solid ${tokens.border}`, borderRadius: "12px" }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <SpeedOutlined sx={{ fontSize: 18, color: tokens.primary.main }} />
+            <Typography sx={{ fontSize: 13, fontWeight: 700, color: tokens.text.primary }}>耗时瀑布流 (Timeline Waterfall)</Typography>
+          </Box>
+          <Typography sx={{ ...mono, fontSize: 13, fontWeight: 700, color: tokens.text.primary }}>总耗时: {duration(request.durationMs)}</Typography>
+        </Box>
+
+        {/* Progress bar */}
+        <Box sx={{ height: 10, borderRadius: "5px", overflow: "hidden", display: "flex", bgcolor: tokens.surface, mb: 2, border: `1px solid ${tokens.border}` }}>
+          {qPct > 0 ? <Tooltip title={`排队: ${request.queueMs} ms (${qPct.toFixed(1)}%)`}><Box sx={{ width: `${qPct}%`, bgcolor: "#a855f7" }} /></Tooltip> : null}
+          {acqPct > 0 ? <Tooltip title={`取号: ${request.accountAcquireMs} ms (${acqPct.toFixed(1)}%)`}><Box sx={{ width: `${acqPct}%`, bgcolor: "#f59e0b" }} /></Tooltip> : null}
+          {ttfbPct > 0 ? <Tooltip title={`TTFB: ${request.ttfbMs} ms (${ttfbPct.toFixed(1)}%)`}><Box sx={{ width: `${ttfbPct}%`, bgcolor: "#38bdf8" }} /></Tooltip> : null}
+          {genPct > 0 ? <Tooltip title={`生成: ${request.generationMs} ms (${genPct.toFixed(1)}%)`}><Box sx={{ width: `${genPct}%`, bgcolor: "#10b981" }} /></Tooltip> : null}
+        </Box>
+
+        {/* Breakdown stage cards */}
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, 1fr)" }, gap: 1.5 }}>
+          <StageCard label="并发排队 (Queue)" value={`${request.queueMs} ms`} pct={`${qPct.toFixed(1)}%`} color="#a855f7" />
+          <StageCard label="凭据租约 (Acquire)" value={`${request.accountAcquireMs} ms`} pct={`${acqPct.toFixed(1)}%`} color="#f59e0b" />
+          <StageCard label="首字节 (TTFB)" value={`${request.ttfbMs} ms`} pct={`${ttfbPct.toFixed(1)}%`} color="#38bdf8" />
+          <StageCard label="流式传输 (Generation)" value={`${request.generationMs} ms`} pct={`${genPct.toFixed(1)}%`} color="#10b981" />
+        </Box>
+
+        {/* Metadata summary bar */}
+        <Box sx={{ mt: 2, pt: 1.5, borderTop: `1px dashed ${tokens.border}`, display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
+          <MetaPill label="厂商" value={request.providerId} />
+          <MetaPill label="模型" value={request.modelId} highlight />
+          <MetaPill label="协议" value={request.protocol} />
+          <MetaPill label="类型" value={request.requestKind} />
+          <MetaPill label="输入/输出" value={`${request.inputTokens} / ${request.outputTokens} t`} />
+          <MetaPill label="缓存命中" value={`${request.cacheReadTokens} t`} />
+          <MetaPill label="账号" value={short(request.accountId)} />
+        </Box>
+      </Box>
+
+      {/* Payloads Inspector */}
+      {detail.isLoading ? <LinearProgress sx={{ borderRadius: 1 }} /> : null}
+      {detail.error ? <Alert severity="error" sx={{ mb: 2 }}>{detail.error.message}</Alert> : null}
+      {detail.data ? (
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, minHeight: 520 }}>
+          <JsonPane title="请求输入 (Request Input)" value={detail.data.input} />
+          <JsonPane title="响应输出 (Response Output)" value={detail.data.output} />
+        </Box>
+      ) : null}
+    </DialogContent>
   </Dialog>;
 }
 
-function JsonPane({ title, value, border = false }: { title: string; value: unknown; border?: boolean }) { return <Box sx={{ minWidth: 0, borderLeft: border ? 1 : 0, borderColor: "divider" }}><Typography sx={{ px: 2, py: 1.25, borderBottom: 1, borderColor: "divider", fontSize: 10.5, fontWeight: 800, color: "text.secondary" }}>{title}</Typography><Box component="pre" sx={{ m: 0, p: 2, height: 570, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: "ui-monospace, monospace", fontSize: 11.5, lineHeight: 1.65 }}>{JSON.stringify(value, null, 2)}</Box></Box>; }
-const mono = { fontFamily: "ui-monospace, monospace", fontSize: 11.5 } as const;
+function StageCard({ label, value, pct, color }: { label: string; value: string; pct: string; color: string }) {
+  return <Box sx={{ p: 1.25, bgcolor: tokens.surface, borderRadius: "8px", border: `1px solid ${tokens.border}` }}>
+    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 0.5 }}>
+      <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: color }} />
+      <Typography sx={{ fontSize: 11, color: tokens.text.secondary }}>{label}</Typography>
+    </Box>
+    <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+      <Typography sx={{ ...mono, fontSize: 12.5, fontWeight: 700, color: tokens.text.primary }}>{value}</Typography>
+      <Typography sx={{ ...mono, fontSize: 10.5, color: tokens.text.muted }}>{pct}</Typography>
+    </Box>
+  </Box>;
+}
+
+function MetaPill({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, px: 1, py: 0.25, bgcolor: tokens.surface, borderRadius: "6px", border: `1px solid ${tokens.border}`, fontSize: 11 }}>
+    <Typography component="span" sx={{ fontSize: 10.5, color: tokens.text.muted }}>{label}:</Typography>
+    <Typography component="span" sx={{ ...mono, fontSize: 11, fontWeight: highlight ? 700 : 500, color: highlight ? tokens.primary.main : tokens.text.primary }}>{value}</Typography>
+  </Box>;
+}
+
+function JsonPane({ title, value }: { title: string; value: unknown }) {
+  const [copied, setCopied] = useState(false);
+  const text = JSON.stringify(value, null, 2);
+  const copy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return <Box sx={{ minWidth: 0, bgcolor: tokens.canvasSubtle, border: `1px solid ${tokens.border}`, borderRadius: "10px", display: "flex", flexDirection: "column" }}>
+    <Box sx={{ px: 2, py: 1.25, borderBottom: `1px solid ${tokens.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: tokens.text.secondary }}>{title}</Typography>
+      <Button size="small" variant="text" startIcon={<ContentCopyOutlined sx={{ fontSize: 14 }} />} onClick={copy} sx={{ minWidth: 0, p: "2px 8px", fontSize: 10.5, color: tokens.text.secondary }}>
+        {copied ? "已复制" : "复制 JSON"}
+      </Button>
+    </Box>
+    <Box component="pre" sx={{ m: 0, p: 2, height: 480, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: "ui-monospace, monospace", fontSize: 11.5, lineHeight: 1.6, bgcolor: tokens.canvas, color: tokens.text.primary }}>
+      {text}
+    </Box>
+  </Box>;
+}
+
+const mono = { fontFamily: "ui-monospace, monospace" } as const;
 const subtle = { fontSize: 10.5 } as const;
 function short(value: string | null) { return value ? value.slice(0, 12) : "system"; }
-function Identifier({ value }: { value: string | null }) { return <Tooltip title={value || "system"}><Typography noWrap sx={mono}>{short(value)}</Typography></Tooltip>; }
+function Identifier({ value }: { value: string | null }) { return <Tooltip title={value || "system"}><Typography noWrap sx={{ ...mono, fontSize: 11.5 }}>{short(value)}</Typography></Tooltip>; }
 function duration(value: number) { return value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`; }
 function formatTime(value: string) { return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }

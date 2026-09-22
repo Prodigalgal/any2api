@@ -1,6 +1,7 @@
 package com.any2api.config;
 
 import com.any2api.auth.AdminSessionWebFilter;
+import com.any2api.auth.ApiKeyRateLimiter;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.context.annotation.Bean;
@@ -11,6 +12,11 @@ import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 
 @Configuration
 public class SecurityConfiguration {
+
+    @Bean
+    ApiKeyRateLimiter apiKeyRateLimiter(Any2ApiProperties properties) {
+        return new ApiKeyRateLimiter(properties);
+    }
 
     @Bean
     SecurityWebFilterChain securityWebFilterChain(

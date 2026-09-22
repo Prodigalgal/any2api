@@ -7,13 +7,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.springframework.stereotype.Component;
 
 /**
  * Manages per-API-key in-flight concurrency quotas and sliding window RPM limits
  * to prevent abusive clients from exhausting shared account pools.
  */
-@Component
 public class ApiKeyRateLimiter {
 
     public static final int DEFAULT_MAX_CONCURRENCY = 20;

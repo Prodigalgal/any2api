@@ -45,31 +45,6 @@ public class RandomInferenceRouter {
         AccountSelectionService accounts,
         CanonicalRequestParser parser,
         ExecutorService databaseExecutor,
-        ModelRuntimeGuard runtimeGuard
-    ) {
-        this(catalog, providers, accounts, parser, databaseExecutor, runtimeGuard,
-            new ModelHealthTracker());
-    }
-
-    public RandomInferenceRouter(
-        RandomRouteCatalog catalog,
-        ProviderRegistry providers,
-        AccountSelectionService accounts,
-        CanonicalRequestParser parser,
-        ExecutorService databaseExecutor,
-        ModelRuntimeGuard runtimeGuard,
-        org.springframework.beans.factory.ObjectProvider<ModelHealthTracker> healthTrackers
-    ) {
-        this(catalog, providers, accounts, parser, databaseExecutor, runtimeGuard,
-            healthTrackers.getIfAvailable(ModelHealthTracker::new));
-    }
-
-    public RandomInferenceRouter(
-        RandomRouteCatalog catalog,
-        ProviderRegistry providers,
-        AccountSelectionService accounts,
-        CanonicalRequestParser parser,
-        ExecutorService databaseExecutor,
         ModelRuntimeGuard runtimeGuard,
         ModelHealthTracker healthTracker
     ) {

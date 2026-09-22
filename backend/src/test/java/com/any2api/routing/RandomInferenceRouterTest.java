@@ -70,7 +70,8 @@ class RandomInferenceRouterTest {
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
             executor,
-            runtimeGuard());
+            runtimeGuard(),
+            new ModelHealthTracker());
         var request = new ObjectMapper().createObjectNode();
         request.putArray("messages").addObject().put("role", "user").put("content", "hello");
         request.putObject("provider_options").putObject("alpha").put("flag", true);
@@ -97,7 +98,8 @@ class RandomInferenceRouterTest {
             mock(AccountSelectionService.class),
             new CanonicalRequestParser(new ObjectMapper()),
             executor,
-            runtimeGuard());
+            runtimeGuard(),
+            new ModelHealthTracker());
         var request = new ObjectMapper().createObjectNode().put("model", "alpha/model");
 
         assertThatThrownBy(() -> router.select(
@@ -124,7 +126,8 @@ class RandomInferenceRouterTest {
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
             executor,
-            runtimeGuard());
+            runtimeGuard(),
+            new ModelHealthTracker());
         var request = new ObjectMapper().createObjectNode();
         request.putArray("messages").addObject()
             .put("role", "user").put("content", "hello");
@@ -157,7 +160,8 @@ class RandomInferenceRouterTest {
             accounts,
             new CanonicalRequestParser(new ObjectMapper()),
             executor,
-            runtimeGuard());
+            runtimeGuard(),
+            new ModelHealthTracker());
         var request = new ObjectMapper().createObjectNode();
         request.putArray("messages").addObject().put("role", "user").put("content", "hello");
         var grant = new ApiKeyGrant(

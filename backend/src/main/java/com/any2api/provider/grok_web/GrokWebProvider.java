@@ -89,8 +89,8 @@ public final class GrokWebProvider implements InferenceProvider {
 
     @Override
     public void validateCredential(tools.jackson.databind.JsonNode credential) {
-        if (first(credential, "sso", "sso-rw", "sso_rw", "sso_token").isBlank()) {
-            throw new IllegalArgumentException("Grok Web credential requires an SSO token");
+        if (first(credential, "sso", "sso-rw", "sso_rw", "sso_token", "cookies", "cookie").isBlank()) {
+            throw new IllegalArgumentException("Grok Web credential requires an SSO token or cookie");
         }
     }
 

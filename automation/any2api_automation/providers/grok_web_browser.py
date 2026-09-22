@@ -182,7 +182,7 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
             "grok_web",
             base_url,
             allowed_domain_suffixes=("grok.com", "x.ai"),
-            identity_fields=("sso", "sso-rw", "sso_rw", "email"),
+            identity_fields=("sso", "sso-rw", "sso_rw", "cookies", "cookie", "email"),
             require_build_assets=False,
             page_url=base_url,
         )
@@ -496,7 +496,7 @@ def _text(value: Any) -> str:
 
 def _credential_cookies(credential: dict[str, Any]) -> list[dict[str, Any]]:
     values: dict[str, str] = {}
-    for field in ("cookies", "cloudflare_cookies", "cf_cookies"):
+    for field in ("cookies", "cloudflare_cookies", "cf_cookies", "cookie"):
         source = credential.get(field)
         if isinstance(source, dict):
             pairs = source.items()

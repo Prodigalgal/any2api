@@ -19,12 +19,30 @@ final class GrokWebModelCatalog {
     private static final Map<String, ModelSpec> BY_ID = MODELS.stream()
         .collect(java.util.stream.Collectors.toUnmodifiableMap(ModelSpec::id, value -> value));
 
+    private static final Map<String, String> ALIASES = Map.ofEntries(
+        Map.entry("grok-3", "grok-chat-fast"),
+        Map.entry("grok-3-mini", "grok-chat-fast"),
+        Map.entry("grok-3-fast", "grok-chat-fast"),
+        Map.entry("grok-2", "grok-chat-fast"),
+        Map.entry("grok-2-mini", "grok-chat-fast"),
+        Map.entry("grok-beta", "grok-chat-fast"),
+        Map.entry("grok-3-deepsearch", "grok-chat-heavy"),
+        Map.entry("grok-3-reasoning", "grok-chat-heavy"),
+        Map.entry("grok-3-expert", "grok-chat-expert")
+    );
+
     private GrokWebModelCatalog() {}
 
-    static List<String> modelIds() { return MODELS.stream().map(ModelSpec::id).toList(); }
+    static List<String> modelIds() {
+        var ids = new java.util.ArrayList<>(MODELS.stream().map(ModelSpec::id).toList());
+        ids.addAll(List.of("grok-3", "grok-3-mini", "grok-2", "grok-beta", "grok-3-deepsearch"));
+        return List.copyOf(ids);
+    }
 
     static ModelSpec require(String id) {
-        var model = BY_ID.get(id);
+        if (id == null) throw new IllegalArgumentException("model id cannot be null");
+        var resolved = ALIASES.getOrDefault(id.trim().toLowerCase(), id.trim());
+        var model = BY_ID.get(resolved);
         if (model == null) throw new IllegalArgumentException("unknown Grok Web model: " + id);
         return model;
     }

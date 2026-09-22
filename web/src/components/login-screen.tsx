@@ -143,10 +143,10 @@ export function LoginScreen() {
             <Typography component="span" className={styles.brandWord}>Any2API</Typography>
           </div>
           <Box sx={{ mt: 9 }}>
-            <Typography component="h1" sx={{ fontSize: 30, fontWeight: 720, lineHeight: 1.2, color: "#172126" }}>
+            <Typography component="h1" sx={{ fontSize: 30, fontWeight: 720, lineHeight: 1.2, color: "#f8fafc" }}>
               进入控制台
             </Typography>
-            <Typography sx={{ mt: 1.25, color: "#5d6a70", fontSize: 13 }}>
+            <Typography sx={{ mt: 1.25, color: "#94a3b8", fontSize: 13 }}>
               使用管理员身份继续
             </Typography>
           </Box>
@@ -222,9 +222,9 @@ export function LoginScreen() {
                   transform: "scale(0.99)",
                 },
                 "&.Mui-disabled": {
-                  background: "#e2e8f0",
-                  color: "#94a3b8",
-                  border: "1px solid #cbd5e1",
+                  background: "rgba(255, 255, 255, 0.06)",
+                  color: "rgba(255, 255, 255, 0.3)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
                   boxShadow: "none",
                 },
               }}
@@ -277,14 +277,23 @@ function DarkField({
         },
       }}
       sx={{
-        "& .MuiOutlinedInput-root": { height: 54, color: "#172126", bgcolor: "#fff", borderRadius: 1 },
-        "& .MuiOutlinedInput-notchedOutline": { borderColor: "#cfd8dc" },
-        "& .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline": { borderColor: "#829197" },
-        "& .MuiOutlinedInput-root.Mui-focused": { boxShadow: "0 0 0 4px rgba(20, 110, 245, 0.08)" },
-        "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#146ef5" },
-        "& .MuiInputLabel-root": { color: "#68767c" },
-        "& .MuiInputLabel-root.Mui-focused": { color: "#146ef5" },
-        "& .MuiInputAdornment-root": { color: "#718086" },
+        "& .MuiOutlinedInput-root": {
+          height: 52,
+          color: "#f8fafc",
+          bgcolor: "rgba(255, 255, 255, 0.04)",
+          borderRadius: "10px",
+          transition: "all 140ms ease",
+        },
+        "& .MuiOutlinedInput-notchedOutline": { borderColor: "rgba(255, 255, 255, 0.12)" },
+        "& .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline": { borderColor: "rgba(255, 255, 255, 0.25)" },
+        "& .MuiOutlinedInput-root.Mui-focused": {
+          boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.25)",
+          bgcolor: "rgba(255, 255, 255, 0.06)",
+        },
+        "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#3b82f6" },
+        "& .MuiInputLabel-root": { color: "#94a3b8" },
+        "& .MuiInputLabel-root.Mui-focused": { color: "#3b82f6" },
+        "& .MuiInputAdornment-root": { color: "#94a3b8" },
         "& .MuiSvgIcon-root": { fontSize: 19 },
       }}
     />

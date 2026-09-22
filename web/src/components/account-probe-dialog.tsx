@@ -24,6 +24,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api, type Account } from "@/lib/api";
+import { tokens } from "@/theme/theme";
 
 export function AccountProbeDialog({ account, providerName, onClose }: { account: Account; providerName: string; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -92,7 +93,7 @@ export function AccountProbeDialog({ account, providerName, onClose }: { account
           {models.isSuccess && choices.length === 0 ? <Alert severity="warning">该厂商没有已启用模型</Alert> : null}
 
           {probe.isPending ? (
-            <Box sx={{ minHeight: 180, display: "grid", placeItems: "center", border: 1, borderColor: "divider", borderRadius: 1, bgcolor: "#f8fafb" }}>
+            <Box sx={{ minHeight: 180, display: "grid", placeItems: "center", border: 1, borderColor: "divider", borderRadius: 1, bgcolor: tokens.canvasSubtle }}>
               <Stack spacing={1.25} sx={{ alignItems: "center" }}>
                 <CircularProgress size={28} />
                 <Typography sx={{ fontSize: 12.5, fontWeight: 680 }}>正在等待上游模型响应</Typography>

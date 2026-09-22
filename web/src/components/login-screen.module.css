@@ -6,8 +6,8 @@
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 520px;
-  background: #f4f6f7;
-  color: #14213d;
+  background: #090d16;
+  color: #f8fafc;
 }
 
 .visual {
@@ -451,7 +451,7 @@
   justify-content: center;
   --spotlight-x: 50%;
   --spotlight-y: 32%;
-  background: #fbfcfc;
+  background: #0b0f19;
   isolation: isolate;
 }
 
@@ -462,7 +462,7 @@
   z-index: -1;
   pointer-events: none;
   opacity: 0.48;
-  background: radial-gradient(circle 280px at var(--spotlight-x) var(--spotlight-y), rgb(20 110 245 / 8%), transparent 76%);
+  background: radial-gradient(circle 320px at var(--spotlight-x) var(--spotlight-y), rgb(59 130 246 / 10%), transparent 76%);
   transition: opacity 420ms ease;
 }
 
@@ -473,7 +473,7 @@
   top: 12%;
   bottom: 12%;
   width: 1px;
-  background: linear-gradient(to bottom, transparent, rgb(20 110 245 / 22%), transparent);
+  background: linear-gradient(to bottom, transparent, rgb(59 130 246 / 28%), transparent);
   pointer-events: none;
 }
 
@@ -489,7 +489,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #14213d;
+  color: #f8fafc;
   font-size: 15px;
   font-weight: 720;
 }
@@ -497,15 +497,16 @@
 .brandMark {
   width: 30px;
   height: 30px;
-  border-color: #146ef5;
-  box-shadow: 0 0 0 5px rgb(20 110 245 / 5%);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 5px rgb(59 130 246 / 15%);
 }
 
-.brandMark span { background: #146ef5; }
+.brandMark span { background: #3b82f6; }
 
 .brandWord {
   letter-spacing: 0;
-  text-shadow: 0 1px 0 rgb(255 255 255 / 80%);
+  color: #f8fafc;
+  text-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
 }
 
 .powState {
@@ -513,7 +514,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  color: #68767c;
+  color: #94a3b8;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 10px;
 }
@@ -522,14 +523,14 @@
   width: 7px;
   height: 7px;
   display: block;
-  background: #146ef5;
+  background: #3b82f6;
   border-radius: 50%;
-  box-shadow: 0 0 0 4px rgb(20 110 245 / 7%), 0 0 12px rgb(20 110 245 / 12%);
+  box-shadow: 0 0 0 4px rgb(59 130 246 / 18%), 0 0 12px rgb(59 130 246 / 30%);
 }
 
 .powState b {
   margin-left: auto;
-  color: #4f5e64;
+  color: #cbd5e1;
   font-weight: 650;
 }
 
@@ -537,7 +538,7 @@
   position: absolute;
   left: 0;
   bottom: 34px;
-  color: #93a0a5;
+  color: #64748b;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 9px;
 }

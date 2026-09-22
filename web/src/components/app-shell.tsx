@@ -4,6 +4,7 @@ import {
   AccountTreeOutlined,
   ApiOutlined,
   AccountCircleOutlined,
+  AutoAwesomeOutlined,
   DashboardOutlined,
   AutorenewOutlined,
   LogoutOutlined,
@@ -47,6 +48,7 @@ const shellMetrics = {
 
 const navigation = [
   ["运行概览", DashboardOutlined, "/"],
+  ["模型操练台", AutoAwesomeOutlined, "/playground"],
   ["账号池", AccountTreeOutlined, "/accounts"],
   ["模型策略", TuneOutlined, "/models"],
   ["运行时规则", RuleOutlined, "/runtime-rules"],
@@ -269,13 +271,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           zIndex: (value) => value.zIndex.drawer + 1,
           borderBottom: "1px solid",
           borderColor: "divider",
-          bgcolor: "rgba(255, 255, 255, 0.8)",
+          bgcolor: "rgba(9, 13, 22, 0.82)",
           backdropFilter: "blur(20px) saturate(180%)",
           WebkitBackdropFilter: "blur(20px) saturate(180%)",
           color: "text.primary",
           ml: compact ? 0 : `${shellMetrics.drawerWidth}px`,
           width: compact ? "100%" : `calc(100% - ${shellMetrics.drawerWidth}px)`,
-          boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
+          boxShadow: "0 1px 0 rgba(255, 255, 255, 0.05)",
         }}
       >
         <Toolbar sx={{ minHeight: `${shellMetrics.headerHeight}px !important`, px: { xs: 2, sm: 3 } }}>

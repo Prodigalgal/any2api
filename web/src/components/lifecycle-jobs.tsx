@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import { OperationEventsDialog } from "@/components/operation-events-dialog";
 import { DataSurface, PageContainer, PageHeader, ToolbarSurface } from "@/components/page-layout";
+import { tokens } from "@/theme/theme";
 import {
   RegistrationJobFields, registrationJobDefaults, registrationJobValidation,
 } from "@/components/registration-job-form";
@@ -136,8 +137,8 @@ function RegistrationJobsPanel({ providers, settings, settingsLoading }: {
                   position: "sticky",
                   right: 0,
                   zIndex: 4,
-                  bgcolor: "#f7f9fc",
-                  boxShadow: "-1px 0 0 #e3e9f2",
+                  bgcolor: tokens.canvasSubtle,
+                  boxShadow: `-1px 0 0 ${tokens.borderSubtle}`,
                 }}
               >
                 操作
@@ -178,8 +179,8 @@ function RegistrationJobsPanel({ providers, settings, settingsLoading }: {
                       right: 0,
                       zIndex: 2,
                       bgcolor: "background.paper",
-                      boxShadow: "-1px 0 0 #e3e9f2",
-                      "tr:hover &": { bgcolor: "#f3f7fe" },
+                      boxShadow: `-1px 0 0 ${tokens.borderSubtle}`,
+                      "tr:hover &": { bgcolor: "rgba(255, 255, 255, 0.05)" },
                     }}
                   >
                     <Tooltip title="查看运行轨迹"><IconButton size="small" aria-label="查看运行轨迹" onClick={() => setTraceJob(job)}><ManageSearchOutlined sx={{ fontSize: 18 }} /></IconButton></Tooltip>

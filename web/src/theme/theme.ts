@@ -3,86 +3,95 @@
 import { createTheme } from "@mui/material/styles";
 import { zhCN } from "@mui/material/locale";
 
-// Stripe × Apple 精准调色盘与材质设计系统 Tokens
+// Apple Pro × Linear × Stripe 高级暗黑美学设计系统 Tokens
 export const tokens = {
-  canvas: "#f8fafc",      // Slate 50 纯净通透底色
-  canvasSubtle: "#f1f5f9",// Slate 100
-  surface: "#ffffff",
-  surfaceHover: "#f8fafc",
-  borderSubtle: "rgba(15, 23, 42, 0.06)",
-  border: "rgba(15, 23, 42, 0.09)",
-  borderStrong: "rgba(15, 23, 42, 0.16)",
+  // 极黑与多层级深色表面体系
+  canvas: "#090d16",          // 根底色：深邃星空墨黑 (Obsidian Space Dark)
+  canvasSubtle: "#0e1526",    // 次级底色：表头、未激活胶囊、输入框内陷底色
+  surface: "#111827",         // 卡片、面板表面：Slate 900 纯粹深邃高质感
+  surfaceHover: "#172033",    // 悬浮状态高亮表面
+  borderSubtle: "rgba(255, 255, 255, 0.05)",  // 极细微分割线
+  border: "rgba(255, 255, 255, 0.09)",        // 标准卡片与面板 1px 晶体边界
+  borderStrong: "rgba(255, 255, 255, 0.18)",  // 交互高亮与焦点边界
 
-  // 文字阶梯
+  // 材质阴影体系（深色高阶扩散与微光边框）
+  shadow: {
+    sm: "0 1px 2px rgba(0, 0, 0, 0.35)",
+    card: "0 1px 3px rgba(0, 0, 0, 0.45), 0 6px 18px -3px rgba(0, 0, 0, 0.35)",
+    hover: "0 4px 20px -2px rgba(0, 0, 0, 0.6), 0 0 1px rgba(255, 255, 255, 0.12)",
+    modal: "0 24px 64px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08)",
+  },
+
+  // 文字阶梯（保障 WCAG AAA 级高对比可读性）
   text: {
-    primary: "#0f172a",   // Slate 900
-    secondary: "#475569", // Slate 600
-    muted: "#94a3b8",     // Slate 400
+    primary: "#f8fafc",       // Slate 50：纯净透亮主标题与核心数据
+    secondary: "#94a3b8",     // Slate 400：辅助说明与元信息标签
+    muted: "#64748b",         // Slate 500：时间戳、折叠提示、代码说明
   },
 
-  // 品牌主色 (Apple / Stripe 电光深蓝)
+  // 品牌电光蓝 (Electric Azure)
   primary: {
-    main: "#2563eb",
-    dark: "#1d4ed8",
-    light: "#eff6ff",
-    gradient: "linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)",
-    shadow: "0 1px 2px rgba(37, 99, 235, 0.2), 0 4px 12px rgba(37, 99, 235, 0.18)",
+    main: "#3b82f6",          // Blue 500: 在暗色下极具视觉冲击力的电光蓝
+    dark: "#2563eb",          // Blue 600
+    light: "rgba(59, 130, 246, 0.15)", // 半透明电光蓝呼吸发光层
+    gradient: "linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%)",
+    shadow: "0 1px 2px rgba(0, 0, 0, 0.5), 0 0 16px rgba(59, 130, 246, 0.28)",
   },
 
-  // 侧边栏专属设计 Tokens
+  // 侧边栏专属暗色阶梯（略低于主画布深度，构建空间进深）
   sidebar: {
-    bg: "#0b0f19",
+    bg: "#060911",            // 侧栏深暗底色
     border: "rgba(255, 255, 255, 0.07)",
-    borderSubtle: "rgba(255, 255, 255, 0.06)",
+    borderSubtle: "rgba(255, 255, 255, 0.05)",
     text: "#f8fafc",
     textMuted: "#94a3b8",
     itemHoverBg: "rgba(255, 255, 255, 0.05)",
-    itemHoverText: "#e2e8f0",
-    itemActiveBg: "rgba(37, 99, 235, 0.18)",
-    itemActiveBorder: "rgba(59, 130, 246, 0.28)",
+    itemHoverText: "#f1f5f9",
+    itemActiveBg: "rgba(59, 130, 246, 0.14)",
+    itemActiveBorder: "rgba(59, 130, 246, 0.32)",
     itemActiveIcon: "#60a5fa",
     itemIcon: "#64748b",
-    footerBg: "rgba(0, 0, 0, 0.15)",
+    footerBg: "rgba(0, 0, 0, 0.25)",
     footerBorder: "rgba(255, 255, 255, 0.05)",
     footerCardBg: "rgba(255, 255, 255, 0.03)",
   },
 
-  // 状态语义色
+  // 状态语义色（暗黑微光材质与纯净对比）
   status: {
     emerald: {
       main: "#10b981",
       dark: "#059669",
-      light: "#ecfdf5",
-      text: "#065f46",
-      border: "#a7f3d0",
+      light: "rgba(16, 185, 129, 0.12)",
+      text: "#34d399",
+      border: "rgba(16, 185, 129, 0.25)",
     },
     amber: {
       main: "#f59e0b",
       dark: "#d97706",
-      light: "#fffbeb",
-      text: "#92400e",
-      border: "#fde68a",
+      light: "rgba(245, 158, 11, 0.12)",
+      text: "#fbbf24",
+      border: "rgba(245, 158, 11, 0.25)",
     },
     rose: {
       main: "#f43f5e",
       dark: "#e11d48",
-      light: "#fff1f2",
-      text: "#9f1239",
-      border: "#fecdd3",
+      light: "rgba(244, 63, 94, 0.12)",
+      text: "#fb7185",
+      border: "rgba(244, 63, 94, 0.25)",
     },
     sky: {
       main: "#0284c7",
       dark: "#0369a1",
-      light: "#f0f9ff",
-      text: "#075985",
-      border: "#bae6fd",
+      light: "rgba(2, 132, 199, 0.12)",
+      text: "#38bdf8",
+      border: "rgba(2, 132, 199, 0.25)",
     },
   },
 } as const;
 
 export const theme = createTheme({
   palette: {
-    mode: "light",
+    mode: "dark",
     primary: {
       main: tokens.primary.main,
       dark: tokens.primary.dark,
@@ -225,7 +234,7 @@ export const theme = createTheme({
             scrollBehavior: "auto !important",
           },
         },
-        /* 精细极客滚动条 */
+        /* 暗黑模式高质感微光滚动条 */
         "::-webkit-scrollbar": {
           width: 6,
           height: 6,
@@ -234,11 +243,11 @@ export const theme = createTheme({
           background: "transparent",
         },
         "::-webkit-scrollbar-thumb": {
-          background: "rgba(15, 23, 42, 0.15)",
+          background: "rgba(255, 255, 255, 0.14)",
           borderRadius: 9999,
         },
         "::-webkit-scrollbar-thumb:hover": {
-          background: "rgba(15, 23, 42, 0.28)",
+          background: "rgba(255, 255, 255, 0.24)",
         },
       },
     },
@@ -249,7 +258,7 @@ export const theme = createTheme({
       },
       styleOverrides: {
         root: {
-          backgroundColor: "rgba(255, 255, 255, 0.82)",
+          backgroundColor: "rgba(9, 13, 22, 0.78)",
           backdropFilter: "blur(20px) saturate(180%)",
           WebkitBackdropFilter: "blur(20px) saturate(180%)",
           borderBottom: `1px solid ${tokens.borderSubtle}`,
@@ -266,7 +275,7 @@ export const theme = createTheme({
           borderColor: tokens.border,
           borderRadius: 14,
           backgroundColor: tokens.surface,
-          boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px -2px rgba(15, 23, 42, 0.02)",
+          boxShadow: "0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px -2px rgba(0, 0, 0, 0.25)",
         },
       },
     },
@@ -291,17 +300,17 @@ export const theme = createTheme({
           border: "1px solid rgba(255, 255, 255, 0.15)",
           "&:hover": {
             background: "linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)",
-            boxShadow: "0 2px 4px rgba(37, 99, 235, 0.25), 0 6px 20px rgba(37, 99, 235, 0.2)",
+            boxShadow: "0 2px 4px rgba(37, 99, 235, 0.3), 0 0 20px rgba(59, 130, 246, 0.35)",
           },
         },
         outlined: {
           borderColor: tokens.border,
           color: tokens.text.primary,
-          backgroundColor: tokens.surface,
-          boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+          backgroundColor: "rgba(255, 255, 255, 0.03)",
+          boxShadow: "0 1px 2px rgba(0, 0, 0, 0.2)",
           "&:hover": {
             borderColor: tokens.borderStrong,
-            backgroundColor: tokens.surfaceHover,
+            backgroundColor: "rgba(255, 255, 255, 0.07)",
           },
         },
         startIcon: {
@@ -319,7 +328,7 @@ export const theme = createTheme({
           color: tokens.text.secondary,
           transition: "all 140ms ease",
           "&:hover": {
-            backgroundColor: "rgba(15, 23, 42, 0.05)",
+            backgroundColor: "rgba(255, 255, 255, 0.08)",
             color: tokens.text.primary,
           },
           "&:active": {
@@ -336,7 +345,7 @@ export const theme = createTheme({
         root: {
           minHeight: 38,
           borderRadius: 8,
-          backgroundColor: tokens.surface,
+          backgroundColor: tokens.canvasSubtle,
           transition: "border-color 140ms ease, box-shadow 140ms ease",
           "& .MuiOutlinedInput-notchedOutline": {
             borderColor: tokens.border,
@@ -346,7 +355,7 @@ export const theme = createTheme({
             borderColor: tokens.borderStrong,
           },
           "&.Mui-focused": {
-            boxShadow: "0 0 0 3px rgba(37, 99, 235, 0.12)",
+            boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.2)",
             "& .MuiOutlinedInput-notchedOutline": {
               borderColor: tokens.primary.main,
               borderWidth: "1.5px",
@@ -381,7 +390,7 @@ export const theme = createTheme({
         },
         outlined: {
           borderColor: tokens.border,
-          backgroundColor: tokens.surface,
+          backgroundColor: "rgba(255, 255, 255, 0.04)",
         },
         colorSuccess: {
           backgroundColor: tokens.status.emerald.light,
@@ -409,16 +418,17 @@ export const theme = createTheme({
       defaultProps: { arrow: true, enterDelay: 300 },
       styleOverrides: {
         tooltip: {
-          backgroundColor: "#0f172a",
-          color: "#ffffff",
+          backgroundColor: "#1e293b",
+          color: "#f8fafc",
           fontSize: 11.5,
           fontWeight: 500,
           borderRadius: 6,
           padding: "5px 9px",
-          boxShadow: "0 4px 14px rgba(15, 23, 42, 0.2)",
+          border: "1px solid rgba(255, 255, 255, 0.12)",
+          boxShadow: "0 4px 14px rgba(0, 0, 0, 0.4)",
         },
         arrow: {
-          color: "#0f172a",
+          color: "#1e293b",
         },
       },
     },
@@ -426,8 +436,9 @@ export const theme = createTheme({
       styleOverrides: {
         paper: {
           borderRadius: 16,
+          backgroundColor: tokens.surface,
           border: `1px solid ${tokens.border}`,
-          boxShadow: "0 24px 64px -12px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.04)",
+          boxShadow: "0 24px 64px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08)",
           overflow: "hidden",
         },
       },
@@ -457,7 +468,7 @@ export const theme = createTheme({
         root: {
           height: 46,
           borderBottom: `1px solid ${tokens.borderSubtle}`,
-          borderRight: "0 !important", // 彻底清除九宫格垂直线
+          borderRight: "0 !important", // 清除多余垂直九宫格线
           padding: "9px 16px",
           fontSize: "0.8125rem",
           color: tokens.text.primary,
@@ -469,7 +480,7 @@ export const theme = createTheme({
           fontWeight: 650,
           letterSpacing: "0.03em",
           textTransform: "uppercase",
-          backgroundColor: "rgba(248, 250, 252, 0.85)",
+          backgroundColor: "rgba(14, 21, 38, 0.9)",
           backdropFilter: "blur(8px)",
           whiteSpace: "nowrap",
           borderBottom: `1px solid ${tokens.border}`,
@@ -479,7 +490,7 @@ export const theme = createTheme({
     MuiTableContainer: {
       styleOverrides: {
         root: {
-          scrollbarColor: "rgba(15, 23, 42, 0.15) transparent",
+          scrollbarColor: "rgba(255, 255, 255, 0.14) transparent",
           scrollbarWidth: "thin",
         },
       },
@@ -489,7 +500,7 @@ export const theme = createTheme({
         root: {
           transition: "background-color 100ms ease",
           "&.MuiTableRow-hover:hover": {
-            backgroundColor: "rgba(241, 245, 249, 0.65) !important",
+            backgroundColor: "rgba(255, 255, 255, 0.035) !important",
           },
         },
       },
@@ -537,7 +548,7 @@ export const theme = createTheme({
           alignItems: "center",
           border: "1px solid",
           fontSize: 13,
-          boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
+          boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)",
           "&.MuiAlert-colorSuccess": {
             backgroundColor: tokens.status.emerald.light,
             color: tokens.status.emerald.text,
@@ -590,7 +601,7 @@ export const theme = createTheme({
           },
         },
         thumb: {
-          boxShadow: "0 2px 4px 0 rgba(0, 35, 11, 0.2)",
+          boxShadow: "0 2px 4px 0 rgba(0, 0, 0, 0.3)",
           width: 16,
           height: 16,
           borderRadius: 8,
@@ -599,7 +610,7 @@ export const theme = createTheme({
         track: {
           borderRadius: 20 / 2,
           opacity: 1,
-          backgroundColor: "rgba(15, 23, 42, 0.16)",
+          backgroundColor: "rgba(255, 255, 255, 0.18)",
           boxSizing: "border-box",
           transition: "background-color 140ms ease",
         },
@@ -610,7 +621,7 @@ export const theme = createTheme({
         root: {
           height: 3,
           borderRadius: 2,
-          backgroundColor: "rgba(15, 23, 42, 0.08)",
+          backgroundColor: "rgba(255, 255, 255, 0.08)",
         },
       },
     },

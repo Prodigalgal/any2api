@@ -85,9 +85,9 @@ export function Overview() {
                 void Promise.all([catalog.refetch(), runtime.refetch(), models.refetch(), health.refetch()])
               }
               sx={{
-                border: "1px solid rgba(15, 23, 42, 0.08)",
+                border: `1px solid ${tokens.border}`,
                 bgcolor: "background.paper",
-                boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+                boxShadow: tokens.shadow.sm,
               }}
             >
               <RefreshOutlined sx={{ fontSize: 18 }} />
@@ -295,12 +295,12 @@ export function Overview() {
             variant="outlined"
             sx={{
               borderRadius: "14px",
-              borderColor: "rgba(15, 23, 42, 0.08)",
+              borderColor: tokens.border,
               overflow: "hidden",
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.03)",
+              boxShadow: tokens.shadow.card,
             }}
           >
-            <Box sx={{ px: 2.25, py: 1.75, bgcolor: "rgba(248, 250, 252, 0.6)" }}>
+            <Box sx={{ px: 2.25, py: 1.75, bgcolor: tokens.canvasSubtle }}>
               <Typography variant="h6" sx={{ fontSize: 14, fontWeight: 700 }}>
                 集群运行面摘要
               </Typography>
@@ -333,12 +333,12 @@ export function Overview() {
             variant="outlined"
             sx={{
               borderRadius: "14px",
-              borderColor: "rgba(15, 23, 42, 0.08)",
+              borderColor: tokens.border,
               overflow: "hidden",
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.03)",
+              boxShadow: tokens.shadow.card,
             }}
           >
-            <Box sx={{ px: 2.25, py: 1.75, bgcolor: "rgba(248, 250, 252, 0.6)", display: "flex", alignItems: "center", gap: 1 }}>
+            <Box sx={{ px: 2.25, py: 1.75, bgcolor: tokens.canvasSubtle, display: "flex", alignItems: "center", gap: 1 }}>
               <ShieldOutlined sx={{ fontSize: 17, color: "text.secondary" }} />
               <Typography variant="h6" sx={{ fontSize: 14, fontWeight: 700 }}>
                 高可用调度防护策略
@@ -380,9 +380,9 @@ function StatusMetricCard({
       sx={{
         p: 2.5,
         borderRadius: "14px",
-        borderColor: "rgba(15, 23, 42, 0.08)",
+        borderColor: tokens.border,
         bgcolor: "background.paper",
-        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03), 0 4px 14px -2px rgba(15, 23, 42, 0.02)",
+        boxShadow: tokens.shadow.card,
         position: "relative",
         overflow: "hidden",
         display: "flex",
@@ -392,7 +392,7 @@ function StatusMetricCard({
         transition: "transform 140ms ease, box-shadow 140ms ease",
         "&:hover": {
           transform: "translateY(-1px)",
-          boxShadow: "0 2px 4px rgba(15, 23, 42, 0.04), 0 8px 20px -2px rgba(15, 23, 42, 0.04)",
+          boxShadow: tokens.shadow.hover,
         },
       }}
     >

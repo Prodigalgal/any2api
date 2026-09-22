@@ -46,6 +46,7 @@ import {
   type SystemSettings,
 } from "@/lib/api";
 import { DataSurface, ToolbarSurface } from "@/components/page-layout";
+import { tokens } from "@/theme/theme";
 import {
   RegistrationJobFields,
   registrationJobDefaults,
@@ -176,8 +177,8 @@ export function RegistrationSchedules({
                     position: "sticky",
                     right: 0,
                     zIndex: 4,
-                    bgcolor: "#f7f9fc",
-                    boxShadow: "-1px 0 0 #e3e9f2",
+                    bgcolor: tokens.canvasSubtle,
+                    boxShadow: `-1px 0 0 ${tokens.borderSubtle}`,
                   }}
                 >
                   操作
@@ -221,8 +222,8 @@ export function RegistrationSchedules({
                       right: 0,
                       zIndex: 2,
                       bgcolor: "background.paper",
-                      boxShadow: "-1px 0 0 #e3e9f2",
-                      "tr:hover &": { bgcolor: "#f3f7fe" },
+                      boxShadow: `-1px 0 0 ${tokens.borderSubtle}`,
+                      "tr:hover &": { bgcolor: "rgba(255, 255, 255, 0.05)" },
                     }}
                   >
                     <Stack direction="row" spacing={0.25} sx={{ justifyContent: "flex-end", alignItems: "center" }}>

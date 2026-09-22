@@ -423,7 +423,7 @@ function CreateApiKeyDialog({
                       py: 1,
                       borderBottom: index === providers.length - 1 ? 0 : 1,
                       borderColor: "divider",
-                      bgcolor: selected ? "#f3f7fe" : "background.paper",
+                      bgcolor: selected ? "rgba(59, 130, 246, 0.12)" : "background.paper",
                     }}
                   >
                     <FormControlLabel

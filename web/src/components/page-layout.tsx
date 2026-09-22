@@ -2,6 +2,7 @@
 
 import { Box, Paper, Stack, Typography, type SxProps, type Theme } from "@mui/material";
 import type { ReactNode } from "react";
+import { tokens } from "@/theme/theme";
 
 export function PageContainer({
   children,
@@ -97,11 +98,11 @@ export function ToolbarSurface({ children }: { children: ReactNode }) {
       sx={{
         mb: 2,
         p: { xs: 1.25, sm: 1.5 },
-        bgcolor: "background.paper",
+        bgcolor: tokens.surface,
         overflow: "hidden",
         borderRadius: "12px",
-        borderColor: "rgba(15, 23, 42, 0.08)",
-        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
+        borderColor: tokens.border,
+        boxShadow: tokens.shadow.sm,
       }}
     >
       {children}
@@ -125,9 +126,9 @@ export function DataSurface({
           overflow: "hidden",
           position: "relative",
           borderRadius: "14px",
-          borderColor: "rgba(15, 23, 42, 0.08)",
-          bgcolor: "background.paper",
-          boxShadow: "0 1px 3px rgba(15, 23, 42, 0.03), 0 6px 18px -3px rgba(15, 23, 42, 0.03)",
+          borderColor: tokens.border,
+          bgcolor: tokens.surface,
+          boxShadow: tokens.shadow.card,
         },
         ...(Array.isArray(sx) ? sx : [sx]),
       ]}

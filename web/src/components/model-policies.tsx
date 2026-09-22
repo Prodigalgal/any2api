@@ -46,6 +46,7 @@ import {
   type TokenLimits,
 } from "@/lib/api";
 import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout";
+import { tokens } from "@/theme/theme";
 
 const defaultKeepalive: ProviderKeepalivePolicy = {
   intervalMinutes: 360,
@@ -111,7 +112,7 @@ export function ModelPolicies() {
 
         {tab === 0 ? (
           <Box>
-            <Box sx={{ p: { xs: 1.25, sm: 1.5 }, borderBottom: 1, borderColor: "divider", bgcolor: "#f7f9fc" }}>
+            <Box sx={{ p: { xs: 1.25, sm: 1.5 }, borderBottom: 1, borderColor: "divider", bgcolor: tokens.canvasSubtle }}>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(240px, 1fr) 220px 40px" }, gap: 1.25 }}>
                 <TextField
                   value={search}
@@ -410,7 +411,7 @@ function KeepaliveDialog({ providerId, providerName, value, settings, onClose, o
 }
 
 function ReferenceValue({ label, value }: { label: string; value: number | null }) {
-  return <Box sx={{ p: 1.25, border: 1, borderColor: "divider", borderRadius: 1, bgcolor: "#f8fafb" }}><Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{label}</Typography><Typography sx={{ mt: 0.25, fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12.5 }}>{formatTokens(value)}</Typography></Box>;
+  return <Box sx={{ p: 1.25, border: 1, borderColor: "divider", borderRadius: 1, bgcolor: tokens.canvasSubtle }}><Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{label}</Typography><Typography sx={{ mt: 0.25, fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12.5 }}>{formatTokens(value)}</Typography></Box>;
 }
 
 function LimitField({ label, value, discovered, onChange }: { label: string; value: string; discovered: number | null; onChange: (value: string) => void }) {

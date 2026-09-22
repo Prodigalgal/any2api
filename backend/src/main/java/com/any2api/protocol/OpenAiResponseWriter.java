@@ -93,7 +93,10 @@ public class OpenAiResponseWriter {
                 Flux.just(": request_id=" + request.requestId() + "\n\n"),
                 Flux.merge(
                     shared,
-                    Flux.interval(Duration.ofSeconds(10))
+                    Flux.interval(Duration.ofSeconds(3))
+                        .map(ignored -> ": keep-alive\n\n")
+                        .takeUntilOther(shared),
+                    Flux.interval(Duration.ofSeconds(15))
                         .map(ignored -> ": heartbeat\n\n")
                         .takeUntilOther(shared.ignoreElements()))));
         Flux<DataBuffer> body = rendered

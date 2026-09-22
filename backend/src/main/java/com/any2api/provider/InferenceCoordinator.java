@@ -173,8 +173,17 @@ public class InferenceCoordinator {
         CanonicalRequest request,
         InferenceProvider provider
     ) {
+        return accountLease(request, provider, java.util.Set.of());
+    }
+
+    private reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> accountLease(
+        CanonicalRequest request,
+        InferenceProvider provider,
+        java.util.Set<UUID> excludedAccountIds
+    ) {
         return accounts.acquire(request.providerId(), request.model(),
-            account -> provider.supportsAccount(request, account));
+            account -> (excludedAccountIds == null || !excludedAccountIds.contains(account.accountId()))
+                && provider.supportsAccount(request, account));
     }
 
     private void validateRequest(
@@ -205,6 +214,28 @@ public class InferenceCoordinator {
         ProviderTransportMode fallbackTransportMode,
         JsonNode modelCapabilities
     ) {
+        return executeWithRetries(
+            request, provider, lease, validateInsideLease, attempt, apiKeyId,
+            requestKind, queueMs, transportMode, fallbackTransportMode, modelCapabilities,
+            java.util.Set.of());
+    }
+
+    private Flux<CanonicalEvent> executeWithRetries(
+        CanonicalRequest request,
+        InferenceProvider provider,
+        reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> lease,
+        boolean validateInsideLease,
+        int attempt,
+        UUID apiKeyId,
+        String requestKind,
+        long queueMs,
+        ProviderTransportMode transportMode,
+        ProviderTransportMode fallbackTransportMode,
+        JsonNode modelCapabilities,
+        java.util.Set<UUID> attemptedAccountIds
+    ) {
+        var currentAccountId = new java.util.concurrent.atomic.AtomicReference<UUID>();
+        var wrappedLease = lease.doOnNext(account -> currentAccountId.set(account.accountId()));
         var attemptEvents = Flux.defer(() -> {
             var observed = telemetry.start(new InferenceTelemetryService.InferenceTrace(
                 request.requestId(), request.providerId(), request.model(),
@@ -213,7 +244,7 @@ public class InferenceCoordinator {
                 attempt, queueMs);
             return usage.normalize(request,
                     executeWithLease(
-                        request, provider, lease, validateInsideLease, observed, transportMode,
+                        request, provider, wrappedLease, validateInsideLease, observed, transportMode,
                         modelCapabilities))
                 .doOnNext(event -> recordTelemetry(observed, event))
                 .doOnError(observed::recordError)
@@ -225,40 +256,48 @@ public class InferenceCoordinator {
                     .filter(CanonicalEvent.Failed.class::isInstance)
                     .map(CanonicalEvent.Failed.class::cast)
                     .findFirst();
+                var nextExcluded = new java.util.HashSet<UUID>(attemptedAccountIds);
+                if (currentAccountId.get() != null) {
+                    nextExcluded.add(currentAccountId.get());
+                }
                 if (failure.isPresent() && fallbackTransportMode != null
                     && shouldFallbackToRuntime(failure.get().errorType())) {
                     return executeWithRetries(
-                        request, provider, accountLease(request, provider), false, 1,
+                        request, provider, accountLease(request, provider, nextExcluded), false, 1,
                         apiKeyId, requestKind, 0, fallbackTransportMode, null,
-                        modelCapabilities);
+                        modelCapabilities, nextExcluded);
                 }
                 if (failure.isPresent()
                     && provider.retryPolicy().shouldRetry(failure.get().errorType(), attempt)) {
                     return executeWithRetries(
-                        request, provider, accountLease(request, provider), false,
+                        request, provider, accountLease(request, provider, nextExcluded), false,
                         attempt + 1, apiKeyId, requestKind, 0,
-                        transportMode, fallbackTransportMode, modelCapabilities);
+                        transportMode, fallbackTransportMode, modelCapabilities, nextExcluded);
                 }
                 return Flux.fromIterable(events);
             });
         }
         return attemptEvents.switchOnFirst((signal, events) -> {
+                var nextExcluded = new java.util.HashSet<UUID>(attemptedAccountIds);
+                if (currentAccountId.get() != null) {
+                    nextExcluded.add(currentAccountId.get());
+                }
                 if (signal.hasValue()
                     && signal.get() instanceof CanonicalEvent.Failed failure
                     && fallbackTransportMode != null
                     && shouldFallbackToRuntime(failure.errorType())) {
                     return events.thenMany(executeWithRetries(
-                        request, provider, accountLease(request, provider), false, 1,
+                        request, provider, accountLease(request, provider, nextExcluded), false, 1,
                         apiKeyId, requestKind, 0, fallbackTransportMode, null,
-                        modelCapabilities));
+                        modelCapabilities, nextExcluded));
                 }
                 if (signal.hasValue()
                     && signal.get() instanceof CanonicalEvent.Failed failure
                     && provider.retryPolicy().shouldRetry(failure.errorType(), attempt)) {
                     return events.thenMany(executeWithRetries(
-                        request, provider, accountLease(request, provider), false,
+                        request, provider, accountLease(request, provider, nextExcluded), false,
                         attempt + 1, apiKeyId, requestKind, 0,
-                        transportMode, fallbackTransportMode, modelCapabilities));
+                        transportMode, fallbackTransportMode, modelCapabilities, nextExcluded));
                 }
                 return events;
             });

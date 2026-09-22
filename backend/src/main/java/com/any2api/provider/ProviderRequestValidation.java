@@ -408,7 +408,7 @@ public final class ProviderRequestValidation {
     ) {
         requireKnownOptions(request, contract.providerOptions().keySet());
         requireOptionTypes(request, contract);
-        requireSupportedParameters(request, contract);
+        requireSupportedParameters(request, manifest, contract);
         requireSupportedTools(request, manifest, contract);
         requireSupportedReasoning(request, contract);
         requireSupportedCapabilities(request, manifest, modelCapabilities);
@@ -476,12 +476,20 @@ public final class ProviderRequestValidation {
 
     private static void requireSupportedParameters(
         CanonicalRequest request,
+        ProviderManifest manifest,
         ProviderProtocolContract contract
     ) {
         var supported = new HashSet<>(request.protocol()
             == CanonicalRequest.Protocol.CHAT_COMPLETIONS
             ? CHAT_PLATFORM_PARAMETERS : RESPONSES_PLATFORM_PARAMETERS);
         supported.addAll(contract.parameters(request.protocol()));
+        if (manifest.capabilities().getOrDefault(
+                ProviderCapability.FUNCTION_TOOLS, SupportLevel.UNSUPPORTED)
+                != SupportLevel.UNSUPPORTED) {
+            supported.add("tools");
+            supported.add("tool_choice");
+            supported.add("parallel_tool_calls");
+        }
         var unsupported = new java.util.ArrayList<String>();
         request.rawRequest().propertyNames().forEach(field -> {
             if (!supported.contains(field)) unsupported.add(field);
@@ -538,12 +546,16 @@ public final class ProviderRequestValidation {
         ProviderManifest manifest,
         ProviderProtocolContract contract
     ) {
+        var functionToolsSupported = manifest.capabilities().getOrDefault(
+            ProviderCapability.FUNCTION_TOOLS, SupportLevel.UNSUPPORTED)
+            != SupportLevel.UNSUPPORTED;
         for (var tool : request.tools()) {
             if (!tool.isObject()) {
                 throw OpenAiRequestException.invalid("tools", "tool definitions must be objects");
             }
             var type = tool.path("type").asText("function");
-            if (!contract.toolTypes().contains(type)) {
+            if (!contract.toolTypes().contains(type)
+                && !( "function".equals(type) && functionToolsSupported )) {
                 throw OpenAiRequestException.unsupported(
                     "tools", manifest.id() + " does not translate tool type " + type);
             }

@@ -496,7 +496,9 @@ def _find_data_url(value: Any, *, depth: int = 0) -> str | None:
 
 def _decode_arena_data_url(source: str, block_type: str) -> tuple[str, bytes]:
     raw = str(source or "").strip()
-    match = re.fullmatch(r"data:([^;,\s]+)(?:;[^;,]*)?;base64,([A-Za-z0-9+/=\s]+)", raw, re.IGNORECASE)
+    match = re.fullmatch(
+        r"data:([^;,\s]+)(?:;[^;,]*)?;base64,([A-Za-z0-9+/=\s]+)", raw, re.IGNORECASE
+    )
     if match is None:
         raise ValueError(f"Arena {block_type} upload requires data:<mime>;base64,<payload>")
     mime_type = match.group(1).lower()

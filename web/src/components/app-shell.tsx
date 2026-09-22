@@ -38,10 +38,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { tokens } from "@/theme/theme";
 
 const shellMetrics = {
-  drawerWidth: 240,
-  headerHeight: 60,
+  drawerWidth: 244,
+  headerHeight: 56,
 } as const;
 
 const navigation = [
@@ -84,17 +85,84 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (session.isLoading || session.isError || !session.data?.authenticated) return <SessionGate />;
 
   const drawer = (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#0a1630", color: "#dce8f8" }}>
-      <Box sx={{ px: 2.25, height: shellMetrics.headerHeight, display: "flex", alignItems: "center", borderBottom: "1px solid #1b2d4d" }}>
-        <Box sx={{ width: 32, height: 32, borderRadius: 1.5, bgcolor: "primary.main", display: "grid", placeItems: "center", mr: 1.25, boxShadow: "0 5px 16px rgba(20, 110, 245, 0.28)" }}>
-          <ApiOutlined sx={{ fontSize: 19, color: "white" }} />
+    <Box
+      sx={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        bgcolor: tokens.sidebar.bg,
+        color: tokens.sidebar.text,
+        borderRight: `1px solid ${tokens.sidebar.border}`,
+      }}
+    >
+      {/* 品牌 Brand Header */}
+      <Box
+        sx={{
+          px: 2.25,
+          height: shellMetrics.headerHeight,
+          display: "flex",
+          alignItems: "center",
+          borderBottom: `1px solid ${tokens.sidebar.borderSubtle}`,
+        }}
+      >
+        <Box
+          sx={{
+            width: 32,
+            height: 32,
+            borderRadius: "9px",
+            background: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)",
+            display: "grid",
+            placeItems: "center",
+            mr: 1.5,
+            boxShadow: "0 2px 8px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25)",
+          }}
+        >
+          <ApiOutlined sx={{ fontSize: 18, color: "#ffffff" }} />
         </Box>
         <Box sx={{ minWidth: 0 }}>
-          <Typography noWrap sx={{ color: "white", fontWeight: 760, fontSize: 15.5, letterSpacing: "-0.01em" }}>Any2API</Typography>
-          <Typography noWrap sx={{ color: "#91a5c1", fontSize: 10.5, letterSpacing: "0.02em" }}>模型运维</Typography>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Typography
+              noWrap
+              sx={{
+                color: "#ffffff",
+                fontWeight: 700,
+                fontSize: 14.5,
+                letterSpacing: "-0.02em",
+              }}
+            >
+              Any2API
+            </Typography>
+            <Box
+              sx={{
+                px: 0.75,
+                py: 0.15,
+                borderRadius: "4px",
+                bgcolor: "rgba(255, 255, 255, 0.08)",
+                fontSize: 10,
+                fontWeight: 600,
+                color: tokens.sidebar.textMuted,
+                letterSpacing: "0.02em",
+              }}
+            >
+              PRO
+            </Box>
+          </Stack>
+          <Typography
+            noWrap
+            sx={{
+              color: tokens.sidebar.itemIcon,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            模型运营与网关中心
+          </Typography>
         </Box>
       </Box>
-      <List aria-label="主导航" sx={{ px: 1.5, py: 2 }}>
+
+      {/* 导航菜单 Navigation List */}
+      <List aria-label="主导航" sx={{ px: 1.25, py: 2, flex: 1, overflowY: "auto" }}>
         {navigation.map(([label, Icon, href]) => {
           const selected = activeNavigation?.[2] === href;
           return (
@@ -105,88 +173,204 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={() => setMobileOpen(false)}
               selected={selected}
               sx={{
-                minHeight: 42,
-                mb: 0.75,
+                minHeight: 38,
+                mb: 0.5,
                 px: 1.5,
-                borderRadius: 1.5,
-                color: "#b9c8dc",
-                position: "relative",
-                transition: "background-color 160ms ease, color 160ms ease",
-                "& .MuiListItemIcon-root": { color: "inherit" },
-                "&:hover": { bgcolor: "rgba(76, 139, 229, 0.10)", color: "#e8f1ff" },
-                "&.Mui-selected": {
-                  bgcolor: "#153b78",
-                  color: "#c6ddff",
-                  "&:before": {
-                    content: '\"\"', position: "absolute", left: 0, top: 9, bottom: 9,
-                    width: 3, borderRadius: "0 2px 2px 0", bgcolor: "#3b82f6",
+                borderRadius: "8px",
+                color: selected ? tokens.sidebar.text : tokens.sidebar.textMuted,
+                bgcolor: selected ? tokens.sidebar.itemActiveBg : "transparent",
+                border: selected ? `1px solid ${tokens.sidebar.itemActiveBorder}` : "1px solid transparent",
+                transition: "all 140ms cubic-bezier(0.4, 0, 0.2, 1)",
+                "& .MuiListItemIcon-root": {
+                  color: selected ? tokens.sidebar.itemActiveIcon : tokens.sidebar.itemIcon,
+                  transition: "color 140ms ease",
+                },
+                "&:hover": {
+                  bgcolor: selected ? tokens.sidebar.itemActiveBg : tokens.sidebar.itemHoverBg,
+                  color: selected ? tokens.sidebar.text : tokens.sidebar.itemHoverText,
+                  "& .MuiListItemIcon-root": {
+                    color: selected ? tokens.sidebar.itemActiveIcon : tokens.sidebar.itemHoverText,
                   },
-                  "&:hover": { bgcolor: "#194786" },
                 },
               }}
             >
-              <ListItemIcon sx={{ minWidth: 34 }}><Icon sx={{ fontSize: 19 }} /></ListItemIcon>
-              <ListItemText primary={label} slotProps={{ primary: { sx: { fontSize: 13, fontWeight: selected ? 700 : 520 } } }} />
+              <ListItemIcon sx={{ minWidth: 30 }}>
+                <Icon sx={{ fontSize: 18 }} />
+              </ListItemIcon>
+              <ListItemText
+                primary={label}
+                slotProps={{
+                  primary: {
+                    sx: {
+                      fontSize: 13,
+                      fontWeight: selected ? 650 : 500,
+                      letterSpacing: "-0.01em",
+                    },
+                  },
+                }}
+              />
             </ListItemButton>
           );
         })}
       </List>
-      <Box sx={{ mt: "auto", px: 2.25, py: 2, borderTop: "1px solid #1b2d4d" }}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "#47bf87" }} />
-          <Typography sx={{ color: "#9db0ca", fontSize: 10.5 }}>控制平台在线</Typography>
+
+      {/* 底部状态 Footer Status */}
+      <Box
+        sx={{
+          mt: "auto",
+          p: 1.75,
+          borderTop: `1px solid ${tokens.sidebar.borderSubtle}`,
+          bgcolor: tokens.sidebar.footerBg,
+        }}
+      >
+        <Stack
+          direction="row"
+          spacing={1.25}
+          sx={{
+            alignItems: "center",
+            px: 1.25,
+            py: 1,
+            borderRadius: "8px",
+            bgcolor: tokens.sidebar.footerCardBg,
+            border: `1px solid ${tokens.sidebar.footerBorder}`,
+          }}
+        >
+          <Box
+            sx={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              bgcolor: tokens.status.emerald.main,
+              boxShadow: "0 0 0 3px rgba(16, 185, 129, 0.2)",
+            }}
+          />
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography
+              noWrap
+              sx={{ color: tokens.sidebar.itemHoverText, fontSize: 12, fontWeight: 600, letterSpacing: "-0.01em" }}
+            >
+              控制集群就绪
+            </Typography>
+            <Typography noWrap sx={{ color: tokens.sidebar.itemIcon, fontSize: 10.5 }}>
+              Any2API 正常服务中
+            </Typography>
+          </Box>
         </Stack>
       </Box>
     </Box>
   );
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex" }}>
+    <Box sx={{ minHeight: "100vh", display: "flex", bgcolor: "background.default" }}>
+      {/* 顶部 AppBar (Apple Frosted Glass) */}
       <AppBar
         position="fixed"
         sx={{
           zIndex: (value) => value.zIndex.drawer + 1,
-          borderBottom: 1,
-          borderColor: { xs: "#1b2d4d", md: "rgba(215, 224, 236, 0.9)" },
-          bgcolor: { xs: "#0a1630", md: "rgba(255, 255, 255, 0.94)" },
-          color: { xs: "#ffffff", md: "text.primary" },
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          bgcolor: "rgba(255, 255, 255, 0.8)",
+          backdropFilter: "blur(20px) saturate(180%)",
+          WebkitBackdropFilter: "blur(20px) saturate(180%)",
+          color: "text.primary",
           ml: compact ? 0 : `${shellMetrics.drawerWidth}px`,
           width: compact ? "100%" : `calc(100% - ${shellMetrics.drawerWidth}px)`,
-          boxShadow: { xs: "none", md: "0 1px 0 rgba(20, 33, 61, 0.03), 0 6px 18px rgba(20, 33, 61, 0.04)" },
+          boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
         }}
       >
-        <Toolbar sx={{ minHeight: `${shellMetrics.headerHeight}px !important`, px: { xs: 1.5, sm: 2.5 } }}>
+        <Toolbar sx={{ minHeight: `${shellMetrics.headerHeight}px !important`, px: { xs: 2, sm: 3 } }}>
           {compact ? (
             <Tooltip title="打开导航">
-              <IconButton aria-label="打开导航" onClick={() => setMobileOpen(true)} sx={{ mr: 1, color: "inherit" }}>
-                <MenuOutlined />
+              <IconButton
+                aria-label="打开导航"
+                onClick={() => setMobileOpen(true)}
+                sx={{ mr: 1.5, color: "text.primary" }}
+              >
+                <MenuOutlined sx={{ fontSize: 20 }} />
               </IconButton>
             </Tooltip>
           ) : null}
-          <Typography noWrap sx={{ fontWeight: 720, fontSize: { xs: 16, md: 14 } }}>
-            {appBarTitle}
-          </Typography>
-          <Box sx={{ flex: 1 }} />
-          <Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
-            <Box sx={{ display: { xs: "none", sm: "flex" }, alignItems: "center", gap: 0.75 }}>
-              <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "success.main" }} />
-              <Typography color="text.secondary" sx={{ fontSize: 11.5, whiteSpace: "nowrap" }}>正常运行</Typography>
-              <Box sx={{ width: 1, height: 18, bgcolor: "divider", mx: 0.5 }} />
-            </Box>
-            <AccountCircleOutlined sx={{ display: { xs: "none", sm: "block" }, fontSize: 18, color: "text.secondary" }} />
-            <Typography noWrap sx={{ display: { xs: "none", sm: "block" }, maxWidth: 140, fontSize: 12, fontWeight: 650 }}>
-              {session.data?.username ?? "管理员"}
+
+          {/* 页面标题 & 面包屑指示 */}
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Typography
+              sx={{
+                fontWeight: 700,
+                fontSize: 15,
+                letterSpacing: "-0.02em",
+                color: "text.primary",
+              }}
+            >
+              {appBarTitle}
             </Typography>
-            <Tooltip title="退出登录">
-              <span>
-                <IconButton aria-label="退出登录" onClick={() => logout.mutate()} disabled={logout.isPending} sx={{ color: "inherit" }}>
-                  <LogoutOutlined sx={{ fontSize: 18 }} />
-                </IconButton>
-              </span>
+          </Stack>
+
+          <Box sx={{ flex: 1 }} />
+
+          {/* 右侧管理员信息与状态胶囊 */}
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+            <Box
+              sx={{
+                display: { xs: "none", sm: "flex" },
+                alignItems: "center",
+                gap: 1,
+                px: 1.25,
+                py: 0.5,
+                borderRadius: "9999px",
+                bgcolor: tokens.status.emerald.light,
+                border: `1px solid ${tokens.status.emerald.border}`,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  bgcolor: tokens.status.emerald.main,
+                  boxShadow: "0 0 0 2px rgba(16, 185, 129, 0.25)",
+                }}
+              />
+              <Typography sx={{ color: tokens.status.emerald.text, fontSize: 11.5, fontWeight: 600 }}>
+                集群健康
+              </Typography>
+            </Box>
+
+            <Box
+              sx={{
+                display: { xs: "none", sm: "flex" },
+                alignItems: "center",
+                gap: 1,
+                pl: 1,
+                borderLeft: "1px solid",
+                borderColor: "divider",
+              }}
+            >
+              <AccountCircleOutlined sx={{ fontSize: 20, color: "text.secondary" }} />
+              <Typography sx={{ fontSize: 13, fontWeight: 600, color: "text.primary" }}>
+                {session.data?.username ?? "管理员"}
+              </Typography>
+            </Box>
+
+            <Tooltip title="安全退出">
+              <IconButton
+                aria-label="退出登录"
+                onClick={() => logout.mutate()}
+                disabled={logout.isPending}
+                sx={{
+                  color: "text.secondary",
+                  border: "1px solid",
+                  borderColor: tokens.border,
+                  bgcolor: "background.paper",
+                }}
+              >
+                <LogoutOutlined sx={{ fontSize: 17 }} />
+              </IconButton>
             </Tooltip>
           </Stack>
         </Toolbar>
       </AppBar>
+
+      {/* 侧边抽屉 / 常驻侧边栏 */}
       <Box component="nav" aria-label="主导航">
         {compact ? (
           <Drawer
@@ -194,7 +378,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             open={mobileOpen}
             onClose={() => setMobileOpen(false)}
             ModalProps={{ keepMounted: true }}
-            sx={{ "& .MuiDrawer-paper": { width: shellMetrics.drawerWidth, border: 0 } }}
+            sx={{
+              "& .MuiDrawer-paper": {
+                width: shellMetrics.drawerWidth,
+                border: 0,
+                boxShadow: "0 20px 40px rgba(0, 0, 0, 0.35)",
+              },
+            }}
           >
             {drawer}
           </Drawer>
@@ -202,13 +392,31 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Drawer
             variant="permanent"
             open
-            sx={{ width: shellMetrics.drawerWidth, flexShrink: 0, "& .MuiDrawer-paper": { width: shellMetrics.drawerWidth, border: 0, borderRight: "1px solid #1b2d4d" } }}
+            sx={{
+              width: shellMetrics.drawerWidth,
+              flexShrink: 0,
+              "& .MuiDrawer-paper": {
+                width: shellMetrics.drawerWidth,
+                border: 0,
+              },
+            }}
           >
             {drawer}
           </Drawer>
         )}
       </Box>
-      <Box component="main" sx={{ flex: 1, minWidth: 0, minHeight: "100vh", pt: `${shellMetrics.headerHeight}px`, bgcolor: "background.default" }}>
+
+      {/* 主视图内容区域 */}
+      <Box
+        component="main"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: "100vh",
+          pt: `${shellMetrics.headerHeight}px`,
+          bgcolor: "background.default",
+        }}
+      >
         {children}
       </Box>
     </Box>
@@ -217,14 +425,39 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function SessionGate() {
   return (
-    <Box sx={{ minWidth: 0, minHeight: "100vh", display: "grid", placeItems: "center", bgcolor: "#071126" }}>
-      <Stack spacing={2} sx={{ alignItems: "center" }}>
-        <Box sx={{ width: 38, height: 38, border: "1px solid #3b82f6", transform: "rotate(45deg)", display: "grid", placeItems: "center" }}>
-          <ApiOutlined sx={{ color: "#93c5fd", fontSize: 21, transform: "rotate(-45deg)" }} />
+    <Box
+      sx={{
+        minWidth: 0,
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        bgcolor: tokens.sidebar.bg,
+      }}
+    >
+      <Stack spacing={2.5} sx={{ alignItems: "center" }}>
+        <Box
+          sx={{
+            width: 44,
+            height: 44,
+            borderRadius: "12px",
+            background: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)",
+            display: "grid",
+            placeItems: "center",
+            boxShadow: "0 4px 16px rgba(37, 99, 235, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3)",
+          }}
+        >
+          <ApiOutlined sx={{ color: "#ffffff", fontSize: 24 }} />
         </Box>
-        <CircularProgress size={20} thickness={4} sx={{ color: "#60a5fa" }} />
-        <Typography sx={{ color: "#839399", fontFamily: "ui-monospace, monospace", fontSize: 10 }}>
-          正在验证管理员会话
+        <CircularProgress size={22} thickness={4} sx={{ color: tokens.primary.main }} />
+        <Typography
+          sx={{
+            color: tokens.sidebar.textMuted,
+            fontFamily: "ui-monospace, monospace",
+            fontSize: 11.5,
+            letterSpacing: "0.02em",
+          }}
+        >
+          验证管理员权限与工作态...
         </Typography>
       </Stack>
     </Box>

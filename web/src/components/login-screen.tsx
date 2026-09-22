@@ -203,9 +203,33 @@ export function LoginScreen() {
               size="large"
               endIcon={<ArrowForwardOutlined />}
               disabled={!ready || login.isPending || session.isLoading}
-              sx={{ mt: "8px !important", height: 48, borderRadius: 1, bgcolor: "#146ef5", color: "#fff", boxShadow: "0 10px 24px rgba(20, 110, 245, 0.18)", transition: "background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease", "&:hover": { bgcolor: "#0b5ed7", boxShadow: "0 13px 28px rgba(20, 110, 245, 0.24)", transform: "translateY(-1px)" }, "&.Mui-disabled": { bgcolor: "#e5eaf2", color: "#8794a8", border: "1px solid #d7e0ec", boxShadow: "none" } }}
+              sx={{
+                mt: "10px !important",
+                height: 46,
+                borderRadius: "10px",
+                background: "linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)",
+                color: "#ffffff",
+                fontWeight: 650,
+                letterSpacing: "-0.01em",
+                boxShadow: "0 1px 2px rgba(37, 99, 235, 0.2), 0 6px 20px rgba(37, 99, 235, 0.25)",
+                transition: "all 150ms cubic-bezier(0.4, 0, 0.2, 1)",
+                "&:hover": {
+                  background: "linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)",
+                  boxShadow: "0 2px 4px rgba(37, 99, 235, 0.3), 0 8px 24px rgba(37, 99, 235, 0.35)",
+                  transform: "translateY(-1px)",
+                },
+                "&:active": {
+                  transform: "scale(0.99)",
+                },
+                "&.Mui-disabled": {
+                  background: "#e2e8f0",
+                  color: "#94a3b8",
+                  border: "1px solid #cbd5e1",
+                  boxShadow: "none",
+                },
+              }}
             >
-              {login.isPending ? "正在验证" : "安全登录"}
+              {login.isPending ? "正在验证..." : "安全登录"}
             </Button>
           </Stack>
           <Typography className={styles.footer}>ARM64 · Java · PostgreSQL · Redis</Typography>

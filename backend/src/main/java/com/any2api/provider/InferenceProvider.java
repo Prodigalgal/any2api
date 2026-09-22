@@ -36,7 +36,7 @@ public interface InferenceProvider {
     }
 
     default ProviderTransportMode defaultTransportMode() {
-        return ProviderTransportMode.RUNTIME;
+        return ProviderTransportMode.AUTO;
     }
 
     default Duration modelProbeTimeout() {

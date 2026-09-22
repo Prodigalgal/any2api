@@ -57,3 +57,5 @@ databaseChangeLog:
       file: db/changelog/releases/028-arena-browser-runtime.sql
   - include:
       file: db/changelog/releases/029-api-key-transport-mode.sql
+  - include:
+      file: db/changelog/releases/030-default-provider-transport-mode-auto.sql

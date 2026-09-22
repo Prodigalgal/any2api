@@ -131,7 +131,8 @@ public class ProviderTransportModeService {
                 "provider " + provider.manifest().id()
                     + " declares an invalid transport mode set");
         }
-        if (!modes.contains(provider.defaultTransportMode())) {
+        var defaultMode = provider.defaultTransportMode();
+        if (defaultMode != ProviderTransportMode.AUTO && !modes.contains(defaultMode)) {
             throw new IllegalStateException(
                 "provider " + provider.manifest().id()
                     + " default transport mode is not supported");

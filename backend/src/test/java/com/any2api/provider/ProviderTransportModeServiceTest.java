@@ -20,15 +20,15 @@ import reactor.core.publisher.Flux;
 class ProviderTransportModeServiceTest {
 
     @Test
-    void defaultRemainsRuntimeEvenWhenApiIsSupported() {
+    void defaultIsAutoAndPrefersApiWithRuntimeFallback() {
         var provider = new TestProvider(Set.of(
             ProviderTransportMode.API, ProviderTransportMode.RUNTIME));
         var plan = new ProviderTransportModeService(mock(JdbcClient.class))
             .plan(provider);
 
-        assertThat(plan.requested()).isEqualTo(ProviderTransportMode.RUNTIME);
-        assertThat(plan.primary()).isEqualTo(ProviderTransportMode.RUNTIME);
-        assertThat(plan.fallback()).isNull();
+        assertThat(plan.requested()).isEqualTo(ProviderTransportMode.AUTO);
+        assertThat(plan.primary()).isEqualTo(ProviderTransportMode.API);
+        assertThat(plan.fallback()).isEqualTo(ProviderTransportMode.RUNTIME);
     }
 
     @Test

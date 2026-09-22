@@ -47,45 +47,6 @@ public class InferenceCoordinator {
         ModelAvailabilityGuard availability,
         ModelCatalogCache catalog,
         ModelRequestLimitGuard requestLimits,
-        ProviderTransportModeService transportModes
-    ) {
-        this(providers, accounts, failures, telemetry, runtime, usage, availability, catalog,
-            requestLimits, transportModes,
-            new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper()),
-            null);
-    }
-
-    public InferenceCoordinator(
-        ProviderRegistry providers,
-        AccountSelectionService accounts,
-        ProviderFailureDisposition failures,
-        InferenceTelemetryService telemetry,
-        ModelRuntimeGuard runtime,
-        UsageNormalizer usage,
-        ModelAvailabilityGuard availability,
-        ModelCatalogCache catalog,
-        ModelRequestLimitGuard requestLimits,
-        ProviderTransportModeService transportModes,
-        org.springframework.beans.factory.ObjectProvider<com.any2api.protocol.SmartContextWindowManager> contextManagers,
-        org.springframework.beans.factory.ObjectProvider<com.any2api.cache.PromptExactCacheManager> promptCaches
-    ) {
-        this(providers, accounts, failures, telemetry, runtime, usage, availability, catalog,
-            requestLimits, transportModes,
-            contextManagers.getIfAvailable(() ->
-                new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper())),
-            promptCaches.getIfAvailable());
-    }
-
-    public InferenceCoordinator(
-        ProviderRegistry providers,
-        AccountSelectionService accounts,
-        ProviderFailureDisposition failures,
-        InferenceTelemetryService telemetry,
-        ModelRuntimeGuard runtime,
-        UsageNormalizer usage,
-        ModelAvailabilityGuard availability,
-        ModelCatalogCache catalog,
-        ModelRequestLimitGuard requestLimits,
         ProviderTransportModeService transportModes,
         com.any2api.protocol.SmartContextWindowManager contextManager,
         com.any2api.cache.PromptExactCacheManager promptCache
@@ -100,9 +61,7 @@ public class InferenceCoordinator {
         this.catalog = catalog;
         this.requestLimits = requestLimits;
         this.transportModes = transportModes;
-        this.contextManager = contextManager == null
-            ? new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper())
-            : contextManager;
+        this.contextManager = contextManager;
         this.promptCache = promptCache;
     }
 

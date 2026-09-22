@@ -290,7 +290,9 @@ class InferenceCoordinatorTest {
                 new Any2ApiProperties(),
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
             new UsageNormalizer(), callableAvailability(), catalog,
-            new ModelRequestLimitGuard(), transportModes);
+            new ModelRequestLimitGuard(), transportModes,
+            new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper()),
+            null);
     }
 
     private ModelAvailabilityGuard callableAvailability() {

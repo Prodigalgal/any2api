@@ -179,10 +179,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                 mb: 0.5,
                 px: 1.5,
                 borderRadius: "8px",
+                position: "relative",
                 color: selected ? tokens.sidebar.text : tokens.sidebar.textMuted,
                 bgcolor: selected ? tokens.sidebar.itemActiveBg : "transparent",
                 border: selected ? `1px solid ${tokens.sidebar.itemActiveBorder}` : "1px solid transparent",
                 transition: "all 140ms cubic-bezier(0.4, 0, 0.2, 1)",
+                "&::before": selected ? {
+                  content: '""',
+                  position: "absolute",
+                  left: -5,
+                  top: "22%",
+                  bottom: "22%",
+                  width: 3,
+                  borderRadius: "0 2px 2px 0",
+                  bgcolor: tokens.primary.main,
+                  boxShadow: `0 0 8px ${tokens.primary.main}`,
+                } : undefined,
                 "& .MuiListItemIcon-root": {
                   color: selected ? tokens.sidebar.itemActiveIcon : tokens.sidebar.itemIcon,
                   transition: "color 140ms ease",
@@ -362,7 +374,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                   color: "text.secondary",
                   border: "1px solid",
                   borderColor: tokens.border,
-                  bgcolor: "background.paper",
+                  bgcolor: "rgba(255, 255, 255, 0.03)",
+                  transition: "all 140ms ease",
+                  "&:hover": {
+                    bgcolor: "rgba(244, 63, 94, 0.12)",
+                    borderColor: "rgba(244, 63, 94, 0.3)",
+                    color: tokens.status.rose.main,
+                  },
                 }}
               >
                 <LogoutOutlined sx={{ fontSize: 17 }} />

@@ -7,6 +7,9 @@ import {
   SpeedOutlined,
   LayersOutlined,
   ShieldOutlined,
+  AutoModeOutlined,
+  HttpOutlined,
+  LanguageOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -389,9 +392,10 @@ function StatusMetricCard({
         flexDirection: "column",
         justifyContent: "space-between",
         minHeight: 110,
-        transition: "transform 140ms ease, box-shadow 140ms ease",
+        transition: "transform 180ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1), border-color 180ms ease",
         "&:hover": {
-          transform: "translateY(-1px)",
+          transform: "translateY(-2px)",
+          borderColor: "rgba(255, 255, 255, 0.16)",
           boxShadow: tokens.shadow.hover,
         },
       }}
@@ -555,34 +559,87 @@ function TransportSelector({
 }: {
   row: {
     requestedTransportMode: ProviderTransportMode;
+    primaryTransportMode: Exclude<ProviderTransportMode, "AUTO">;
     supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">>;
   };
   disabled: boolean;
   onChange: (mode: ProviderTransportMode) => void;
 }) {
   const options: ProviderTransportMode[] = ["AUTO", ...row.supportedTransportModes];
+  const isAuto = row.requestedTransportMode === "AUTO";
+
   return (
-    <Select
-      size="small"
-      variant="outlined"
-      value={row.requestedTransportMode}
-      disabled={disabled}
-      onChange={(event) => onChange(event.target.value as ProviderTransportMode)}
-      sx={{
-        minWidth: 120,
-        height: 30,
-        fontSize: 12,
-        borderRadius: "6px",
-        "& .MuiSelect-select": { py: 0.5, px: 1 },
-      }}
-      inputProps={{ "aria-label": "推理通道" }}
-    >
-      {[...new Set(options)].map((mode) => (
-        <MenuItem key={mode} value={mode} sx={{ fontSize: 12.5 }}>
-          {mode === "AUTO" ? "自动（API优先）" : mode === "API" ? "API 直接通道" : "Runtime 浏览器"}
-        </MenuItem>
-      ))}
-    </Select>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+      <Select
+        size="small"
+        variant="outlined"
+        value={row.requestedTransportMode}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as ProviderTransportMode)}
+        sx={{
+          minWidth: 136,
+          height: 32,
+          fontSize: 12,
+          bgcolor: tokens.canvasSubtle,
+          borderRadius: "8px",
+          borderColor: tokens.border,
+          "& .MuiSelect-select": { py: 0.5, px: 1.25, display: "flex", alignItems: "center", gap: 0.75 },
+          "&:hover": {
+            borderColor: tokens.borderStrong,
+          },
+          "&.Mui-focused": {
+            borderColor: tokens.primary.main,
+            boxShadow: `0 0 0 2px ${tokens.primary.light}`,
+          },
+        }}
+        inputProps={{ "aria-label": "推理通道" }}
+      >
+        {[...new Set(options)].map((mode) => (
+          <MenuItem key={mode} value={mode} sx={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 1 }}>
+            {mode === "AUTO" ? (
+              <>
+                <AutoModeOutlined sx={{ fontSize: 15, color: tokens.primary.main }} />
+                <span>自动（API优先）</span>
+              </>
+            ) : mode === "API" ? (
+              <>
+                <HttpOutlined sx={{ fontSize: 15, color: tokens.status.sky.text }} />
+                <span>API 直接通道</span>
+              </>
+            ) : (
+              <>
+                <LanguageOutlined sx={{ fontSize: 15, color: tokens.status.amber.text }} />
+                <span>Runtime 浏览器</span>
+              </>
+            )}
+          </MenuItem>
+        ))}
+      </Select>
+      {isAuto && row.primaryTransportMode && (
+        <Typography
+          sx={{
+            fontSize: 10.5,
+            color: tokens.text.muted,
+            display: "flex",
+            alignItems: "center",
+            gap: 0.5,
+            pl: 0.25,
+          }}
+        >
+          <Box
+            component="span"
+            sx={{
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              bgcolor: row.primaryTransportMode === "API" ? tokens.status.emerald.main : tokens.status.amber.main,
+              boxShadow: `0 0 4px ${row.primaryTransportMode === "API" ? tokens.status.emerald.main : tokens.status.amber.main}`,
+            }}
+          />
+          当前通道: {row.primaryTransportMode === "API" ? "API 直连" : "Runtime 浏览器"}
+        </Typography>
+      )}
+    </Box>
   );
 }
 

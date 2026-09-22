@@ -246,7 +246,7 @@ function LimitHeaders() {
 
 function LimitCells({ limits, emphasized = false }: { limits: TokenLimits; emphasized?: boolean }) {
   return <>{([limits.maxContextTokens, limits.maxInputTokens, limits.maxOutputTokens] as const).map((value, index) => (
-    <TableCell key={index} align="right" sx={{ fontFamily: "ui-monospace, monospace", fontWeight: emphasized ? 700 : 500, color: emphasized ? "primary.dark" : "text.primary" }}>
+    <TableCell key={index} align="right" sx={{ fontFamily: "ui-monospace, monospace", fontWeight: emphasized ? 700 : 500, color: emphasized ? tokens.primary.main : "text.primary" }}>
       {formatTokens(value)}
     </TableCell>
   ))}</>;

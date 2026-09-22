@@ -700,7 +700,7 @@ export function Playground() {
                         sx={{
                           fontSize: "0.9rem",
                           lineHeight: 1.65,
-                          color: m.role === "user" ? tokens.primary.dark : tokens.text.primary,
+                          color: tokens.text.primary,
                           whiteSpace: "pre-wrap",
                           wordBreak: "break-word",
                         }}
@@ -803,11 +803,24 @@ export function Playground() {
                           sx={{
                             bgcolor: tokens.primary.main,
                             color: "#fff",
-                            "&:hover": { bgcolor: tokens.primary.dark },
-                            "&.Mui-disabled": { bgcolor: tokens.canvasSubtle, color: tokens.text.muted },
+                            borderRadius: "10px",
+                            width: 34,
+                            height: 34,
+                            boxShadow: "0 2px 8px rgba(59, 130, 246, 0.4)",
+                            transition: "all 140ms cubic-bezier(0.4, 0, 0.2, 1)",
+                            "&:hover": {
+                              bgcolor: tokens.primary.dark,
+                              boxShadow: "0 0 16px rgba(59, 130, 246, 0.6)",
+                              transform: "translateY(-1px)",
+                            },
+                            "&.Mui-disabled": {
+                              bgcolor: tokens.canvasSubtle,
+                              color: tokens.text.muted,
+                              boxShadow: "none",
+                            },
                           }}
                         >
-                          <SendOutlined fontSize="small" />
+                          <SendOutlined sx={{ fontSize: 18 }} />
                         </IconButton>
                       )}
                     </InputAdornment>

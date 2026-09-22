@@ -29,6 +29,7 @@ import { useTheme } from "@mui/material/styles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api, type Account } from "@/lib/api";
+import { tokens } from "@/theme/theme";
 import { OperationEventsTable } from "@/components/operation-events-dialog";
 import { accountActivationActionLabel } from "@/components/lifecycle-labels";
 
@@ -65,7 +66,7 @@ export function AccountDetailDialog({ account, providerName, reauthenticationSup
       slotProps={{ paper: { sx: { height: { sm: "min(90vh, 900px)" }, maxHeight: { sm: 900 } } } }}
     >
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1.25, borderBottom: 1, borderColor: "divider" }}>
-        <Box sx={{ width: 36, height: 36, borderRadius: 1, display: "grid", placeItems: "center", bgcolor: "primary.light", color: "primary.dark", fontWeight: 780, fontSize: 12 }}>
+        <Box sx={{ width: 36, height: 36, borderRadius: "9px", display: "grid", placeItems: "center", bgcolor: tokens.primary.light, color: tokens.primary.main, border: "1px solid rgba(59, 130, 246, 0.3)", fontWeight: 780, fontSize: 12 }}>
           {providerName.slice(0, 2).toUpperCase()}
         </Box>
         <Box sx={{ minWidth: 0 }}>

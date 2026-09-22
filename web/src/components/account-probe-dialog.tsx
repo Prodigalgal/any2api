@@ -59,7 +59,7 @@ export function AccountProbeDialog({ account, providerName, onClose }: { account
   return (
     <Dialog open onClose={probe.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
-        <Box sx={{ width: 34, height: 34, borderRadius: 1, display: "grid", placeItems: "center", bgcolor: "primary.light", color: "primary.dark" }}>
+        <Box sx={{ width: 34, height: 34, borderRadius: "8px", display: "grid", placeItems: "center", bgcolor: tokens.primary.light, color: tokens.primary.main, border: "1px solid rgba(59, 130, 246, 0.3)" }}>
           <MonitorHeartOutlined sx={{ fontSize: 20 }} />
         </Box>
         <Box sx={{ minWidth: 0 }}>

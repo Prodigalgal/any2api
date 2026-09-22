@@ -17,8 +17,8 @@ export function PageContainer({
         maxWidth,
         minWidth: 0,
         mx: "auto",
-        px: { xs: 2, sm: 3, xl: 3.5 },
-        py: { xs: 2.25, sm: 2.75, xl: 3.25 },
+        px: { xs: 2, sm: 3.5, xl: 4 },
+        py: { xs: 2.5, sm: 3.5, xl: 4 },
       }}
     >
       {children}
@@ -39,21 +39,49 @@ export function PageHeader({
     <Stack
       direction={{ xs: "column", sm: "row" }}
       sx={{
-        minHeight: 60,
-        mb: { xs: 2.25, sm: 2.75 },
-        alignItems: "flex-start",
+        minHeight: 52,
+        mb: { xs: 2.5, sm: 3.25 },
+        alignItems: { xs: "flex-start", sm: "center" },
         justifyContent: "space-between",
         gap: { xs: 1.5, sm: 3 },
       }}
     >
-      <Box>
-        <Typography variant="h4">{title}</Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.5, fontSize: 13 }}>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography
+          variant="h4"
+          sx={{
+            fontWeight: 750,
+            fontSize: { xs: "1.375rem", sm: "1.625rem" },
+            letterSpacing: "-0.03em",
+            color: "text.primary",
+          }}
+        >
+          {title}
+        </Typography>
+        <Typography
+          color="text.secondary"
+          sx={{
+            mt: 0.5,
+            fontSize: { xs: 12.5, sm: 13 },
+            fontWeight: 450,
+            lineHeight: 1.5,
+            letterSpacing: "-0.005em",
+          }}
+        >
           {description}
         </Typography>
       </Box>
       {actions ? (
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center", minHeight: 36, flexWrap: "wrap" }}>
+        <Stack
+          direction="row"
+          spacing={1.25}
+          sx={{
+            alignItems: "center",
+            minHeight: 36,
+            flexWrap: "wrap",
+            gap: { xs: 1, sm: 0 },
+          }}
+        >
           {actions}
         </Stack>
       ) : null}
@@ -66,7 +94,15 @@ export function ToolbarSurface({ children }: { children: ReactNode }) {
     <Paper
       component="section"
       variant="outlined"
-      sx={{ mb: 2, p: { xs: 1.25, sm: 1.5 }, bgcolor: "background.paper", overflow: "hidden", borderRadius: 2 }}
+      sx={{
+        mb: 2,
+        p: { xs: 1.25, sm: 1.5 },
+        bgcolor: "background.paper",
+        overflow: "hidden",
+        borderRadius: "12px",
+        borderColor: "rgba(15, 23, 42, 0.08)",
+        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
+      }}
     >
       {children}
     </Paper>
@@ -84,7 +120,17 @@ export function DataSurface({
     <Paper
       component="section"
       variant="outlined"
-      sx={[{ overflow: "hidden", position: "relative", borderRadius: 2, boxShadow: "0 2px 10px rgba(20, 33, 61, 0.025)" }, ...(Array.isArray(sx) ? sx : [sx])]}
+      sx={[
+        {
+          overflow: "hidden",
+          position: "relative",
+          borderRadius: "14px",
+          borderColor: "rgba(15, 23, 42, 0.08)",
+          bgcolor: "background.paper",
+          boxShadow: "0 1px 3px rgba(15, 23, 42, 0.03), 0 6px 18px -3px rgba(15, 23, 42, 0.03)",
+        },
+        ...(Array.isArray(sx) ? sx : [sx]),
+      ]}
     >
       {children}
     </Paper>

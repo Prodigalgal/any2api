@@ -1,9 +1,12 @@
 "use client";
 
 import {
-  CheckCircleOutlined,
   RefreshOutlined,
-  HubOutlined
+  HubOutlined,
+  CheckCircleRounded,
+  SpeedOutlined,
+  LayersOutlined,
+  ShieldOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -24,11 +27,18 @@ import {
   TableHead,
   TableRow,
   Tooltip,
-  Typography
+  Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ProviderDescriptor, type ProviderModel, type ProviderRuntime, type ProviderTransportMode } from "@/lib/api";
-import { PageContainer, PageHeader } from "@/components/page-layout";
+import {
+  api,
+  type ProviderDescriptor,
+  type ProviderModel,
+  type ProviderRuntime,
+  type ProviderTransportMode,
+} from "@/lib/api";
+import { PageContainer, PageHeader, DataSurface } from "@/components/page-layout";
+import { tokens } from "@/theme/theme";
 
 export function Overview() {
   const queryClient = useQueryClient();
@@ -39,8 +49,10 @@ export function Overview() {
   const rows = groupProviders(runtime.data ?? [], catalog.data?.data ?? [], models.data?.data ?? []);
   const modelRows = models.data?.data ?? [];
   const enabledAccounts = rows.reduce((total, row) => total + row.enabledAccountCount, 0);
+
   const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateProvider(id, { enabled }),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.updateProvider(id, { enabled }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin-providers"] }),
@@ -51,26 +63,32 @@ export function Overview() {
       ]);
     },
   });
+
   const transportMode = useMutation({
-    mutationFn: ({ id, mode }: { id: string; mode: ProviderTransportMode }) => (
-      api.updateProvider(id, { transportMode: mode })
-    ),
+    mutationFn: ({ id, mode }: { id: string; mode: ProviderTransportMode }) =>
+      api.updateProvider(id, { transportMode: mode }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin-providers"] });
     },
   });
 
   return (
-    <PageContainer maxWidth={1480}>
+    <PageContainer maxWidth={1520}>
       <PageHeader
         title="运行概览"
-        description="厂商接入、账号生命周期与自动化资源的实时状态"
+        description="厂商接入、自动化资源、推理通道与集群调度保护的实时控制中枢"
         actions={
-          <Tooltip title="刷新状态">
+          <Tooltip title="刷新集群实时状态">
             <IconButton
               aria-label="刷新状态"
-              onClick={() => void Promise.all([catalog.refetch(), runtime.refetch(), models.refetch(), health.refetch()])}
-              sx={{ border: 1, borderColor: "divider", bgcolor: "background.paper" }}
+              onClick={() =>
+                void Promise.all([catalog.refetch(), runtime.refetch(), models.refetch(), health.refetch()])
+              }
+              sx={{
+                border: "1px solid rgba(15, 23, 42, 0.08)",
+                bgcolor: "background.paper",
+                boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+              }}
             >
               <RefreshOutlined sx={{ fontSize: 18 }} />
             </IconButton>
@@ -78,76 +96,261 @@ export function Overview() {
         }
       />
 
-      {(catalog.error || runtime.error || models.error) && <Alert severity="warning" sx={{ mb: 2 }}>后端尚未连接，启动 Java 服务后将显示真实厂商目录。</Alert>}
-      {toggle.error && <Alert severity="error" sx={{ mb: 2 }}>{toggle.error.message}</Alert>}
-      {transportMode.error && <Alert severity="error" sx={{ mb: 2 }}>{transportMode.error.message}</Alert>}
+      {(catalog.error || runtime.error || models.error) && (
+        <Alert severity="warning" sx={{ mb: 2.5 }}>
+          后端尚未连接或探针未返回，启动 Java 服务后将显示实时集群厂商目录。
+        </Alert>
+      )}
+      {toggle.error && <Alert severity="error" sx={{ mb: 2.5 }}>{toggle.error.message}</Alert>}
+      {transportMode.error && <Alert severity="error" sx={{ mb: 2.5 }}>{transportMode.error.message}</Alert>}
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, border: 1, borderColor: "divider", bgcolor: "background.paper", mb: 2.5 }}>
-        <StatusMetric label="控制面" value={health.data?.status ?? "未连接"} healthy={health.data?.status === "UP"} />
-        <StatusMetric label="已接入厂商" value={`${rows.filter((row) => row.enabled).length} / ${rows.length}`} healthy={rows.some((row) => row.available)} />
-        <StatusMetric label="可路由模型" value={`${modelRows.filter((model) => model.available).length} / ${modelRows.length}`} healthy={modelRows.some((model) => model.available)} />
+      {/* Stripe 标杆级三大核心指标卡片 */}
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" },
+          gap: 2.25,
+          mb: 3,
+        }}
+      >
+        <StatusMetricCard
+          label="集群控制面状态"
+          value={health.data?.status ?? "未连接"}
+          caption="网关与心跳探针链路"
+          Icon={SpeedOutlined}
+          healthy={health.data?.status === "UP"}
+        />
+        <StatusMetricCard
+          label="已接入厂商"
+          value={`${rows.filter((row) => row.enabled).length} / ${rows.length}`}
+          caption={`${rows.filter((row) => row.available).length} 家可用供流`}
+          Icon={LayersOutlined}
+          healthy={rows.some((row) => row.available)}
+        />
+        <StatusMetricCard
+          label="可路由模型总数"
+          value={`${modelRows.filter((model) => model.available).length} / ${modelRows.length}`}
+          caption="当前全网开放的模型目录"
+          Icon={HubOutlined}
+          healthy={modelRows.some((model) => model.available)}
+        />
       </Box>
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "minmax(0, 2fr) minmax(300px, 1fr)" }, gap: 2.5 }}>
-        <Paper variant="outlined" sx={{ overflow: "hidden" }}>
-          <Box sx={{ px: 2, py: 1.75 }}>
-            <Typography variant="h6">厂商与模型</Typography>
-            <Typography color="text.secondary" sx={{ fontSize: 12, mt: 0.25 }}>开关即时控制路由、模型目录与后台任务，无需重新部署</Typography>
+      {/* 主数据表与侧面板 */}
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", xl: "minmax(0, 2.3fr) minmax(320px, 1fr)" },
+          gap: 2.5,
+        }}
+      >
+        {/* 厂商与模型表格 */}
+        <DataSurface>
+          <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.015em" }}>
+                厂商接入与推理路由
+              </Typography>
+              <Typography color="text.secondary" sx={{ fontSize: 12.5, mt: 0.25 }}>
+                动态启用/拔出厂商，实时切换推理通道，无需重启或重新部署
+              </Typography>
+            </Box>
           </Box>
-          <Divider />
+          <Divider sx={{ borderColor: "divider" }} />
           <TableContainer>
             <Table size="small">
-              <TableHead><TableRow><TableCell>厂商</TableCell><TableCell>接入</TableCell><TableCell>状态</TableCell><TableCell>推理通道</TableCell><TableCell>账号</TableCell><TableCell>默认模型</TableCell><TableCell>工具</TableCell><TableCell>多模态</TableCell></TableRow></TableHead>
+              <TableHead>
+                <TableRow>
+                  <TableCell>厂商名称</TableCell>
+                  <TableCell>接入开关</TableCell>
+                  <TableCell>健康状态</TableCell>
+                  <TableCell>推理通道</TableCell>
+                  <TableCell>可用账号</TableCell>
+                  <TableCell>绑定模型</TableCell>
+                  <TableCell>工具调用</TableCell>
+                  <TableCell>多模态能力</TableCell>
+                </TableRow>
+              </TableHead>
               <TableBody>
-                {(catalog.isLoading || runtime.isLoading || models.isLoading) && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5 }}><CircularProgress size={24} /></TableCell></TableRow>}
-                {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.map((row) => (
-                  <TableRow key={row.id} hover>
-                    <TableCell><Typography sx={{ fontWeight: 700, fontSize: 13 }}>{row.displayName}</Typography></TableCell>
-                    <TableCell>
-                      <Switch
-                        size="small"
-                        checked={row.enabled}
-                        disabled={!row.installed || (toggle.isPending && toggle.variables?.id === row.id)}
-                        onChange={(_, enabled) => {
-                          if (!enabled && !window.confirm(`拔出 ${row.displayName}？新请求和后台任务会立即停止。`)) return;
-                          toggle.mutate({ id: row.id, enabled });
-                        }}
-                        slotProps={{ input: { "aria-label": `${row.displayName} 接入状态` } }}
-                      />
+                {(catalog.isLoading || runtime.isLoading || models.isLoading) && (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                      <CircularProgress size={24} thickness={4} />
                     </TableCell>
-                    <TableCell><Chip size="small" variant="outlined" color={row.available ? "success" : "default"} label={!row.enabled ? "已拔出" : row.available ? "可用" : row.configured ? "待账号" : "待配置"} /></TableCell>
-                    <TableCell><TransportSelector row={row} disabled={transportMode.isPending} onChange={(mode) => transportMode.mutate({ id: row.id, mode })} /></TableCell>
-                    <TableCell><Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{row.enabledAccountCount} / {row.accountCount}</Typography></TableCell>
-                    <TableCell><Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{row.models.join(", ") || "-"}</Typography></TableCell>
-                    <TableCell>{formatCapability(row.capabilities.FUNCTION_TOOLS)}</TableCell>
-                    <TableCell>{hasMultimodal(row.capabilities) ? "支持" : "文本"}</TableCell>
                   </TableRow>
-                ))}
-                {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.length === 0 && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5, color: "text.secondary" }}>等待后端厂商目录</TableCell></TableRow>}
+                )}
+                {!catalog.isLoading &&
+                  !runtime.isLoading &&
+                  !models.isLoading &&
+                  rows.map((row) => (
+                    <TableRow key={row.id} hover>
+                      <TableCell>
+                        <Typography sx={{ fontWeight: 650, fontSize: 13.5, color: "text.primary" }}>
+                          {row.displayName}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Switch
+                          size="small"
+                          checked={row.enabled}
+                          disabled={!row.installed || (toggle.isPending && toggle.variables?.id === row.id)}
+                          onChange={(_, enabled) => {
+                            if (!enabled && !window.confirm(`拔出 ${row.displayName}？新请求和后台任务会立即停止。`))
+                              return;
+                            toggle.mutate({ id: row.id, enabled });
+                          }}
+                          slotProps={{ input: { "aria-label": `${row.displayName} 接入状态` } }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          color={
+                            !row.enabled
+                              ? "default"
+                              : row.available
+                              ? "success"
+                              : row.configured
+                              ? "warning"
+                              : "default"
+                          }
+                          label={
+                            !row.enabled
+                              ? "已拔出"
+                              : row.available
+                              ? "在线"
+                              : row.configured
+                              ? "待就绪账号"
+                              : "待配置"
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TransportSelector
+                          row={row}
+                          disabled={transportMode.isPending}
+                          onChange={(mode) => transportMode.mutate({ id: row.id, mode })}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography
+                          sx={{
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: row.enabledAccountCount > 0 ? "text.primary" : "text.secondary",
+                          }}
+                        >
+                          {row.enabledAccountCount} / {row.accountCount}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography
+                          sx={{
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                            fontSize: 12,
+                            color: "text.secondary",
+                            maxWidth: 180,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={row.models.join(", ") || "-"}
+                        >
+                          {row.models.join(", ") || "-"}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
+                          {formatCapability(row.capabilities.FUNCTION_TOOLS)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={hasMultimodal(row.capabilities) ? "支持模态" : "仅文本"}
+                          color={hasMultimodal(row.capabilities) ? "info" : "default"}
+                          sx={{ height: 22, fontSize: 11 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                      暂无厂商目录数据
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
-        </Paper>
+        </DataSurface>
 
+        {/* 右侧：运行面摘要与调度保护 */}
         <Stack spacing={2.5}>
-          <Paper variant="outlined">
-            <Box sx={{ px: 2, py: 1.75 }}><Typography variant="h6">运行面摘要</Typography></Box>
-            <Divider />
-            <Stack divider={<Divider flexItem />}>
-              <ResourceRow name="启用账号" detail="当前参与推理路由" status={enabledAccounts.toLocaleString("zh-CN")} />
-              <ResourceRow name="已编目模型" detail="所有已接入厂商" status={modelRows.length.toLocaleString("zh-CN")} />
-              <ResourceRow name="运行时不可用" detail="目录或探针已判定不可用" status={modelRows.filter((model) => model.runtime.status === "UNAVAILABLE").length.toLocaleString("zh-CN")} />
+          {/* 运行面摘要 */}
+          <Paper
+            variant="outlined"
+            sx={{
+              borderRadius: "14px",
+              borderColor: "rgba(15, 23, 42, 0.08)",
+              overflow: "hidden",
+              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.03)",
+            }}
+          >
+            <Box sx={{ px: 2.25, py: 1.75, bgcolor: "rgba(248, 250, 252, 0.6)" }}>
+              <Typography variant="h6" sx={{ fontSize: 14, fontWeight: 700 }}>
+                集群运行面摘要
+              </Typography>
+            </Box>
+            <Divider sx={{ borderColor: "divider" }} />
+            <Stack divider={<Divider flexItem sx={{ borderColor: "divider" }} />}>
+              <ResourceRow
+                name="启用账号"
+                detail="当前参与推理轮询与租约池"
+                status={enabledAccounts.toLocaleString("zh-CN")}
+              />
+              <ResourceRow
+                name="已编目模型"
+                detail="全网所有可用 Provider 模型"
+                status={modelRows.length.toLocaleString("zh-CN")}
+              />
+              <ResourceRow
+                name="运行时不可用"
+                detail="经实时健康探针判定"
+                status={modelRows
+                  .filter((model) => model.runtime.status === "UNAVAILABLE")
+                  .length.toLocaleString("zh-CN")}
+                highlight={modelRows.some((model) => model.runtime.status === "UNAVAILABLE")}
+              />
             </Stack>
           </Paper>
-          <Paper variant="outlined">
-            <Box sx={{ px: 2, py: 1.75 }}><Typography variant="h6">调度保护</Typography></Box>
-            <Divider />
+
+          {/* 调度保护 */}
+          <Paper
+            variant="outlined"
+            sx={{
+              borderRadius: "14px",
+              borderColor: "rgba(15, 23, 42, 0.08)",
+              overflow: "hidden",
+              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.03)",
+            }}
+          >
+            <Box sx={{ px: 2.25, py: 1.75, bgcolor: "rgba(248, 250, 252, 0.6)", display: "flex", alignItems: "center", gap: 1 }}>
+              <ShieldOutlined sx={{ fontSize: 17, color: "text.secondary" }} />
+              <Typography variant="h6" sx={{ fontSize: 14, fontWeight: 700 }}>
+                高可用调度防护策略
+              </Typography>
+            </Box>
+            <Divider sx={{ borderColor: "divider" }} />
             <Box sx={{ p: 2 }}>
-              <Stack spacing={1.25}>
-                <Protection label="确定性抖动" />
-                <Protection label="厂商级熔断" />
-                <Protection label="账号统一租约" />
-                <Protection label="到期队列 generation 去重" />
+              <Stack spacing={1.5}>
+                <Protection label="确定性抖动 (Deterministic Jitter)" />
+                <Protection label="厂商级自适应熔断 (Circuit Breaker)" />
+                <Protection label="账号统一分布式租约 (Unified Lease)" />
+                <Protection label="到期队列 generation 去重防护" />
               </Stack>
             </Box>
           </Paper>
@@ -157,27 +360,167 @@ export function Overview() {
   );
 }
 
-function StatusMetric({ label, value, healthy }: { label: string; value: string; healthy?: boolean }) {
-  const Icon = healthy ? CheckCircleOutlined : HubOutlined;
+// Stripe 风格现代指标卡片
+function StatusMetricCard({
+  label,
+  value,
+  caption,
+  Icon,
+  healthy,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+  Icon: React.ElementType;
+  healthy?: boolean;
+}) {
   return (
-    <Box sx={{ px: 2.25, py: 2, minHeight: 86, display: "flex", alignItems: "center", gap: 1.5, borderRight: { sm: 1 }, borderBottom: { xs: 1, sm: 0 }, borderColor: "divider", "&:last-child": { borderRight: 0, borderBottom: 0 } }}>
-      <Box sx={{ width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: 1, bgcolor: healthy ? "#e5f4ee" : "#eef1f2", color: healthy ? "success.main" : "text.secondary" }}><Icon sx={{ fontSize: 20 }} /></Box>
-      <Box><Typography color="text.secondary" sx={{ fontSize: 11.5 }}>{label}</Typography><Typography sx={{ fontSize: 18, fontWeight: 750, mt: 0.15 }}>{value}</Typography></Box>
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2.5,
+        borderRadius: "14px",
+        borderColor: "rgba(15, 23, 42, 0.08)",
+        bgcolor: "background.paper",
+        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03), 0 4px 14px -2px rgba(15, 23, 42, 0.02)",
+        position: "relative",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        minHeight: 110,
+        transition: "transform 140ms ease, box-shadow 140ms ease",
+        "&:hover": {
+          transform: "translateY(-1px)",
+          boxShadow: "0 2px 4px rgba(15, 23, 42, 0.04), 0 8px 20px -2px rgba(15, 23, 42, 0.04)",
+        },
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <Typography
+          sx={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: "text.secondary",
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {label}
+        </Typography>
+        <Box
+          sx={{
+            width: 32,
+            height: 32,
+            borderRadius: "8px",
+            bgcolor: healthy ? tokens.status.emerald.light : tokens.canvasSubtle,
+            color: healthy ? tokens.status.emerald.main : tokens.text.secondary,
+            display: "grid",
+            placeItems: "center",
+          }}
+        >
+          <Icon sx={{ fontSize: 18 }} />
+        </Box>
+      </Box>
+
+      <Box sx={{ mt: 1.5 }}>
+        <Typography
+          sx={{
+            fontSize: "1.75rem",
+            fontWeight: 750,
+            lineHeight: 1.15,
+            letterSpacing: "-0.03em",
+            color: "text.primary",
+          }}
+        >
+          {value}
+        </Typography>
+        <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", mt: 0.5 }}>
+          {healthy ? (
+            <Box
+              sx={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                bgcolor: tokens.status.emerald.main,
+                boxShadow: "0 0 0 2px rgba(16, 185, 129, 0.2)",
+              }}
+            />
+          ) : null}
+          <Typography sx={{ fontSize: 11.5, color: "text.secondary", fontWeight: 450 }}>
+            {caption}
+          </Typography>
+        </Stack>
+      </Box>
+    </Paper>
+  );
+}
+
+function ResourceRow({
+  name,
+  detail,
+  status,
+  highlight,
+}: {
+  name: string;
+  detail: string;
+  status: string;
+  highlight?: boolean;
+}) {
+  return (
+    <Box sx={{ px: 2.25, py: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 650, color: "text.primary" }}>{name}</Typography>
+        <Typography color="text.secondary" sx={{ fontSize: 11.5 }}>
+          {detail}
+        </Typography>
+      </Box>
+      <Typography
+        sx={{
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 13,
+          fontWeight: 700,
+          color: highlight ? "error.main" : "text.primary",
+        }}
+      >
+        {status}
+      </Typography>
     </Box>
   );
 }
 
-function ResourceRow({ name, detail, status }: { name: string; detail: string; status: string }) {
-  return <Box sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}><Box sx={{ flex: 1 }}><Typography sx={{ fontSize: 13, fontWeight: 650 }}>{name}</Typography><Typography color="text.secondary" sx={{ fontSize: 11.5 }}>{detail}</Typography></Box><Typography color="text.secondary" sx={{ fontSize: 11.5 }}>{status}</Typography></Box>;
-}
-
 function Protection({ label }: { label: string }) {
-  return <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><CheckCircleOutlined color="success" sx={{ fontSize: 17 }} /><Typography sx={{ fontSize: 12.5 }}>{label}</Typography></Stack>;
+  return (
+    <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
+      <CheckCircleRounded sx={{ fontSize: 17, color: tokens.status.emerald.main }} />
+      <Typography sx={{ fontSize: 13, fontWeight: 500, color: "text.primary" }}>{label}</Typography>
+    </Stack>
+  );
 }
 
-function groupProviders(runtime: ProviderRuntime[], providers: ProviderDescriptor[], models: ProviderModel[]) {
+function groupProviders(
+  runtime: ProviderRuntime[],
+  providers: ProviderDescriptor[],
+  models: ProviderModel[]
+) {
   const catalog = new Map(providers.map((provider) => [provider.id, provider]));
-  const rows = new Map<string, { id: string; displayName: string; configured: boolean; installed: boolean; enabled: boolean; accountCount: number; enabledAccountCount: number; available: boolean; models: string[]; capabilities: Record<string, string>; requestedTransportMode: ProviderTransportMode; primaryTransportMode: Exclude<ProviderTransportMode, "AUTO">; supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">> }>();
+  const rows = new Map<
+    string,
+    {
+      id: string;
+      displayName: string;
+      configured: boolean;
+      installed: boolean;
+      enabled: boolean;
+      accountCount: number;
+      enabledAccountCount: number;
+      available: boolean;
+      models: string[];
+      capabilities: Record<string, string>;
+      requestedTransportMode: ProviderTransportMode;
+      primaryTransportMode: Exclude<ProviderTransportMode, "AUTO">;
+      supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">>;
+    }
+  >();
   for (const provider of runtime) {
     const active = catalog.get(provider.id);
     rows.set(provider.id, {
@@ -205,31 +548,52 @@ function groupProviders(runtime: ProviderRuntime[], providers: ProviderDescripto
   return [...rows.values()];
 }
 
-function TransportSelector({ row, disabled, onChange }: {
-  row: { requestedTransportMode: ProviderTransportMode; supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">> };
+function TransportSelector({
+  row,
+  disabled,
+  onChange,
+}: {
+  row: {
+    requestedTransportMode: ProviderTransportMode;
+    supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">>;
+  };
   disabled: boolean;
   onChange: (mode: ProviderTransportMode) => void;
 }) {
   const options: ProviderTransportMode[] = ["AUTO", ...row.supportedTransportModes];
-  return <Select
-    size="small"
-    variant="standard"
-    value={row.requestedTransportMode}
-    disabled={disabled}
-    onChange={(event) => onChange(event.target.value as ProviderTransportMode)}
-    sx={{ minWidth: 112, fontSize: 12 }}
-    inputProps={{ "aria-label": "推理通道" }}
-  >
-    {[...new Set(options)].map((mode) => <MenuItem key={mode} value={mode} sx={{ fontSize: 12 }}>{mode === "AUTO" ? "自动（API优先）" : mode === "API" ? "API" : "Runtime"}</MenuItem>)}
-  </Select>;
+  return (
+    <Select
+      size="small"
+      variant="outlined"
+      value={row.requestedTransportMode}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value as ProviderTransportMode)}
+      sx={{
+        minWidth: 120,
+        height: 30,
+        fontSize: 12,
+        borderRadius: "6px",
+        "& .MuiSelect-select": { py: 0.5, px: 1 },
+      }}
+      inputProps={{ "aria-label": "推理通道" }}
+    >
+      {[...new Set(options)].map((mode) => (
+        <MenuItem key={mode} value={mode} sx={{ fontSize: 12.5 }}>
+          {mode === "AUTO" ? "自动（API优先）" : mode === "API" ? "API 直接通道" : "Runtime 浏览器"}
+        </MenuItem>
+      ))}
+    </Select>
+  );
 }
 
 function formatCapability(level?: string) {
-  if (level === "NATIVE") return "原生";
-  if (level === "EMULATED") return "模拟";
-  return "不支持";
+  if (level === "NATIVE") return "原生支持";
+  if (level === "EMULATED") return "模拟支持";
+  return "暂不支持";
 }
 
 function hasMultimodal(capabilities: Record<string, string>) {
-  return ["IMAGE_INPUT", "AUDIO_INPUT", "VIDEO_INPUT", "FILE_INPUT"].some((key) => capabilities[key] === "NATIVE");
+  return ["IMAGE_INPUT", "AUDIO_INPUT", "VIDEO_INPUT", "FILE_INPUT"].some(
+    (key) => capabilities[key] === "NATIVE"
+  );
 }

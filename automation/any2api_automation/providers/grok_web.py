@@ -1,11 +1,13 @@
-from __future__ import annotations
-
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ..lifecycle.account import credential
+from ..lifecycle.account import credential, flow_max_attempts, prepare_registration
+from ..lifecycle.browser import run_browser_flow
+from ..lifecycle.proxy import proxy_attempt_payload
+from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import CAMOUFOX_BROWSER_RUNTIME, AutomationProvider, AutomationProviderManifest
-from .grok_web_browser import GrokWebOfficialBrowserTransport
+from .grok_web_browser import GrokWebOfficialBrowserTransport, register_grok_web
 from .runtime_rules import parse_runtime_plan
 from .sso_channel import probe_result
 from .transport_support import transport_frame, transport_proxy_lease
@@ -20,7 +22,7 @@ class GrokWebAutomationProvider(AutomationProvider):
         fallback_backend="patchright",
         isolation="process",
         challenge_types=("cloudflare",),
-        operations=("keepalive",),
+        operations=("register", "keepalive"),
         realtime=True,
         inference_transport=True,
         inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
@@ -37,6 +39,61 @@ class GrokWebAutomationProvider(AutomationProvider):
             transport = GrokWebOfficialBrowserTransport(base_url)
             self._transports[base_url] = transport
         return transport
+
+    async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
+        trace = RegistrationTrace(self.manifest.id)
+        try:
+            mail, mailbox, password = await prepare_registration(payload)
+            trace.mark(RegistrationStage.MAILBOX_CREATED)
+            attempts = flow_max_attempts(payload, 2)
+            last_failure: Exception | None = None
+            for attempt in range(1, attempts + 1):
+                try:
+                    flow_payload = proxy_attempt_payload(
+                        {**payload, "proxy_check_url": str(payload.get("base_url") or _BASE_URL)},
+                        identity=mailbox.address,
+                        attempt=attempt,
+                    )
+                    if flow_payload.get("dynamic_proxy") or flow_payload.get("proxy_pool"):
+                        flow_payload["strict_proxy_affinity"] = True
+                    result = await asyncio.to_thread(
+                        run_browser_flow,
+                        lambda page, context, backend, proxy_url, _mail=mail, _mailbox=mailbox, _password=password, _trace=trace, _flow=flow_payload: (
+                            register_grok_web(
+                                page,
+                                context,
+                                backend,
+                                _mail,
+                                _mailbox,
+                                _password,
+                                _flow,
+                                _trace,
+                            )
+                        ),
+                        preferred=self.manifest.browser_backend,
+                        fallback=self.manifest.fallback_backend,
+                        payload=flow_payload,
+                        context_profile=self.browser_context_profile(),
+                        launch_profile=self.browser_launch_profile(),
+                    )
+                    response = result.response()
+                    response.setdefault("metadata", {})["browser_attempt"] = attempt
+                    return response
+                except Exception as error:
+                    last_failure = error
+                    accepted = trace.current in {
+                        RegistrationStage.UPSTREAM_ACCEPTED.value,
+                        RegistrationStage.ACTIVATED.value,
+                        RegistrationStage.CREDENTIAL_CAPTURED.value,
+                    }
+                    if accepted or attempt >= attempts:
+                        raise
+                    await asyncio.sleep(2.0)
+            if last_failure is not None:
+                raise last_failure
+            raise RuntimeError("Grok Web registration attempts exhausted")
+        except Exception as error:
+            raise trace.failure(error) from error
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)

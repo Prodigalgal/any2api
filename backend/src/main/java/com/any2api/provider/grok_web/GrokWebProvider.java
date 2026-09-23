@@ -49,7 +49,8 @@ public final class GrokWebProvider implements InferenceProvider {
             ProviderCapability.STORED_RESPONSES, SupportLevel.NATIVE,
             ProviderCapability.IMAGE_GENERATION, SupportLevel.NATIVE,
             ProviderCapability.IMAGE_EDITING, SupportLevel.NATIVE,
-            ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE),
+            ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
+            ProviderCapability.REGISTRATION, SupportLevel.NATIVE),
         Map.of(RandomModelRole.TOP_TEXT, List.of(
             "grok-chat-heavy", "grok-chat-expert", "grok-chat-fast")), true);
     private static final Duration RESPONSE_STATE_TTL = Duration.ofHours(24);

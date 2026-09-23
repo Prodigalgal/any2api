@@ -644,6 +644,14 @@ function ImportDialog({
   const [email, setEmail] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [credential, setCredential] = useState("{\n  \"token\": \"\"\n}");
+  const handleProviderChange = (newProvider: string) => {
+    setProviderId(newProvider);
+    if (newProvider === "grok_web" && (!credential || credential.includes('"token": ""'))) {
+      setCredential('{\n  "cookie": "sso=...; sso-rw=..."\n}');
+    } else if (newProvider !== "grok_web" && credential.includes('"cookie": "sso=')) {
+      setCredential('{\n  "token": ""\n}');
+    }
+  };
   const mutation = useMutation({
     mutationFn: () => {
       let parsed: unknown;
@@ -668,7 +676,7 @@ function ImportDialog({
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
           {mutation.error ? <Alert severity="error">{mutation.error.message}</Alert> : null}
-          <TextField select label="厂商" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
+          <TextField select label="厂商" value={providerId} onChange={(event) => handleProviderChange(event.target.value)}>
             {providers.map(([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
           </TextField>
           <TextField label="上游账号 ID" value={externalId} onChange={(event) => setExternalId(event.target.value)} />
@@ -686,6 +694,7 @@ function ImportDialog({
             onChange={(event) => setCredential(event.target.value)}
             multiline
             minRows={8}
+            helperText={providerId === "grok_web" ? "Grok Web 支持填入浏览器登录后的 Cookie（包含 sso、sso-rw）" : undefined}
             slotProps={{ htmlInput: { spellCheck: false } }}
             sx={{ "& textarea": { fontFamily: "ui-monospace, monospace", fontSize: 12 } }}
           />

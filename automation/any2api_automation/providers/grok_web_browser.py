@@ -4,12 +4,16 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections.abc import AsyncIterator
 from http.cookies import CookieError, SimpleCookie
 from typing import Any
 from uuid import uuid4
 
 from ..config import settings as core_settings
+from ..lifecycle.browser import BrowserResult
+from ..lifecycle.mail import Mailbox, TempMailClient
+from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import reject_raw_request
 from .multimodal import text_content
 from .official_browser import OfficialBrowserRuntime, OfficialBrowserSession
@@ -540,3 +544,268 @@ def _credential_cookies(credential: dict[str, Any]) -> list[dict[str, Any]]:
         }
         for name, value in values.items()
     ]
+
+
+def _visible(page: Any, selectors: tuple[str, ...], timeout_ms: int = 5_000) -> Any | None:
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return locator
+        except Exception:  # noqa: BLE001,S112 - try next selector
+            continue
+    return None
+
+
+def _wait_for_challenge_if_present(page: Any, max_wait_seconds: int = 15) -> None:
+    try:
+        deadline = time.monotonic() + max_wait_seconds
+        while time.monotonic() < deadline:
+            challenge_frame = page.locator(
+                'iframe[src*="cloudflare" i], iframe[src*="turnstile" i]'
+            ).first
+            if not challenge_frame.is_visible():
+                break
+            page.wait_for_timeout(1000)
+    except Exception:  # noqa: BLE001,S110 - challenge wait fallback
+        pass
+
+
+def register_grok_web(
+    page: Any,
+    context: Any,
+    backend: str,
+    mail: TempMailClient,
+    mailbox: Mailbox,
+    password: str,
+    payload: dict[str, Any],
+    trace: RegistrationTrace,
+) -> BrowserResult:
+    del backend
+    base_url = str(payload.get("base_url") or "https://grok.com").rstrip("/")
+    signup_url = str(payload.get("signup_url") or f"{base_url}/").strip()
+
+    trace.mark(RegistrationStage.BROWSER_LAUNCHED)
+    page.goto(signup_url, wait_until="domcontentloaded", timeout=45_000)
+    page.wait_for_timeout(2000)
+
+    email_input = _visible(
+        page,
+        (
+            'input[type="email"]',
+            'input[placeholder*="email" i]',
+            'input[name*="email" i]',
+            'input[autocomplete="email"]',
+        ),
+        timeout_ms=5_000,
+    )
+    if email_input is None:
+        signup_button = _visible(
+            page,
+            (
+                'a:has-text("Sign up")',
+                'button:has-text("Sign up")',
+                'a:has-text("Sign in")',
+                'button:has-text("Sign in")',
+                '[role="button"]:has-text("Sign up")',
+                'button:has-text("Get started")',
+            ),
+            timeout_ms=5_000,
+        )
+        if signup_button is not None:
+            signup_button.click()
+            page.wait_for_timeout(2000)
+        email_input = _visible(
+            page,
+            (
+                'input[type="email"]',
+                'input[placeholder*="email" i]',
+                'input[name*="email" i]',
+                'input[autocomplete="email"]',
+            ),
+            timeout_ms=5_000,
+        )
+
+    if email_input is None:
+        page.goto("https://accounts.x.ai/sign-up", wait_until="domcontentloaded", timeout=30_000)
+        page.wait_for_timeout(2000)
+        email_input = _visible(
+            page,
+            (
+                'input[type="email"]',
+                'input[placeholder*="email" i]',
+                'input[name*="email" i]',
+                'input[autocomplete="email"]',
+            ),
+            timeout_ms=5_000,
+        )
+
+    if email_input is None:
+        raise RuntimeError("Grok Web email registration form is unavailable")
+
+    trace.mark(RegistrationStage.FORM_READY)
+    email_input.fill(mailbox.address)
+    page.wait_for_timeout(500)
+
+    submit_button = _visible(
+        page,
+        (
+            'button[type="submit"]',
+            'button:has-text("Continue")',
+            'button:has-text("Sign up")',
+            'button:has-text("Next")',
+            'button:has-text("Submit")',
+        ),
+        timeout_ms=3_000,
+    )
+    if submit_button is not None:
+        submit_button.click()
+    else:
+        email_input.press("Enter")
+
+    trace.mark(RegistrationStage.FORM_SUBMITTED)
+    page.wait_for_timeout(2000)
+
+    _wait_for_challenge_if_present(page)
+    trace.mark(RegistrationStage.CHALLENGE_CLEARED)
+
+    trace.mark(RegistrationStage.OTP_UI_VISIBLE)
+    code = mail.wait_for_code(
+        mailbox,
+        pattern=r"\b\d{6}\b",
+        timeout_seconds=float(payload.get("mail_timeout_seconds") or 60),
+    )
+    trace.mark(RegistrationStage.OTP_RECEIVED)
+
+    otp_input = _visible(
+        page,
+        (
+            'input[name*="code" i]',
+            'input[autocomplete="one-time-code"]',
+            'input[placeholder*="code" i]',
+            'input[type="text"][maxlength="6"]',
+            'input[type="text"]',
+        ),
+        timeout_ms=10_000,
+    )
+    if otp_input is not None:
+        otp_input.fill(code)
+        page.wait_for_timeout(500)
+        otp_submit = _visible(
+            page,
+            (
+                'button[type="submit"]',
+                'button:has-text("Verify")',
+                'button:has-text("Continue")',
+                'button:has-text("Confirm")',
+            ),
+            timeout_ms=3_000,
+        )
+        if otp_submit is not None:
+            otp_submit.click()
+        else:
+            otp_input.press("Enter")
+
+    page.wait_for_timeout(3000)
+
+    password_input = _visible(
+        page,
+        (
+            'input[type="password"]',
+            'input[name*="password" i]',
+        ),
+        timeout_ms=3_000,
+    )
+    if password_input is not None:
+        password_input.fill(password)
+        page.wait_for_timeout(500)
+        pw_submit = _visible(
+            page,
+            (
+                'button[type="submit"]',
+                'button:has-text("Continue")',
+                'button:has-text("Save")',
+                'button:has-text("Next")',
+            ),
+            timeout_ms=3_000,
+        )
+        if pw_submit is not None:
+            pw_submit.click()
+        else:
+            password_input.press("Enter")
+        page.wait_for_timeout(2000)
+
+    terms_button = _visible(
+        page,
+        (
+            'button:has-text("Accept")',
+            'button:has-text("I agree")',
+            'button:has-text("Agree")',
+            'button:has-text("Continue")',
+        ),
+        timeout_ms=3_000,
+    )
+    if terms_button is not None:
+        try:
+            terms_button.click()
+            page.wait_for_timeout(1000)
+        except Exception:  # noqa: BLE001,S110 - terms prompt may not appear
+            pass
+
+    trace.mark(RegistrationStage.ACTIVATED)
+
+    try:
+        cookies_list = context.cookies()
+    except Exception:  # noqa: BLE001 - cookies fallback
+        cookies_list = []
+
+    sso = ""
+    sso_rw = ""
+    cookie_dict: dict[str, str] = {}
+    for c in cookies_list:
+        name = str(c.get("name") or "").strip()
+        val = str(c.get("value") or "").strip()
+        if name:
+            cookie_dict[name] = val
+        if name == "sso":
+            sso = val
+        elif name in {"sso-rw", "sso_rw"}:
+            sso_rw = val
+
+    cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+
+    user_id = ""
+    try:
+        session_info = page.evaluate(_SESSION_REQUEST)
+        if isinstance(session_info, dict):
+            body_text = str(session_info.get("body") or "")
+            parsed = json.loads(body_text) if body_text else {}
+            user_id = str(parsed.get("session", {}).get("userId") or "").strip()
+    except Exception:  # noqa: BLE001,S110 - session evaluate fallback
+        pass
+
+    trace.mark(RegistrationStage.CREDENTIAL_CAPTURED)
+
+    credential_map: dict[str, Any] = {
+        "sso": sso,
+        "sso-rw": sso_rw,
+        "cookie": cookie_str,
+        "cookies": cookie_dict,
+        "email": mailbox.address,
+        "password": password,
+    }
+
+    metadata_map: dict[str, Any] = {
+        "userId": user_id,
+        "tier": "basic",
+        "registration_source": "grok_web",
+        **trace.metadata(),
+    }
+
+    return BrowserResult(
+        external_id=user_id or mailbox.address,
+        email=mailbox.address,
+        credential=credential_map,
+        metadata=metadata_map,
+        ready_for_inference=True,
+    )

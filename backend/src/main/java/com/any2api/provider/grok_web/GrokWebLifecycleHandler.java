@@ -27,7 +27,7 @@ final class GrokWebLifecycleHandler implements ProviderLifecycleHandler {
     @Override public String providerId() { return "grok_web"; }
 
     @Override public Set<AutomationOperation> operations() {
-        return Set.of(AutomationOperation.KEEPALIVE);
+        return Set.of(AutomationOperation.KEEPALIVE, AutomationOperation.REGISTER);
     }
 
     @Override
@@ -37,12 +37,13 @@ final class GrokWebLifecycleHandler implements ProviderLifecycleHandler {
         Map<String, Object> accountMetadata,
         Map<String, Object> proxyPool
     ) {
-        if (operation != AutomationOperation.KEEPALIVE) {
+        if (operation != AutomationOperation.KEEPALIVE && operation != AutomationOperation.REGISTER) {
             return Mono.error(new IllegalArgumentException(
                 "unsupported Grok Web local lifecycle operation: " + operation.externalName()));
         }
+        var action = operation == AutomationOperation.REGISTER ? "register" : "keepalive";
         return transport.request(
-                providerId(), "keepalive", semanticCommands.models(), credential,
+                providerId(), action, semanticCommands.models(), credential,
                 proxyPool, affinity(accountMetadata))
             .map(response -> {
                 var body = response.body() == null ? "" : response.body();

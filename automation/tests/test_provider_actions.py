@@ -212,6 +212,7 @@ def test_api_action_matrix_matches_declared_api_mode() -> None:
         "arena": {"model_discovery", "chat"},
         "deepseek": {"model_discovery", "chat"},
         "glm": {"model_discovery", "chat"},
+        "grok_web": {"model_discovery", "chat"},
         "longcat": {"chat"},
         "mimo": {"model_discovery", "chat"},
         "minmax": {

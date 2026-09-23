@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
@@ -140,9 +141,14 @@ public final class GrokWebProvider implements InferenceProvider {
         var proxyPool = proxyPools.runtimeForProvider(
             manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
         var status = new AtomicInteger(-1);
-        return transport.stream(
+        var upstream = context.transportMode() == ProviderTransportMode.API
+            ? transport.stream(
                 manifest().id(), "chat", command, account.credential(), proxyPool,
-                affinity(account.metadata()))
+                affinity(account.metadata()), Map.of(), context.transportMode())
+            : transport.stream(
+                manifest().id(), "chat", command, account.credential(), proxyPool,
+                affinity(account.metadata()), Map.of());
+        return upstream
             .handle((frame, sink) -> {
                 var type = frame.path("type").asText("");
                 if ("status".equals(type)) {

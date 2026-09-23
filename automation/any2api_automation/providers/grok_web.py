@@ -6,7 +6,12 @@ from ..lifecycle.account import credential, flow_max_attempts, prepare_registrat
 from ..lifecycle.browser import run_browser_flow
 from ..lifecycle.proxy import proxy_attempt_payload
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
-from .base import CAMOUFOX_BROWSER_RUNTIME, AutomationProvider, AutomationProviderManifest
+from .base import (
+    API_TRANSPORT,
+    CAMOUFOX_BROWSER_RUNTIME,
+    AutomationProvider,
+    AutomationProviderManifest,
+)
 from .grok_web_browser import GrokWebOfficialBrowserTransport, register_grok_web
 from .runtime_rules import parse_runtime_plan
 from .sso_channel import probe_result
@@ -26,11 +31,17 @@ class GrokWebAutomationProvider(AutomationProvider):
         realtime=True,
         inference_transport=True,
         inference_runtime=CAMOUFOX_BROWSER_RUNTIME,
+        inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("model_discovery", "chat"),
     )
 
     def __init__(self) -> None:
         self._transports: dict[str, GrokWebOfficialBrowserTransport] = {}
+
+    def action_bindings(self):
+        from .grok_web_api_actions import grok_web_api_action_bindings
+
+        return grok_web_api_action_bindings(self)
 
     def _transport(self, payload: dict[str, Any]) -> GrokWebOfficialBrowserTransport:
         base_url = str(payload.get("base_url") or _BASE_URL).rstrip("/")

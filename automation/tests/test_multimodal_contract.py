@@ -10,8 +10,6 @@ import pytest
 
 from any2api_automation.providers.deepseek_browser import build_deepseek_request
 from any2api_automation.providers.glm_runtime import build_glm_command
-from any2api_automation.providers.grok_browser import build_grok_request
-from any2api_automation.providers.grok_console_browser import build_grok_console_request
 from any2api_automation.providers.grok_web_browser import build_grok_web_request
 from any2api_automation.providers.longcat_browser import _UPLOAD_MEDIA as LONGCAT_UPLOAD_MEDIA
 from any2api_automation.providers.longcat_browser import (
@@ -72,8 +70,6 @@ def test_shared_content_contract_covers_image_audio_video_and_file_sources() -> 
     [
         lambda command: build_deepseek_request(command, "session-1"),
         lambda command: build_glm_command(command, "user@example.test", timestamp_ms=1),
-        build_grok_request,
-        build_grok_console_request,
         build_grok_web_request,
         build_longcat_request,
         build_mimo_chat_request,
@@ -203,55 +199,6 @@ def test_text_only_browser_adapters_fail_closed_instead_of_dropping_media(
         builder(command)
 
 
-@pytest.mark.parametrize("builder", [build_grok_request, build_grok_console_request])
-@pytest.mark.parametrize(
-    "media_block",
-    [
-        {"type": "input_audio", "input_audio": {"data": "YQ==", "format": "wav"}},
-        {"type": "input_video", "input_video": {"video_url": "https://example.test/a.mp4"}},
-    ],
-)
-def test_xai_browser_adapters_reject_media_without_a_supported_payload(
-    builder,
-    media_block: dict[str, object],
-) -> None:
-    with pytest.raises(ValueError, match="(audio|video)"):
-        builder(_command([{"role": "user", "content": [media_block]}]))
-
-
-def test_xai_browser_adapters_preserve_image_and_file_blocks() -> None:
-    command = _command(
-        [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "inspect"},
-                    {"type": "input_image", "image_url": "https://example.test/a.png"},
-                    {
-                        "type": "input_file",
-                        "input_file": {
-                            "file_url": "https://example.test/a.pdf",
-                            "filename": "a.pdf",
-                        },
-                    },
-                ],
-            }
-        ]
-    )
-
-    for builder in (build_grok_request, build_grok_console_request):
-        body = builder(command)
-        content = body["input"][0]["content"]
-        assert [item["type"] for item in content] == [
-            "input_text",
-            "input_image",
-            "input_file",
-        ]
-        assert content[1]["image_url"] == "https://example.test/a.png"
-        assert content[2]["file_url"] == "https://example.test/a.pdf"
-        assert content[2]["filename"] == "a.pdf"
-
-
 @pytest.mark.parametrize(
     ("provider", "builder", "supported"),
     [
@@ -261,8 +208,6 @@ def test_xai_browser_adapters_preserve_image_and_file_blocks() -> None:
             lambda command: build_glm_command(command, "user@example.test", timestamp_ms=1),
             set(),
         ),
-        ("grok", build_grok_request, {"image", "file"}),
-        ("grok_console", build_grok_console_request, {"image", "file"}),
         ("grok_web", build_grok_web_request, set()),
         (
             "longcat",

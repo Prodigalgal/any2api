@@ -20,7 +20,7 @@ class OfficialBrowserSemanticCommandFactoryTest {
             .put("enable_thinking", true);
         var message = mapper.createObjectNode().put("role", "user").put("content", "hello");
         var request = new CanonicalRequest(
-            "request-1", CanonicalRequest.Protocol.RESPONSES, "grok_console", "grok-4.3",
+            "request-1", CanonicalRequest.Protocol.RESPONSES, "grok_web", "grok-chat-fast",
             true, List.of(message), Map.of(), Map.of(), List.of(), Map.of(), raw);
 
         var command = factory.chat(request);

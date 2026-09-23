@@ -140,8 +140,6 @@ def test_all_inference_provider_manifests_use_camoufox_runtime() -> None:
         "deepseek",
         "arena",
         "glm",
-        "grok",
-        "grok_console",
         "grok_web",
         "longcat",
         "mimo",

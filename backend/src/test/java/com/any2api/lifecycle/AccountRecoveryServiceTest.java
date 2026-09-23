@@ -70,9 +70,9 @@ class AccountRecoveryServiceTest {
         var accounts = mock(AccountRepository.class);
         var providers = mock(ProviderRegistry.class);
         var schedules = mock(LifecycleScheduleService.class);
-        var failed = leased("grok_console", Map.of());
-        var provider = provider("grok_console", Map.of());
-        when(providers.require("grok_console"))
+        var failed = leased("unsupported_provider", Map.of());
+        var provider = provider("unsupported_provider", Map.of());
+        when(providers.require("unsupported_provider"))
             .thenReturn(provider);
 
         var scheduled = new AccountRecoveryService(

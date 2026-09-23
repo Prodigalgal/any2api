@@ -23,6 +23,15 @@ _MODEL_MODES = {
     "grok-chat-auto": "auto",
     "grok-chat-expert": "expert",
     "grok-chat-heavy": "heavy",
+    "grok-3": "fast",
+    "grok-3-mini": "fast",
+    "grok-3-fast": "fast",
+    "grok-2": "fast",
+    "grok-2-mini": "fast",
+    "grok-beta": "fast",
+    "grok-3-deepsearch": "heavy",
+    "grok-3-reasoning": "heavy",
+    "grok-3-expert": "expert",
 }
 _MODEL_IDS = (
     *tuple(_MODEL_MODES),

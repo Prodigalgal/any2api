@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.any2api"
-version = "0.19.1"
+version = "0.20.0"
 
 java {
     toolchain {
@@ -40,4 +40,3 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
-

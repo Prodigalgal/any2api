@@ -32,6 +32,6 @@ def test_browser_session_persists_only_cloudflare_context() -> None:
 
 
 def test_browser_session_does_not_create_empty_context_patch() -> None:
-    with BrowserSession(origin="https://console.x.ai", credential={}) as session:
+    with BrowserSession(origin="https://grok.com", credential={}) as session:
         assert session.credential_patch() is None
         assert "Chrome/136.0.0.0" in session.user_agent

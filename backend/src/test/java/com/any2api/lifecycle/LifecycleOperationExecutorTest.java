@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.any2api.observability.OperationContext;
-import com.any2api.provider.xai_identity.XaiLifecyclePayloadPolicy;
 import com.any2api.runtime.ProviderRuntimeRuleService;
 import com.any2api.settings.RuntimeSettingsService;
 import java.util.List;
@@ -94,33 +93,5 @@ class LifecycleOperationExecutorTest {
         verify(automation).execute(
             eq("mimo"), eq("keepalive"), payload.capture(), any(OperationContext.class));
         assertThat(payload.getValue()).containsEntry("runtime_plan", plan);
-    }
-
-    @Test
-    void forcesGrokSsoRefreshOnlyWhenRecoveryMetadataRequestsIt() {
-        var registry = mock(ProviderLifecycleRegistry.class);
-        var automation = mock(LifecycleAutomationClient.class);
-        var settings = mock(RuntimeSettingsService.class);
-        var runtimeRules = mock(ProviderRuntimeRuleService.class);
-        var mapper = new ObjectMapper();
-        when(registry.handler("grok", AutomationOperation.REAUTHENTICATE))
-            .thenReturn(Optional.empty());
-        when(automation.execute(
-            eq("grok"), eq("reauthenticate"), anyMap(), any(OperationContext.class)))
-            .thenReturn(Mono.just(mapper.createObjectNode().put("healthy", true)));
-
-        new LifecycleOperationExecutor(
-            registry, automation, settings, runtimeRules,
-            List.of(new XaiLifecyclePayloadPolicy()))
-            .execute("grok", "reauthenticate", mapper.createObjectNode(),
-                Map.of("xai_force_sso_refresh", true), Map.of())
-            .block();
-
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        var payload = (ArgumentCaptor<Map<String, Object>>) (ArgumentCaptor)
-            ArgumentCaptor.forClass(Map.class);
-        verify(automation).execute(
-            eq("grok"), eq("reauthenticate"), payload.capture(), any(OperationContext.class));
-        assertThat(payload.getValue()).containsEntry("force_sso_refresh", true);
     }
 }

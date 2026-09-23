@@ -23,7 +23,6 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.SupportLevel;
-import com.any2api.provider.xai_identity.XaiAccountDerivationPolicy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -178,41 +177,6 @@ class AccountManagementServiceTest {
         assertThat(detail.account().metadata()).containsEntry("inference_probe_status", "READY");
         assertThat(detail.credential()).isEqualTo(summary);
         verify(vault, never()).read(any(), any());
-    }
-
-    @Test
-    void grokSsoCreatesDisabledIndependentWebAndConsoleAccounts() {
-        var repository = mock(AccountRepository.class);
-        var vault = mock(CredentialVault.class);
-        var stored = new HashMap<String, AccountEntity>();
-        when(repository.findByProviderIdAndExternalId(any(), any())).thenAnswer(invocation ->
-            Optional.ofNullable(stored.get(invocation.getArgument(0) + ":" + invocation.getArgument(1))));
-        when(repository.save(any())).thenAnswer(invocation -> {
-            AccountEntity account = invocation.getArgument(0);
-            stored.put(account.getProviderId() + ":" + account.getExternalId(), account);
-            return account;
-        });
-        when(vault.store(any(), any(), any(), any())).thenAnswer(invocation ->
-            new DecryptedCredential("provider-session", 1, invocation.getArgument(3),
-                invocation.getArgument(2)));
-        var providers = ProviderRegistry.allEnabled(List.of(
-            provider("grok"), provider("grok_web"), provider("grok_console")));
-        var service = new AccountManagementService(repository, vault, providers,
-            mock(LifecycleScheduleService.class),
-            List.of(new XaiAccountDerivationPolicy(mapper)));
-
-        var result = service.importAccount(command("grok", "xai-user", mapper.createObjectNode()
-            .put("access_token", "build-token").put("sso", "shared-session")));
-
-        assertThat(result.account().metadata()).containsKey("identity_group_id");
-        assertThat(stored).containsKeys(
-            "grok:xai-user", "grok_web:xai-user", "grok_console:xai-user");
-        assertThat(stored.get("grok_web:xai-user").getStatus()).isEqualTo(AccountStatus.PENDING);
-        assertThat(stored.get("grok_web:xai-user").isEnabled()).isFalse();
-        assertThat(stored.get("grok_console:xai-user").getStatus()).isEqualTo(AccountStatus.PENDING);
-        assertThat(stored.get("grok_console:xai-user").isEnabled()).isFalse();
-        verify(vault).store(any(), eq("grok_web"), any(), any());
-        verify(vault).store(any(), eq("grok_console"), any(), any());
     }
 
     @Test

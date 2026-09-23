@@ -14,8 +14,6 @@ class ProviderTransportBoundaryArchitectureTest {
         var providers = List.of(
             "deepseek/DeepseekProvider.java",
             "glm/GlmProvider.java",
-            "grok/GrokProvider.java",
-            "grok_console/GrokConsoleProvider.java",
             "grok_web/GrokWebProvider.java",
             "longcat/LongcatProvider.java",
             "mimo/MimoProvider.java",

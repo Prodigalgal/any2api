@@ -180,8 +180,6 @@ def test_runtime_action_matrix_matches_each_provider_manifest() -> None:
         "arena": {"model_discovery", "chat"},
         "deepseek": {"model_discovery", "chat"},
         "glm": {"model_discovery", "chat"},
-        "grok": {"model_discovery", "chat"},
-        "grok_console": {"chat"},
         "grok_web": {"model_discovery", "chat"},
         "longcat": {"chat"},
         "mimo": {"model_discovery", "chat"},

@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from ..lifecycle.account import credential, flow_max_attempts, prepare_registration
-from ..lifecycle.browser import run_browser_flow
+from ..lifecycle.browser import BrowserLaunchProfile, run_browser_flow
 from ..lifecycle.proxy import proxy_attempt_payload
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import (
@@ -42,6 +42,12 @@ class GrokWebAutomationProvider(AutomationProvider):
         from .grok_web_api_actions import grok_web_api_action_bindings
 
         return grok_web_api_action_bindings(self)
+
+    def browser_launch_profile(self) -> BrowserLaunchProfile:
+        return BrowserLaunchProfile(
+            headless=False,
+            firefox_user_prefs=(("webgl.force-enabled", True), ("webgl.disabled", False)),
+        )
 
     def _transport(self, payload: dict[str, Any]) -> GrokWebOfficialBrowserTransport:
         base_url = str(payload.get("base_url") or _BASE_URL).rstrip("/")

@@ -202,7 +202,7 @@ def lifecycle_action_bindings(provider: AutomationProvider) -> tuple[ActionBindi
             method_name: str = operation,
         ) -> ActionResult:
             method = getattr(provider, method_name)
-            return await _await_result(method(dict(request.payload)))
+            return await _await_result(method(request.legacy_payload()))
 
         bindings.append(
             ActionBinding(

@@ -55,7 +55,7 @@ public class RegistrationScheduleService {
             .param("type", normalized.scheduleType().name())
             .param("interval", normalized.intervalMinutes(), Types.INTEGER)
             .param("enabled", normalized.enabled())
-            .param("nextRun", normalized.firstRunAt(), Types.TIMESTAMP_WITH_TIMEZONE)
+            .param("nextRun", PostgresResultValues.timestamp(normalized.firstRunAt()), Types.TIMESTAMP_WITH_TIMEZONE)
             .param("job", mapper.valueToTree(normalized.job()).toString())
             .update();
         return get(id);
@@ -80,7 +80,7 @@ public class RegistrationScheduleService {
             .param("type", normalized.scheduleType().name())
             .param("interval", normalized.intervalMinutes(), Types.INTEGER)
             .param("enabled", normalized.enabled())
-            .param("nextRun", normalized.firstRunAt(), Types.TIMESTAMP_WITH_TIMEZONE)
+            .param("nextRun", PostgresResultValues.timestamp(normalized.firstRunAt()), Types.TIMESTAMP_WITH_TIMEZONE)
             .param("job", mapper.valueToTree(normalized.job()).toString())
             .update();
         if (updated != 1) {
@@ -203,8 +203,8 @@ public class RegistrationScheduleService {
             WHERE id = :id AND lease_owner = :owner
             """)
             .param("enabled", nextRun != null)
-            .param("nextRun", nextRun, Types.TIMESTAMP_WITH_TIMEZONE)
-            .param("completedAt", completedAt, Types.TIMESTAMP_WITH_TIMEZONE)
+            .param("nextRun", PostgresResultValues.timestamp(nextRun), Types.TIMESTAMP_WITH_TIMEZONE)
+            .param("completedAt", PostgresResultValues.timestamp(completedAt), Types.TIMESTAMP_WITH_TIMEZONE)
             .param("jobId", jobId).param("id", claim.id()).param("owner", owner)
             .update();
         if (updated != 1) {

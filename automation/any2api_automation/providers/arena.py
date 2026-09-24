@@ -47,9 +47,6 @@ class ArenaAutomationProvider(AutomationProvider):
         inference_runtime="camoufox_browser_runtime",
         inference_modes=(API_TRANSPORT, CAMOUFOX_BROWSER_RUNTIME),
         inference_actions=("model_discovery", "chat"),
-        registration_attempt_mode="single_identity",
-        registration_max_target=1,
-        registration_max_attempts=1,
     )
 
     def __init__(self) -> None:

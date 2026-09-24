@@ -97,7 +97,7 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override
     public Set<ProviderTransportMode> supportedTransportModes() {
-        return Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
+        return Set.of(ProviderTransportMode.RUNTIME);
     }
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     java_base_url: str = "http://localhost:8080"
     browser_realtime_capacity: int = 1
-    browser_batch_capacity: int = 2
+    browser_batch_capacity: int = 4
     browser_process_capacity: int = Field(default=3, ge=1, le=32)
     official_browser_session_pool_size: int = Field(default=2, ge=1, le=32)
     browser_transport_allowed_origins: str = ""

@@ -106,6 +106,11 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
             captcha_policy = CaptchaAiPolicy.from_payload(request.payload)
             with bind_captcha_policy(captcha_policy):
                 async with lanes.batch:
+                    runtime_plan = (
+                        dict(request.payload["runtime_plan"])
+                        if isinstance(request.payload.get("runtime_plan"), dict)
+                        else {}
+                    )
                     result = await action_dispatcher.execute(
                         ProviderActionRequest(
                             provider_id=provider_id,
@@ -113,6 +118,7 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
                             channel=CAMOUFOX_BROWSER_RUNTIME,
                             operation=request.operation,
                             payload=request.payload,
+                            runtime_plan=runtime_plan,
                         )
                     )
             duration_ms = round((time.monotonic() - started) * 1000)

@@ -2249,4 +2249,6 @@ def account_status_is_healthy(body: str) -> bool:
     if not isinstance(user, dict):
         nested = value.get("data")
         user = nested.get("user") if isinstance(nested, dict) else None
+    if not isinstance(user, dict):
+        user = value
     return isinstance(user, dict) and bool(str(user.get("id") or user.get("userId") or "").strip())

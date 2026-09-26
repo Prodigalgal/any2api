@@ -33,14 +33,34 @@ contract default to `AUTO`.
 
 For ordinary provider-specific and unified direct inference routes, the key policy is resolved
 before account acquisition: `API` uses only the provider API channel, `RUNTIME` uses only the
-Camoufox browser Runtime channel, and `AUTO` prefers API and may fall back to Runtime only after
-a classified retryable API failure. An explicit channel never silently changes to the other one.
+browser Runtime channel, and `AUTO` prefers API when the Java provider declares it and may
+fall back to Runtime only after a classified retryable API failure. For a Runtime-only provider,
+`AUTO` selects Runtime and an explicit `API` request fails before execution. An explicit channel
+never silently changes to the other one.
 The policy applies to Chat Completions and Responses inference; lifecycle actions and the current
 `/v1/images/*` media handlers retain their existing provider-specific Runtime-only boundary.
 
+The Java selection boundary in source version 0.21.0 is:
+
+| Provider | Java-selectable inference channels | Python Action bindings |
+|---|---|---|
+| Arena | Runtime | API, Runtime |
+| DeepSeek | API, Runtime | API, Runtime |
+| GLM | API, Runtime | API, Runtime |
+| Grok Web (`grok_web`) | Runtime | API, Runtime |
+| LongCat | API, Runtime | API, Runtime |
+| MiMo | API, Runtime | API, Runtime |
+| MinMax | API, Runtime | API, Runtime |
+| Qwen | API, Runtime | API, Runtime |
+
+The Java declaration controls what a public request can use; a Python binding alone does not make
+that channel selectable or establish live readiness. Provider enablement, accounts, and model health
+remain separate runtime gates.
+
 The two random route families, `/random/v1/*` and `/multimodal-random/v1/*`, always force `AUTO`
-for the selected account and model, regardless of the calling key's stored mode. This preserves
-the random router's provider-agnostic API-first/fallback behavior while keeping the key's provider,
+for the selected account and model, regardless of the calling key's stored mode. The selected
+provider's Java declaration then determines whether `AUTO` starts with API or Runtime. This preserves
+the random router's provider-agnostic behavior while keeping the key's provider,
 model, protocol, and feature authorization checks intact.
 
 `GET /v1/models` reads the PostgreSQL runtime catalog and namespaces IDs as
@@ -151,9 +171,9 @@ The direct API channel reuses the same semantic command contract but performs th
 HTTP/SSE and upload protocol without creating a browser session. It may extract legal non-empty
 `Set-Cookie` values into a bounded `credential_patch`; multi-step adapters merge that patch into
 their in-memory account snapshot before the next provider request, and the Java boundary persists
-it only against the leased credential version. The following is the current
-implemented boundary; it is deliberately narrower where the upstream requires a page-owned
-signature, challenge token, or uploader:
+it only against the leased credential version. The following table describes Python API bindings,
+including bindings that Java does not currently select. It is deliberately narrower where the
+upstream requires a page-owned signature, challenge token, or uploader:
 
 When a multi-step API action fails before its final completion request, the Automation Action
 boundary preserves an upstream 4xx/5xx status through `ApiActionError` and includes only a bounded,
@@ -167,6 +187,7 @@ normal Action result, while SSE exposes the status before data or error frames.
 | Arena | HTML direct-page catalog | direct mode and search | Unsupported; use Runtime/AUTO | Unsupported; use Runtime/AUTO | accepts only a provider-issued reCAPTCHA v3 token; no token generation or v2 escalation in API |
 | DeepSeek | `/api/v0/client/settings` | session + PoW + completion SSE | Unsupported | Unsupported | PoW is solved locally from the provider challenge; account token/device ID required |
 | GLM | `/api/models` | `/api/v2/chat/completions` with current signature fields | multipart `/api/v1/files/` for vision models | Unsupported | frontend version/signature key must match the deployed web protocol; `provider_options.glm.captcha_verify_param` only accepts an existing provider-issued ticket and is never generated here |
+| Grok Web | `/api/auth/session` plus built-in model IDs | direct Gateway WebSocket | Unsupported | Unsupported | Python binding requires an SSO cookie; Java currently exposes Runtime only |
 | LongCat | Not declared | `/api/v1/session-create` + `/api/v1/chat-completion-V2` | `/api/v1/appendix-upload` | `/api/v1/appendix-upload` | authenticated cookie/access token and returned `fileUrl`/`fileKey` are required |
 | MiMo | `/open-apis/bot/config` | `/open-apis/bot/chat` | signed upload + parse flow | Unsupported | `xiaomichatbot_ph` and provider-issued object-storage upload data are required |
 | MiniMax | `/archon/api/v1/config` | signed session message SSE | Unsupported; use Runtime/AUTO | Unsupported; use Runtime/AUTO | API signing/account binding remains provider-specific |
@@ -267,17 +288,13 @@ completion is a separate release gate.
 | MiMo | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
 | MinMax | Native | Native | Native | Unsupported | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
 | GLM | Native | Native | Native | Unsupported | Native upload (vision models only) | Unsupported | Unsupported | Unsupported | Unsupported |
-| Grok Build | Native | Native | Native | Native | Native block | Native block | Unsupported | Unsupported | Unsupported |
 | Grok Web | Native | Native | Native output | Emulated | Separate media ops | Unsupported in chat input | Unsupported in chat input | Separate media ops | Native |
-| Grok Console | Native | Native | Native | Native | Native block | Native block | Unsupported | Unsupported | Stateless only |
 
 For `Native upload`, the page session obtains the provider's temporary upload authorization,
 uploads through the provider object-storage path, and sends only the resulting provider file object
-in the same account/proxy context. For `Native block`, the current xAI Responses-shaped payload
-preserves `input_image`/`input_file` and lets the upstream fetch the declared URL or file ID. A
-provider marked `Unsupported` fails before account acquisition; the runtime must never flatten or
-silently discard that content. Grok Web's separate media API is not a declaration that Gateway
-chat accepts arbitrary content blocks.
+in the same account/proxy context. A provider marked `Unsupported` fails before account acquisition;
+the runtime must never flatten or silently discard that content. Grok Web's separate media API is
+not a declaration that Gateway chat accepts arbitrary content blocks.
 
 Qwen, MiMo, MinMax, GLM, and LongCat currently declare image input only for inline base64 data URLs
 because their page upload protocols require browser-side bytes. LongCat additionally declares one
@@ -292,21 +309,23 @@ aliases, while provider capability, model metadata, and source policy decide whe
 proceed. Audio and video are not declared as LongCat chat input capabilities; their presence in
 other LongCat product flows does not change this contract.
 
-Arena supports both direct API and Runtime inference. The public request may use either the typed
+Arena has Python API and Runtime bindings, but Java selects Runtime only in 0.21.0. The public
+request may use either the typed
 `provider_options.arena.web_search` option or the provider-contract `web_search` parameter; both
 are normalized to the same semantic boolean and the page mapper emits Arena's native
 `modality: "search"`. Media blocks must be user-message inputs with inline base64 data URLs. The
 Camoufox page locates the current Arena-exported `uploadFile` function, obtains Arena's signed
 upload URL through the page-owned action, uploads the bytes, and sends only the returned
 `experimental_attachments` objects in `create-evaluation`. Runtime supports the current UI
-declaration of PNG, JPEG, WebP, and PDF. The direct API channel supports text/search only because
+declaration of PNG, JPEG, WebP, and PDF. The currently unselected Python API binding supports
+text/search only because
 the current signed uploader and reCAPTCHA escalation are page-owned; audio, video, remote URLs,
 file IDs, and unsupported document MIME types fail closed before either channel. A successful
 model catalog response is not an inference-ready account; Arena still requires a real text probe
 after registration.
 
-Grok channels remain code-installed but may be administratively hot-unplugged. Disabling them does
-not weaken protocol validation for the enabled providers.
+Only `grok_web` remains code-installed in 0.21.0. The `grok` and `grok_console` provider rows were
+retired by Liquibase changeset 031; historical Grok multi-channel design is under `docs/archive`.
 
 The shared event guard requires schema version 1, matching request IDs, monotonically increasing
 sequence numbers, one response start, paired tool-call events, at most one usage snapshot, and one

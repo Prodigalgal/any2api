@@ -4,6 +4,9 @@
 - 日期：2026-09-09
 - 取代：`ADR-0006` 中“推理只能使用 Camoufox Runtime”的选择策略；`ADR-0006` 关于 Runtime 作为安全默认边界的部分继续有效
 
+> 本 ADR 的 Action/Channel 决策继续适用；文中的 Provider 迁移进度对应 2026-09-09。
+> 0.21.0 的 Java 可选通道以 [API 契约](../architecture/API_CONTRACTS.md)为准。
+
 ## 背景
 
 系统的稳定契约是注册、重新认证、保活、签到、模型发现、对话和媒体处理等业务动作，

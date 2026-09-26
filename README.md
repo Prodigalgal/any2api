@@ -1,6 +1,6 @@
 # any2api
 
-`any2api` consolidates Arena, DeepSeek, GLM, Grok, Grok Console, Grok Web, MiMo, Qwen, LongCat, and MinMax web-account gateways behind one OpenAI-compatible API and one operational control plane.
+`any2api` consolidates Arena, DeepSeek, GLM, Grok Web, LongCat, MiMo, MinMax, and Qwen web-account gateways behind one OpenAI-compatible API and one operational control plane. The former `grok` and `grok_console` channels were retired in 0.21.0.
 
 The repository is a deliberately small distributed system:
 
@@ -12,20 +12,20 @@ The repository is a deliberately small distributed system:
 
 ## Current architecture
 
-- Java adapters are semantic-only: they validate, route, lease accounts, and decode the canonical
-  event stream. They do not contain a provider's physical upstream URL, signature, cookie, or
-  streaming transport.
+- Java owns request validation, routing, account leases, transport policy, canonical events, and
+  OpenAI rendering. Provider adapters may also own semantic mapping, decoding, and provider-specific
+  profiles; Python owns the physical Action execution against the upstream.
 - Provider business actions use one shared vocabulary: lifecycle (`register`, `reauthenticate`,
   `keepalive`, `daily_checkin`), `model_discovery`, `chat`, provider queries, and controlled media
   steps. An Action Dispatcher selects a concrete channel; providers register Action bindings instead
   of branching on `API` versus `Runtime` inside business methods.
-- `RuntimeChannel` is the default upstream boundary. It executes the vendor Web/CLI frontend's page
-  bridge, same-origin `fetch`, or page WebSocket in the account's isolated Camoufox context; it is
+- `RuntimeChannel` is the browser-backed upstream boundary. It executes the vendor Web/CLI frontend's
+  page bridge, same-origin `fetch`, or page WebSocket in an isolated account browser context; it is
   not a call to the vendor's public channel API and not a simulated button click.
-- `ApiChannel` is an independent, opt-in Web API/CLI API implementation. It is not an official
-  public channel API. MinMax currently has the first separated API bindings for text/model/query
-  actions; its media upload remains Runtime-only. The other providers remain Runtime-only until
-  their API bindings pass real account and K8S acceptance.
+- `ApiChannel` is an independent Web API/CLI API implementation, not a vendor public channel API.
+  In 0.21.0 Java can select both API and Runtime for DeepSeek, GLM, LongCat, MiMo, MinMax, and Qwen.
+  Arena and Grok Web currently select Runtime only, although Python contains API Action bindings.
+  A binding in source does not establish live account or model readiness.
 - Both `/v1/chat/completions` and `/v1/responses`, with provider-path equivalents, render from one
   canonical event contract in streaming and collected modes.
 - PostgreSQL owns provider-scoped accounts, AES-GCM encrypted credentials, sessions, jobs, schedules,
@@ -91,7 +91,8 @@ Default development addresses:
 - Java API: `http://localhost:8080`
 - Python automation: `http://localhost:8090`
 
-See [Development Guide](docs/DEVELOPMENT.md) and [Architecture](docs/architecture/ARCHITECTURE.md).
+See the [documentation index](docs/README.md), [Development Guide](docs/DEVELOPMENT.md), and
+[Architecture](docs/architecture/ARCHITECTURE.md).
 Provider and model onboarding is specified in
 [Provider Extension Contract](docs/architecture/PROVIDER_EXTENSION.md).
 Proxy pool security and flow behavior are defined in
@@ -101,5 +102,6 @@ The current Action/Channel boundary and migration policy are recorded in
 boundary are in [ADR-0006](docs/adr/0006-unified-camoufox-inference-runtime.md); superseded
 documents are under [docs/archive](docs/archive/README.md).
 
-Production container images target `linux/arm64`; GitHub Actions publishes one immutable tag per
-component and source commit.
+Production container images target `linux/arm64`; GitHub Actions currently uses component and source
+SHA in each image tag. See the documentation index for the distinction between source, CI, and live
+deployment evidence.

@@ -1,5 +1,9 @@
 # 统一 Action / Runtime / API Channel 任务规格
 
+> 历史迁移规格。下文“9 个 provider”和 Grok Build/Console 能力矩阵描述当时的范围；
+> 0.21.0 只保留八家 Provider，当前 Java 可选通道以
+> [API 契约](../architecture/API_CONTRACTS.md)为准。
+
 ## 目标
 
 将所有上游厂商请求统一收敛到 Python Automation 的 Action/Channel 边界。Java 核心只负责业务语义、账号租约、凭据版本和规范化结果；Python 由 RuntimeChannel 或 ApiChannel 负责账号隔离、代理亲和、上游物理请求和原始事件转译。Runtime 是默认渠道，API 只能按已验证的 Action binding 逐项启用。

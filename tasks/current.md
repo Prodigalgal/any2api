@@ -1,105 +1,46 @@
-# 当前任务：Grok 之外七家 Provider 的 Runtime/API 双通道闭环
+# 当前任务板（源码 0.22.0）
 
-## 本轮推进：API Key 通道选择与全厂商 API Channel（0.18.0）
+> 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
+> 历史任务与运行态快照已归档，不作为 0.21.0 的生产就绪结论。
 
-### API Key 通道选择 task spec
+## 2026-09-26 Arena 深度优化与全厂商补号健壮性提升（0.22.0）
 
-- 目标：创建分发 KEY 时选择 `API`、`RUNTIME` 或 `AUTO`，并让普通推理请求按 KEY 策略执行。
-- 范围：`api_keys` 持久化、授权缓存、Admin API、管理端创建/详情/列表、直连与随机推理入口、数据库迁移和契约文档。
-- 非目标：不改变生命周期动作、不把 `/v1/images/*` 的 Runtime-only 媒体边界伪装成 API 能力、不开放随机接口自定义通道。
-- 验收：历史 KEY 默认 `AUTO`；显式 API/Runtime 不跨通道回退；AUTO 为 API 优先并可按既有失败分类回退 Runtime；两个随机路由族固定 AUTO；GitHub Actions 完成 Backend/Automation/WEB 验证。
+- **Arena 定期探活与全链路自动就绪**：
+  - `ArenaProvider.java` 启用 `scheduledModelProbeEnabled = true`，后端 `ModelProbeScheduler` 自动为 Arena 执行周期性模型探活，彻底解决 `arena/Max has no ready probe result` 报错。
+  - 优化 `account_status_is_healthy` 兼容根级用户信息，并为所有 Provider 提供缺省运行时规则防护。
+- **全厂商 Keepalive 崩溃与调度队列阻塞根因修复**：
+  - 根因定位：统一 Action 契约在转换旧 payload 时覆盖冲毁了后端传入的 `payload["runtime_plan"]`，导致所有依赖声明式运行时规则的 Provider（Arena、Qwen、GLM、LongCat）在执行 keepalive 时以 `TypeError: runtime active selection must be an object` 失败；新账号无法完成首次探活激活并卡在 `PENDING`，同时重试请求堆积造成批处理队列阻塞。
+  - 修复方案：在 `ProviderActionRequest` 与 `provider_api.py` 中无损透传 `runtime_plan`；在 `runtime_rules.py` 中内置全厂商默认规则兜底。
+- **补号吞吐抗超时增强**：
+  - `browser_batch_capacity` 从 2 调优至 4，极大缓解高峰批处理排队。
 
-- 业务范围为 Arena、DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen；Grok 三通道继续排除。
-- Java `ProviderTransportModeService` 统一选择 `API`、`RUNTIME` 或 `AUTO`；`InferenceCoordinator`、模型发现和就绪探针均把最终模式传入 Provider。
-- Automation 已为七家 Provider 注册独立 API Action binding；生命周期注册、重新认证、保活、打卡保持 Runtime-only，API 不创建浏览器、不转发任意 URL/JS/rawRequest。
-- 公共 API 层提供 HTTPS allowlist、同源路径校验、有界响应、代理租约、SSE 背压、取消清理和受限 `Set-Cookie` credential patch 传播；厂商模块各自负责路径、请求体、签名、上传、错误与事件协议。公共与 MiniMax SSE 均使用有界队列，取消时主动关闭上游响应。
-- 当前 API 代码边界：Arena 文本/Search（reCAPTCHA 仅接受厂商签发 token，媒体保留 Runtime/AUTO）；DeepSeek 文本/PoW；GLM 文本/图片；LongCat 文本/图片/PDF；MiMo 文本/图片；MiniMax 文本；Qwen 文本/图片。
-- `AUTO` 的推理、模型发现和账号就绪探针均按同一分类策略支持 API -> Runtime 回退；显式 `API` 仍失败即止。
-- 逐厂商收口了 API 的状态和凭证边界：七家适配器的多步骤前置请求在解析前严格要求
-  2xx；Automation 通过 `ApiActionError` 保留上游 4xx/5xx 及有界脱敏摘要，Java SSE 对
-  3xx 和无状态尾流均失败关闭；GLM 签名 query 与实际 `User-Agent` 共用同一默认配置。
-- `0.17.1` 在 `0.17.0` API Channel 基础上补齐 GLM `anti_bot_rejected` 的 HTTP/SSE 分类、厂商签发 ticket 参数边界，并关闭无验证上下文的广泛定时模型探针；在完成 K8S 每家 API 非流式/SSE 真实样本前，不把任何 API provider 标记为运行态 `READY`。
-- `0.17.2` 将已知 provider verification 信号统一收敛到 `ProviderFailureSignals`；DeepSeek、LongCat、MiMo、MinMax、Qwen、Arena、GLM 的 API 风控响应不再误判为凭证失效，统一进入 anti-bot 冷却/`AUTO` 回退边界。各 API handler 继续只提交 provider-native 参数，未引入验证码生成或绕过。
-- 2026-09-12 E2E API 真实验收已取得 DeepSeek、LongCat、MiMo 的文本非流式/SSE HTTP 200；LongCat、MiMo 的图片非流式 HTTP 200。LongCat PDF 的上传、会话和 completion 返回 200，但当前测试文档未被模型读取，不能算 API 文档通过；GLM 非流式真实返回 `anti_bot_rejected`，SSE 随后因冷却返回 `account_unavailable`。Arena、MiniMax、Qwen 因没有可用账号暂不验收，详见 [API Channel K8S 真实验收记录](../docs/reports/REAL_API_CHANNEL_ACCEPTANCE_2026-09-12.md)。
-- `0.17.3` 将最终 `ProviderTransportMode` 写入 inference start/finish 日志与 `any2api.inference.duration` 指标的 `channel` 标签；API/Runtime 的真实验收不再只依赖数据库模式快照判读。兼容旧的 `InferenceTrace` 构造方式，媒体动作明确标为 Runtime。GitHub Actions `34689733061` 已通过，`70926ef` 已滚动到 E2E；新版本 MiMo API smoke HTTP 200 且日志确认 `channel=api`。滚动初始阶段仅出现一次 PostgreSQL DNS 瞬态启动失败，恢复后 `healthz/readyz` 均 200，无 OOM；生产未更新。
-- `0.18.0` 新增 KEY 级 `transportMode`（默认 `AUTO`）；普通 Chat/Responses 直连遵循 KEY 选择，两个 random 路由族固定 `AUTO`，并保留生命周期与 `/v1/images/*` 的既有边界。本次候选的构建与测试仍只交给 GitHub Actions。
-- 验证约束：本机不执行编译、构建或测试构建；Backend、Automation、WEB 的编译与测试统一由 `.github/workflows/build-and-deploy.yml` 的 GitHub Actions 执行。
+## 2026-09-25 文档与缺漏排查
 
-## 上一版本：Provider 边界、Arena Direct 与生命周期稳定性（0.16.5）
+- 源码基线：`main` 的 `6cbe025`，Backend/Automation/WEB 版本为 `0.21.0`。
+- GitHub Actions [35939416946](https://github.com/Prodigalgal/any2api/actions/runs/35939416946)
+  的三端质量检查、镜像构建和 GitOps 更新均成功。2026-09-25 只读检查显示 Argo CD
+  `Synced/Healthy`，三套业务 Deployment 均运行 `*-sha-6cbe025...`、Pod Ready 且重启 0；
+  这不等于八家 Provider 的真实请求验收。
+- 2026-09-26 只读数据库核对：Liquibase 031 已执行，旧 `grok` / `grok_console` 的
+  Provider、账号和 API Key 授权行当前均为 0；Arena、Grok Web 的持久化通道模式为 `AUTO`。
+  迁移前数据量和备份可恢复性尚未核实。
+- 当前源码包含 Arena、DeepSeek、GLM、Grok Web、LongCat、MiMo、MinMax、Qwen 八家；
+  `grok`、`grok_console` 已退出代码目录，并由 Liquibase 031 清理持久化数据。
+- Java 推理通道声明：DeepSeek、GLM、LongCat、MiMo、MinMax、Qwen 支持 API/Runtime；
+  Arena 和 Grok Web 当前仅开放 Runtime。Python 的 API binding 不等于 Java 对外开放。
+- 待处理缺漏、证据和优先级见 [2026-09-25 排查报告](../docs/reports/CODEBASE_GAP_AUDIT_2026-09-25.md)。
+- 2026-09-26 各 Provider 的账号、模型探针、普通推理和生命周期快照见
+  [Provider 运行态快照](../docs/reports/PROVIDER_STATUS_2026-09-26.md)。
 
-- 公共框架职责与 Provider 职责已整理到 [ADR-0008](../docs/adr/0008-provider-boundaries-and-arena-direct.md)：框架负责 Action/Channel 契约、账号租约、浏览器预算、邮箱策略、生命周期、错误模型和观测；Provider 负责厂商协议、页面脚本、认证、媒体上传、事件解码和 provider-local 重试。
-- Arena 对外只接受 `direct` 语义；官方新会话所需的 wire `mode=direct-battle` 仅作为内部协议值保留，不开放 Battle/Side-by-side，不发送 `modelBId`。
-- Arena 注册修复已加入 provisional user 多来源等待提取、匿名注册/密码设置瞬态重试和激活链接 `NS_BINDING_ABORTED` 目标页确认；已成功落库的账号不删除、不重置，继续由生命周期探针接管。
-- Arena 对话已加入官方 Enterprise V3 → V2 escalation：仅当上游明确返回 `recaptcha validation failed` 或 `prompt failed` 时渲染官方 V2 widget；没有官方 callback token 时返回 `recaptcha_v2_required`，不伪造或绕过验证。
-- 0.16.5 新增受控的 Automation 响应缓冲（默认 8 MiB，允许范围 256 KiB–32 MiB），修复浏览器状态上下文回传时的 `DataBufferLimitException`，同时保留 OOM 上限；本地、CI、GitOps 和 K8S 验证均已通过。
+## 待处理
 
-## 上一版本 Arena 适配（0.16.5，K8S 真实验收完成，健康窗口观察中）
+- [ ] 核实 Liquibase 031 执行前的数据备份、删除量和恢复策略；已执行变更集不原地改写。
+- [ ] 为发布流水线补版本契约、不可覆盖镜像 tag 和空库 Liquibase 校验。
+- [ ] 明确 Grok Web API binding 的发布意图，并使 Java 通道声明与验收证据一致。
+- [ ] 启用 Grok Web API 前补齐直接 `websockets` 依赖声明。
+- [ ] 明确 LongCat 模型发现的真实接口或验收例外。
+- [ ] 补齐 0.21.0 的逐 Provider 真实推理和生命周期验收记录。
 
-- 已新增 `arena` Automation Provider 与 Java `ArenaProvider`，仅启用 `camoufox_browser_runtime`，不注册官方 API/CLI Channel。
-- 注册使用共享 `TempMailClient` 的 email magic link：每个 `register` 操作只创建一个临时邮箱，先快照历史邮件 ID，再提交 `/nextjs-api/sign-up/magic-link`，验证新链接并通过 `/api/me` 核对身份；Manifest 与 Java 调度器均限制 `target=1`、`maxAttempts=1`。
-- 模型发现从登录后的 `/text/direct?model_a=max` 页面 RSC `initialModels` 提取 UUID、显示名、输入/输出能力；Arena UUID 只由当前页面目录解析，不把显示名直接当作上游 ID。
-- 文本请求使用 Arena `POST /nextjs-api/stream/create-evaluation` 的一字符前缀 NDJSON 帧；`0/2/3/d/e/f/g` 已映射到统一 canonical events，验证码、额度、认证、限流、模型不可用和协议错误分别归类。
-- 图片/PDF 输入使用同一账号页面导出的 `uploadFile` 与 signed upload action，随后发送 `experimental_attachments`；当前适配只声明 PNG/JPEG/WebP 与 PDF，远程 URL、file ID、音频、视频和未声明文档格式在浏览器请求前失败。
-- `provider_options.arena.web_search=true`（或契约允许的 `web_search`）映射为 Arena 原生 `modality="search"`；Search 能力按当前模型目录 `outputCapabilities.search` 做检查。
-- K8S 已保留真实 Arena 注册账号，不删除、不重置；0.16.5 已取得 Direct 文本、Search、图片和 PDF 非流式/SSE 的真实成功样本。模型健康窗口仍为 `DEGRADED`，在成功率/P95 和长期账号切换证据达标前不得标记 `Ready`。
+## 历史记录
 
-## 0.16.5 收尾记录（2026-09-12）
-
-- 当前源码候选为 `0.16.5`；修复点是 Java `LifecycleAutomationClient` 与 `AutomationProviderCatalog` 的响应解码上限，不取消上限、不扩大浏览器并发。配置键为 `ANY2API_AUTOMATION_MAX_RESPONSE_BYTES`，默认 `8388608`。
-- 0.16.5 K8S 运行态已稳定：Argo CD `Synced/Healthy/Succeeded`，当前 server、automation、web 使用验收记录提交 `61f0f8c` 生成的同一不可变镜像，业务 Pod Ready、重启 0；本轮检查未发现 `OOMKilled`、`OOMKilling` 或发布后的 `DataBufferLimitException`。
-- Arena Direct 真实证据：文本非流式/SSE、Search 非流式/SSE、Max 图片非流式/SSE、`claude-sonnet-4-6` PDF 非流式/SSE 均 HTTP 200 并完成；最新串行复验的 Search/图片/PDF SSE 分别取得 9/7/8 个数据帧并包含 `[DONE]`，无错误帧。Arena V3 reCAPTCHA 已取得 `issued/available=true` 记录；V2 只走官方 widget 升级边界，不伪造 callback、不绕过验证。
-- Arena `Max` 当前目录不声明文件输入；对 Max 发送 PDF 返回 HTTP 400 `unsupported_parameter`（`input`），属于正确的模型能力门禁。PDF 验收使用声明 `file` 能力并已探针通过的 `claude-sonnet-4-6`，不能将能力扩展到 Max 或未声明模型。
-- 账号聚合快照为 9 个：8 个 `ACTIVE/enabled`、0 个 `PENDING/disabled`、1 个凭据失败 `EXPIRED/disabled`、0 个当前 `DEGRADED`。0.16.5 运行态已记录多笔 reauthenticate 与账号探针成功；剩余过期凭据恢复和 24 小时健康窗口继续观察，Arena 总体保持 `DEGRADED`。
-
-## 历史推进记录（0.14.1 及之前）
-
-## 目标
-
-按 DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen 逐厂商完成 K8S Runtime 的真实推理、账号生命周期、模型发现、账号租约切换、已声明多模态和错误边界验收；Grok、Grok Web、Grok Console 暂不纳入范围，API Channel 后置。
-
-## 已完成
-
-- `9944909` 已通过 CI `34476956811`，源码镜像通过 GitOps `ac420b0` 部署；随后配额修复 GitOps `9642473` 已由 Argo CD 应用。
-- `5b4cdb5` 已通过 CI `34527813416`；GitOps `45bbb52` 已切换到 server、automation、web 的 `*-sha-5b4cdb5...` 不可变镜像，Argo CD revision 为 `45bbb527...`，三套 Pod 当前 Ready 且零重启。
-- GLM-4.6V 图片 SSE 连续三次在 K8S 真实通过，当前 `rolling_success_rate=90.48%`、`p95=53.7s`，已达到该模型 Ready 门槛；`glm-5.2` 仍为 Ready。`glm-4.7`/`glm-5.3` 仍因窗口指标为 `DEGRADED`，另有多个目录模型为真实探针判定的 `UNAVAILABLE/provider_upstream_error`，不能把 GLM 全目录标为 Ready。
-- 六家选定模型的非流式和 SSE 文本请求均真实返回成功。
-- MiMo、MiniMax、GLM 的图片输入流式请求均成功；LongCat 已完成同源上传实现和契约测试，并在 K8S 真实通过图片非流式/SSE、有效 PDF 非流式/SSE、有效 DOCX/TXT 请求；DeepSeek 仍保持 text-only；Qwen 32x32 图片非流式/SSE 均已成功，但 1x1 仍为明确 `invalid_request_error`，不能标记为完整图片 Ready。
-- LongCat 的 TXT 上传可以成功但当前上游不返回文件内容解析，其他未实测扩展不计入 Ready；因此 LongCat 当前是“图片 + PDF/DOCX 已通过，文件扩展全量仍观察中”。
-- 当前账号表为 DeepSeek 16、GLM 23、LongCat 26、MiMo 57、MiniMax 7、Qwen 47 个 `ACTIVE/enabled`；Qwen 其中 44 个 `expires_at` 已过期，模型目录实际仅 3 个 eligible/available，MiniMax 当前 7 个 eligible/available，二者均无当前 `quota_limited` 账号。Qwen 的剩余阻断是凭据生命周期和健康窗口，不直接归因于额度耗尽。
-- 生命周期调度已限制为默认并发 2、单次最多 claim 8 个动作；当前滚动观测没有新的 `OOMKilled`。namespace quota 已从 `requests.memory=6Gi/limits.memory=16Gi` 调整为 `8Gi/20Gi`，为滚动副本留出余量。
-- MiniMax 的通用 `daily_checkin` 语义和具体 Runtime 实现已保留，账号额度依赖每日打卡的规则不绕过。
-- LongCat 在当前发布上补充完成 TXT 非流式/SSE 真实 completion；两个不同 ACTIVE/enabled 账号的 `longcat-pro` 账号探针均通过，最近 30 分钟成功请求使用 9 个不同账号。`longcat-flash` 在真实成功样本补充后恢复为 `READY`。
-- Runtime 的公共 Action 已统一先经过共享 semantic command 校验，再由 DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen 各自的 Runtime mapper 翻译为厂商字段；`rawRequest` 不进入 Runtime/API Action 边界。API Channel 仍按计划后置。
-- `ProviderActionDispatcher` 现在会在解析 `CHAT` binding 前统一校验 semantic command；厂商 mapper 保留防御性校验并只负责自己的字段、嵌套、上传和事件协议转换。六家 Runtime 的具体映射矩阵已补入 `docs/architecture/API_CONTRACTS.md`。
-- `a99ec65` 已通过 CI `34537508021` 并由 GitOps `d564532` 发布；Argo CD 为 `Synced / Healthy / Succeeded`，三套 Deployment 已运行同一不可变镜像，Qwen 图片真实复测确认 `image_count=1`、上传 `file_count=1`，上游 `invalid_input` 被映射为 HTTP 400 `invalid_request_error`，且服务端仅 `attempt=1`。
-
-## 当前推进
-
-- 最新业务版本已迭代到 `0.14.1`：源码 `fc33232`、CI `34556906088`、GitOps `46b6e98`、Argo revision `46b6e985...` 已形成同一不可变发布链路；server、automation、web 全部运行 `*-sha-fc33232...`，Pod Ready、重启 0、无新的 `OOMKilling` 事件。本地 `ircs-prod-config` checkout 已 fast-forward 到 `46b6e98`。
-- 生命周期过期凭据修复已在生产生效：Qwen 过期 keepalive 记录为 `credential_refresh_scheduled`，账号进入 `EXPIRED/disabled` 并生成 `reauthenticate`；截至 11:27 已有 7 笔真实 reauthenticate 在 `inference_probe` 阶段因 `provider_transport_error/PrematureCloseException` 失败，另有 1 笔 keepalive 同类失败，当前继续处理上游 Runtime 稳定性，不标 Qwen Ready。:codex-annotation{index="1"}
-- Qwen 当前账号快照为 6 个 `ACTIVE/enabled`（其中 3 个 expiry fence 已过期）、40 个 `EXPIRED/disabled`、1 个 `PENDING/disabled`；这证明生命周期分流已发生，但恢复稳定性和上游 transport 仍未闭环。
-- MiniMax 保留 7 个 `daily_checkin` 待执行动作，最早中国时间 15:02 到期；继续等待自然打卡结果，不提前伪造额度或完成事件。
-- Automation 当前约 `1361Mi`、内存 limit `6Gi`，浏览器预算日志显示等待/idle eviction 正常工作；本次发布后无 Pod 重启和 OOM 事件。
-
-- LongCat 的图片、PDF、DOCX、TXT 已取得真实 completion；26 个账号均为 `ACTIVE/enabled`，自然 `keepalive` 事件已取得 `SUCCEEDED / lifecycle_completed` 证据；当前生产制品 `ce2ee60` 在 K8S 内新增文本请求返回 HTTP 200，服务端 `attempt=1/status=SUCCEEDED`，五个目录模型均 `available=true/probe=READY/circuit=CLOSED`，滚动成功率约 90.9%–100%，按本轮声明范围达到 Runtime Ready。继续观察多账号覆盖、24 小时健康窗口和其他未逐项验证的文件扩展，不扩大为全部文件格式 Ready。
-- Qwen 文本探针、keepalive 和 32x32 图片非流式/SSE completion 已在 `ce2ee60` 发布上成功；本次 K8S SSE 请求 HTTP 200，39 个 SSE 帧、包含 `[DONE]`，服务端 `attempt=1/status=SUCCEEDED`。1x1 图片仍返回 HTTP 200、392 字节、仅含 `error` 的不完整 SSE，公共层转换为不可重试的 HTTP 400 `invalid_request_error`；Qwen 当前仍为 `DEGRADED`，继续补齐尺寸边界和稳定性证据，整体保持未 Ready。
-- MiniMax-M3 在 K8S 内新增 SSE 和两次非流式请求均 `attempt=1/status=SUCCEEDED`，三个不同账号分别承载请求，证明租约切换；7 个账号均可用且 `quota_limited=0`。但 M3/M2.7 24 小时滚动成功率约 87.1%/31.4%，当前仍为 `DEGRADED`，且自然 `daily_checkin` 尚未取得完成事件，继续观察真实结果。
-- DeepSeek 最新 SSE 请求 HTTP 200、`attempt=1/status=SUCCEEDED`，但首字节约 122.1s、P95 约 125.7s，`DEGRADED` 属于真实上游延迟风险；MiMo-v2.5 最新图片 SSE HTTP 200、`attempt=1/status=SUCCEEDED`，但滚动成功率约 85.7%，继续观察历史失败样本自然退出。
-- 继续等待 LongCat 自然 keepalive 和 MiniMax 自然 `daily_checkin` 到期执行，并记录真实结果。
-- 继续观察 24 小时 Runtime 健康窗口，区分历史失败与新版本失败；不通过清理历史数据或降低阈值伪造 Ready。
-- 当前多模态范围只覆盖图片和文档；音频、视频不纳入本轮 LongCat 聊天输入能力。
-- GLM 图片请求只允许官方目录标记 `capabilities.vision=true` 的模型，且只接受 inline base64 图片。
-
-## 非目标
-
-- 不接入厂商公开渠道 API，不绕过验证码、风控、额度和每日打卡限制。
-- 不批量注册、启用、删除或重置 Grok 三通道账号。
-- 不把尚未经过真实 Web/CLI 请求的能力标记为 Ready。
-
-## 验收标准
-
-- 每家选定 Provider 至少有模型发现、文本非流式、文本 SSE、账号保活和账号租约/切换的运行证据。
-- 声明图片输入的 Provider 通过真实图片请求；未声明的 Provider 对图片输入给出明确契约错误。
-- Arena 还必须分别取得真实文本、Search、图片和 PDF 请求的非流式/SSE 证据；注册成功必须再完成 Arena 账号探针后才能进入 inference pool。
-- 新版本在 K8S Pod Ready、零重启、无新增 OOMKilled，浏览器进程预算和生命周期并发限制持续生效。
-- 代码、测试、GitOps、镜像和运行态版本保持同一不可变发布链路。
+- [0.18.0 及以前的任务与验收快照](../docs/archive/tasks/PROVIDER_RUNTIME_API_PROGRESS_THROUGH_0.18.0.md)

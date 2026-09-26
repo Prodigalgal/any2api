@@ -5,6 +5,9 @@
 - 适用版本：0.17.0
 - 关联：ADR-0007《统一 Action 契约并拆分 Runtime / API Channel》、ADR-0008《Provider 边界与 Arena Direct Runtime 闭环》
 
+> 下文 Provider 表和 rollout 范围对应 0.17.0 决策时点；0.21.0 的 Java 可选通道以
+> [API 契约](../architecture/API_CONTRACTS.md)为准。
+
 ## 背景
 
 项目代理的是厂商 Web/CLI 上游，而不是厂商公开渠道 API。Runtime 能力依赖页面上下文，资源

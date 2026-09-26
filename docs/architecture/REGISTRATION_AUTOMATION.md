@@ -89,7 +89,7 @@ passes its binding to the native Qwen browser so page navigation, Baxia header g
 discovery, upload-token acquisition, chat creation, and completion use the same egress. Request
 IDs and catalog probes cannot create a second account identity.
 
-The lease is passed into provider code, not hidden behind global proxy environment variables. Therefore browser navigation and follow-up vendor HTTP exchanges share the same egress in one attempt: Qwen sign-in after email activation and Grok OAuth token exchange cannot accidentally fall back to the host network. A failed node fails that attempt; only the durable Java retry starts a new flow and leases another node.
+The lease is passed into provider code, not hidden behind global proxy environment variables. Therefore browser navigation and follow-up vendor HTTP exchanges share the same egress in one attempt: Qwen sign-in after email activation and Grok Web registration cannot accidentally fall back to the host network. A failed node fails that attempt; only the durable Java retry starts a new flow and leases another node.
 
 MiMo uses its proven Xiaomi HTTP registration protocol rather than a guessed browser form. It fetches and solves the image captcha, encrypts the registration fields, verifies the mailbox ticket, exchanges `passToken` for MiMo service cookies, and validates the result through one provider proxy lease. The RSA public key is discovered from the current official registration assets. The asset contains preview and production keys in a host-dependent conditional, so the parser selects the branch for the configured account host and rejects ambiguous multi-key assets; `ANY2API_AUTOMATION_MIMO_REGISTRATION_PUBLIC_KEY_DER` is only an operator-controlled fallback. MiMo also owns its Xiaomi-compatible password policy instead of inheriting the generic provider password length.
 MiMo reauthentication uses the same provider-owned protocol boundary: it first exchanges a usable
@@ -107,7 +107,7 @@ each browser flow. If all provider-local flows fail, a batch may create a replac
 when its configured `maxAttempts` budget still has room. This lets a success target tolerate bounded
 failed identities without sharing one mailbox across concurrent calls.
 The provider-neutral `flow_max_attempts` task control applies to every migrated registration
-plugin. A scheduler attempt creates its mailbox once, then Qwen, LongCat, Grok, MiMo, MinMax,
+plugin. A scheduler attempt creates its mailbox once, then Qwen, LongCat, Grok Web, MiMo, MinMax,
 DeepSeek, or GLM reuses that identity for its bounded local flows. Only exhaustion of that mailbox
 task consumes another `maxAttempts` slot.
 Registration-job backoff follows consecutive fully failed batches, not lifetime attempt totals. A
@@ -141,26 +141,32 @@ the challenge or rotates a fresh browser while preserving the same mailbox. GLM 
 does not call the multimodal random inference routes. Only the official SDK success callback can
 accept a ticket.
 
-Grok registration uses one Camoufox context and one provider proxy lease. It loads the live signup page, waits for the current React Castle provider, discovers the current server action, router state, and Turnstile sitekey, and mints a full Castle request token from that page. Email-code requests, OTP verification, and signup are page-context fetches, so cookies, browser fingerprint, TLS, proxy egress, `conversionId`, Castle token, Turnstile token, `Next-Action`, and router state remain in one flow. Castle is minted again immediately before signup. A request with an empty or short Castle token is rejected locally and is never submitted. The Turnstile solver uses the same flow proxy by default.
+### Grok Web in 0.21.0
 
-After SSO extraction, that same browser context opens Grok Web and reads the allowlisted registration-risk fields embedded in the current RSC response. `botFlagSource=0` without a deny policy is `clean`; `policy=deny,event=$registration` is `denied`; other or missing combinations remain `flagged` or `unknown`. A denied or unknown diagnostic never destroys an already obtained SSO. Denied identities skip OAuth and remain disabled; unknown identities may continue authorization but still require a real channel probe. Only source, policy, score, event, and the normalized status are durable. Raw `botFlagDetails`, page HTML, cookies, and challenge artifacts are not persisted.
+`grok_web` is the only installed Grok provider. Its Python manifest advertises `register` and
+`keepalive`, but not `reauthenticate`. Registration uses `register_grok_web` in an isolated browser
+flow with a provider proxy lease; account activation still requires a real inference probe. The
+retired Build and Console channels are not activation targets in the current provider registry.
 
-Grok exposes four separate outcomes. `ACCOUNT_REGISTERED` means xAI accepted the signup and issued SSO. `REGISTRATION_RISK_CLEAN` means the post-signup Web state is clean. `BUILD_AUTHORIZED` additionally requires a Grok Build OAuth access token. `INFERENCE_READY` additionally requires a real upstream probe for the specific Build, Web, or Console account row. An SSO-only result is persisted as `PENDING`, disabled for inference, and scheduled for bounded reauthentication; it is not counted as an inference-ready account. The current device flow uses the complete scope set and live version/surface/referrer metadata. An OAuth `invalid_grant: Access denied` preserves the registered account but keeps it pending.
+### Historical Grok multi-channel flow (through 0.20.0)
 
-Grok reauthentication is owned entirely by the Python Grok provider worker. It escalates through `refresh_token`, saved `sso`/`sso-rw` device OAuth, password login with a dynamically discovered Turnstile sitekey, and device OAuth with the newly issued SSO. The SSO exchange uses the provider-specific `curl_cffi` browser fingerprint and installs both cookie names on `.x.ai` and `accounts.x.ai`; a generic Java or Node HTTP client must not emulate this flow. Java only leases and schedules the generic provider operation, merges the returned credential patch, persists credential expiry, and transitions the account state.
+The retired Build/Console registration and recovery details are preserved in the
+[archived Grok registration flow](../archive/architecture/GROK_REGISTRATION_FLOW.md).
 
-HTTP 403 and `permission-denied` are not sufficient to ban an account. Grok classifies them as ambiguous and retries through controlled A/B evidence: same account with another egress, another account on the same egress, and another account from the same email domain. Only corroborated evidence may attribute the failure to account eligibility, email-domain reputation, or proxy IP/ASN. OAuth-token acquisition success followed by inference 403 is treated separately from SSO-to-OAuth eligibility failure.
+### MinMax registration
 
 MinMax is overseas-only. Its lifecycle flow uses `account.minimax.io` and `agent.minimax.io`; a redirect to `minimaxi.com` invalidates the attempt. The OAuth state, device profile, request token, and request-signing profile are discovered from the current official flow rather than copied from the domestic site. Official assets are restricted to provider-configured CDN hosts, currently including both `cdn.hailuo.ai` and the legacy `cdn.hailuoai.com`; signature salts and version codes are still extracted from the live scripts and are never fixed constants.
 
 MinMax's inference request `user_id` is a protocol field and is not an account identity. Registration accepts an account only after the official `/v1/api/user/info` response matches the registration mailbox. The stable `realUserID` (falling back to `userID`) becomes the provider account's external identity, while the request `user_id` remains isolated in the credential for upstream signing.
 
+### Common lifecycle contract
+
 The common provider lifecycle contract includes a `daily_checkin` operation for providers whose Web or CLI account requires a daily account action before inference. The Python side exposes the shared `DailyCheckinStrategy` contract; each provider owns its protocol, parser, endpoint paths, and credential-patch handling in a separate concrete strategy module. MinMax is the first implementation: it reads the official Web check-in panel through `GET /minimax-cloud/api/v1/signin/status` and claims the current day through `POST /minimax-cloud/api/v1/signin/claim` when the day is claimable. An already-claimed day is idempotently successful. Newly imported or manually activated accounts with this capability execute the operation before the real inference probe so a zero-credit account is not misclassified as an invalid credential.
 
-The seven full-lifecycle plugins for Arena, GLM, Grok, LongCat, MiMo, MinMax, and Qwen expose the common
+The seven full-lifecycle plugins for Arena, DeepSeek, GLM, LongCat, MiMo, MinMax, and Qwen expose the common
 registration, reauthentication, and keepalive operations. A provider may additionally advertise
 the common `daily_checkin` operation when its account lifecycle requires it; channel-only plugins
-such as Grok Console may advertise a strict subset:
+such as Grok Web may advertise a strict subset (`register` and `keepalive` in 0.21.0):
 
 ```text
 register -> external_id + email + encrypted credential input

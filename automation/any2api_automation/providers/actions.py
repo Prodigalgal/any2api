@@ -99,7 +99,10 @@ class ProviderActionRequest:
                 "use canonical fields, controls, or providerOptions"
             )
         object.__setattr__(self, "semantic_command", semantic_command)
-        object.__setattr__(self, "runtime_plan", dict(self.runtime_plan))
+        runtime_plan = dict(self.runtime_plan)
+        if not runtime_plan and isinstance(self.payload.get("runtime_plan"), Mapping):
+            runtime_plan = dict(self.payload["runtime_plan"])
+        object.__setattr__(self, "runtime_plan", runtime_plan)
 
     @classmethod
     def from_legacy(
@@ -116,14 +119,24 @@ class ProviderActionRequest:
         body: str = "",
         stream: bool = False,
     ) -> ProviderActionRequest:
+        effective_payload = dict(payload or {})
+        effective_plan = (
+            dict(runtime_plan)
+            if runtime_plan is not None
+            else (
+                dict(effective_payload.get("runtime_plan"))
+                if isinstance(effective_payload.get("runtime_plan"), Mapping)
+                else {}
+            )
+        )
         return cls(
             provider_id=provider_id,
             action=ProviderAction.from_legacy_operation(operation),
             channel=channel,
             operation=operation,
-            payload=payload or {},
+            payload=effective_payload,
             semantic_command=semantic_command or {},
-            runtime_plan=runtime_plan or {},
+            runtime_plan=effective_plan,
             method=method,
             path=path,
             body=body,
@@ -135,13 +148,16 @@ class ProviderActionRequest:
 
         operation = self.operation or default_operation or self.action.default_legacy_operation
         payload = dict(self.payload)
+        effective_runtime_plan = dict(self.runtime_plan)
+        if not effective_runtime_plan and isinstance(payload.get("runtime_plan"), Mapping):
+            effective_runtime_plan = dict(payload["runtime_plan"])
         payload.update(
             {
                 "action": self.action.value,
                 "runtime_mode": self.channel,
                 "operation": operation,
                 "semantic_command": dict(self.semantic_command),
-                "runtime_plan": dict(self.runtime_plan),
+                "runtime_plan": effective_runtime_plan,
             }
         )
         if self.method is not None:

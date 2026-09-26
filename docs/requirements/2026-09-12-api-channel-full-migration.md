@@ -1,5 +1,9 @@
 # 全厂商 API Channel 迁移任务规格
 
+> 2026-09-12 的历史任务规格。下文的 Provider 范围和实施顺序对应当时的迁移计划；
+> 0.21.0 的 Java 可选通道以 [API 契约](../architecture/API_CONTRACTS.md)为准，
+> 本规格不构成当前运行态验收记录。
+
 ## 目标
 
 为已纳入当前业务范围的 Arena、DeepSeek、GLM、LongCat、MiMo、MiniMax、Qwen 建立真实的

@@ -228,7 +228,7 @@ class ArenaProtocolTest {
     }
 
     @Test
-    void disablesBroadScheduledProbesBecauseArenaRateLimitsRealPrompts() {
+    void enablesScheduledModelProbesToKeepDiscoveredModelsCallable() {
         var provider = new ArenaProvider(
             new ArenaProperties(),
             mock(ProxyPoolService.class),
@@ -236,6 +236,6 @@ class ArenaProtocolTest {
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class));
 
-        assertThat(provider.scheduledModelProbeEnabled()).isFalse();
+        assertThat(provider.scheduledModelProbeEnabled()).isTrue();
     }
 }

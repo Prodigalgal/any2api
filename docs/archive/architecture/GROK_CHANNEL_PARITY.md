@@ -1,5 +1,9 @@
 # Grok Build, Web, and Console Parity Contract
 
+> Archived 0.20.0-and-earlier multi-channel design. Source version 0.21.0 retains only `grok_web`;
+> `grok` and `grok_console` were retired by Liquibase changeset 031. Status words such as
+> "current" and "DONE" below refer to the historical design and acceptance window.
+
 This document defines the required Any2API behavior against the local reference snapshot at
 `tmp/chenyme-grok2api`. It is an implementation and acceptance contract, not a claim that the
 current code already provides every item.

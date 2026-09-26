@@ -50,9 +50,119 @@ class RuntimePlan:
     candidate_build_id: str
 
 
-def parse_runtime_plan(value: Any, provider_id: str) -> RuntimePlan:
+_PROVIDER_DEFAULT_RULES: dict[str, dict[str, Any]] = {
+    "arena": {
+        "build_asset_markers": ("arena.ai",),
+        "discovery_markers": {"page": ("initialModels",)},
+        "capabilities": {"mediaUploader": "generateUploadUrl,getSignedUrl"},
+        "endpoint_paths": {
+            "me": "/api/me",
+            "chat": "/nextjs-api/stream/create-evaluation",
+            "models": "/text/direct?model_a=max",
+        },
+    },
+    "deepseek": {
+        "build_asset_markers": ("deepseek",),
+        "discovery_markers": {"page": ("chat.deepseek.com",), "settings": ("/api/v0/client/settings",)},
+        "capabilities": {},
+        "endpoint_paths": {
+            "pow": "/api/v0/chat/create_pow_challenge",
+            "models": "/api/v0/client/settings",
+            "session": "/api/v0/chat_session/create",
+            "completion": "/api/v0/chat/completion",
+        },
+    },
+    "glm": {
+        "build_asset_markers": ("/assets/index-",),
+        "discovery_markers": {
+            "sign": ("5*60*1e3",),
+            "newChat": ("/chats/new",),
+            "completion": ("X-Signature",),
+            "requestContext": ("sortedPayload",),
+        },
+        "capabilities": {},
+        "endpoint_paths": {
+            "chat": "/api/v2/chat/completions",
+            "apiBase": "/api/v2",
+        },
+    },
+    "qwen": {
+        "build_asset_markers": ("qwen-chat-fe",),
+        "discovery_markers": {"page": ("chat.qwen.ai",), "models": ("/api/v2/models/",)},
+        "capabilities": {},
+        "endpoint_paths": {
+            "chat": "/api/v2/chat/completions",
+            "models": "/api/v2/models/",
+            "upload": "/api/v2/files/getstsToken",
+            "session": "/api/v2/chats/new",
+        },
+    },
+    "longcat": {
+        "build_asset_markers": ("longcat.chat",),
+        "discovery_markers": {"page": ("longcat.chat",)},
+        "capabilities": {},
+        "endpoint_paths": {
+            "chat": "/api/v1/chat-completion-V2",
+            "upload": "/api/v1/appendix-upload",
+            "session": "/api/v1/session-create",
+        },
+    },
+    "mimo": {
+        "build_asset_markers": ("xiaomimimo.com",),
+        "discovery_markers": {"requestModule": ("/open-apis/bot/chat", "genUploadInfo")},
+        "capabilities": {"chat": "completions", "models": "getConfig"},
+        "endpoint_paths": {
+            "chat": "/open-apis/bot/chat",
+            "models": "/open-apis/bot/config",
+            "uploadInfo": "/open-apis/resource/genUploadInfo",
+            "parse": "/open-apis/resource/parse",
+        },
+    },
+    "minmax": {
+        "build_asset_markers": ("minmax",),
+        "discovery_markers": {},
+        "capabilities": {},
+        "endpoint_paths": {
+            "chat": "/v1/chat/completions",
+            "models": "/v1/models",
+        },
+    },
+    "grok_web": {
+        "build_asset_markers": ("grok",),
+        "discovery_markers": {},
+        "capabilities": {},
+        "endpoint_paths": {
+            "chat": "/rest/app-chat/conversations/new",
+            "models": "/rest/models",
+        },
+    },
+}
+
+
+def default_runtime_plan_for_provider(provider_id: str) -> RuntimePlan:
+    defaults = _PROVIDER_DEFAULT_RULES.get(provider_id, {})
+    rule = RuntimeRule(
+        schema_version=1,
+        session_max_age_seconds=900,
+        canary_timeout_seconds=60,
+        build_asset_markers=tuple(defaults.get("build_asset_markers", (provider_id,))),
+        discovery_markers=dict(defaults.get("discovery_markers", {})),
+        capabilities=dict(defaults.get("capabilities", {})),
+        endpoint_paths=dict(defaults.get("endpoint_paths", {})),
+    )
+    return RuntimePlan(RuntimeRuleSelection(provider_id, 1, rule), None, "", "")
+
+
+def parse_runtime_plan(
+    value: Any,
+    provider_id: str,
+    *,
+    fallback_default: bool = True,
+) -> RuntimePlan:
     if not _PROVIDER_ID.fullmatch(provider_id):
         raise ValueError("runtime plan provider id is invalid")
+    if (value is None or not isinstance(value, dict) or not value.get("active")) and fallback_default:
+        return default_runtime_plan_for_provider(provider_id)
     if not isinstance(value, dict):
         raise TypeError("runtime plan must be an object")
     active = _parse_selection(value.get("active"), provider_id, "active")

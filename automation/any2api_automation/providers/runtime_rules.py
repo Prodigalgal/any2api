@@ -63,7 +63,10 @@ _PROVIDER_DEFAULT_RULES: dict[str, dict[str, Any]] = {
     },
     "deepseek": {
         "build_asset_markers": ("deepseek",),
-        "discovery_markers": {"page": ("chat.deepseek.com",), "settings": ("/api/v0/client/settings",)},
+        "discovery_markers": {
+            "page": ("chat.deepseek.com",),
+            "settings": ("/api/v0/client/settings",),
+        },
         "capabilities": {},
         "endpoint_paths": {
             "pow": "/api/v0/chat/create_pow_challenge",
@@ -161,7 +164,9 @@ def parse_runtime_plan(
 ) -> RuntimePlan:
     if not _PROVIDER_ID.fullmatch(provider_id):
         raise ValueError("runtime plan provider id is invalid")
-    if (value is None or not isinstance(value, dict) or not value.get("active")) and fallback_default:
+    if (
+        value is None or not isinstance(value, dict) or not value.get("active")
+    ) and fallback_default:
         return default_runtime_plan_for_provider(provider_id)
     if not isinstance(value, dict):
         raise TypeError("runtime plan must be an object")

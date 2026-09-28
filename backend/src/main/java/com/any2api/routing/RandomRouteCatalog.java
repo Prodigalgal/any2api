@@ -62,6 +62,12 @@ public class RandomRouteCatalog {
                         AND probe.status = 'READY'
                         AND probe.probed_at >= :probeFreshAfter
                   )
+                  OR EXISTS (
+                      SELECT 1 FROM model_probe_results provider_probe
+                      WHERE provider_probe.provider_id = model.provider_id
+                        AND provider_probe.status = 'READY'
+                        AND provider_probe.probed_at >= :probeFreshAfter
+                  )
               )
               AND EXISTS (
                   SELECT 1

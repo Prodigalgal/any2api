@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -107,6 +108,9 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override
     public boolean scheduledModelProbeEnabled() { return true; }
+
+    @Override
+    public Optional<String> scheduledProbeModel() { return Optional.of("Max"); }
 
     @Override
     public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }

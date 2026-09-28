@@ -3,7 +3,11 @@ package com.any2api.provider;
 import com.any2api.config.Any2ApiProperties;
 import com.any2api.persistence.PostgresResultValues;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import org.slf4j.Logger;
@@ -24,6 +28,7 @@ public final class ModelProbeScheduler {
     private final int batchSize;
     private final Duration freshness;
     private final Set<String> scheduledProviderIds;
+    private final Map<String, String> scheduledTargets;
 
     public ModelProbeScheduler(
         JdbcClient jdbc,
@@ -37,10 +42,15 @@ public final class ModelProbeScheduler {
         this.probes = probes;
         this.batchSize = properties.getModelRuntime().getScheduledProbeBatchSize();
         this.freshness = properties.getModelRuntime().getProbeFreshness();
-        this.scheduledProviderIds = providers.plugins().stream()
-            .filter(InferenceProvider::scheduledModelProbeEnabled)
-            .map(provider -> provider.manifest().id())
-            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        var targets = new LinkedHashMap<String, String>();
+        for (var provider : providers.plugins()) {
+            if (provider.scheduledModelProbeEnabled()) {
+                provider.scheduledProbeModel().ifPresent(model ->
+                    targets.put(provider.manifest().id(), model));
+            }
+        }
+        this.scheduledTargets = Map.copyOf(targets);
+        this.scheduledProviderIds = Set.copyOf(this.scheduledTargets.keySet());
     }
 
     @Scheduled(
@@ -64,32 +74,46 @@ public final class ModelProbeScheduler {
     }
 
     private Mono<List<Candidate>> candidates() {
-        if (scheduledProviderIds.isEmpty()) {
+        if (scheduledTargets.isEmpty()) {
             return Mono.just(List.of());
         }
-        return Mono.fromCallable(() -> jdbc.sql("""
-                SELECT model.provider_id, model.upstream_id
-                FROM models model
-                JOIN providers provider ON provider.id = model.provider_id
-                LEFT JOIN model_probe_results probe
-                  ON probe.provider_id = model.provider_id
-                 AND probe.model_id = model.upstream_id
-                WHERE model.enabled = TRUE
-                  AND provider.enabled = TRUE
-                  AND provider.installed = TRUE
-                  AND provider.id IN (:providerIds)
-                  AND (probe.probed_at IS NULL
-                    OR probe.probed_at < :staleBefore)
-                ORDER BY probe.probed_at NULLS FIRST, model.provider_id, model.upstream_id
-                LIMIT :limit
-                """)
-            .param("limit", batchSize)
-            .param("providerIds", scheduledProviderIds)
-            .param("staleBefore", PostgresResultValues.timestamp(
-                java.time.Instant.now().minus(freshness)))
-            .query((row, ignored) -> new Candidate(
-                row.getString("provider_id"), row.getString("upstream_id")))
-            .list()).subscribeOn(Schedulers.fromExecutor(databaseExecutor));
+        return Mono.fromCallable(() -> {
+            var staleBefore = Instant.now().minus(freshness);
+            List<Candidate> result = new ArrayList<>();
+            for (var entry : scheduledTargets.entrySet()) {
+                var providerId = entry.getKey();
+                var modelId = entry.getValue();
+                var stale = jdbc.sql("""
+                        SELECT 1
+                        FROM models model
+                        JOIN providers provider ON provider.id = model.provider_id
+                        LEFT JOIN model_probe_results probe
+                          ON probe.provider_id = model.provider_id
+                         AND probe.model_id = model.upstream_id
+                        WHERE model.provider_id = :providerId
+                          AND model.upstream_id = :modelId
+                          AND model.enabled = TRUE
+                          AND provider.enabled = TRUE
+                          AND provider.installed = TRUE
+                          AND (probe.probed_at IS NULL
+                            OR probe.probed_at < :staleBefore)
+                        LIMIT 1
+                        """)
+                    .param("providerId", providerId)
+                    .param("modelId", modelId)
+                    .param("staleBefore", PostgresResultValues.timestamp(staleBefore))
+                    .query((row, ignored) -> true)
+                    .optional()
+                    .orElse(false);
+                if (stale) {
+                    result.add(new Candidate(providerId, modelId));
+                    if (result.size() >= batchSize) {
+                        break;
+                    }
+                }
+            }
+            return result;
+        }).subscribeOn(Schedulers.fromExecutor(databaseExecutor));
     }
 
     private record Candidate(String providerId, String modelId) {}

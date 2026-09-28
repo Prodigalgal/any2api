@@ -67,6 +67,12 @@ public class ModelCatalogCache {
                  AND (
                    usage_runtime.success_count > 0
                    OR (probe.status = 'READY' AND probe.probed_at >= :probeFreshAfter)
+                   OR EXISTS (
+                       SELECT 1 FROM model_probe_results provider_probe
+                       WHERE provider_probe.provider_id = m.provider_id
+                         AND provider_probe.status = 'READY'
+                         AND provider_probe.probed_at >= :probeFreshAfter
+                   )
                  ) AS available
         FROM models m
         JOIN providers p ON p.id = m.provider_id

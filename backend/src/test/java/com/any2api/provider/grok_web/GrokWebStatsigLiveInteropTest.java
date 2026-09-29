@@ -4,13 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import com.any2api.config.Any2ApiProperties;
-import com.any2api.lifecycle.AutomationOperation;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.transport.BrowserTransportClient;
 import com.any2api.transport.BrowserClearanceCoordinator;
-import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
-import com.any2api.transport.OfficialBrowserTransportClient;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,42 +32,6 @@ class GrokWebStatsigLiveInteropTest {
         var signature = signer.sign("POST", path, Files.readString(index));
 
         Files.writeString(output, signature);
-    }
-
-    @Test
-    @EnabledIfEnvironmentVariable(named = "ANY2API_LIVE_GROK_SSO", matches = ".+")
-    void javaLifecycleHandlerCompletesCurrentChatAndQuotaProbe() {
-        var mapper = new ObjectMapper();
-        var platform = new Any2ApiProperties();
-        platform.getAutomation().setBaseUrl(URI.create(
-            System.getenv("ANY2API_LIVE_AUTOMATION_URL")));
-        var transport = new BrowserTransportClient(WebClient.builder(), platform, mapper);
-        var properties = new GrokWebProperties();
-        var protocol = new GrokWebProtocolClient(
-            transport, mock(BrowserClearanceCoordinator.class),
-            new GrokWebStatsigSigner(mapper, properties), properties, mapper);
-        var handler = new GrokWebLifecycleHandler(
-            mock(OfficialBrowserTransportClient.class),
-            new OfficialBrowserSemanticCommandFactory(mapper));
-        var credential = mapper.createObjectNode().put(
-            "sso", System.getenv("ANY2API_LIVE_GROK_SSO"));
-        var proxyJson = new String(Base64.getDecoder().decode(
-            System.getenv("ANY2API_LIVE_PROXY_POOL_B64")));
-        Map<String, Object> proxyPool = mapper.readValue(proxyJson, new TypeReference<>() {});
-
-        var result = handler.execute(
-            AutomationOperation.KEEPALIVE, credential, proxyPool).block();
-
-        assertThat(result).isNotNull();
-        assertThat(result.healthy())
-            .as("lifecycle error class: %s", result.errorClass())
-            .isTrue();
-        assertThat(result.authExpired()).isFalse();
-        assertThat(result.credentialPatch().path("browser_profile").asText())
-            .isEqualTo("chrome136");
-        assertThat(result.metadataPatch().path("available_modes").isArray()).isTrue();
-        assertThat(result.metadataPatch().path("available_modes").size()).isGreaterThan(0);
-        assertThat(result.metadataPatch().path("quota").isObject()).isTrue();
     }
 
     @Test

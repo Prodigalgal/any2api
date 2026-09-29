@@ -87,11 +87,26 @@ public final class OfficialBrowserTransportClient {
                 providerId, plan, operation, semanticCommand, credential, proxyPool,
                 affinityKey, runtimeOptions, transportMode));
         return request
-            .flatMap(value -> acceptReports(providerId, value.path("runtime_reports"))
-                .thenReturn(new TransportResponse(
-                    value.path("status").asInt(502),
-                    value.path("body").asText(""),
-                    value.path("credential_patch").deepCopy())));
+            .flatMap(value -> {
+                var target = value.has("result") && value.path("result").isObject()
+                    ? value.path("result")
+                    : value;
+                var reports = target.has("runtime_reports")
+                    ? target.path("runtime_reports")
+                    : value.path("runtime_reports");
+                int status;
+                if (target.has("status")) {
+                    status = target.path("status").asInt(502);
+                } else if (target.path("healthy").asBoolean(false)) {
+                    status = 200;
+                } else {
+                    status = 502;
+                }
+                var body = target.path("body").asText("");
+                var credentialPatch = target.path("credential_patch").deepCopy();
+                return acceptReports(providerId, reports)
+                    .thenReturn(new TransportResponse(status, body, credentialPatch));
+            });
     }
 
     private Mono<JsonNode> request(

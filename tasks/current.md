@@ -1,7 +1,20 @@
-# 当前任务板（源码 0.22.4）
+# 当前任务板（源码 0.22.5）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-09-29 重点问题厂商注册攻坚、Grok保活激活契约重构与全链路长耗时超时加固（0.22.5）
+
+- **Grok Web 保活契约重构与 PENDING 账号激活解脱**：
+  - **根因查明**：旧版 `GrokWebLifecycleHandler.java` 未沿用系统通用的 `LifecycleOperationExecutor` -> `automation.execute`，而是通过 `OfficialBrowserTransportClient` 错误从顶层读取 `status` 与 `body`；由于自动化端返回的是标准生命周期探活对象（包含 `healthy: true` 而非原始 HTTP 状态码），导致后端恒解析出 502，将每次保活与初次激活均误判为 `provider_upstream_error`；11 次重试耗尽后所有新注册成功的账号死锁在 `PENDING` 状态；
+  - **架构修正**：彻底删除孤立的 `GrokWebLifecycleHandler.java`，让 Grok Web 生命周期完全回归通用的 `LifecycleOperationExecutor` 架构；同时在 `OfficialBrowserTransportClient.java` 中引入对 `result` 容器和 `healthy` 响应的防御性解包；
+  - **调度自愈增强**：优化 `LifecycleScheduler.java` 中的 `reactivateExhaustedActions`，允许未过期的 `PENDING` 账号在冷却后重新唤醒调度，杜绝新注册账号因偶发抖动而“早夭”死在 PENDING。
+- **通义千问（Qwen）注册 100% 失败彻底攻坚**：
+  - **根因查明**：通义千问新版官方注册页面精简去除了用户名输入框，仅保留邮箱和密码；但 `qwen.py:1027-1036` 中的 `_human_type_first` 强制寻找 `username/name` 字段，找不到直接抛出 `RuntimeError("required registration field is unavailable")`，导致注册在 `FORM_READY` 阶段 100% 暴毙；
+  - **修复**：`_human_type_first` 引入 `required: bool = True` 约束支持；用户名输入框显式指定 `required=False`，页面不存在时优雅跳过，邮箱与密码保持必填，畅通全链路注册与验证邮件激活。
+- **全链路长耗时自动化超时加固（DeepSeek / GLM）**：
+  - **根因查明**：`WebClientConfiguration.java` 中的内部 HTTP 连接底层 Netty `responseTimeout` 硬编码为 5 分钟，而复杂的浏览器人机验证（DeepSeek hCaptcha / 邮件验证码收发、GLM 滑动拼图）在多轮重试时极易逼近 300 秒，导致客户端连接被粗暴掐断并报 `WebClientRequestException`；
+  - **加固**：将 `WebClientConfiguration` 的 `responseTimeout` 从 5 分钟提升至 15 分钟，与 `RegistrationJobScheduler` 35 分钟的调度设计相匹配，保障长耗时多轮验证码和异步邮件等待稳定返回。
 
 ## 2026-09-29 全厂商最新模型探活、Arena纯文本选型与LongCat/Qwen链路加固（0.22.4）
 

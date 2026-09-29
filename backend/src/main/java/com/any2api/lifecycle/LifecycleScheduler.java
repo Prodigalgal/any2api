@@ -201,8 +201,7 @@ public class LifecycleScheduler {
                 WHERE action.status = 'EXHAUSTED'
                   AND action.entity_type = 'ACCOUNT'
                   AND action.action_family IN ('keepalive', 'reauthenticate', 'daily_checkin')
-                  AND account.status = 'ACTIVE'
-                  AND account.enabled = TRUE
+                  AND (account.status = 'ACTIVE' AND account.enabled = TRUE OR account.status = 'PENDING')
                   AND (action.expires_at IS NULL OR action.expires_at > CURRENT_TIMESTAMP)
                   AND action.updated_at <= CURRENT_TIMESTAMP
                       - CAST(:rearmCooldownSeconds || ' seconds' AS interval)

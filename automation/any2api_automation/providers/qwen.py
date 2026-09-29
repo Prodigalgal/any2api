@@ -1033,6 +1033,7 @@ def _register_browser(
             'input[autocomplete="username"]',
         ),
         _random_display_name(),
+        required=False,
     )
     _human_type_first(
         page,
@@ -1238,9 +1239,13 @@ def _qwen_session_patch(
     }
 
 
-def _human_type_first(page, selectors: tuple[str, ...], value: str) -> None:
+def _human_type_first(
+    page, selectors: tuple[str, ...], value: str, *, required: bool = True
+) -> None:
     locator = first_visible(page, selectors)
     if locator is None:
+        if not required:
+            return
         raise RuntimeError("required registration field is unavailable")
     _human_type(page, locator, value)
 

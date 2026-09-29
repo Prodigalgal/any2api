@@ -24,7 +24,7 @@ public class WebClientConfiguration {
             .maxIdleTime(Duration.ofSeconds(30))
             .build();
         var http = HttpClient.create(provider)
-            .responseTimeout(Duration.ofMinutes(5));
+            .responseTimeout(Duration.ofMinutes(15));
         return WebClient.builder()
             .clientConnector(new ReactorClientHttpConnector(http));
     }

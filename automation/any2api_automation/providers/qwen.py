@@ -1047,62 +1047,141 @@ def _register_browser(
     )
     pace(page, 600, 1_200)
     passwords = page.locator('input[type="password"]')
-    if passwords.count() < 1:
-        raise RuntimeError("Qwen password field is unavailable")
-    _human_type(page, passwords.first, password)
-    confirmation = page.locator(
-        'input[name="checkPassword"], input[name="confirmPassword"], input[placeholder*="再次"]'
-    ).first
-    if confirmation.count() and confirmation.is_visible():
-        _human_type(page, confirmation, password)
-    elif passwords.count() > 1:
-        _human_type(page, passwords.nth(1), password)
-    agreements = page.locator("input.ant-checkbox-input, input[type='checkbox']")
-    if agreements.count() and not agreements.first.is_checked():
+    if passwords.count() > 0 and passwords.first.is_visible():
+        _human_type(page, passwords.first, password)
+        confirmation = page.locator(
+            'input[name="checkPassword"], input[name="confirmPassword"], input[placeholder*="再次"]'
+        ).first
+        if confirmation.count() and confirmation.is_visible():
+            _human_type(page, confirmation, password)
+        elif passwords.count() > 1:
+            _human_type(page, passwords.nth(1), password)
+        agreements = page.locator("input.ant-checkbox-input, input[type='checkbox']")
+        if agreements.count() and not agreements.first.is_checked():
+            try:
+                agreements.first.check(force=True)
+            except Exception:  # noqa: BLE001 - Ant Design can require a forced click
+                agreements.first.click(force=True)
+            pace(page, 800, 1_500)
+            try:
+                if not agreements.first.is_checked():
+                    page.get_by_text("我同意用户条款", exact=False).first.click()
+            except Exception:  # noqa: BLE001,S110 - localized builds may omit this label
+                pass
+        pace(page, 2_000, 5_000)
+        submit = first_visible(
+            page,
+            (
+                'button[type="submit"]',
+                'button:has-text("创建账号")',
+                'button:has-text("注册")',
+                'button:has-text("Sign up")',
+            ),
+        )
+        if submit is None:
+            raise RuntimeError("Qwen registration submit action is unavailable")
         try:
-            agreements.first.check(force=True)
-        except Exception:  # noqa: BLE001 - Ant Design can require a forced click
-            agreements.first.click(force=True)
-        pace(page, 800, 1_500)
-        try:
-            if not agreements.first.is_checked():
-                page.get_by_text("我同意用户条款", exact=False).first.click()
-        except Exception:  # noqa: BLE001,S110 - localized builds may omit this label
+            if submit.is_disabled():
+                agreements.first.check(force=True)
+                page.wait_for_timeout(800)
+        except Exception:  # noqa: BLE001,S110 - click will provide the final actionable failure
             pass
-    pace(page, 2_000, 5_000)
-    submit = first_visible(
-        page,
-        (
-            'button[type="submit"]',
-            'button:has-text("创建账号")',
-            'button:has-text("注册")',
-            'button:has-text("Sign up")',
-        ),
-    )
-    if submit is None:
-        raise RuntimeError("Qwen registration submit action is unavailable")
-    try:
-        if submit.is_disabled():
-            agreements.first.check(force=True)
-            page.wait_for_timeout(800)
-    except Exception:  # noqa: BLE001,S110 - click will provide the final actionable failure
-        pass
-    trace.mark(RegistrationStage.FORM_SUBMITTED)
-    challenge.submit_and_solve(page, submit)
-    trace.mark(RegistrationStage.CHALLENGE_CLEARED)
-    trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
-    pace(page, 2_000, 4_000)
-    activate_url = mail.wait_for_link_sync(mailbox, host_pattern=r"qwen\.ai")
-    trace.mark(RegistrationStage.OTP_RECEIVED)
-    pace(page, 2_000, 4_000)
-    page.goto(activate_url, wait_until="domcontentloaded")
-    page.wait_for_timeout(2500)
+        trace.mark(RegistrationStage.FORM_SUBMITTED)
+        challenge.submit_and_solve(page, submit)
+        trace.mark(RegistrationStage.CHALLENGE_CLEARED)
+        trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
+        pace(page, 2_000, 4_000)
+        activate_url = mail.wait_for_link_sync(mailbox, host_pattern=r"qwen\.ai")
+        trace.mark(RegistrationStage.OTP_RECEIVED)
+        pace(page, 2_000, 4_000)
+        page.goto(activate_url, wait_until="domcontentloaded")
+        page.wait_for_timeout(2500)
+    else:
+        agreements = page.locator("input.ant-checkbox-input, input[type='checkbox']")
+        if agreements.count() and not agreements.first.is_checked():
+            try:
+                agreements.first.check(force=True)
+            except Exception:
+                pass
+        submit = first_visible(
+            page,
+            (
+                'button:has-text("Continue")',
+                'button:has-text("继续")',
+                'button:has-text("下一步")',
+                'button[type="submit"]',
+            ),
+        )
+        if submit is None:
+            raise RuntimeError("Qwen continue control is unavailable")
+        seen = mail.message_ids_sync(mailbox)
+        trace.mark(RegistrationStage.FORM_SUBMITTED)
+        challenge.submit_and_solve(page, submit)
+        trace.mark(RegistrationStage.CHALLENGE_CLEARED)
+        trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
+        pace(page, 2_000, 4_000)
+        otp = mail.wait_for_code_sync(mailbox, seen_ids=seen)
+        trace.mark(RegistrationStage.OTP_RECEIVED)
+        pace(page, 1_000, 2_000)
+        try:
+            page.wait_for_selector(
+                ".qwenchat-verification-code-input-cell, input[placeholder*='code' i], input[autocomplete='one-time-code']",
+                timeout=30_000,
+            )
+        except Exception:
+            pass
+        cells = page.locator(".qwenchat-verification-code-input-cell")
+        if cells.count() >= 6:
+            for idx, digit in enumerate(otp[:6]):
+                cells.nth(idx).fill(digit)
+                page.wait_for_timeout(150)
+        else:
+            otp_input = first_visible(
+                page,
+                (
+                    "input.qwenchat-verification-code-input-cell",
+                    "input[placeholder*='code' i]",
+                    "input[autocomplete='one-time-code']",
+                    "input[type='text']",
+                ),
+            )
+            if otp_input:
+                _human_type(page, otp_input, otp)
+        pace(page, 1_500, 3_000)
+        confirm_btn = first_visible(
+            page,
+            (
+                'button:has-text("Continue")',
+                'button:has-text("继续")',
+                'button:has-text("确认")',
+                'button:has-text("Verify")',
+                'button[type="submit"]',
+            ),
+            timeout_ms=3000,
+        )
+        if confirm_btn and confirm_btn.is_visible() and not confirm_btn.is_disabled():
+            confirm_btn.click()
+        try:
+            page.wait_for_url(lambda u: "/auth" not in u, timeout=40_000)
+        except Exception:
+            pass
+        page.wait_for_timeout(3000)
     _wait_qwen_risk_runtime(page)
     credential_value = credential_from_context(context, page, password, mailbox.jwt)
     credential_value.update({"email": mailbox.address, "registration_backend": backend})
-    token = challenge.token or _signin_sync(page, mailbox.address, password, proxy_url, fingerprint)
-    page.evaluate("token => localStorage.setItem('token', token)", token)
-    credential_value["token"] = token
+    token = (
+        page.evaluate("() => localStorage.getItem('token') || ''")
+        or challenge.token
+        or _extract_token_from_cookies(context)
+    )
+    if not token:
+        try:
+            token = _signin_sync(page, mailbox.address, password, proxy_url, fingerprint)
+        except Exception:
+            pass
+    if token:
+        page.evaluate("token => localStorage.setItem('token', token)", token)
+        credential_value["token"] = token
     credential_value.update(_qwen_session_patch(context, page, config.qwen_base_url, fingerprint))
     if proxy_url and proxy_affinity_key:
         credential_value["proxy_affinity_key"] = proxy_affinity_key
@@ -1257,6 +1336,19 @@ def _human_type(page, locator, value: str) -> None:
     for character in value:
         page.keyboard.type(character, delay=60 + secrets.randbelow(161))
     pace(page, 1_500, 3_500)
+
+
+def _extract_token_from_cookies(context) -> str:
+    try:
+        for c in context.cookies():
+            name = str(c.get("name") or "").lower()
+            if name in {"token", "auth_token", "access_token", "jwt", "qwen_token"}:
+                val = str(c.get("value") or "").strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return ""
 
 
 def _random_display_name() -> str:

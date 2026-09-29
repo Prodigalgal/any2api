@@ -278,7 +278,11 @@ class LongcatAutomationProvider(AutomationProvider):
             except Exception as error:  # noqa: BLE001 - normalized stream boundary
                 reason = " ".join(str(error).split())[:240]
                 lower_reason = reason.lower()
-                if "401" in lower_reason or "log in" in lower_reason or "unauthorized" in lower_reason:
+                if (
+                    "401" in lower_reason
+                    or "log in" in lower_reason
+                    or "unauthorized" in lower_reason
+                ):
                     yield transport_frame("status", status=401)
                 yield transport_frame(
                     "error",

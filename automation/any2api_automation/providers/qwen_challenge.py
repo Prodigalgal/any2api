@@ -179,9 +179,20 @@ class QwenSignupChallenge(ChallengeStrategy):
                     payload = response.json()
                     if isinstance(payload, dict):
                         entry["successful"] = response.status == 200 and not payload.get("error")
-                        data_obj = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-                        token = payload.get("token") or data_obj.get("token") or data_obj.get("active_token")
-                        user_id = payload.get("id") or data_obj.get("id") or data_obj.get("userId") or data_obj.get("user_id")
+                        data_obj = (
+                            payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                        )
+                        token = (
+                            payload.get("token")
+                            or data_obj.get("token")
+                            or data_obj.get("active_token")
+                        )
+                        user_id = (
+                            payload.get("id")
+                            or data_obj.get("id")
+                            or data_obj.get("userId")
+                            or data_obj.get("user_id")
+                        )
                         if token:
                             self.token = str(token)
                         if user_id:

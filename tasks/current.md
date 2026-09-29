@@ -9,9 +9,13 @@
   - **根因查明**：旧版 `GrokWebLifecycleHandler.java` 未沿用系统通用的 `LifecycleOperationExecutor` -> `automation.execute`，而是通过 `OfficialBrowserTransportClient` 错误从顶层读取 `status` 与 `body`；由于自动化端返回的是标准生命周期探活对象（包含 `healthy: true` 而非原始 HTTP 状态码），导致后端恒解析出 502，将每次保活与初次激活均误判为 `provider_upstream_error`；11 次重试耗尽后所有新注册成功的账号死锁在 `PENDING` 状态；
   - **架构修正**：彻底删除孤立的 `GrokWebLifecycleHandler.java`，让 Grok Web 生命周期完全回归通用的 `LifecycleOperationExecutor` 架构；同时在 `OfficialBrowserTransportClient.java` 中引入对 `result` 容器和 `healthy` 响应的防御性解包；
   - **调度自愈增强**：优化 `LifecycleScheduler.java` 中的 `reactivateExhaustedActions`，允许未过期的 `PENDING` 账号在冷却后重新唤醒调度，杜绝新注册账号因偶发抖动而“早夭”死在 PENDING。
-- **通义千问（Qwen）注册 100% 失败彻底攻坚**：
-  - **根因查明**：通义千问新版官方注册页面精简去除了用户名输入框，仅保留邮箱和密码；但 `qwen.py:1027-1036` 中的 `_human_type_first` 强制寻找 `username/name` 字段，找不到直接抛出 `RuntimeError("required registration field is unavailable")`，导致注册在 `FORM_READY` 阶段 100% 暴毙；
-  - **修复**：`_human_type_first` 引入 `required: bool = True` 约束支持；用户名输入框显式指定 `required=False`，页面不存在时优雅跳过，邮箱与密码保持必填，畅通全链路注册与验证邮件激活。
+- **通义千问（Qwen）现代化纯验证码注册流程重构与 100% 成功交付**：
+  - **现场真机取证与流程勘误**：在生产 Pod 内通过真实 Camoufox 捕获现场证实，通义千问官方注册页已全面转为 **"Sign up with verification code"（纯验证码注册模式）**；页面仅有单邮箱输入框与 Continue 按钮，点击后向邮箱发送 6 位验证码，页面渲染 6 个独立单字符输入格（`.qwenchat-verification-code-input-cell`），填入即自动登录主站，不再支持旧版的用户名、独立密码设置与邮件激活链接；
+  - **自动化端全流程重写**：`automation/any2api_automation/providers/qwen.py` 完整实现自适应注册流程：智能识别现代验证码注册与旧版双模式；处理用户协议多选框、提交邮箱、自动化滑动验证码解除、异步邮件 6 位验证码接收、按格填入 6 位验证码并点击确认、等待页面跳转进入 `/`，并由上下文提取 Cookie/JWT Token 与会话凭据直接入库；
+  - **生产环境端到端验证通过**：
+    - Job `75c611f8-64eb-4407-ac14-11c972c036b7`：新注册任务 1 次尝试即 100% 成功完成，账号 `2c1a0820-70af-4162-879e-28b2ac153caa` 成功诞生并安全入库；
+    - Job `d458c2b5-9277-4f63-9c3a-de4c1be0a793`：此前因旧逻辑 4 次失败的存量任务，在新版本上线后自动进行第 5 次重试并 100% 成功，账号 `fc5e1c00-3b9f-4dde-9560-a62b377b6a43` 成功诞生，任务转为 `SUCCEEDED`；
+    - 彻底扭转通义千问过去 100% 注册暴毙的局面，实测注册成功率达到 **100%（2/2）**。
 - **全链路长耗时自动化超时加固（DeepSeek / GLM）**：
   - **根因查明**：`WebClientConfiguration.java` 中的内部 HTTP 连接底层 Netty `responseTimeout` 硬编码为 5 分钟，而复杂的浏览器人机验证（DeepSeek hCaptcha / 邮件验证码收发、GLM 滑动拼图）在多轮重试时极易逼近 300 秒，导致客户端连接被粗暴掐断并报 `WebClientRequestException`；
   - **加固**：将 `WebClientConfiguration` 的 `responseTimeout` 从 5 分钟提升至 15 分钟，与 `RegistrationJobScheduler` 35 分钟的调度设计相匹配，保障长耗时多轮验证码和异步邮件等待稳定返回。

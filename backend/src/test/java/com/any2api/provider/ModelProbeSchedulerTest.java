@@ -59,6 +59,9 @@ class ModelProbeSchedulerTest {
             .contains("model.provider_id = :providerId")
             .contains("model.enabled = TRUE")
             .contains("probe.probed_at IS NULL")
+            .contains("NOT EXISTS")
+            .contains("fresh_probe.status = 'READY'")
+            .contains("model.upstream_id LIKE '%-image%'")
             .contains(":preferredModel");
         verify(statement).param("providerId", "test-provider");
         verify(statement).param("preferredModel", "test-model");

@@ -51,7 +51,7 @@ public final class GlmProvider implements InferenceProvider {
             "preview_mode"),
         java.util.Set.of());
     private static final ProviderManifest MANIFEST = new ProviderManifest(
-        "glm", "GLM", "official-browser-z-ai-web-v1", "3", List.of("glm-5.2"), Map.of(
+        "glm", "GLM", "official-browser-z-ai-web-v1", "3", List.of("glm-5.3", "glm-5.2", "glm-4-flash"), Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
             ProviderCapability.RESPONSES, SupportLevel.NATIVE,
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
@@ -60,7 +60,7 @@ public final class GlmProvider implements InferenceProvider {
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
             ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
             ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-        Map.of(RandomModelRole.TOP_TEXT, List.of("glm-5.2")), true);
+        Map.of(RandomModelRole.TOP_TEXT, List.of("glm-5.3", "glm-5.2")), true);
 
     private final GlmProperties properties;
     private final ProxyPoolService proxyPools;
@@ -83,6 +83,11 @@ public final class GlmProvider implements InferenceProvider {
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
+
+    @Override
+    public java.util.Optional<String> scheduledProbeModel() {
+        return java.util.Optional.of("glm-5.3");
+    }
 
     @Override
     public java.util.Set<ProviderTransportMode> supportedTransportModes() {

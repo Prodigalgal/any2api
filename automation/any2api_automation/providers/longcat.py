@@ -196,21 +196,32 @@ class LongcatAutomationProvider(AutomationProvider):
                 runtime_options=_runtime_options(payload),
             )
         status = int(result.get("status") or 502)
-        if status in {401, 403}:
+        body_text = str(result.get("body") or "")
+        is_auth_rejected = (
+            status in {401, 403}
+            or "code=401" in body_text
+            or '"code": 401' in body_text
+            or '"code":401' in body_text
+            or "please log in" in body_text.lower()
+            or "unauthorized" in body_text.lower()
+        )
+        if is_auth_rejected:
             return {
                 "healthy": False,
                 "auth_expired": True,
                 "ready_for_inference": False,
-                "error_class": "longcat_credentials_rejected",
+                "error_class": "credential_rejected",
             }
         try:
             _conversation_id(result)
         except Exception as error:  # noqa: BLE001 - normalize probe failure
+            err_msg = str(error).lower()
+            auth_expired = "401" in err_msg or "log in" in err_msg or "unauthorized" in err_msg
             return {
                 "healthy": False,
-                "auth_expired": False,
+                "auth_expired": auth_expired,
                 "ready_for_inference": False,
-                "error_class": type(error).__name__,
+                "error_class": "credential_rejected" if auth_expired else type(error).__name__,
             }
         response: dict[str, Any] = {
             "healthy": True,
@@ -266,6 +277,9 @@ class LongcatAutomationProvider(AutomationProvider):
                     )
             except Exception as error:  # noqa: BLE001 - normalized stream boundary
                 reason = " ".join(str(error).split())[:240]
+                lower_reason = reason.lower()
+                if "401" in lower_reason or "log in" in lower_reason or "unauthorized" in lower_reason:
+                    yield transport_frame("status", status=401)
                 yield transport_frame(
                     "error",
                     data=(

@@ -121,13 +121,17 @@ class QwenAutomationProvider(AutomationProvider):
             result = await _qwen_models_request(current, proxy_url, plan, payload)
         status = int(result.get("status") or 502)
         body = _qwen_body_text(result)
+        auth_expired = _is_qwen_auth_rejected(status, body)
+        healthy = 200 <= status < 300 and _qwen_model_catalog_available(body) and not auth_expired
         response: dict[str, Any] = {
-            "healthy": 200 <= status < 300 and _qwen_model_catalog_available(body),
-            "auth_expired": status in {401, 403},
+            "healthy": healthy,
+            "auth_expired": auth_expired,
             "ready_for_inference": False,
-            "inference_probe_required": 200 <= status < 300,
+            "inference_probe_required": healthy,
         }
-        if status not in {401, 403} and not response["healthy"]:
+        if auth_expired:
+            response["error_class"] = "credential_rejected"
+        elif not healthy:
             response["error_class"] = "qwen_model_catalog_unavailable"
         patch = result.get("credential_patch")
         if isinstance(patch, dict) and patch:
@@ -165,13 +169,16 @@ class QwenAutomationProvider(AutomationProvider):
         ) as proxy_url:
             result = await _qwen_chat_request(current, proxy_url, plan, command, payload)
         status = int(result.get("status") or 502)
-        yield transport_frame("status", status=status)
-        if status < 400:
+        body_text = _qwen_body_excerpt(result)
+        auth_rejected = _is_qwen_auth_rejected(status, body_text)
+        reported_status = 401 if auth_rejected else status
+        yield transport_frame("status", status=reported_status)
+        if status < 400 and not auth_rejected:
             body = _decode_qwen_body(result)
             for data in _qwen_sse_data(body):
                 yield transport_frame("data", data=data)
         else:
-            yield transport_frame("error", data=_qwen_body_excerpt(result))
+            yield transport_frame("error", data=body_text)
         patch = result.get("credential_patch")
         if isinstance(patch, dict) and patch:
             yield transport_frame("credential_patch", data=patch)
@@ -762,6 +769,24 @@ def _qwen_body_text(result: dict[str, Any]) -> str:
         return _decode_qwen_body(result).decode("utf-8", errors="replace")
     except RuntimeError:
         return str(result.get("body") or "Qwen browser request failed")
+
+
+def _is_qwen_auth_rejected(status: int, body: str) -> bool:
+    if status in {401, 403}:
+        return True
+    lower = (body or "").lower()
+    return (
+        "unauthorized" in lower
+        or "401 unauthorized" in lower
+        or '"code":"unauthorized"' in lower
+        or '"code": "unauthorized"' in lower
+        or "token expired" in lower
+        or "token_expired" in lower
+        or "login expired" in lower
+        or "invalid token" in lower
+        or "credentials_rejected" in lower
+        or "credential_rejected" in lower
+    )
 
 
 def _qwen_chat_id(value: Any) -> str:

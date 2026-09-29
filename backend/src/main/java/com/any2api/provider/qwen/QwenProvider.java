@@ -72,7 +72,7 @@ public final class QwenProvider implements InferenceProvider {
     @Override
     public ProviderManifest manifest() {
         return new ProviderManifest("qwen", "Qwen", "native-qwen-web-v2.1", "2",
-            List.of("qwen3.7-plus"), Map.of(
+            List.of("qwen3.8-max", "qwen3.8-omni-flash", "qwen3.7-plus"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.STREAMING, SupportLevel.NATIVE,
@@ -82,7 +82,12 @@ public final class QwenProvider implements InferenceProvider {
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
                 ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-            Map.of(RandomModelRole.TOP_TEXT, List.of("qwen3.7-plus")), true);
+            Map.of(RandomModelRole.TOP_TEXT, List.of("qwen3.8-max", "qwen3.8-omni-flash")), true);
+    }
+
+    @Override
+    public java.util.Optional<String> scheduledProbeModel() {
+        return java.util.Optional.of("qwen3.8-max");
     }
 
     @Override
@@ -194,9 +199,13 @@ public final class QwenProvider implements InferenceProvider {
                 if ("status".equals(type)) {
                     status.set(frame.path("status").asInt(502));
                 } else if ("error".equals(type)) {
-                    var code = status.get() < 0 ? 502 : status.get();
+                    var rawText = frame.path("data").asText("");
+                    var code = status.get();
+                    if (code < 0) {
+                        code = ProviderFailureSignals.isCredentialRejected(502, rawText) ? 401 : 502;
+                    }
                     sink.error(new QwenUpstreamException(
-                        code, summarize(code, frame.path("data").asText(""))));
+                        code, summarize(code, rawText)));
                 } else if ("data".equals(type)
                     && status.get() >= 200
                     && status.get() < 300) {
@@ -233,10 +242,15 @@ public final class QwenProvider implements InferenceProvider {
                 manifest().id(), "models", semanticCommands.models(), account.credential(),
                 proxyPool(), proxyAffinityKey(account), runtimeOptions());
         return upstream
-            .flatMap(response -> response.status() >= 200 && response.status() < 300
-                ? Mono.just(parseModels(json(response.body())))
-                : Mono.error(new QwenUpstreamException(
-                    response.status(), summarize(response.status(), response.body()))));
+            .flatMap(response -> {
+                if (response.status() >= 200 && response.status() < 300) {
+                    return Mono.just(parseModels(json(response.body())));
+                }
+                var code = ProviderFailureSignals.isCredentialRejected(response.status(), response.body())
+                    ? 401 : response.status();
+                return Mono.error(new QwenUpstreamException(
+                    code, summarize(code, response.body())));
+            });
     }
 
     static List<DiscoveredModel> parseModels(JsonNode root) {
@@ -292,13 +306,17 @@ public final class QwenProvider implements InferenceProvider {
         if (error instanceof QwenUpstreamException upstream) {
             var antiBot = ProviderFailureSignals.isAntiBot(
                 upstream.status(), upstream.getMessage());
-            var retryable = antiBot || upstream.status() >= 500
-                || List.of(408, 409, 425, 429).contains(upstream.status());
-            var type = antiBot ? "anti_bot_rejected" : switch (upstream.status()) {
-                case 401, 403 -> "credential_rejected";
-                case 429 -> "rate_limited";
-                default -> "provider_upstream_error";
-            };
+            var credentialRejected = !antiBot && ProviderFailureSignals.isCredentialRejected(
+                upstream.status(), upstream.getMessage());
+            var retryable = !credentialRejected && (antiBot || upstream.status() >= 500
+                || List.of(408, 409, 425, 429).contains(upstream.status()));
+            var type = antiBot ? "anti_bot_rejected"
+                : credentialRejected ? "credential_rejected"
+                : switch (upstream.status()) {
+                    case 401, 403 -> "credential_rejected";
+                    case 429 -> "rate_limited";
+                    default -> "provider_upstream_error";
+                };
             return new ProviderFailure(type, upstream.getMessage(), retryable,
                 antiBot
                     ? Map.of("status", upstream.status(), "challenge", "provider_verification")

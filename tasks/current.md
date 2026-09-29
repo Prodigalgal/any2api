@@ -1,7 +1,21 @@
-# 当前任务板（源码 0.22.3）
+# 当前任务板（源码 0.22.4）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-09-29 全厂商最新模型探活、Arena纯文本选型与LongCat/Qwen链路加固（0.22.4）
+
+- **全厂商探活动态首选各厂商最新代际模型**：
+  - 各厂商 Manifest 与 `scheduledProbeModel()` 全面升级对齐各家最新主力模型：MiMo (`mimo-v2.6-flash`), GLM (`glm-5.3`), Qwen (`qwen3.8-max`), MiniMax (`MiniMax-M3.1-Flash-Preview`), Arena (`Max`), LongCat (`longcat-flash`), Grok (`grok-3`), DeepSeek (`default`)；
+  - `ModelProbeScheduler` 防重复探测与额度保护机制：引入 15 分钟新鲜 READY 探针排他拦截，已成功探活的厂商在新鲜窗口内绝不重复发起探测，显著节省调用额度并降低风控封号风险。
+- **Arena 探活彻底避免选中文生图/生视频等非对话模型**：
+  - 显式声明 `ArenaProvider.scheduledProbeModel() = "Max"`，实测 13s 内稳定就绪；
+  - `ModelProbeScheduler` 数据库候选模型查询在 SQL 层建立多模态/生图/生视频模型降级排除机制（自动后置或过滤 `%-image%`, `%-video%`, `flux-%`, `wan-%`, `veo-%`, `kling-%`, `sora%` 等），确保任何纯文本对话模型绝对优先于生图/生视频模型，杜绝纯文本 completions 命中图像模型导致的 400 `invalid_request_error`。
+- **LongCat 与 Qwen 链路认证失效自愈与异常识别加固**：
+  - 根因定位：LongCat 美团会话创建接口在凭据过期时返回 HTTP 200 + `{"code": 401, "message": "Please log in to continue"}`，通义千问上游在 Token 失效时返回 401 并被反代包装为 502；此前系统仅比对 HTTP 状态码 401/403，导致大量登录失效被误判为 502 `provider_upstream_error`，不仅重试死循环，更无法触发后端的账号下线与重新认证/自动注册补号；
+  - `ProviderFailureSignals.java` 引入保守且强健的 `isCredentialRejected` 判定，覆盖 `unauthorized`, `code=401`, `Please log in`, `token expired` 等认证失效特征；
+  - `LongcatProvider.java` 与 `QwenProvider.java`：在流式错误帧与模型发现阶段统一将凭据失效提升为 401 `credential_rejected`，禁止单账号无效重试；
+  - `automation` 端 `longcat.py` 与 `qwen.py`：在 `keepalive` 与 `transport_stream` 中精准捕获 401/登录失效语义，返回 `auth_expired: True` 且 `error_class: "credential_rejected"`，使得后端 `LifecycleScheduler` 与 `AccountRecoveryService` 能立即调度 `reauthenticate` 或自动注册新号补充账号池。
 
 ## 2026-09-29 探活自适应动态选型与 Arena 全链路打通（0.22.3）
 

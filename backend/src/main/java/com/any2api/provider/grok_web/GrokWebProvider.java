@@ -52,8 +52,7 @@ public final class GrokWebProvider implements InferenceProvider {
             ProviderCapability.IMAGE_EDITING, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
             ProviderCapability.REGISTRATION, SupportLevel.NATIVE),
-        Map.of(RandomModelRole.TOP_TEXT, List.of(
-            "grok-chat-heavy", "grok-chat-expert", "grok-chat-fast")), true);
+        Map.of(RandomModelRole.TOP_TEXT, List.of("grok-3", "grok-2")), true);
     private static final Duration RESPONSE_STATE_TTL = Duration.ofHours(24);
 
     private final OfficialBrowserTransportClient transport;
@@ -86,6 +85,11 @@ public final class GrokWebProvider implements InferenceProvider {
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
+
+    @Override
+    public java.util.Optional<String> scheduledProbeModel() {
+        return java.util.Optional.of("grok-3");
+    }
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 

@@ -64,7 +64,7 @@ public final class MinmaxProvider implements InferenceProvider {
     @Override
     public ProviderManifest manifest() {
         return new ProviderManifest("minmax", "MinMax", "official-browser-minmax-agent-v2", "3",
-            List.of("MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"), Map.of(
+            List.of("MiniMax-M3.1-Flash-Preview", "MiniMax-M3", "MiniMax-M2.7-highspeed"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.STREAMING, SupportLevel.NATIVE,
@@ -75,7 +75,12 @@ public final class MinmaxProvider implements InferenceProvider {
                 ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.NATIVE,
                 ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-            Map.of(RandomModelRole.TOP_TEXT, List.of("MiniMax-M3")), true);
+            Map.of(RandomModelRole.TOP_TEXT, List.of("MiniMax-M3.1-Flash-Preview", "MiniMax-M3")), true);
+    }
+
+    @Override
+    public java.util.Optional<String> scheduledProbeModel() {
+        return java.util.Optional.of("MiniMax-M3.1-Flash-Preview");
     }
 
     @Override

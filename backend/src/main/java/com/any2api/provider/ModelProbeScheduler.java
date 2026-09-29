@@ -87,8 +87,29 @@ public final class ModelProbeScheduler {
                           AND provider.installed = TRUE
                           AND (probe.probed_at IS NULL
                             OR probe.probed_at < :staleBefore)
+                          AND NOT EXISTS (
+                            SELECT 1 FROM model_probe_results fresh_probe
+                            WHERE fresh_probe.provider_id = model.provider_id
+                              AND fresh_probe.status = 'READY'
+                              AND fresh_probe.probed_at >= :staleBefore
+                          )
                         ORDER BY
                           CASE WHEN model.upstream_id = :preferredModel THEN 0 ELSE 1 END,
+                          CASE
+                            WHEN model.upstream_id LIKE '%-image%'
+                              OR model.upstream_id LIKE '%-video%'
+                              OR model.upstream_id LIKE '%-i2v%'
+                              OR model.upstream_id LIKE '%-t2v%'
+                              OR model.upstream_id LIKE '%-t2i%'
+                              OR model.upstream_id LIKE '%-edit%'
+                              OR model.upstream_id LIKE 'flux-%'
+                              OR model.upstream_id LIKE 'wan-%'
+                              OR model.upstream_id LIKE 'wan2%'
+                              OR model.upstream_id LIKE 'veo-%'
+                              OR model.upstream_id LIKE 'kling-%'
+                              OR model.upstream_id LIKE 'sora%'
+                            THEN 1 ELSE 0
+                          END ASC,
                           model.updated_at DESC,
                           model.id DESC
                         LIMIT 1

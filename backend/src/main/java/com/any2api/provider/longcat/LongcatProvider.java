@@ -59,7 +59,7 @@ public final class LongcatProvider implements InferenceProvider {
             ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
             ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
         Map.of(
-            RandomModelRole.TOP_TEXT, List.of("longcat-pro"),
+            RandomModelRole.TOP_TEXT, List.of("longcat-flash", "longcat-search", "longcat-pro"),
             RandomModelRole.TOP_MULTIMODAL, List.of("longcat-pro")), true);
 
     private final OfficialBrowserTransportClient transport;
@@ -86,6 +86,11 @@ public final class LongcatProvider implements InferenceProvider {
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
+
+    @Override
+    public java.util.Optional<String> scheduledProbeModel() {
+        return java.util.Optional.of("longcat-flash");
+    }
 
     @Override
     public Set<ProviderTransportMode> supportedTransportModes() {
@@ -148,9 +153,13 @@ public final class LongcatProvider implements InferenceProvider {
                     if ("status".equals(type)) {
                         status.set(frame.path("status").asInt(502));
                     } else if ("error".equals(type)) {
-                        var code = status.get() < 0 ? 502 : status.get();
+                        var rawText = frame.path("data").asText("");
+                        var code = status.get();
+                        if (code < 0) {
+                            code = ProviderFailureSignals.isCredentialRejected(502, rawText) ? 401 : 502;
+                        }
                         sink.error(new LongcatUpstreamException(
-                            code, summarize(code, frame.path("data").asText(""))));
+                            code, summarize(code, rawText)));
                     } else if ("data".equals(type)
                         && status.get() >= 200
                         && status.get() < 300) {
@@ -180,9 +189,11 @@ public final class LongcatProvider implements InferenceProvider {
                     "anti_bot_rejected", upstream.getMessage(), true,
                     Map.of("status", upstream.status(), "challenge", "provider_verification"));
             }
-            var retryable = upstream.status() >= 500
-                || List.of(408, 409, 425, 429).contains(upstream.status());
-            var type = switch (upstream.status()) {
+            var credentialRejected = ProviderFailureSignals.isCredentialRejected(
+                upstream.status(), upstream.getMessage());
+            var retryable = !credentialRejected && (upstream.status() >= 500
+                || List.of(408, 409, 425, 429).contains(upstream.status()));
+            var type = credentialRejected ? "credential_rejected" : switch (upstream.status()) {
                 case 401, 403 -> "credential_rejected";
                 case 429 -> "rate_limited";
                 default -> "provider_upstream_error";

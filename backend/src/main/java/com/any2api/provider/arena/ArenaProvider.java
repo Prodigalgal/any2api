@@ -97,6 +97,11 @@ public final class ArenaProvider implements InferenceProvider {
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
     @Override
+    public java.util.Optional<String> scheduledProbeModel() {
+        return java.util.Optional.of("Max");
+    }
+
+    @Override
     public Set<ProviderTransportMode> supportedTransportModes() {
         return Set.of(ProviderTransportMode.RUNTIME);
     }

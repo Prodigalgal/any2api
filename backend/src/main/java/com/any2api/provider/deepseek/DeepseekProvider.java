@@ -83,6 +83,11 @@ public final class DeepseekProvider implements InferenceProvider {
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
     @Override
+    public java.util.Optional<String> scheduledProbeModel() {
+        return java.util.Optional.of("default");
+    }
+
+    @Override
     public Set<ProviderTransportMode> supportedTransportModes() {
         return Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
     }

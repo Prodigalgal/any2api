@@ -1101,7 +1101,7 @@ def _register_browser(
         if agreements.count() and not agreements.first.is_checked():
             try:
                 agreements.first.check(force=True)
-            except Exception:
+            except Exception:  # noqa: BLE001,S110 - agreement checkbox is optional or auto-checked
                 pass
         submit = first_visible(
             page,
@@ -1128,7 +1128,7 @@ def _register_browser(
                 ".qwenchat-verification-code-input-cell, input[placeholder*='code' i], input[autocomplete='one-time-code']",
                 timeout=30_000,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001,S110 - fallback to first visible input probe
             pass
         cells = page.locator(".qwenchat-verification-code-input-cell")
         if cells.count() >= 6:
@@ -1163,7 +1163,7 @@ def _register_browser(
             confirm_btn.click()
         try:
             page.wait_for_url(lambda u: "/auth" not in u, timeout=40_000)
-        except Exception:
+        except Exception:  # noqa: BLE001,S110 - url navigation can take longer or stay on landing
             pass
         page.wait_for_timeout(3000)
     _wait_qwen_risk_runtime(page)
@@ -1177,7 +1177,7 @@ def _register_browser(
     if not token:
         try:
             token = _signin_sync(page, mailbox.address, password, proxy_url, fingerprint)
-        except Exception:
+        except Exception:  # noqa: BLE001,S110 - signin fallback is best-effort
             pass
     if token:
         page.evaluate("token => localStorage.setItem('token', token)", token)
@@ -1346,7 +1346,7 @@ def _extract_token_from_cookies(context) -> str:
                 val = str(c.get("value") or "").strip()
                 if val:
                     return val
-    except Exception:
+    except Exception:  # noqa: BLE001,S110 - cookie extraction failure falls back to empty
         pass
     return ""
 

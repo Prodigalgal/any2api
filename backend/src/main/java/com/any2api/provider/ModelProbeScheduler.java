@@ -78,7 +78,7 @@ public final class ModelProbeScheduler {
             return Mono.just(List.of());
         }
         return Mono.fromCallable(() -> {
-            var staleBefore = Instant.now().minus(freshness);
+            var staleBefore = Instant.now().minus(freshness.dividedBy(2));
             List<Candidate> result = new ArrayList<>();
             for (var entry : scheduledTargets.entrySet()) {
                 var providerId = entry.getKey();

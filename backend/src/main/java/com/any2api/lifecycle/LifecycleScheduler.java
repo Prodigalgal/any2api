@@ -428,6 +428,10 @@ public class LifecycleScheduler {
         var nextAttempts = healthy || reauthenticationRequired ? 0 : action.attempts() + 1;
         if (!healthy && nextAttempts >= MAX_ATTEMPTS) {
             exhaust(action, owner, "LifecycleAttemptsExhausted");
+            if (task.account().getStatus() == AccountStatus.ACTIVE) {
+                task.account().updateState(AccountStatus.DEGRADED, false);
+                accounts.save(task.account());
+            }
             return;
         }
         var nextGeneration = action.generation() + 1;

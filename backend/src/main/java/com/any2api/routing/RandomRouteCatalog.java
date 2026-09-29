@@ -66,7 +66,7 @@ public class RandomRouteCatalog {
                       SELECT 1 FROM model_probe_results provider_probe
                       WHERE provider_probe.provider_id = model.provider_id
                         AND provider_probe.status = 'READY'
-                        AND provider_probe.probed_at >= :probeFreshAfter
+                        AND provider_probe.probed_at >= :providerProbeFreshAfter
                   )
               )
               AND EXISTS (
@@ -95,6 +95,8 @@ public class RandomRouteCatalog {
                 Instant.now().minus(healthWindow)))
             .param("probeFreshAfter", PostgresResultValues.timestamp(
                 Instant.now().minus(probeFreshness)))
+            .param("providerProbeFreshAfter", PostgresResultValues.timestamp(
+                Instant.now().minus(probeFreshness.multipliedBy(4))))
             .query(this::row)
             .list();
     }

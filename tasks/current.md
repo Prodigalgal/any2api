@@ -1,7 +1,19 @@
-# 当前任务板（源码 0.22.1）
+# 当前任务板（源码 0.22.2）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-09-29 探活鲁棒性增强与账号保活死循环治理（0.22.2）
+
+- **探活账号并发争抢误杀根除**：
+  - `ModelProbeService` 中捕获 `AccountUnavailableException` 与 `AccountCapacityException`（无空闲账号/并发占满），直接跳过持久化而不记录为 `FAILED`，杜绝因线上业务请求占用账号导致代表探针被误杀覆盖，防止旗下子模型发生雪崩式 503。
+- **探针时钟抖动采样断档根除（半衰期预刷新 + 连通性继承窗口放宽）**：
+  - `ModelProbeScheduler` 将检查阈值从 `freshness` 前置为 `freshness.dividedBy(2)`（15 分钟），实现主动预刷新（Prefetch），保证探针在 15~30 分钟生命周期内平滑轮转；
+  - `ModelCatalogCache` 与 `RandomRouteCatalog` 将代表探针继承窗口放宽至 2 小时（`providerProbeFreshAfter`），彻底消除调度周期采样交错带来的短暂停摆断档。
+- **Arena 激活超时治理**：
+  - 将 `arena_recaptcha_v2_timeout_seconds` 默认值从 180 秒缩短为 10 秒，在无头环境中遇到 v2 挑战时快速返回明确失败，杜绝阻塞 180 秒导致后端 120 秒抛出 `TimeoutException` 和 `provider_transport_error`。
+- **Keepalive 失败死循环与 Camoufox 内存暴涨治理**：
+  - `LifecycleScheduler` 中当 keepalive 任务耗尽 `MAX_ATTEMPTS` 时，将该账号置为 `DEGRADED, enabled = false`，阻止 `reactivateExhaustedActions` 周期性无脑复活死账号，彻底根除高频无效拉起 Camoufox 导致的自动化 Pod OOM / SIGABRT 134 崩溃。
 
 ## 2026-09-28 模型轻量探活与防封禁优化（0.22.1）
 

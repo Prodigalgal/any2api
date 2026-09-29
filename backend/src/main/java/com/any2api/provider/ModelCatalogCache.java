@@ -71,7 +71,7 @@ public class ModelCatalogCache {
                        SELECT 1 FROM model_probe_results provider_probe
                        WHERE provider_probe.provider_id = m.provider_id
                          AND provider_probe.status = 'READY'
-                         AND provider_probe.probed_at >= :probeFreshAfter
+                         AND provider_probe.probed_at >= :providerProbeFreshAfter
                    )
                  ) AS available
         FROM models m
@@ -195,6 +195,7 @@ public class ModelCatalogCache {
         return jdbc.sql(MODEL_QUERY)
             .param("windowStart", PostgresResultValues.timestamp(now.minus(healthWindow)))
             .param("probeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness)))
+            .param("providerProbeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness.multipliedBy(4))))
             .param("readySuccessRate", readySuccessRate)
             .param("readyP95Ms", readyP95Ms)
             .query(this::row).list();

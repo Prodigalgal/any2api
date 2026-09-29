@@ -12,10 +12,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 @Service
 public final class ModelProbeService {
+    private static final Logger log = LoggerFactory.getLogger(ModelProbeService.class);
     private final ProviderRegistry providers;
     private final InferenceCoordinator coordinator;
     private final JdbcClient jdbc;
@@ -47,9 +50,21 @@ public final class ModelProbeService {
                 .collectList()
                 .timeout(provider.modelProbeTimeout())
                 .map(events -> result(normalizedProvider, normalizedModel, events, startedAt))
-                .onErrorResume(error -> Mono.just(new Result(
-                    normalizedProvider, normalizedModel, "FAILED",
-                    error.getClass().getSimpleName(), null, elapsed(startedAt), Instant.now())))
+                .onErrorResume(error -> {
+                    var root = error;
+                    while (root.getCause() != null && root.getCause() != root) {
+                        root = root.getCause();
+                    }
+                    if (root instanceof com.any2api.account.AccountUnavailableException
+                        || root instanceof com.any2api.coordination.AccountCapacityException) {
+                        log.info("model_probe_deferred provider={} model={} reason={}",
+                            normalizedProvider, normalizedModel, root.getClass().getSimpleName());
+                        return Mono.empty();
+                    }
+                    return Mono.just(new Result(
+                        normalizedProvider, normalizedModel, "FAILED",
+                        error.getClass().getSimpleName(), null, elapsed(startedAt), Instant.now()));
+                })
                 .flatMap(this::persist)));
     }
 

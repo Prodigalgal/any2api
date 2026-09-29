@@ -13,6 +13,10 @@ final class GrokWebFailureClassifier {
             return new ProviderFailure("account_blocked", "Grok Web account is blocked",
                 false, Map.of("channel", "web"));
         }
+        if (unauthenticatedSession(message)) {
+            return new ProviderFailure("credential_rejected", "Grok Web session is unauthenticated or empty",
+                false, Map.of("channel", "web"));
+        }
         if (rateLimited(message)) {
             return new ProviderFailure("rate_limited", "Grok Web model quota is exhausted",
                 true, Map.of("channel", "web"));
@@ -46,6 +50,17 @@ final class GrokWebFailureClassifier {
         return new ProviderFailure("provider_transport_error",
             error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
             true, Map.of("channel", "web"));
+    }
+
+    private boolean unauthenticatedSession(String message) {
+        var value = message.toLowerCase();
+        return value.contains("\"userid\":\"\"")
+            || value.contains("\"userid\": \"\"")
+            || value.contains("\"sessionid\":\"\"")
+            || value.contains("\"sessionid\": \"\"")
+            || value.contains("unauthenticated")
+            || value.contains("not authenticated")
+            || value.contains("invalid session");
     }
 
     private boolean definitiveBlock(String message) {

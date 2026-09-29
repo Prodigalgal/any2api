@@ -1132,9 +1132,19 @@ def _register_browser(
             pass
         cells = page.locator(".qwenchat-verification-code-input-cell")
         if cells.count() >= 6:
+            try:
+                cells.first.click()
+                page.keyboard.type(otp[:6], delay=120)
+            except Exception:  # noqa: BLE001,S110 - keyboard typing fallback to cell fill
+                pass
             for idx, digit in enumerate(otp[:6]):
-                cells.nth(idx).fill(digit)
-                page.wait_for_timeout(150)
+                try:
+                    cell = cells.nth(idx)
+                    if not cell.input_value():
+                        cell.fill(digit)
+                except Exception:  # noqa: BLE001,S110 - best-effort individual fill
+                    pass
+                page.wait_for_timeout(100)
         else:
             otp_input = first_visible(
                 page,
@@ -1147,7 +1157,7 @@ def _register_browser(
             )
             if otp_input:
                 _human_type(page, otp_input, otp)
-        pace(page, 1_500, 3_000)
+        pace(page, 1_000, 2_000)
         confirm_btn = first_visible(
             page,
             (
@@ -1161,6 +1171,11 @@ def _register_browser(
         )
         if confirm_btn and confirm_btn.is_visible() and not confirm_btn.is_disabled():
             confirm_btn.click()
+        else:
+            try:
+                page.keyboard.press("Enter")
+            except Exception:  # noqa: BLE001,S110 - best effort Enter key
+                pass
         try:
             page.wait_for_url(lambda u: "/auth" not in u, timeout=40_000)
         except Exception:  # noqa: BLE001,S110 - url navigation can take longer or stay on landing
@@ -1169,24 +1184,73 @@ def _register_browser(
     _wait_qwen_risk_runtime(page)
     credential_value = credential_from_context(context, page, password, mailbox.jwt)
     credential_value.update({"email": mailbox.address, "registration_backend": backend})
-    token = (
-        page.evaluate("() => localStorage.getItem('token') || ''")
-        or challenge.token
-        or _extract_token_from_cookies(context)
-    )
+    token = challenge.token or ""
+    user_id = challenge.user_id or ""
+    token_eval_script = """() => {
+        try {
+            const direct = localStorage.getItem('token') || localStorage.getItem('active_token');
+            if (direct && direct.trim()) return {token: direct.trim()};
+            const stateStr = localStorage.getItem('qwen_access_token_state');
+            if (stateStr) {
+                try {
+                    const parsed = JSON.parse(stateStr);
+                    if (parsed && typeof parsed.token === 'string' && parsed.token.trim()) {
+                        return {token: parsed.token.trim()};
+                    }
+                } catch(e) {}
+            }
+            const pre = document.getElementById('__prerendered_data');
+            if (pre && pre.textContent) {
+                try {
+                    const data = JSON.parse(pre.textContent);
+                    if (data && data.user) {
+                        const tok = typeof data.user.token === 'string' ? data.user.token.trim() : '';
+                        const uid = typeof data.user.id === 'string' ? data.user.id.trim() : '';
+                        if (tok) return {token: tok, user_id: uid};
+                    }
+                } catch(e) {}
+            }
+        } catch(err) {}
+        return null;
+    }"""
+    for _ in range(15):
+        if not token:
+            try:
+                res = page.evaluate(token_eval_script)
+                if isinstance(res, dict):
+                    token = res.get("token") or token
+                    user_id = res.get("user_id") or user_id
+            except Exception:  # noqa: BLE001,S110 - best effort token poll
+                pass
+        if not token:
+            token = _extract_token_from_cookies(context)
+        if token:
+            break
+        page.wait_for_timeout(1000)
     if not token:
         try:
             token = _signin_sync(page, mailbox.address, password, proxy_url, fingerprint)
         except Exception:  # noqa: BLE001,S110 - signin fallback is best-effort
             pass
     if token:
-        page.evaluate("token => localStorage.setItem('token', token)", token)
+        try:
+            page.evaluate("token => localStorage.setItem('token', token)", token)
+        except Exception:  # noqa: BLE001,S110 - storage fallback
+            pass
         credential_value["token"] = token
+    if not user_id and token and token.count(".") >= 2:
+        try:
+            parts = token.split(".")
+            padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+            payload_data = json.loads(base64.urlsafe_b64decode(padded))
+            user_id = str(payload_data.get("id") or "")
+        except Exception:  # noqa: BLE001,S110 - JWT parsing fallback
+            pass
+    if user_id:
+        credential_value["user_id"] = user_id
     credential_value.update(_qwen_session_patch(context, page, config.qwen_base_url, fingerprint))
     if proxy_url and proxy_affinity_key:
         credential_value["proxy_affinity_key"] = proxy_affinity_key
-    if challenge.user_id:
-        credential_value["user_id"] = challenge.user_id
     trace.mark(RegistrationStage.ACTIVATED)
     trace.mark(RegistrationStage.CREDENTIAL_CAPTURED)
     return BrowserResult(

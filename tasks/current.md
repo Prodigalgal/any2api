@@ -1,7 +1,17 @@
-# 当前任务板（源码 0.22.5）
+# 当前任务板（源码 0.22.6）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-09-29 PENDING 账号处置与根因修复、Qwen新版Token契约适配与Grok空会话淘汰（0.22.6）
+
+- **通义千问（Qwen）前端新版 Token 契约逆向适配与闭环**：
+  - **根因查明**：逆向官方前端 JS bundle（`0.3.12/js/main.js`）证实，官方已从单一 `localStorage.getItem("token")` 改为多级结构存储在 `qwen_access_token_state`（内含 `token`, `expiresAt`, `version`）以及 `active_token`，且首屏通过 `window.__prerendered_data.user.token` 注入；导致新版注册虽然流程成功，但入库凭据缺少 `token` 字段，后端保活校验拦截死锁在 PENDING；
+  - **契约重构**：`automation/any2api_automation/providers/qwen.py` 改造为多级级联 Token 提取与 JWT 解码（直接从 JWT payload 提取 `user_id`），并优化验证码键盘模拟输入提升成功率；`qwen_challenge.py` 扩展 POST 拦截监听，彻底解决凭据完整性问题。
+- **Grok Web 空 Session 凭据拒绝与淘汰流转加固**：
+  - **根因查明**：9 月底早期版本注册残留的 15 个空会话账号在探活时返回 `status: authenticated` 但 `userId` 与 `sessionId` 均为空；后端 `GrokWebFailureClassifier.java` 错误将其兜底分类为 `provider_stream_error`（标记为可重试流式错误），导致调度器误判为偶发网络抖动陷入无休止重试死循环；
+  - **分类修正**：在 `GrokWebFailureClassifier.java` 增加 `unauthenticatedSession` 语义提取，将空 `userId`/`sessionId` 明确分类为 `credential_rejected`（不可重试）；
+  - **生命周期流转**：`LifecycleScheduler.java` 在账号达到重试上限或遭遇不可逆凭据拒绝时，显式将其状态流转为 `EXPIRED` 并淘汰，限制重激活仅适用于 3 天内的偶发抖动账号，根除僵尸 PENDING 账号。
 
 ## 2026-09-29 重点问题厂商注册攻坚、Grok保活激活契约重构与全链路长耗时超时加固（0.22.5）
 

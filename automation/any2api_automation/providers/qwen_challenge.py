@@ -161,6 +161,10 @@ class QwenSignupChallenge(ChallengeStrategy):
                     "/api/v2/auths/signup",
                     "/api/v1/auths/signin",
                     "/api/v2/auths/signin",
+                    "/api/v1/auths",
+                    "/api/v2/auths",
+                    "/api/v1/auth",
+                    "/api/v2/auth",
                 )
             )
             if auth_endpoint and response.request.method == "POST":
@@ -175,8 +179,9 @@ class QwenSignupChallenge(ChallengeStrategy):
                     payload = response.json()
                     if isinstance(payload, dict):
                         entry["successful"] = response.status == 200 and not payload.get("error")
-                        token = payload.get("token") or (payload.get("data") or {}).get("token")
-                        user_id = payload.get("id") or (payload.get("data") or {}).get("id")
+                        data_obj = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                        token = payload.get("token") or data_obj.get("token") or data_obj.get("active_token")
+                        user_id = payload.get("id") or data_obj.get("id") or data_obj.get("userId") or data_obj.get("user_id")
                         if token:
                             self.token = str(token)
                         if user_id:

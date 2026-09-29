@@ -201,7 +201,8 @@ public class LifecycleScheduler {
                 WHERE action.status = 'EXHAUSTED'
                   AND action.entity_type = 'ACCOUNT'
                   AND action.action_family IN ('keepalive', 'reauthenticate', 'daily_checkin')
-                  AND (account.status = 'ACTIVE' AND account.enabled = TRUE OR account.status = 'PENDING')
+                  AND (account.status = 'ACTIVE' AND account.enabled = TRUE
+                       OR (account.status = 'PENDING' AND account.created_at >= CURRENT_TIMESTAMP - INTERVAL '3 days'))
                   AND (action.expires_at IS NULL OR action.expires_at > CURRENT_TIMESTAMP)
                   AND action.updated_at <= CURRENT_TIMESTAMP
                       - CAST(:rearmCooldownSeconds || ' seconds' AS interval)
@@ -429,6 +430,9 @@ public class LifecycleScheduler {
             exhaust(action, owner, "LifecycleAttemptsExhausted");
             if (task.account().getStatus() == AccountStatus.ACTIVE) {
                 task.account().updateState(AccountStatus.DEGRADED, false);
+                accounts.save(task.account());
+            } else if (task.account().getStatus() == AccountStatus.PENDING) {
+                task.account().updateState(AccountStatus.EXPIRED, false);
                 accounts.save(task.account());
             }
             return;

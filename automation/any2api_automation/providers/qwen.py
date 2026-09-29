@@ -1177,16 +1177,27 @@ def _register_browser(
             except Exception:  # noqa: BLE001,S110 - best effort Enter key
                 pass
         try:
-            page.wait_for_url(lambda u: "/auth" not in u, timeout=40_000)
-        except Exception:  # noqa: BLE001,S110 - url navigation can take longer or stay on landing
+            page.wait_for_url(lambda u: "/auth" not in u, timeout=15_000)
+        except Exception:  # noqa: BLE001,S110 - best effort navigation wait
             pass
-        page.wait_for_timeout(3000)
+        pace(page, 2_000, 4_000)
+        # If still on auth page, navigate to main chat to trigger SSR prerendered data bootstrap
+        if "/auth" in page.url:
+            try:
+                page.goto(
+                    f"{config.qwen_base_url.rstrip('/')}/",
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
+                )
+                pace(page, 2_000, 4_000)
+            except Exception:  # noqa: BLE001,S110 - best effort navigation
+                pass
     _wait_qwen_risk_runtime(page)
     credential_value = credential_from_context(context, page, password, mailbox.jwt)
     credential_value.update({"email": mailbox.address, "registration_backend": backend})
     token = challenge.token or ""
     user_id = challenge.user_id or ""
-    token_eval_script = """() => {
+    token_eval_script = """async () => {
         try {
             const direct = localStorage.getItem('token') || localStorage.getItem('active_token');
             if (direct && direct.trim()) return {token: direct.trim()};
@@ -1207,6 +1218,21 @@ def _register_browser(
                         const tok = typeof data.user.token === 'string' ? data.user.token.trim() : '';
                         const uid = typeof data.user.id === 'string' ? data.user.id.trim() : '';
                         if (tok) return {token: tok, user_id: uid};
+                    }
+                } catch(e) {}
+            }
+            for (const endpoint of ['/api/v1/auths/refresh', '/api/auths/refresh', '/api/v2/auths/refresh']) {
+                try {
+                    const resp = await fetch(endpoint, { method: 'GET', credentials: 'include' });
+                    if (resp.ok) {
+                        const json = await resp.json();
+                        if (json && json.data) {
+                            const tok = json.data.access_token || json.data.token;
+                            if (tok && typeof tok === 'string' && tok.trim()) {
+                                const uid = typeof json.data.id === 'string' ? json.data.id.trim() : '';
+                                return {token: tok.trim(), user_id: uid};
+                            }
+                        }
                     }
                 } catch(e) {}
             }
@@ -1232,12 +1258,13 @@ def _register_browser(
             token = _signin_sync(page, mailbox.address, password, proxy_url, fingerprint)
         except Exception:  # noqa: BLE001,S110 - signin fallback is best-effort
             pass
-    if token:
-        try:
-            page.evaluate("token => localStorage.setItem('token', token)", token)
-        except Exception:  # noqa: BLE001,S110 - storage fallback
-            pass
-        credential_value["token"] = token
+    if not token:
+        raise RuntimeError("Qwen registration failed to capture valid access token")
+    try:
+        page.evaluate("token => localStorage.setItem('token', token)", token)
+    except Exception:  # noqa: BLE001,S110 - storage fallback
+        pass
+    credential_value["token"] = token
     if not user_id and token and token.count(".") >= 2:
         try:
             parts = token.split(".")

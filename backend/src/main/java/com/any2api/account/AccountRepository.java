@@ -97,7 +97,11 @@ public interface AccountRepository extends JpaRepository<AccountEntity, UUID>,
             account.lastFailureAt = :now,
             account.lastError = :error,
             account.cooldownUntil = :cooldownUntil,
-            account.status = com.any2api.account.AccountStatus.PENDING,
+            account.status = CASE
+                WHEN account.status = com.any2api.account.AccountStatus.ACTIVE THEN com.any2api.account.AccountStatus.DEGRADED
+                WHEN account.status = com.any2api.account.AccountStatus.EXPIRED THEN com.any2api.account.AccountStatus.EXPIRED
+                ELSE com.any2api.account.AccountStatus.PENDING
+            END,
             account.enabled = false
         WHERE account.id = :accountId
         """)

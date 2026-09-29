@@ -411,14 +411,17 @@ public class LifecycleScheduler {
                 accounts.save(task.account());
             }
             accounts.markSuccess(task.account().getId(), completedAt);
+        } else if (authExpired || inferenceCredentialRejected) {
+            task.account().updateState(AccountStatus.EXPIRED, false);
+            accounts.save(task.account());
+            accounts.markAuthenticationFailure(
+                task.account().getId(), completedAt,
+                authExpired ? "CredentialExpired" : "InferenceProbe:credential_rejected");
         } else if (result.healthy() && !probe.ready()) {
             accounts.markReadinessFailure(
                 task.account().getId(), completedAt,
                 "InferenceProbe:" + probe.errorClass(),
                 completedAt.plus(retryDelay(action.attempts() + 1)));
-        } else if (authExpired) {
-            task.account().updateState(AccountStatus.EXPIRED, false);
-            accounts.save(task.account());
         }
         if (result.terminal()) {
             exhaust(action, owner, "TerminalAuthenticationFailure");

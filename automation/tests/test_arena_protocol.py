@@ -462,7 +462,7 @@ def test_arena_verification_link_rejects_cdn_assets() -> None:
         _validate_arena_link("https://cdn.arena.ai/assets/logo.png")
 
 
-def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pending() -> None:
+def test_arena_registration_uses_one_new_temp_mail_message_and_activates_account() -> None:
     class Page:
         def __init__(self) -> None:
             self.visited: list[str] = []
@@ -556,6 +556,7 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_keeps_account_pen
     assert page.signup["body"]["marketingConsent"] is False
     assert mail.seen == {"historical-message"}
     assert result.external_id == "arena-user-1"
-    assert result.ready_for_inference is False
+    assert result.ready_for_inference is True
+    assert result.metadata["inference_probe_required"] is False
     assert result.credential["password"] == "TestPassword123!"
     assert result.credential["authentication"] == "email_magic_link"

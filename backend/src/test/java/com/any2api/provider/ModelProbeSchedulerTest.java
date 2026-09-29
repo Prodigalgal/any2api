@@ -29,7 +29,7 @@ class ModelProbeSchedulerTest {
         when(jdbc.sql(anyString())).thenReturn(statement);
         when(statement.param(anyString(), any())).thenReturn(statement);
         when(statement.query(any(RowMapper.class))).thenReturn((JdbcClient.MappedQuerySpec) query);
-        when(query.optional()).thenReturn(Optional.of(true));
+        when(query.optional()).thenReturn(Optional.of("test-model"));
 
         var properties = new Any2ApiProperties();
         var provider = mock(InferenceProvider.class);
@@ -57,11 +57,11 @@ class ModelProbeSchedulerTest {
         verify(jdbc).sql(sql.capture());
         assertThat(sql.getValue())
             .contains("model.provider_id = :providerId")
-            .contains("model.upstream_id = :modelId")
             .contains("model.enabled = TRUE")
-            .contains("probe.probed_at IS NULL");
+            .contains("probe.probed_at IS NULL")
+            .contains(":preferredModel");
         verify(statement).param("providerId", "test-provider");
-        verify(statement).param("modelId", "test-model");
+        verify(statement).param("preferredModel", "test-model");
         verify(probeService).probe("test-provider", "test-model");
     }
 }

@@ -186,12 +186,12 @@ class GlmProviderTest {
     }
 
     @Test
-    void disablesBroadScheduledProbesThatWouldRunWithoutProviderVerification() {
+    void enablesScheduledProbeForRepresentativeModel() {
         var provider = new GlmProvider(
             new GlmProperties(), mock(ProxyPoolService.class), mapper,
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class));
 
-        assertThat(provider.scheduledModelProbeEnabled()).isFalse();
+        assertThat(provider.scheduledModelProbeEnabled()).isTrue();
     }
 }

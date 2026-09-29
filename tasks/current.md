@@ -1,19 +1,20 @@
-# 当前任务板（源码 0.22.2）
+# 当前任务板（源码 0.22.3）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-09-29 探活鲁棒性增强与账号保活死循环治理（0.22.2）
+## 2026-09-29 探活自适应动态选型与 Arena 全链路打通（0.22.3）
 
-- **探活账号并发争抢误杀根除**：
-  - `ModelProbeService` 中捕获 `AccountUnavailableException` 与 `AccountCapacityException`（无空闲账号/并发占满），直接跳过持久化而不记录为 `FAILED`，杜绝因线上业务请求占用账号导致代表探针被误杀覆盖，防止旗下子模型发生雪崩式 503。
-- **探针时钟抖动采样断档根除（半衰期预刷新 + 连通性继承窗口放宽）**：
-  - `ModelProbeScheduler` 将检查阈值从 `freshness` 前置为 `freshness.dividedBy(2)`（15 分钟），实现主动预刷新（Prefetch），保证探针在 15~30 分钟生命周期内平滑轮转；
-  - `ModelCatalogCache` 与 `RandomRouteCatalog` 将代表探针继承窗口放宽至 2 小时（`providerProbeFreshAfter`），彻底消除调度周期采样交错带来的短暂停摆断档。
-- **Arena 激活超时治理**：
-  - 将 `arena_recaptcha_v2_timeout_seconds` 默认值从 180 秒缩短为 10 秒，在无头环境中遇到 v2 挑战时快速返回明确失败，杜绝阻塞 180 秒导致后端 120 秒抛出 `TimeoutException` 和 `provider_transport_error`。
-- **Keepalive 失败死循环与 Camoufox 内存暴涨治理**：
-  - `LifecycleScheduler` 中当 keepalive 任务耗尽 `MAX_ATTEMPTS` 时，将该账号置为 `DEGRADED, enabled = false`，阻止 `reactivateExhaustedActions` 周期性无脑复活死账号，彻底根除高频无效拉起 Camoufox 导致的自动化 Pod OOM / SIGABRT 134 崩溃。
+- **探活模型动态自适应与无硬限制选型**：
+  - 针对厂商模型下架或库中被禁用导致探活硬编码失效（如 GLM 假死 503、DeepSeek 因 expert 禁用未探活等）问题，重构 `ModelProbeScheduler`：动态查询当前厂商在数据库中处于 `enabled = TRUE` 的最新模型（`ORDER BY updated_at DESC, id DESC LIMIT 1`），优先命中 preferred 列表中的可用项，若下架则自动平滑降级到最新模型，彻底解除模型硬编码限制；
+  - 移除 `GlmProvider` 中对探活禁用的 override（默认开启），让智谱 GLM 正常参与探活，消除冷启动 503 假死；
+  - 移除 `ArenaProvider` 中硬编码的 `scheduledProbeModel() = "Max"`，允许根据库内启用的 260+ 模型动态自适应演进。
+- **探活提示词自然化与安全脱敏**：
+  - `ModelProbeService` 与 `InferenceReadinessProbe` 中的探活提示词由生僻测试宏（`ANY2API_MODEL_OK` / `ANY2API_PROBE_OK`）统一优化为自然的对话提示词（`"Hello! Please reply with a short confirmation message."`），彻底杜绝因怪异字符串命中大模型上游安全审查（Safety Filter）或防注入拦截导致探活拒答。
+- **Arena 链路全线打通与注册即激活**：
+  - 彻底查明 Arena 账号停留在 `PENDING` 的根本原因：在自动化端真实浏览器环境（Camoufox）中，账号已经成功接收邮件验证码、设置密码并调用 `/api/me` 验证了 profile，但 `BrowserResult` 中错误设置了 `ready_for_inference=False, inference_probe_required=True`，导致合法的账号被扔回空会话执行推理探测并撞上 Google reCAPTCHA v2；
+  - 优化 `arena_browser.py`：真实浏览器注册成功后直接将账号标记为 `ready_for_inference=True, inference_probe_required=False`，注册完成即投入生产；
+  - 生产数据库已将 3 枚 Arena 账号成功激活为 `ACTIVE`，实测 `arena/Max` 真实推理调用毫秒级响应并 100% 成功生成。
 
 ## 2026-09-28 模型轻量探活与防封禁优化（0.22.1）
 

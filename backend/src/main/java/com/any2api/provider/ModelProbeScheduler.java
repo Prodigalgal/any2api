@@ -25,10 +25,9 @@ public final class ModelProbeScheduler {
     private final JdbcClient jdbc;
     private final ExecutorService databaseExecutor;
     private final ModelProbeService probes;
+    private final ProviderRegistry providers;
     private final int batchSize;
     private final Duration freshness;
-    private final Set<String> scheduledProviderIds;
-    private final Map<String, String> scheduledTargets;
 
     public ModelProbeScheduler(
         JdbcClient jdbc,
@@ -40,17 +39,9 @@ public final class ModelProbeScheduler {
         this.jdbc = jdbc;
         this.databaseExecutor = databaseExecutor;
         this.probes = probes;
+        this.providers = providers;
         this.batchSize = properties.getModelRuntime().getScheduledProbeBatchSize();
         this.freshness = properties.getModelRuntime().getProbeFreshness();
-        var targets = new LinkedHashMap<String, String>();
-        for (var provider : providers.plugins()) {
-            if (provider.scheduledModelProbeEnabled()) {
-                provider.scheduledProbeModel().ifPresent(model ->
-                    targets.put(provider.manifest().id(), model));
-            }
-        }
-        this.scheduledTargets = Map.copyOf(targets);
-        this.scheduledProviderIds = Set.copyOf(this.scheduledTargets.keySet());
     }
 
     @Scheduled(
@@ -74,39 +65,41 @@ public final class ModelProbeScheduler {
     }
 
     private Mono<List<Candidate>> candidates() {
-        if (scheduledTargets.isEmpty()) {
-            return Mono.just(List.of());
-        }
         return Mono.fromCallable(() -> {
             var staleBefore = Instant.now().minus(freshness.dividedBy(2));
             List<Candidate> result = new ArrayList<>();
-            for (var entry : scheduledTargets.entrySet()) {
-                var providerId = entry.getKey();
-                var modelId = entry.getValue();
-                var stale = jdbc.sql("""
-                        SELECT 1
+            for (var provider : providers.plugins()) {
+                if (!provider.scheduledModelProbeEnabled()) {
+                    continue;
+                }
+                var providerId = provider.manifest().id();
+                var preferredModel = provider.scheduledProbeModel().orElse("");
+                var candidateModel = jdbc.sql("""
+                        SELECT model.upstream_id
                         FROM models model
                         JOIN providers provider ON provider.id = model.provider_id
                         LEFT JOIN model_probe_results probe
                           ON probe.provider_id = model.provider_id
                          AND probe.model_id = model.upstream_id
                         WHERE model.provider_id = :providerId
-                          AND model.upstream_id = :modelId
                           AND model.enabled = TRUE
                           AND provider.enabled = TRUE
                           AND provider.installed = TRUE
                           AND (probe.probed_at IS NULL
                             OR probe.probed_at < :staleBefore)
+                        ORDER BY
+                          CASE WHEN model.upstream_id = :preferredModel THEN 0 ELSE 1 END,
+                          model.updated_at DESC,
+                          model.id DESC
                         LIMIT 1
                         """)
                     .param("providerId", providerId)
-                    .param("modelId", modelId)
+                    .param("preferredModel", preferredModel)
                     .param("staleBefore", PostgresResultValues.timestamp(staleBefore))
-                    .query((row, ignored) -> true)
-                    .optional()
-                    .orElse(false);
-                if (stale) {
-                    result.add(new Candidate(providerId, modelId));
+                    .query((row, ignored) -> row.getString("upstream_id"))
+                    .optional();
+                if (candidateModel.isPresent()) {
+                    result.add(new Candidate(providerId, candidateModel.get()));
                     if (result.size() >= batchSize) {
                         break;
                     }

@@ -117,7 +117,7 @@ public final class ModelProbeService {
         var requestId = "model-probe-" + UUID.randomUUID();
         var message = JsonNodeFactory.instance.objectNode()
             .put("role", "user")
-            .put("content", "Reply briefly with ANY2API_MODEL_OK");
+            .put("content", "Hello! Please reply with a short confirmation message.");
         var raw = JsonNodeFactory.instance.objectNode()
             .put("model", modelId)
             .put("stream", false);

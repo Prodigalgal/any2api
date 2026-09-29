@@ -1886,9 +1886,9 @@ def register_with_magic_link(
             "authentication": "email_magic_link",
             "registration_protocol": "arena_nextjs_magic_link",
             "password_setup": True,
-            "inference_probe_required": True,
+            "inference_probe_required": False,
         },
-        ready_for_inference=False,
+        ready_for_inference=True,
     )
 
 

@@ -103,17 +103,9 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
-    @Override
-    public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
+    @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
 
-    @Override
-    public boolean scheduledModelProbeEnabled() { return true; }
-
-    @Override
-    public Optional<String> scheduledProbeModel() { return Optional.of("Max"); }
-
-    @Override
-    public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
+    @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
 
     @Override
     public void validateCredential(JsonNode credential) {

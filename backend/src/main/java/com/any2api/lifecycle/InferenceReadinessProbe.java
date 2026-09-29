@@ -79,7 +79,7 @@ final class InferenceReadinessProbe {
         var requestId = "probe-" + UUID.randomUUID();
         var message = mapper.createObjectNode()
             .put("role", "user")
-            .put("content", "Reply briefly with " + MARKER);
+            .put("content", "Hello! Please reply with a short confirmation message.");
         var raw = mapper.createObjectNode()
             .put("model", model)
             .put("stream", false);

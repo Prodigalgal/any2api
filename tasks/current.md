@@ -1,9 +1,17 @@
-# 当前任务板（源码 0.22.7）
+# 当前任务板（源码 0.22.8）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-09-30 Qwen多模态OTP自适应闭环、Grok Web双域会话持久化与长效保活修复（0.22.7）
+## 2026-09-30 Qwen精准填码与滑块接管强化、全域Token捕获与Grok保活实效闭环（0.22.8）
+
+- **通义千问（Qwen）OTP精准填码、密码滑块接管与全域Token拦截闭环**：
+  - **根因查明**：Qwen 注册收到 6 位 OTP 后，由于旧逻辑同时派发 paste、keyboard.type 和逐格 fill，单/多单元格输入发生竞态，将验证码输入为重复或错位字符串；且确认按钮被点击后若触发二次滑块挑战未被接管，密码与昵称设置表单未接入挑战解决器，过早强行 goto 刷新打断了注册会话；
+  - **精准输入与滑块接管**：重构 `_fill_and_submit_qwen_otp`，支持键盘模拟与自动逐格校准（双重一致性核验），消除重复敲击；提交验证码、密码和昵称时全面接入 `challenge.submit_and_solve` 解决风控滑块；移除过早的页面刷新破坏逻辑，允许平滑等待导航完成；
+  - **全域 Token 拦截与多层回退**：`qwen_challenge.py` 扩充对所有包含 `auth`、`verify`、`signup`、`signin`、`user`、`token` 的 JSON 响应的深度捕获，并在主站刷新与 signin 回退中加入明确日志与保护，确保注册凭据 100% 捕获入库。
+- **Grok Web 跨域双域 SSO Cookie 与全量 StorageState 实测验证**：
+  - 验证 0.22.7 提交的 `browser_execution_context` 持久化及 `.grok.com` + `.x.ai` 双域 Cookie 注入逻辑；
+  - 启动真实注册与会话保活回归测试，验证新账号长期保持 ACTIVE。
 
 - **通义千问（Qwen）现代化多形态 OTP 验证自适应与提交流程闭环**：
   - **根因锁定**：现代 Qwen 前端重构后，验证码输入框类名已不再是单一的 `.qwenchat-verification-code-input-cell`，旧逻辑在 `cells.count() >= 6` 失败后退化为 `first_visible(input[type=text])`，将 6 位验证码全部塞进第 1 个单字符格子导致验证失败；且旧代码对验证码提交步骤未对接人机滑块挑战接管，并在 `/auth` 未完成认证时强行跳转主站丢失凭据；

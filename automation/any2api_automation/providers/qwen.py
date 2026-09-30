@@ -999,14 +999,16 @@ def _fill_and_submit_qwen_otp(
     password: str,
     config: Any,
 ) -> None:
+    code = "".join(filter(str.isdigit, otp))[:6]
+    logger.info("qwen_otp_flow_started otp_len=%d code_digits=%s current_url=%s", len(otp), code, page.url)
     pace(page, 1_000, 2_000)
     try:
         page.wait_for_selector(
             ".qwenchat-verification-code-input-cell, [class*='code'], [class*='otp'], input[autocomplete='one-time-code'], input[placeholder*='code' i], input[placeholder*='验证码' i], input[inputmode='numeric']",
             timeout=15_000,
         )
-    except Exception:  # noqa: BLE001,S110
-        pass
+    except Exception as sel_err:  # noqa: BLE001
+        logger.warning("qwen_otp_selector_wait_warning error=%s", sel_err)
 
     multi_cell_selectors = (
         ".qwenchat-verification-code-input-cell",
@@ -1022,38 +1024,30 @@ def _fill_and_submit_qwen_otp(
         loc = page.locator(selector)
         count = loc.count()
         if count >= 6:
+            logger.info("qwen_otp_multi_cell_matched selector=%s count=%d", selector, count)
             try:
                 first = loc.first
                 first.click()
-                try:
-                    page.evaluate(
-                        """([sel, code]) => {
-                            const el = document.querySelector(sel);
-                            if (el) {
-                                const dt = new DataTransfer();
-                                dt.setData('text/plain', code);
-                                el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
-                            }
-                        }""",
-                        [selector, otp[:6]],
-                    )
-                except Exception:  # noqa: BLE001,S110
-                    pass
-                page.keyboard.type(otp[:6], delay=100)
-                for idx, digit in enumerate(otp[:6]):
-                    cell = loc.nth(idx)
-                    try:
-                        val = cell.input_value()
-                        if not val:
+                page.keyboard.type(code, delay=100)
+                page.wait_for_timeout(300)
+                current_val = "".join(str(loc.nth(i).input_value() or "") for i in range(6))
+                if current_val != code:
+                    logger.info("qwen_otp_multi_cell_fallback_fill expected=%s actual=%s", code, current_val)
+                    for idx, digit in enumerate(code):
+                        cell = loc.nth(idx)
+                        try:
+                            cell.click()
                             cell.fill(digit)
                             cell.dispatch_event("input")
                             cell.dispatch_event("change")
-                    except Exception:  # noqa: BLE001,S110
-                        pass
-                    page.wait_for_timeout(60)
+                        except Exception as cell_err:  # noqa: BLE001
+                            logger.warning("qwen_otp_cell_fill_failed idx=%d error=%s", idx, cell_err)
+                        page.wait_for_timeout(60)
                 filled = True
+                logger.info("qwen_otp_multi_cell_completed")
                 break
-            except Exception:  # noqa: BLE001,S112
+            except Exception as cell_flow_err:  # noqa: BLE001
+                logger.warning("qwen_otp_multi_cell_attempt_failed selector=%s error=%s", selector, cell_flow_err)
                 continue
 
     if not filled:
@@ -1069,10 +1063,10 @@ def _fill_and_submit_qwen_otp(
         )
         single_input = first_visible(page, single_selectors, timeout_ms=5000)
         if single_input is not None:
+            logger.info("qwen_otp_single_input_matched")
             single_input.click()
             pace(page, 200, 500)
-            single_input.fill(otp[:6])
-            page.keyboard.type(otp[:6], delay=80)
+            single_input.fill(code)
             single_input.dispatch_event("input")
             single_input.dispatch_event("change")
             filled = True
@@ -1085,6 +1079,10 @@ def _fill_and_submit_qwen_otp(
             'button:has-text("Continue")',
             'button:has-text("继续")',
             'button:has-text("确认")',
+            'button:has-text("确定")',
+            'button:has-text("下一步")',
+            'button:has-text("提交")',
+            'button:has-text("完成")',
             'button:has-text("Verify")',
             'button:has-text("Confirm")',
             'button:has-text("Log in")',
@@ -1094,47 +1092,62 @@ def _fill_and_submit_qwen_otp(
         timeout_ms=4000,
     )
     if confirm_btn is not None and confirm_btn.is_visible() and not confirm_btn.is_disabled():
+        logger.info("qwen_otp_confirm_btn_found text=%s", confirm_btn.inner_text())
         try:
             challenge.submit_and_solve(page, confirm_btn)
-        except Exception:  # noqa: BLE001
+        except Exception as solve_err:  # noqa: BLE001
+            logger.warning("qwen_otp_submit_solve_warning error=%s", solve_err)
             try:
                 confirm_btn.click(timeout=3000)
             except Exception:  # noqa: BLE001,S110
                 pass
     else:
+        logger.info("qwen_otp_auto_or_enter_submitting")
         try:
             page.keyboard.press("Enter")
         except Exception:  # noqa: BLE001,S110
             pass
 
-    try:
-        page.wait_for_url(lambda u: "/auth" not in u, timeout=12_000)
-    except Exception:  # noqa: BLE001,S110
-        pass
-
-    passwords = page.locator('input[type="password"]')
-    if passwords.count() > 0 and passwords.first.is_visible():
-        try:
-            _human_type(page, passwords.first, password)
-            if passwords.count() > 1 and passwords.nth(1).is_visible():
-                _human_type(page, passwords.nth(1), password)
-            confirm_pwd = first_visible(
-                page,
-                (
-                    'button:has-text("Continue")',
-                    'button:has-text("继续")',
-                    'button:has-text("确认")',
-                    'button[type="submit"]',
-                ),
-                timeout_ms=3000,
-            )
-            if confirm_pwd:
-                confirm_pwd.click()
-            else:
-                page.keyboard.press("Enter")
-            page.wait_for_timeout(2000)
-        except Exception:  # noqa: BLE001,S110
-            pass
+    for _ in range(20):
+        if "/auth" not in page.url:
+            logger.info("qwen_registration_navigated_away url=%s", page.url)
+            break
+        passwords = page.locator('input[type="password"]')
+        if passwords.count() > 0 and passwords.first.is_visible():
+            logger.info("qwen_password_input_detected count=%d", passwords.count())
+            try:
+                _human_type(page, passwords.first, password)
+                if passwords.count() > 1 and passwords.nth(1).is_visible():
+                    _human_type(page, passwords.nth(1), password)
+                confirm_pwd = first_visible(
+                    page,
+                    (
+                        'button:has-text("Continue")',
+                        'button:has-text("继续")',
+                        'button:has-text("确认")',
+                        'button:has-text("确定")',
+                        'button:has-text("下一步")',
+                        'button:has-text("完成")',
+                        'button:has-text("注册")',
+                        'button:has-text("创建账号")',
+                        'button[type="submit"]',
+                    ),
+                    timeout_ms=3000,
+                )
+                if confirm_pwd:
+                    logger.info("qwen_password_confirm_btn_found text=%s", confirm_pwd.inner_text())
+                    try:
+                        challenge.submit_and_solve(page, confirm_pwd)
+                    except Exception as pwd_solve_err:  # noqa: BLE001
+                        logger.warning("qwen_pwd_solve_warning error=%s", pwd_solve_err)
+                        confirm_pwd.click(timeout=3000)
+                else:
+                    page.keyboard.press("Enter")
+                page.wait_for_timeout(2000)
+            except Exception as pwd_fill_err:  # noqa: BLE001
+                logger.warning("qwen_password_fill_error error=%s", pwd_fill_err)
+            break
+        page.wait_for_timeout(500)
 
     name_input = first_visible(
         page,
@@ -1147,6 +1160,7 @@ def _fill_and_submit_qwen_otp(
         timeout_ms=2000,
     )
     if name_input is not None and name_input.is_visible() and not name_input.input_value():
+        logger.info("qwen_name_input_detected")
         try:
             _human_type(page, name_input, _random_display_name())
             confirm_name = first_visible(
@@ -1155,30 +1169,28 @@ def _fill_and_submit_qwen_otp(
                     'button:has-text("Continue")',
                     'button:has-text("继续")',
                     'button:has-text("确认")',
+                    'button:has-text("确定")',
                     'button:has-text("完成")',
                     'button[type="submit"]',
                 ),
                 timeout_ms=3000,
             )
             if confirm_name:
-                confirm_name.click()
+                try:
+                    challenge.submit_and_solve(page, confirm_name)
+                except Exception:  # noqa: BLE001
+                    confirm_name.click(timeout=3000)
             else:
                 page.keyboard.press("Enter")
             page.wait_for_timeout(2000)
-        except Exception:  # noqa: BLE001,S110
-            pass
+        except Exception as name_fill_err:  # noqa: BLE001
+            logger.warning("qwen_name_fill_error error=%s", name_fill_err)
 
-    pace(page, 2_000, 3_000)
-    if "/auth" in page.url:
-        try:
-            page.goto(
-                f"{config.qwen_base_url.rstrip('/')}/",
-                wait_until="domcontentloaded",
-                timeout=30_000,
-            )
-            pace(page, 2_000, 3_000)
-        except Exception:  # noqa: BLE001,S110
-            pass
+    try:
+        page.wait_for_url(lambda u: "/auth" not in u, timeout=25_000)
+        logger.info("qwen_registration_navigation_succeeded url=%s", page.url)
+    except Exception:  # noqa: BLE001
+        logger.warning("qwen_registration_stayed_on_auth url=%s", page.url)
 
 
 def _register_browser(
@@ -1374,11 +1386,25 @@ def _register_browser(
         if token:
             break
         page.wait_for_timeout(1000)
+    if not token and "/auth" in page.url:
+        logger.info("qwen_token_poll_navigating_to_landing")
+        try:
+            page.goto(f"{config.qwen_base_url.rstrip('/')}/", wait_until="domcontentloaded", timeout=15_000)
+            page.wait_for_timeout(2000)
+            res = page.evaluate(token_eval_script)
+            if isinstance(res, dict):
+                token = res.get("token") or token
+                user_id = res.get("user_id") or user_id
+            if not token:
+                token = _extract_token_from_cookies(context)
+        except Exception as landing_err:  # noqa: BLE001
+            logger.warning("qwen_landing_token_extract_failed error=%s", landing_err)
     if not token:
+        logger.info("qwen_token_missing_trying_signin_fallback")
         try:
             token = _signin_sync(page, mailbox.address, password, proxy_url, fingerprint)
-        except Exception:  # noqa: BLE001,S110 - signin fallback is best-effort
-            pass
+        except Exception as signin_err:  # noqa: BLE001
+            logger.warning("qwen_signin_sync_fallback_failed error=%s", signin_err)
     if not token:
         raise RuntimeError("Qwen registration failed to capture valid access token")
     try:

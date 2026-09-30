@@ -157,17 +157,23 @@ class QwenSignupChallenge(ChallengeStrategy):
             auth_endpoint = any(
                 endpoint in lowered
                 for endpoint in (
-                    "/api/v1/auths/signup",
-                    "/api/v2/auths/signup",
-                    "/api/v1/auths/signin",
-                    "/api/v2/auths/signin",
                     "/api/v1/auths",
                     "/api/v2/auths",
                     "/api/v1/auth",
                     "/api/v2/auth",
+                    "/api/v1/users",
+                    "/api/v2/users",
+                    "/api/v1/user",
+                    "/api/v2/user",
+                    "/api/v1/accounts",
+                    "/api/v2/accounts",
+                    "verify",
+                    "signup",
+                    "signin",
+                    "token",
                 )
             )
-            if auth_endpoint and response.request.method == "POST":
+            if auth_endpoint and response.request.method in {"POST", "GET"}:
                 content_type = response.headers.get("content-type", "")
                 entry: dict[str, Any] = {
                     "status": response.status,
@@ -196,9 +202,9 @@ class QwenSignupChallenge(ChallengeStrategy):
                             or data_obj.get("user_id")
                         )
                         if token:
-                            self.token = str(token)
+                            self.token = str(token).strip()
                         if user_id:
-                            self.user_id = str(user_id)
+                            self.user_id = str(user_id).strip()
                 elif response.status == 200 and entry["u_atoken"]:
                     entry["successful"] = True
                 self.signup_responses.append(entry)

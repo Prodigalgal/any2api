@@ -54,6 +54,13 @@ class OfficialBrowserSession:
 class OfficialBrowserRuntime:
     """Restores isolated account runtimes with bounded, idle-only eviction."""
 
+    # Subclasses that need Camoufox human-behaviour emulation during inference
+    # sessions (e.g. providers with behavioural anti-bot scoring) should set
+    # this to True.  It enables the camoufox ``humanize`` option which injects
+    # randomised mouse movement and timing into page interactions, improving
+    # reCAPTCHA v3 scores without any changes to the request payload.
+    inference_humanize: bool = False
+
     def __init__(
         self,
         provider_id: str,
@@ -280,6 +287,7 @@ class OfficialBrowserRuntime:
                     camoufox_launch_options,
                     exact_config if isinstance(exact_config, dict) else {},
                     proxy_url,
+                    humanize=self.inference_humanize,
                 )
                 camoufox_config = camoufox_config_from_options(prepared)
                 browser_manager = AsyncCamoufox(from_options=prepared)
@@ -416,13 +424,16 @@ def digest(value: dict[str, Any]) -> str:
     ).hexdigest()
 
 
-def camoufox_launch_options(config: dict[str, Any], proxy_url: str) -> dict[str, Any]:
+def camoufox_launch_options(
+    config: dict[str, Any], proxy_url: str, *, humanize: bool = False
+) -> dict[str, Any]:
     from camoufox.utils import get_env_vars, get_target_os, launch_options
 
     if config:
         prepared = launch_options(
             config=deepcopy(config),
             headless=core_settings().registration_headless,
+            humanize=humanize,
             geoip=False,
             proxy=None,
             env={**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
@@ -439,8 +450,8 @@ def camoufox_launch_options(config: dict[str, Any], proxy_url: str) -> dict[str,
         prepared = launch_options(
             os="windows",
             headless=core_settings().registration_headless,
-            humanize=False,
-            geoip=bool(proxy_url),
+            humanize=humanize,
+            geoip=True,
             proxy={"server": proxy_url} if proxy_url else None,
             env={**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
             firefox_user_prefs={"security.sandbox.content.level": 0},

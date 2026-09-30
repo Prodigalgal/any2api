@@ -389,7 +389,7 @@ def launch_browser(
                 manager_options: dict[str, Any] = {
                     "headless": headless,
                     "humanize": effective_profile.humanize,
-                    "geoip": bool(proxy_url) and not effective_profile.camoufox_config,
+                    "geoip": not effective_profile.camoufox_config,
                     "proxy": {"server": proxy_url} if proxy_url else None,
                     "env": {**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
                     "firefox_user_prefs": {

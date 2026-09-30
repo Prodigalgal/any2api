@@ -44,6 +44,7 @@ public class LifecycleScheduler {
     private static final Duration LEASE_TTL = Duration.ofMinutes(5);
     private static final Duration HEALTHY_INTERVAL = Duration.ofHours(6);
     private static final Duration EXHAUSTED_REARM_COOLDOWN = Duration.ofMinutes(30);
+    private static final Duration EXPIRED_REARM_COOLDOWN = Duration.ofHours(2);
     private static final Duration EXHAUSTED_REARM_DELAY = Duration.ofMinutes(5);
     private static final Logger LOGGER = LoggerFactory.getLogger(LifecycleScheduler.class);
 
@@ -198,14 +199,15 @@ public class LifecycleScheduler {
                   ON history.provider_id = action.provider_id
                  AND history.entity_type = action.entity_type
                  AND history.entity_id = action.entity_id
-                WHERE action.status = 'EXHAUSTED'
+                WHERE action.status IN ('EXHAUSTED', 'EXPIRED')
                   AND action.entity_type = 'ACCOUNT'
                   AND action.action_family IN ('keepalive', 'reauthenticate', 'daily_checkin')
-                  AND (account.status = 'ACTIVE' AND account.enabled = TRUE
-                       OR (account.status = 'PENDING' AND account.created_at >= CURRENT_TIMESTAMP - INTERVAL '3 days'))
-                  AND (action.expires_at IS NULL OR action.expires_at > CURRENT_TIMESTAMP)
+                  AND account.status NOT IN ('BANNED', 'DISABLED')
                   AND action.updated_at <= CURRENT_TIMESTAMP
-                      - CAST(:rearmCooldownSeconds || ' seconds' AS interval)
+                      - CAST(
+                          CASE WHEN account.status = 'EXPIRED' THEN :expiredRearmCooldownSeconds
+                               ELSE :rearmCooldownSeconds END
+                          || ' seconds' AS interval)
                   AND NOT EXISTS (
                       SELECT 1
                       FROM scheduled_actions active
@@ -220,6 +222,7 @@ public class LifecycleScheduler {
             SET status = 'PENDING',
                 generation = eligible.next_generation,
                 attempts = 0,
+                expires_at = NULL,
                 due_at = CURRENT_TIMESTAMP + CAST(:rearmDelaySeconds || ' seconds' AS interval)
                     + (MOD(ABS(hashtext(action.entity_id)::bigint), :jitterSeconds)
                         * INTERVAL '1 second'),
@@ -233,6 +236,7 @@ public class LifecycleScheduler {
             WHERE action.id = eligible.id
             """)
             .param("rearmCooldownSeconds", EXHAUSTED_REARM_COOLDOWN.toSeconds())
+            .param("expiredRearmCooldownSeconds", EXPIRED_REARM_COOLDOWN.toSeconds())
             .param("rearmDelaySeconds", EXHAUSTED_REARM_DELAY.toSeconds())
             .param("jitterSeconds", 900)
             .update();
@@ -317,11 +321,11 @@ public class LifecycleScheduler {
                         transactions.executeWithoutResult(ignored ->
                             complete(action, owner, task, result, probeResult,
                             readinessRequired, dailyCheckinSupported, credentialExpired));
-                    var inferenceReady = !credentialExpired && result.healthy() && probeResult.ready()
+                    var inferenceReady = (!credentialExpired || probeResult.ready()) && result.healthy() && probeResult.ready()
                         && (readinessRequired
                             || (task.account().getStatus() == AccountStatus.ACTIVE
                                 && task.account().isEnabled()));
-                    if (credentialExpired) {
+                    if (credentialExpired && !probeResult.ready()) {
                         observability.succeed(observed, "credential_refresh_scheduled");
                     } else if (inferenceReady) {
                         observability.succeed(observed, probeResult.model().isBlank()
@@ -355,7 +359,7 @@ public class LifecycleScheduler {
     ) {
         var completedAt = Instant.now();
         var clearStaleCredentialExpiry = shouldClearStaleCredentialExpiry(
-            action.action(), result.credentialExpiresAt(), task.credentialExpiresAt(), completedAt);
+            action.action(), result.credentialExpiresAt(), task.credentialExpiresAt(), completedAt, probe.ready());
         var credentialExpiresAt = clearStaleCredentialExpiry
             ? null : result.credentialExpiresAt();
         if (credentialExpiresAt == null && !clearStaleCredentialExpiry) {
@@ -398,10 +402,11 @@ public class LifecycleScheduler {
                 policy.propagate(task.account(), recoveredCredential, credentialExpiresAt);
             }
         }
-        var healthy = !credentialExpired && result.healthy() && probe.ready();
+        var effectiveCredentialExpired = !probe.ready() && credentialExpired;
+        var healthy = !effectiveCredentialExpired && result.healthy() && probe.ready();
         var inferenceReady = probe.ready() && (readinessRequired
             || (task.account().getStatus() == AccountStatus.ACTIVE && task.account().isEnabled()));
-        var authExpired = result.authExpired() || credentialExpired;
+        var authExpired = result.authExpired() || effectiveCredentialExpired;
         var inferenceCredentialRejected = result.healthy() && readinessRequired
             && !probe.ready()
             && "credential_rejected".equals(probe.errorClass());
@@ -443,7 +448,8 @@ public class LifecycleScheduler {
         var nextGeneration = action.generation() + 1;
         var nextAction = nextAction(
             action.action(), result.healthy(), authExpired, inferenceCredentialRejected,
-            task.account().getStatus(), task.account().isEnabled(), dailyCheckinSupported);
+            task.account().getStatus(), task.account().isEnabled(), dailyCheckinSupported,
+            supportsReauthentication(action.providerId()));
         if (result.healthy() || authExpired) {
             jdbc.sql("""
                 UPDATE scheduled_actions SET status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
@@ -562,6 +568,12 @@ public class LifecycleScheduler {
             != SupportLevel.UNSUPPORTED;
     }
 
+    private boolean supportsReauthentication(String providerId) {
+        return providers.require(providerId).manifest().capabilities().getOrDefault(
+            ProviderCapability.REAUTHENTICATION, SupportLevel.UNSUPPORTED)
+            != SupportLevel.UNSUPPORTED;
+    }
+
     private static tools.jackson.databind.JsonNode mergedCredential(
         tools.jackson.databind.JsonNode credential,
         tools.jackson.databind.JsonNode patch
@@ -601,7 +613,17 @@ public class LifecycleScheduler {
         Instant storedExpiry,
         Instant now
     ) {
-        return "reauthenticate".equals(action)
+        return shouldClearStaleCredentialExpiry(action, reportedExpiry, storedExpiry, now, false);
+    }
+
+    static boolean shouldClearStaleCredentialExpiry(
+        String action,
+        Instant reportedExpiry,
+        Instant storedExpiry,
+        Instant now,
+        boolean inferenceReady
+    ) {
+        return ("reauthenticate".equals(action) || inferenceReady)
             && reportedExpiry == null
             && isCredentialExpired(storedExpiry, now);
     }
@@ -634,7 +656,7 @@ public class LifecycleScheduler {
     ) {
         return nextAction(
             current, operationHealthy, authExpired, inferenceCredentialRejected,
-            AccountStatus.ACTIVE, true, false);
+            AccountStatus.ACTIVE, true, false, true);
     }
 
     static String nextAction(
@@ -646,7 +668,26 @@ public class LifecycleScheduler {
         boolean enabled,
         boolean dailyCheckinSupported
     ) {
-        if (authExpired || inferenceCredentialRejected) return "reauthenticate";
+        return nextAction(
+            current, operationHealthy, authExpired, inferenceCredentialRejected,
+            status, enabled, dailyCheckinSupported, true);
+    }
+
+    static String nextAction(
+        String current,
+        boolean operationHealthy,
+        boolean authExpired,
+        boolean inferenceCredentialRejected,
+        AccountStatus status,
+        boolean enabled,
+        boolean dailyCheckinSupported,
+        boolean reauthenticationSupported
+    ) {
+        if (authExpired || inferenceCredentialRejected) {
+            if (reauthenticationSupported) return "reauthenticate";
+            if (dailyCheckinSupported) return "daily_checkin";
+            return "keepalive";
+        }
         if (dailyCheckinSupported && operationHealthy
             && "reauthenticate".equals(current)) return "daily_checkin";
         if (dailyCheckinSupported && operationHealthy

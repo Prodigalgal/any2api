@@ -61,11 +61,29 @@ class LifecycleSchedulerTest {
     }
 
     @Test
+    void clearsAnExpiredCredentialFenceWhenInferenceProbeIsReady() {
+        assertEquals(true, LifecycleScheduler.shouldClearStaleCredentialExpiry(
+            "keepalive", null, NOW.minus(Duration.ofMinutes(1)), NOW, true));
+        assertEquals(false, LifecycleScheduler.shouldClearStaleCredentialExpiry(
+            "keepalive", null, NOW.minus(Duration.ofMinutes(1)), NOW, false));
+    }
+
+    @Test
     void reauthenticatesWhenKeepalivePassesButInferenceRejectsTheCredential() {
         assertEquals("reauthenticate", LifecycleScheduler.nextAction(
             "keepalive", true, false, true));
         assertEquals("reauthenticate", LifecycleScheduler.nextAction(
             "reauthenticate", true, false, true));
+    }
+
+    @Test
+    void fallsBackToKeepaliveOrCheckinWhenReauthenticationIsNotSupported() {
+        assertEquals("keepalive", LifecycleScheduler.nextAction(
+            "keepalive", false, true, false,
+            AccountStatus.ACTIVE, true, false, false));
+        assertEquals("daily_checkin", LifecycleScheduler.nextAction(
+            "keepalive", false, true, false,
+            AccountStatus.ACTIVE, true, true, false));
     }
 
     @Test

@@ -18,8 +18,16 @@ def session_cookies(credential: dict[str, Any]) -> dict[str, str]:
 
 
 def probe_result(status: int, completed: bool) -> dict[str, Any]:
-    if 200 <= status < 300 and completed:
-        return {"healthy": True, "auth_expired": False, "credential_patch": None}
+    if 200 <= status < 300:
+        if completed:
+            return {"healthy": True, "auth_expired": False, "credential_patch": None}
+        return {
+            "healthy": False,
+            "auth_expired": True,
+            "terminal": True,
+            "error_class": "SsoSessionExpired",
+            "credential_patch": None,
+        }
     if status == 401:
         return {
             "healthy": False,

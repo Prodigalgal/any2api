@@ -184,8 +184,10 @@ class QwenSignupChallenge(ChallengeStrategy):
                         )
                         token = (
                             payload.get("token")
+                            or payload.get("access_token")
                             or data_obj.get("token")
                             or data_obj.get("active_token")
+                            or data_obj.get("access_token")
                         )
                         user_id = (
                             payload.get("id")

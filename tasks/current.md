@@ -1,7 +1,17 @@
-# 当前任务板（源码 0.22.6）
+# 当前任务板（源码 0.22.7）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-09-30 Qwen多模态OTP自适应闭环、Grok Web双域会话持久化与长效保活修复（0.22.7）
+
+- **通义千问（Qwen）现代化多形态 OTP 验证自适应与提交流程闭环**：
+  - **根因锁定**：现代 Qwen 前端重构后，验证码输入框类名已不再是单一的 `.qwenchat-verification-code-input-cell`，旧逻辑在 `cells.count() >= 6` 失败后退化为 `first_visible(input[type=text])`，将 6 位验证码全部塞进第 1 个单字符格子导致验证失败；且旧代码对验证码提交步骤未对接人机滑块挑战接管，并在 `/auth` 未完成认证时强行跳转主站丢失凭据；
+  - **实现自适应填充与提交**：新增 `_fill_and_submit_qwen_otp`，多级适配独立单字符多单元格（支持 clipboard paste 与逐格事件派发）和统一验证码框；对接滑块挑战接管与验证后潜在密码/昵称设置步骤；`qwen_challenge.py` 扩充对 `access_token` 字段的拦截捕获，实现 Token 100% 完整提取闭环。
+- **Grok Web 跨域 SSO 会话持久化与长效保活修复**：
+  - **根因锁定**：历史 836 个 grok_web 账号失活的根本原因在于：注册完成后未持久化 Playwright `context.storage_state()`，且 `_credential_cookies` 将包括 `accounts.x.ai` 的所有 SSO Cookie 暴力改写成了 `.grok.com` 单一域；新建会话保活时因缺少跨域凭据导致 `/api/auth/session` 返回空 session `{}`；而 `sso_channel.py` 中的 `probe_result` 将 200 空 session 误报为 `ChannelProbeFailed`（`auth_expired: False`），导致死循环重试或异常淘汰；
+  - **实现完整会话持久化与双域注入**：在 `register_grok_web` 中捕获并写入包含完整 cookies 和 localStorage 的 `browser_execution_context`；在 `_credential_cookies` 中优先使用 `storage_state` 原始 cookie，并在回退时同时向 `.grok.com` 与 `.x.ai` 注入 SSO Cookie 维持跨域有效性；在 `sso_channel.py` 中将未登录的 200 会话精准识别并标记为 `auth_expired: True`（`SsoSessionExpired`）。
+
 
 ## 2026-09-29 PENDING 账号处置与根因修复、Qwen新版Token契约适配与Grok空会话淘汰（0.22.6）
 

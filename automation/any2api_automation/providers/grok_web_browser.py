@@ -509,6 +509,18 @@ def _text(value: Any) -> str:
 
 
 def _credential_cookies(credential: dict[str, Any]) -> list[dict[str, Any]]:
+    exec_ctx = credential.get("browser_execution_context")
+    if isinstance(exec_ctx, dict):
+        storage = exec_ctx.get("storage_state")
+        if isinstance(storage, dict) and isinstance(storage.get("cookies"), list):
+            valid_cookies = [
+                c
+                for c in storage["cookies"]
+                if isinstance(c, dict) and c.get("name") and c.get("value")
+            ]
+            if valid_cookies:
+                return valid_cookies
+
     values: dict[str, str] = {}
     for field in ("cookies", "cloudflare_cookies", "cf_cookies", "cookie"):
         source = credential.get(field)
@@ -534,17 +546,21 @@ def _credential_cookies(credential: dict[str, Any]) -> list[dict[str, Any]]:
             value = value.split("=", 1)[1].strip()
         if value:
             values[cookie_name] = value
-    return [
-        {
-            "name": name,
-            "value": value,
-            "domain": ".grok.com",
-            "path": "/",
-            "secure": True,
-            "sameSite": "Lax",
-        }
-        for name, value in values.items()
-    ]
+
+    res: list[dict[str, Any]] = []
+    for name, value in values.items():
+        for domain in (".grok.com", ".x.ai"):
+            res.append(
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": domain,
+                    "path": "/",
+                    "secure": True,
+                    "sameSite": "Lax",
+                }
+            )
+    return res
 
 
 def _visible(page: Any, selectors: tuple[str, ...], timeout_ms: int = 5_000) -> Any | None:
@@ -613,7 +629,6 @@ def register_grok_web(
     payload: dict[str, Any],
     trace: RegistrationTrace,
 ) -> BrowserResult:
-    del backend
     signup_url = str(
         payload.get("signup_url") or "https://accounts.x.ai/sign-up?redirect=grok-com"
     ).strip()
@@ -897,6 +912,12 @@ def register_grok_web(
 
     trace.mark(RegistrationStage.CREDENTIAL_CAPTURED)
 
+    storage_state_obj = None
+    try:
+        storage_state_obj = context.storage_state()
+    except Exception:  # noqa: BLE001
+        storage_state_obj = None
+
     credential_map: dict[str, Any] = {
         "sso": sso,
         "sso-rw": sso_rw,
@@ -905,6 +926,12 @@ def register_grok_web(
         "email": mailbox.address,
         "password": password,
     }
+    if storage_state_obj:
+        credential_map["browser_execution_context"] = {
+            "schema_version": 1,
+            "backend": backend or "camoufox",
+            "storage_state": storage_state_obj,
+        }
 
     metadata_map: dict[str, Any] = {
         "userId": user_id,

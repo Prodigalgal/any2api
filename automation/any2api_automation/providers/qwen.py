@@ -992,6 +992,195 @@ def _register_with_fingerprint(
     )
 
 
+def _fill_and_submit_qwen_otp(
+    page: Any,
+    otp: str,
+    challenge: QwenSignupChallenge,
+    password: str,
+    config: Any,
+) -> None:
+    pace(page, 1_000, 2_000)
+    try:
+        page.wait_for_selector(
+            ".qwenchat-verification-code-input-cell, [class*='code'], [class*='otp'], input[autocomplete='one-time-code'], input[placeholder*='code' i], input[placeholder*='验证码' i], input[inputmode='numeric']",
+            timeout=15_000,
+        )
+    except Exception:  # noqa: BLE001,S110
+        pass
+
+    multi_cell_selectors = (
+        ".qwenchat-verification-code-input-cell",
+        "[class*='code-input'] input",
+        "[class*='code'] input",
+        "[class*='otp'] input",
+        "[class*='cell'] input",
+        "input[maxlength='1']",
+        "input[inputmode='numeric']",
+    )
+    filled = False
+    for selector in multi_cell_selectors:
+        loc = page.locator(selector)
+        count = loc.count()
+        if count >= 6:
+            try:
+                first = loc.first
+                first.click()
+                try:
+                    page.evaluate(
+                        """([sel, code]) => {
+                            const el = document.querySelector(sel);
+                            if (el) {
+                                const dt = new DataTransfer();
+                                dt.setData('text/plain', code);
+                                el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+                            }
+                        }""",
+                        [selector, otp[:6]],
+                    )
+                except Exception:
+                    pass
+                page.keyboard.type(otp[:6], delay=100)
+                for idx, digit in enumerate(otp[:6]):
+                    cell = loc.nth(idx)
+                    try:
+                        val = cell.input_value()
+                        if not val:
+                            cell.fill(digit)
+                            cell.dispatch_event("input")
+                            cell.dispatch_event("change")
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(60)
+                filled = True
+                break
+            except Exception:
+                continue
+
+    if not filled:
+        single_selectors = (
+            "input.qwenchat-verification-code-input-cell",
+            "input[autocomplete='one-time-code']",
+            "input[placeholder*='code' i]",
+            "input[placeholder*='验证码' i]",
+            "input[name*='code' i]",
+            "input[type='text']",
+            "input[type='number']",
+            "input[inputmode='numeric']",
+        )
+        single_input = first_visible(page, single_selectors, timeout_ms=5000)
+        if single_input is not None:
+            single_input.click()
+            pace(page, 200, 500)
+            single_input.fill(otp[:6])
+            page.keyboard.type(otp[:6], delay=80)
+            single_input.dispatch_event("input")
+            single_input.dispatch_event("change")
+            filled = True
+
+    pace(page, 1_000, 2_000)
+
+    confirm_btn = first_visible(
+        page,
+        (
+            'button:has-text("Continue")',
+            'button:has-text("继续")',
+            'button:has-text("确认")',
+            'button:has-text("Verify")',
+            'button:has-text("Confirm")',
+            'button:has-text("Log in")',
+            'button:has-text("Sign in")',
+            'button[type="submit"]',
+        ),
+        timeout_ms=4000,
+    )
+    if confirm_btn is not None and confirm_btn.is_visible() and not confirm_btn.is_disabled():
+        try:
+            challenge.submit_and_solve(page, confirm_btn)
+        except Exception:
+            try:
+                confirm_btn.click(timeout=3000)
+            except Exception:
+                pass
+    else:
+        try:
+            page.keyboard.press("Enter")
+        except Exception:
+            pass
+
+    try:
+        page.wait_for_url(lambda u: "/auth" not in u, timeout=12_000)
+    except Exception:
+        pass
+
+    passwords = page.locator('input[type="password"]')
+    if passwords.count() > 0 and passwords.first.is_visible():
+        try:
+            _human_type(page, passwords.first, password)
+            if passwords.count() > 1 and passwords.nth(1).is_visible():
+                _human_type(page, passwords.nth(1), password)
+            confirm_pwd = first_visible(
+                page,
+                (
+                    'button:has-text("Continue")',
+                    'button:has-text("继续")',
+                    'button:has-text("确认")',
+                    'button[type="submit"]',
+                ),
+                timeout_ms=3000,
+            )
+            if confirm_pwd:
+                confirm_pwd.click()
+            else:
+                page.keyboard.press("Enter")
+            page.wait_for_timeout(2000)
+        except Exception:
+            pass
+
+    name_input = first_visible(
+        page,
+        (
+            'input[name="username"]',
+            'input[name="name"]',
+            'input[placeholder*="名称"]',
+            'input[placeholder*="昵称"]',
+        ),
+        timeout_ms=2000,
+    )
+    if name_input is not None and name_input.is_visible() and not name_input.input_value():
+        try:
+            _human_type(page, name_input, _random_display_name())
+            confirm_name = first_visible(
+                page,
+                (
+                    'button:has-text("Continue")',
+                    'button:has-text("继续")',
+                    'button:has-text("确认")',
+                    'button:has-text("完成")',
+                    'button[type="submit"]',
+                ),
+                timeout_ms=3000,
+            )
+            if confirm_name:
+                confirm_name.click()
+            else:
+                page.keyboard.press("Enter")
+            page.wait_for_timeout(2000)
+        except Exception:
+            pass
+
+    pace(page, 2_000, 3_000)
+    if "/auth" in page.url:
+        try:
+            page.goto(
+                f"{config.qwen_base_url.rstrip('/')}/",
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
+            pace(page, 2_000, 3_000)
+        except Exception:
+            pass
+
+
 def _register_browser(
     page,
     context,
@@ -1123,75 +1312,7 @@ def _register_browser(
         otp = mail.wait_for_code_sync(mailbox, seen_ids=seen)
         trace.mark(RegistrationStage.OTP_RECEIVED)
         pace(page, 1_000, 2_000)
-        try:
-            page.wait_for_selector(
-                ".qwenchat-verification-code-input-cell, input[placeholder*='code' i], input[autocomplete='one-time-code']",
-                timeout=30_000,
-            )
-        except Exception:  # noqa: BLE001,S110 - fallback to first visible input probe
-            pass
-        cells = page.locator(".qwenchat-verification-code-input-cell")
-        if cells.count() >= 6:
-            try:
-                cells.first.click()
-                page.keyboard.type(otp[:6], delay=120)
-            except Exception:  # noqa: BLE001,S110 - keyboard typing fallback to cell fill
-                pass
-            for idx, digit in enumerate(otp[:6]):
-                try:
-                    cell = cells.nth(idx)
-                    if not cell.input_value():
-                        cell.fill(digit)
-                except Exception:  # noqa: BLE001,S110 - best-effort individual fill
-                    pass
-                page.wait_for_timeout(100)
-        else:
-            otp_input = first_visible(
-                page,
-                (
-                    "input.qwenchat-verification-code-input-cell",
-                    "input[placeholder*='code' i]",
-                    "input[autocomplete='one-time-code']",
-                    "input[type='text']",
-                ),
-            )
-            if otp_input:
-                _human_type(page, otp_input, otp)
-        pace(page, 1_000, 2_000)
-        confirm_btn = first_visible(
-            page,
-            (
-                'button:has-text("Continue")',
-                'button:has-text("继续")',
-                'button:has-text("确认")',
-                'button:has-text("Verify")',
-                'button[type="submit"]',
-            ),
-            timeout_ms=3000,
-        )
-        if confirm_btn and confirm_btn.is_visible() and not confirm_btn.is_disabled():
-            confirm_btn.click()
-        else:
-            try:
-                page.keyboard.press("Enter")
-            except Exception:  # noqa: BLE001,S110 - best effort Enter key
-                pass
-        try:
-            page.wait_for_url(lambda u: "/auth" not in u, timeout=15_000)
-        except Exception:  # noqa: BLE001,S110 - best effort navigation wait
-            pass
-        pace(page, 2_000, 4_000)
-        # If still on auth page, navigate to main chat to trigger SSR prerendered data bootstrap
-        if "/auth" in page.url:
-            try:
-                page.goto(
-                    f"{config.qwen_base_url.rstrip('/')}/",
-                    wait_until="domcontentloaded",
-                    timeout=30_000,
-                )
-                pace(page, 2_000, 4_000)
-            except Exception:  # noqa: BLE001,S110 - best effort navigation
-                pass
+        _fill_and_submit_qwen_otp(page, otp, challenge, password, config)
     _wait_qwen_risk_runtime(page)
     credential_value = credential_from_context(context, page, password, mailbox.jwt)
     credential_value.update({"email": mailbox.address, "registration_backend": backend})

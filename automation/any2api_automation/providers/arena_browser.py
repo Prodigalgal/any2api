@@ -251,7 +251,6 @@ async def _accept_arena_license_dialog_if_present(page: Any) -> str:
     return str(status)
 
 
-
 def _arena_natural_behavior_script() -> str:
     """Inject realistic mouse movement and scrolling to warm up reCAPTCHA v3 signals.
 
@@ -1008,22 +1007,22 @@ def _arena_ndjson_stream_script(
         return JSON.stringify(retryBody);
       }}"""
         + warmup
-        + rf"""
+        + r"""
       const recaptcha = await getRecaptchaV3Token();
-      await emit({{type: 'recaptcha', available: recaptcha.available === true,
-        tokenLength: String(recaptcha.token || '').length}});
+      await emit({type: 'recaptcha', available: recaptcha.available === true,
+        tokenLength: String(recaptcha.token || '').length});
       if (!recaptcha.token) return JSON.stringify(parsedBody);
-      return JSON.stringify({{...parsedBody, recaptchaV3Token: recaptcha.token}});
-    }};
-    const send = async (attempt, v2Token = '') => {{
-      const response = await fetch(request.url, {{
+      return JSON.stringify({...parsedBody, recaptchaV3Token: recaptcha.token});
+    };
+    const send = async (attempt, v2Token = '') => {
+      const response = await fetch(request.url, {
         method: request.method,
         credentials: 'include',
         headers: request.headers,
         body: await requestBody(v2Token),
         signal: controller.signal
-      }});
-      if (!response.ok) {{
+      });
+      if (!response.ok) {
         const errorBody = (await response.text()).slice(0, 16384);
         const triggerReason = response.status === 403
             && /recaptcha validation failed/i.test(errorBody)
@@ -1031,52 +1030,52 @@ def _arena_ndjson_stream_script(
           : response.status === 429 && /prompt failed/i.test(errorBody)
             ? 'prompt_rate_limit'
             : '';
-        if (attempt === 0 && triggerReason) {{
+        if (attempt === 0 && triggerReason) {
           const token = await getRecaptchaV2Token(triggerReason);
           if (token) return send(1, token);
-          await emit({{type: 'status', status: response.status,
-            contentType: response.headers.get('content-type') || ''}});
-          await emit({{type: 'error', data: JSON.stringify({{
+          await emit({type: 'status', status: response.status,
+            contentType: response.headers.get('content-type') || ''});
+          await emit({type: 'error', data: JSON.stringify({
             error: 'recaptcha v2 interactive verification required',
             code: 'recaptcha_v2_required', triggerReason
-          }})}});
+          })});
           return;
-        }}
-        await emit({{type: 'status', status: response.status,
-          contentType: response.headers.get('content-type') || ''}});
-        await emit({{type: 'error', data: errorBody}});
+        }
+        await emit({type: 'status', status: response.status,
+          contentType: response.headers.get('content-type') || ''});
+        await emit({type: 'error', data: errorBody});
         return;
-      }}
-      await emit({{type: 'status', status: response.status,
-        contentType: response.headers.get('content-type') || ''}});
+      }
+      await emit({type: 'status', status: response.status,
+        contentType: response.headers.get('content-type') || ''});
       const reader = response.body?.getReader();
       if (!reader) throw new Error('Arena response has no stream body');
       const decoder = new TextDecoder();
       let pending = '';
-      const consume = async text => {{
+      const consume = async text => {
         pending += text;
         const lines = pending.split(/\r?\n/);
         pending = lines.pop() || '';
-        for (const line of lines) {{
+        for (const line of lines) {
           const value = line.trim();
           if (!value) continue;
           const normalized = value.startsWith('data:') ? value.slice(5).trimStart() : value;
-          if (normalized) await emit({{type: 'data', data: normalized}});
-        }}
-      }};
-      while (true) {{
-        const {{done, value}} = await reader.read();
+          if (normalized) await emit({type: 'data', data: normalized});
+        }
+      };
+      while (true) {
+        const {done, value} = await reader.read();
         if (done) break;
-        await consume(decoder.decode(value, {{stream: true}}));
-      }}
+        await consume(decoder.decode(value, {stream: true}));
+      }
       await consume(decoder.decode());
       if (pending.trim()) await consume('\n');
-    }};
+    };
     await send(0);
-  }} finally {{
+  } finally {
     clearTimeout(timeout);
-  }}
-}}"""
+  }
+}"""
     )
 
 
@@ -2086,6 +2085,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         # Brief dwell after page load — lets reCAPTCHA scripts initialise and
         # begin recording environment signals before any JS interactions.
         import random as _random
+
         await page.wait_for_timeout(_random.randint(1000, 2500))
         try:
             terms_state = await _ensure_arena_tou_consent(page)
@@ -2110,7 +2110,6 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             )
             return
         self._logger.debug("arena_behavior_warmup state=complete")
-
 
     async def upload_attachments(
         self,

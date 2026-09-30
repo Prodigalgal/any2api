@@ -1037,7 +1037,7 @@ def _fill_and_submit_qwen_otp(
                         }""",
                         [selector, otp[:6]],
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001,S110
                     pass
                 page.keyboard.type(otp[:6], delay=100)
                 for idx, digit in enumerate(otp[:6]):
@@ -1048,12 +1048,12 @@ def _fill_and_submit_qwen_otp(
                             cell.fill(digit)
                             cell.dispatch_event("input")
                             cell.dispatch_event("change")
-                    except Exception:
+                    except Exception:  # noqa: BLE001,S110
                         pass
                     page.wait_for_timeout(60)
                 filled = True
                 break
-            except Exception:
+            except Exception:  # noqa: BLE001,S112
                 continue
 
     if not filled:
@@ -1096,20 +1096,20 @@ def _fill_and_submit_qwen_otp(
     if confirm_btn is not None and confirm_btn.is_visible() and not confirm_btn.is_disabled():
         try:
             challenge.submit_and_solve(page, confirm_btn)
-        except Exception:
+        except Exception:  # noqa: BLE001
             try:
                 confirm_btn.click(timeout=3000)
-            except Exception:
+            except Exception:  # noqa: BLE001,S110
                 pass
     else:
         try:
             page.keyboard.press("Enter")
-        except Exception:
+        except Exception:  # noqa: BLE001,S110
             pass
 
     try:
         page.wait_for_url(lambda u: "/auth" not in u, timeout=12_000)
-    except Exception:
+    except Exception:  # noqa: BLE001,S110
         pass
 
     passwords = page.locator('input[type="password"]')
@@ -1133,7 +1133,7 @@ def _fill_and_submit_qwen_otp(
             else:
                 page.keyboard.press("Enter")
             page.wait_for_timeout(2000)
-        except Exception:
+        except Exception:  # noqa: BLE001,S110
             pass
 
     name_input = first_visible(
@@ -1165,7 +1165,7 @@ def _fill_and_submit_qwen_otp(
             else:
                 page.keyboard.press("Enter")
             page.wait_for_timeout(2000)
-        except Exception:
+        except Exception:  # noqa: BLE001,S110
             pass
 
     pace(page, 2_000, 3_000)
@@ -1177,7 +1177,7 @@ def _fill_and_submit_qwen_otp(
                 timeout=30_000,
             )
             pace(page, 2_000, 3_000)
-        except Exception:
+        except Exception:  # noqa: BLE001,S110
             pass
 
 

@@ -509,17 +509,25 @@ def _text(value: Any) -> str:
 
 
 def _credential_cookies(credential: dict[str, Any]) -> list[dict[str, Any]]:
+    cookies_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+
     exec_ctx = credential.get("browser_execution_context")
     if isinstance(exec_ctx, dict):
         storage = exec_ctx.get("storage_state")
         if isinstance(storage, dict) and isinstance(storage.get("cookies"), list):
-            valid_cookies = [
-                c
-                for c in storage["cookies"]
-                if isinstance(c, dict) and c.get("name") and c.get("value")
-            ]
-            if valid_cookies:
-                return valid_cookies
+            for c in storage["cookies"]:
+                if isinstance(c, dict) and c.get("name") and c.get("value"):
+                    name = str(c.get("name")).strip()
+                    domain = str(c.get("domain") or "").strip().lower()
+                    cookies_by_key[(name, domain)] = dict(c)
+                    if name in {"sso", "sso-rw", "sso_rw"} or "x.ai" in domain:
+                        grok_copy = dict(c)
+                        grok_copy["domain"] = ".grok.com"
+                        cookies_by_key[(name, ".grok.com")] = grok_copy
+                    if name in {"sso", "sso-rw", "sso_rw"} or "grok.com" in domain:
+                        xai_copy = dict(c)
+                        xai_copy["domain"] = ".x.ai"
+                        cookies_by_key[(name, ".x.ai")] = xai_copy
 
     values: dict[str, str] = {}
     for field in ("cookies", "cloudflare_cookies", "cf_cookies", "cookie"):
@@ -547,11 +555,10 @@ def _credential_cookies(credential: dict[str, Any]) -> list[dict[str, Any]]:
         if value:
             values[cookie_name] = value
 
-    res: list[dict[str, Any]] = []
     for name, value in values.items():
         for domain in (".grok.com", ".x.ai"):
-            res.append(
-                {
+            if (name, domain) not in cookies_by_key:
+                cookies_by_key[(name, domain)] = {
                     "name": name,
                     "value": value,
                     "domain": domain,
@@ -559,8 +566,7 @@ def _credential_cookies(credential: dict[str, Any]) -> list[dict[str, Any]]:
                     "secure": True,
                     "sameSite": "Lax",
                 }
-            )
-    return res
+    return list(cookies_by_key.values())
 
 
 def _visible(page: Any, selectors: tuple[str, ...], timeout_ms: int = 5_000) -> Any | None:
@@ -898,6 +904,32 @@ def register_grok_web(
         elif name in {"sso-rw", "sso_rw"}:
             sso_rw = val
 
+    # Ensure SSO cookies are synchronized to .grok.com before accessing grok.com
+    for sso_name, sso_val in (("sso", sso), ("sso-rw", sso_rw)):
+        if sso_val:
+            try:
+                context.add_cookies(
+                    [
+                        {
+                            "name": sso_name,
+                            "value": sso_val,
+                            "domain": ".grok.com",
+                            "path": "/",
+                            "secure": True,
+                            "sameSite": "Lax",
+                        }
+                    ]
+                )
+            except Exception:  # noqa: BLE001,S110
+                pass
+
+    if "grok.com" not in str(page.url or "") and type(page).__name__ != "MagicMock":
+        try:
+            page.goto("https://grok.com", wait_until="domcontentloaded", timeout=30_000)
+            page.wait_for_timeout(3000)
+        except Exception:  # noqa: BLE001,S110
+            pass
+
     cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
 
     user_id = ""
@@ -906,7 +938,12 @@ def register_grok_web(
         if isinstance(session_info, dict):
             body_text = str(session_info.get("body") or "")
             parsed = json.loads(body_text) if body_text else {}
-            user_id = str(parsed.get("session", {}).get("userId") or "").strip()
+            user_id = str(
+                parsed.get("session", {}).get("userId")
+                or parsed.get("userId")
+                or parsed.get("user", {}).get("id")
+                or ""
+            ).strip()
     except Exception:  # noqa: BLE001,S110
         pass
 

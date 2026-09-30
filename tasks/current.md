@@ -1,7 +1,14 @@
-# 当前任务板（源码 0.22.9）
+# 当前任务板（源码 0.22.10）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-09-30 Grok Web 双域SSO Cookie双向复制、注册跨域会话导航与多端版本升级（0.22.10）
+
+- **Grok Web 跨域双域 SSO Cookie 双向复制与保活闭环**：
+  - **根因查明**：新注册账号生成的 `browser_execution_context` 仅包含 `accounts.x.ai` 的 StorageState；`_credential_cookies` 在检测到 `browser_execution_context` 时直接早退并仅返回 `.x.ai` 域名 Cookie，导致 `OfficialBrowserRuntime` 打开 `https://grok.com` 时浏览器未携带任何 Cookie，`/api/auth/session` 返回空 session `{}` 并触发 `SsoSessionExpired`；
+  - **双向复制与完整注入**：重构 `_credential_cookies`，针对 `storage_state` 中的每个 Cookie，只要包含 `sso`/`sso-rw` 或域名为 `x.ai`，强制同步复制一份至 `.grok.com` 域（反之亦然），并确保所有备用 Cookie 也完整映射至双域；
+  - **注册后显式访问 Grok.com**：在 `register_grok_web` 流程结束前，预先同步 Cookie 并显式导航访问 `https://grok.com`，使 `_SESSION_REQUEST` 在实际 Grok 主站直接提取 `userId`（支持 `session.userId`、`userId`、`user.id` 多层提取），并在 StorageState 中持久化包含双域完整的 Cookie 与本地存储。
 
 ## 2026-09-30 Qwen与Grok重试邮箱独立轮换、首屏超时加固与多端版本升级（0.22.9）
 

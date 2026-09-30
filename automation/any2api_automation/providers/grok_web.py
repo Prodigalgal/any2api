@@ -58,59 +58,56 @@ class GrokWebAutomationProvider(AutomationProvider):
         return transport
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
-        trace = RegistrationTrace(self.manifest.id)
-        try:
-            mail, mailbox, password = await prepare_registration(payload)
-            trace.mark(RegistrationStage.MAILBOX_CREATED)
-            attempts = flow_max_attempts(payload, 2)
-            last_failure: Exception | None = None
-            for attempt in range(1, attempts + 1):
-                try:
-                    flow_payload = proxy_attempt_payload(
-                        {**payload, "proxy_check_url": str(payload.get("base_url") or _BASE_URL)},
-                        identity=mailbox.address,
-                        attempt=attempt,
-                    )
-                    if flow_payload.get("dynamic_proxy") or flow_payload.get("proxy_pool"):
-                        flow_payload["strict_proxy_affinity"] = True
-                    result = await asyncio.to_thread(
-                        run_browser_flow,
-                        lambda page, context, backend, proxy_url, _mail=mail, _mailbox=mailbox, _password=password, _trace=trace, _flow=flow_payload: (
-                            register_grok_web(
-                                page,
-                                context,
-                                backend,
-                                _mail,
-                                _mailbox,
-                                _password,
-                                _flow,
-                                _trace,
-                            )
-                        ),
-                        preferred=self.manifest.browser_backend,
-                        fallback=self.manifest.fallback_backend,
-                        payload=flow_payload,
-                        context_profile=self.browser_context_profile(),
-                        launch_profile=self.browser_launch_profile(),
-                    )
-                    response = result.response()
-                    response.setdefault("metadata", {})["browser_attempt"] = attempt
-                    return response
-                except Exception as error:
-                    last_failure = error
-                    accepted = trace.current in {
-                        RegistrationStage.UPSTREAM_ACCEPTED.value,
-                        RegistrationStage.ACTIVATED.value,
-                        RegistrationStage.CREDENTIAL_CAPTURED.value,
-                    }
-                    if accepted or attempt >= attempts:
-                        raise
-                    await asyncio.sleep(2.0)
-            if last_failure is not None:
-                raise last_failure
-            raise RuntimeError("Grok Web registration attempts exhausted")
-        except Exception as error:
-            raise trace.failure(error) from error
+        attempts = flow_max_attempts(payload, 2)
+        last_failure: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            trace = RegistrationTrace(self.manifest.id)
+            try:
+                mail, mailbox, password = await prepare_registration(payload)
+                trace.mark(RegistrationStage.MAILBOX_CREATED)
+                flow_payload = proxy_attempt_payload(
+                    {**payload, "proxy_check_url": str(payload.get("base_url") or _BASE_URL)},
+                    identity=mailbox.address,
+                    attempt=attempt,
+                )
+                if flow_payload.get("dynamic_proxy") or flow_payload.get("proxy_pool"):
+                    flow_payload["strict_proxy_affinity"] = True
+                result = await asyncio.to_thread(
+                    run_browser_flow,
+                    lambda page, context, backend, proxy_url, _mail=mail, _mailbox=mailbox, _password=password, _trace=trace, _flow=flow_payload: (
+                        register_grok_web(
+                            page,
+                            context,
+                            backend,
+                            _mail,
+                            _mailbox,
+                            _password,
+                            _flow,
+                            _trace,
+                        )
+                    ),
+                    preferred=self.manifest.browser_backend,
+                    fallback=self.manifest.fallback_backend,
+                    payload=flow_payload,
+                    context_profile=self.browser_context_profile(),
+                    launch_profile=self.browser_launch_profile(),
+                )
+                response = result.response()
+                response.setdefault("metadata", {})["browser_attempt"] = attempt
+                return response
+            except Exception as error:
+                last_failure = trace.failure(error)
+                accepted = trace.current in {
+                    RegistrationStage.UPSTREAM_ACCEPTED.value,
+                    RegistrationStage.ACTIVATED.value,
+                    RegistrationStage.CREDENTIAL_CAPTURED.value,
+                }
+                if accepted or attempt >= attempts:
+                    raise
+                await asyncio.sleep(2.0)
+        if last_failure is not None:
+            raise last_failure
+        raise RuntimeError("Grok Web registration attempts exhausted")
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)

@@ -71,12 +71,12 @@ class QwenAutomationProvider(AutomationProvider):
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         await asyncio.sleep(random.uniform(2.0, 4.0))
-        mail, mailbox, password = await prepare_registration(payload)
         attempts = flow_max_attempts(payload, settings().qwen_signup_attempts)
         last_error: RuntimeError | None = None
         for attempt in range(1, attempts + 1):
             trace = RegistrationTrace(self.manifest.id)
             try:
+                mail, mailbox, password = await prepare_registration(payload)
                 trace.mark(RegistrationStage.MAILBOX_CREATED)
                 await asyncio.sleep(random.uniform(2.0, 4.0))
                 flow_payload = {**payload}
@@ -99,7 +99,7 @@ class QwenAutomationProvider(AutomationProvider):
                 response = result.response()
                 response.setdefault("metadata", {})["browser_attempt"] = attempt
                 return response
-            except Exception as error:  # noqa: BLE001 - same mailbox retry boundary
+            except Exception as error:  # noqa: BLE001 - fresh mailbox retry boundary
                 last_error = trace.failure(error)
         assert last_error is not None
         raise last_error

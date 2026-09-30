@@ -679,7 +679,7 @@ def register_grok_web(
             'input[placeholder*="email" i]',
             'input[autocomplete="email"]',
         ),
-        timeout_ms=10_000,
+        timeout_ms=25_000,
     )
     if email_input is None:
         raise RuntimeError("Grok Web email registration form is unavailable")

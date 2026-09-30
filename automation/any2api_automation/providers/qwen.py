@@ -1000,7 +1000,9 @@ def _fill_and_submit_qwen_otp(
     config: Any,
 ) -> None:
     code = "".join(filter(str.isdigit, otp))[:6]
-    logger.info("qwen_otp_flow_started otp_len=%d code_digits=%s current_url=%s", len(otp), code, page.url)
+    logger.info(
+        "qwen_otp_flow_started otp_len=%d code_digits=%s current_url=%s", len(otp), code, page.url
+    )
     pace(page, 1_000, 2_000)
     try:
         page.wait_for_selector(
@@ -1032,7 +1034,9 @@ def _fill_and_submit_qwen_otp(
                 page.wait_for_timeout(300)
                 current_val = "".join(str(loc.nth(i).input_value() or "") for i in range(6))
                 if current_val != code:
-                    logger.info("qwen_otp_multi_cell_fallback_fill expected=%s actual=%s", code, current_val)
+                    logger.info(
+                        "qwen_otp_multi_cell_fallback_fill expected=%s actual=%s", code, current_val
+                    )
                     for idx, digit in enumerate(code):
                         cell = loc.nth(idx)
                         try:
@@ -1041,13 +1045,19 @@ def _fill_and_submit_qwen_otp(
                             cell.dispatch_event("input")
                             cell.dispatch_event("change")
                         except Exception as cell_err:  # noqa: BLE001
-                            logger.warning("qwen_otp_cell_fill_failed idx=%d error=%s", idx, cell_err)
+                            logger.warning(
+                                "qwen_otp_cell_fill_failed idx=%d error=%s", idx, cell_err
+                            )
                         page.wait_for_timeout(60)
                 filled = True
                 logger.info("qwen_otp_multi_cell_completed")
                 break
             except Exception as cell_flow_err:  # noqa: BLE001
-                logger.warning("qwen_otp_multi_cell_attempt_failed selector=%s error=%s", selector, cell_flow_err)
+                logger.warning(
+                    "qwen_otp_multi_cell_attempt_failed selector=%s error=%s",
+                    selector,
+                    cell_flow_err,
+                )
                 continue
 
     if not filled:
@@ -1389,7 +1399,11 @@ def _register_browser(
     if not token and "/auth" in page.url:
         logger.info("qwen_token_poll_navigating_to_landing")
         try:
-            page.goto(f"{config.qwen_base_url.rstrip('/')}/", wait_until="domcontentloaded", timeout=15_000)
+            page.goto(
+                f"{config.qwen_base_url.rstrip('/')}/",
+                wait_until="domcontentloaded",
+                timeout=15_000,
+            )
             page.wait_for_timeout(2000)
             res = page.evaluate(token_eval_script)
             if isinstance(res, dict):

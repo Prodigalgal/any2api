@@ -453,7 +453,7 @@ def launch_browser(
                         manager.__exit__(None, None, None)
                 if browser_lease is not None:
                     browser_lease.release()
-                errors.append(f"camoufox: {type(exc).__name__}")
+                errors.append(f"camoufox: {type(exc).__name__}: {exc}")
                 continue
             driver_processes: tuple[int, ...] = ()
             try:
@@ -509,7 +509,7 @@ def launch_browser(
                         runtime.stop()
                 if browser_lease is not None:
                     browser_lease.release()
-                errors.append(f"patchright: {type(exc).__name__}")
+                errors.append(f"patchright: {type(exc).__name__}: {exc}")
                 continue
             driver_processes: tuple[int, ...] = ()
             try:

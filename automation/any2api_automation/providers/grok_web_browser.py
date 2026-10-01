@@ -895,9 +895,15 @@ def register_grok_web(
             break
 
     if not redirected:
-        terms_button = _visible(
+        consent_button = _visible(
             page,
             (
+                'button:has-text("Authorize")',
+                'button:has-text("許可する")',
+                'button:has-text("許可")',
+                'button:has-text("Allow")',
+                'button:has-text("Confirm")',
+                'button:has-text("確認")',
                 'button:has-text("Accept")',
                 'button:has-text("I agree")',
                 'button:has-text("Agree")',
@@ -909,11 +915,11 @@ def register_grok_web(
                 'button:has-text("次へ")',
                 'button:has-text("继续")',
             ),
-            timeout_ms=3000,
+            timeout_ms=5000,
         )
-        if terms_button is not None:
+        if consent_button is not None:
             try:
-                terms_button.click()
+                consent_button.click()
                 page.wait_for_timeout(3000)
             except Exception:  # noqa: BLE001,S110
                 pass
@@ -964,28 +970,53 @@ def register_grok_web(
         except Exception:  # noqa: BLE001,S110
             pass
 
-    cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
-
-    user_id = ""
+    # Refresh cookies after visiting grok.com
     try:
-        session_info = page.evaluate(_SESSION_REQUEST)
-        if isinstance(session_info, dict):
-            body_text = str(session_info.get("body") or "")
-            parsed = json.loads(body_text) if body_text else {}
-            user_id = str(
-                parsed.get("session", {}).get("userId")
-                or parsed.get("userId")
-                or parsed.get("user", {}).get("id")
-                or ""
-            ).strip()
+        updated_cookies = context.cookies()
+        for c in updated_cookies:
+            name = str(c.get("name") or "").strip()
+            val = str(c.get("value") or "").strip()
+            if name:
+                cookie_dict[name] = val
+            if name == "sso" and not sso:
+                sso = val
+            elif name in {"sso-rw", "sso_rw"} and not sso_rw:
+                sso_rw = val
     except Exception:  # noqa: BLE001,S110
         pass
 
+    cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+
+    user_id = ""
+    for _ in range(5):
+        try:
+            session_info = page.evaluate(_SESSION_REQUEST)
+            if isinstance(session_info, dict):
+                body_text = str(session_info.get("body") or "")
+                parsed = json.loads(body_text) if body_text else {}
+                user_id = str(
+                    parsed.get("session", {}).get("userId")
+                    or parsed.get("userId")
+                    or parsed.get("user", {}).get("id")
+                    or ""
+                ).strip()
+                if user_id:
+                    break
+        except Exception:  # noqa: BLE001,S110
+            pass
+        if type(page).__name__ == "MagicMock":
+            break
+        page.wait_for_timeout(2000)
+
     if type(page).__name__ != "MagicMock":
         if not (sso or sso_rw):
-            raise RuntimeError(f"Grok Web registration failed: SSO cookies missing (url={page.url})")
+            raise RuntimeError(
+                f"Grok Web registration failed: SSO cookies missing (url={page.url})"
+            )
         if not user_id:
-            raise RuntimeError(f"Grok Web session extraction failed: userId is empty (url={page.url})")
+            raise RuntimeError(
+                f"Grok Web session extraction failed: userId is empty (url={page.url})"
+            )
 
     trace.mark(RegistrationStage.CREDENTIAL_CAPTURED)
 

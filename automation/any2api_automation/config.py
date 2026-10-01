@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     provider_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36"
     )
+    enabled_providers: str = ""
 
 
 @lru_cache

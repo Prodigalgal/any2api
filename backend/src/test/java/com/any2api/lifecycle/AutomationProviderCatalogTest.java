@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.any2api.config.Any2ApiProperties;
 import com.any2api.provider.ProviderAction;
 import com.any2api.provider.ProviderTransportMode;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import tools.jackson.databind.ObjectMapper;
@@ -34,6 +35,28 @@ class AutomationProviderCatalogTest {
             .isEqualTo(RegistrationAttemptMode.SINGLE_IDENTITY);
         assertThat(catalog.registrationAttemptMode("beta"))
             .isEqualTo(RegistrationAttemptMode.NEW_IDENTITY);
+    }
+
+    @Test
+    void mergesManifestsFromMultipleAutomationTargets() {
+        catalog.replaceFrom(List.of(
+            mapper.readTree("""
+                {"providers":[
+                  {"id":"grok_web","operations":["keepalive","register"]}
+                ]}
+                """),
+            mapper.readTree("""
+                {"providers":[
+                  {"id":"arena","operations":["reauthenticate","register"]}
+                ]}
+                """)
+        ));
+
+        assertThat(catalog.ready()).isTrue();
+        assertThat(catalog.operationsFor("grok_web"))
+            .containsExactlyInAnyOrder(AutomationOperation.REGISTER, AutomationOperation.KEEPALIVE);
+        assertThat(catalog.operationsFor("arena"))
+            .containsExactlyInAnyOrder(AutomationOperation.REGISTER, AutomationOperation.REAUTHENTICATE);
     }
 
     @Test

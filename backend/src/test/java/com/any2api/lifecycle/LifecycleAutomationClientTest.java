@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.any2api.config.Any2ApiProperties;
+import java.net.URI;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -41,6 +43,31 @@ class LifecycleAutomationClientTest {
         assertThat(response).isNotNull();
         assertThat(response.path("ok").asBoolean()).isTrue();
         assertThat(response.path("padding").asText()).hasSize(512 << 10);
+    }
+
+    @Test
+    void routesToCustomProviderUrlWhenConfigured() {
+        var properties = new Any2ApiProperties();
+        properties.getAutomation().getProviderUrls().put(
+            "arena", URI.create("http://any2api-automation-arena:8090"));
+        var mapper = new ObjectMapper();
+        var recordedUri = new AtomicReference<URI>();
+
+        ExchangeFunction exchange = request -> {
+            recordedUri.set(request.url());
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .body("{\"ok\":true}")
+                .build());
+        };
+        var client = new LifecycleAutomationClient(
+            WebClient.builder().exchangeFunction(exchange),
+            properties, mapper);
+
+        client.execute("arena", "reauthenticate", mapper.createObjectNode()).block();
+
+        assertThat(recordedUri.get().toString())
+            .startsWith("http://any2api-automation-arena:8090/internal/v1/providers/arena/execute");
     }
 
     @Test

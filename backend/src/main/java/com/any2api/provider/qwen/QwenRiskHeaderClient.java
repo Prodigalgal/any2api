@@ -24,7 +24,7 @@ final class QwenRiskHeaderClient {
         this.client = builder.clone()
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(20 << 20))
             .filter(RequestCorrelation.propagationFilter())
-            .baseUrl(properties.getAutomation().getBaseUrl().toString())
+            .baseUrl(properties.getAutomation().resolveProviderBaseUrl("qwen").toString())
             .build();
         this.token = properties.getSecurity().getInternalToken();
     }

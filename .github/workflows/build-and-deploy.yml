@@ -107,10 +107,16 @@ jobs:
         include:
           - component: server
             context: backend
+            file: backend/Dockerfile
           - component: automation
             context: automation
+            file: automation/Dockerfile
+          - component: automation-arena
+            context: automation
+            file: automation/Dockerfile.arena
           - component: web
             context: web
+            file: web/Dockerfile
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -121,6 +127,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.context }}
+          file: ./${{ matrix.file }}
           push: true
           platforms: linux/arm64
           tags: docker.io/speedproxy/any2api:${{ matrix.component }}-sha-${{ github.sha }}
@@ -156,7 +163,7 @@ jobs:
           path = Path("any2api/oracle/kustomization.yaml")
           content = path.read_text(encoding="utf-8")
           sha = os.environ["IMAGE_SHA"]
-          for component in ("server", "automation", "web"):
+          for component in ("server", "automation", "automation-arena", "web"):
               pattern = rf"(name: any2api-{component}\n\s+newName: .*\n\s+newTag: ).*"
               content, count = re.subn(pattern, rf"\g<1>{component}-sha-{sha}", content)
               if count != 1:

@@ -14,22 +14,31 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 final class LifecycleAutomationClient {
-    private final WebClient client;
+    private final WebClient.Builder builder;
+    private final Any2ApiProperties properties;
     private final String token;
     private final ObjectMapper mapper;
+    private final java.util.concurrent.ConcurrentMap<java.net.URI, WebClient> clients =
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     LifecycleAutomationClient(
         WebClient.Builder builder,
         Any2ApiProperties properties,
         ObjectMapper mapper
     ) {
-        client = builder.clone()
-            .baseUrl(properties.getAutomation().getBaseUrl().toString())
+        this.builder = builder;
+        this.properties = properties;
+        this.token = properties.getSecurity().getInternalToken();
+        this.mapper = mapper;
+    }
+
+    private WebClient clientFor(String providerId) {
+        var baseUri = properties.getAutomation().resolveProviderBaseUrl(providerId);
+        return clients.computeIfAbsent(baseUri, uri -> builder.clone()
+            .baseUrl(uri.toString())
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(
                 properties.getAutomation().getMaxResponseBytes()))
-            .build();
-        token = properties.getSecurity().getInternalToken();
-        this.mapper = mapper;
+            .build());
     }
 
     Mono<JsonNode> execute(String providerId, String operation, JsonNode credential) {
@@ -48,8 +57,9 @@ final class LifecycleAutomationClient {
         Map<String, ?> payload,
         OperationContext context
     ) {
-        return client.post()
+        return clientFor(providerId).post()
             .uri("/internal/v1/providers/{provider}/execute", providerId)
+
             .headers(headers -> {
                 headers.setContentType(MediaType.APPLICATION_JSON);
                 if (!token.isBlank()) headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + token);

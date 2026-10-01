@@ -22,10 +22,13 @@ import tools.jackson.databind.ObjectMapper;
 /** Gateway-side client for the stable provider Action/Channel contract. */
 @Component
 public final class OfficialBrowserTransportClient {
-    private final WebClient client;
+    private final WebClient.Builder builder;
+    private final Any2ApiProperties properties;
     private final String token;
     private final ProviderRuntimeRuleService rules;
     private final ObjectMapper mapper;
+    private final java.util.concurrent.ConcurrentMap<java.net.URI, WebClient> clients =
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     public OfficialBrowserTransportClient(
         WebClient.Builder builder,
@@ -33,15 +36,22 @@ public final class OfficialBrowserTransportClient {
         ProviderRuntimeRuleService rules,
         ObjectMapper mapper
     ) {
-        client = builder.clone()
-            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(20 << 20))
-            .filter(RequestCorrelation.propagationFilter())
-            .baseUrl(properties.getAutomation().getBaseUrl().toString())
-            .build();
-        token = properties.getSecurity().getInternalToken();
+        this.builder = builder;
+        this.properties = properties;
+        this.token = properties.getSecurity().getInternalToken();
         this.rules = rules;
         this.mapper = mapper;
     }
+
+    private WebClient clientFor(String providerId) {
+        var baseUri = properties.getAutomation().resolveProviderBaseUrl(providerId);
+        return clients.computeIfAbsent(baseUri, uri -> builder.clone()
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(20 << 20))
+            .filter(RequestCorrelation.propagationFilter())
+            .baseUrl(uri.toString())
+            .build());
+    }
+
 
     public Mono<TransportResponse> request(
         String providerId,
@@ -120,7 +130,7 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> runtimeOptions,
         ProviderTransportMode transportMode
     ) {
-        return client.post()
+        return clientFor(providerId).post()
                 .uri("/internal/v1/providers/{providerId}/actions/request", providerId)
                 .headers(this::headers)
                 .bodyValue(command(
@@ -192,7 +202,7 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> runtimeOptions,
         ProviderTransportMode transportMode
     ) {
-        return client.post()
+        return clientFor(providerId).post()
                 .uri("/internal/v1/providers/{providerId}/actions/stream", providerId)
                 .headers(this::headers)
                 .bodyValue(command(

@@ -3,12 +3,19 @@ package com.any2api.lifecycle;
 import com.any2api.config.Any2ApiProperties;
 import com.any2api.provider.ProviderAction;
 import com.any2api.provider.ProviderTransportMode;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -26,17 +33,24 @@ public class AutomationProviderCatalog {
     private static final int DEFAULT_MAX_TARGET = 1000;
     private static final int DEFAULT_MAX_ATTEMPTS = 10000;
 
-    private final WebClient client;
+    private final WebClient.Builder builder;
+    private final Any2ApiProperties properties;
     private final String token;
     private final AtomicReference<Snapshot> current = new AtomicReference<>(Snapshot.empty());
+    private final ConcurrentMap<URI, WebClient> clients = new ConcurrentHashMap<>();
 
     public AutomationProviderCatalog(WebClient.Builder builder, Any2ApiProperties properties) {
-        client = builder.clone()
-            .baseUrl(properties.getAutomation().getBaseUrl().toString())
+        this.builder = builder;
+        this.properties = properties;
+        this.token = properties.getSecurity().getInternalToken();
+    }
+
+    private WebClient clientFor(URI baseUri) {
+        return clients.computeIfAbsent(baseUri, uri -> builder.clone()
+            .baseUrl(uri.toString())
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(
                 properties.getAutomation().getMaxResponseBytes()))
-            .build();
-        token = properties.getSecurity().getInternalToken();
+            .build());
     }
 
     @Scheduled(
@@ -44,20 +58,32 @@ public class AutomationProviderCatalog {
         fixedDelayString = "${any2api.automation.catalog-refresh-interval:1m}"
     )
     public void refresh() {
-        try {
-            var response = client.get()
-                .uri("/internal/v1/capabilities")
-                .headers(headers -> {
-                    if (!token.isBlank()) {
-                        headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + token);
-                    }
-                })
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block(Duration.ofSeconds(10));
-            replaceFrom(response);
-        } catch (RuntimeException error) {
-            log.warn("Automation provider catalog refresh failed: {}", error.getMessage());
+        var targets = new LinkedHashSet<URI>();
+        targets.add(properties.getAutomation().getBaseUrl());
+        targets.addAll(properties.getAutomation().getProviderUrls().values());
+
+        var responses = new ArrayList<JsonNode>();
+        for (var target : targets) {
+            try {
+                var response = clientFor(target).get()
+                    .uri("/internal/v1/capabilities")
+                    .headers(headers -> {
+                        if (!token.isBlank()) {
+                            headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+                        }
+                    })
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block(Duration.ofSeconds(10));
+                if (response != null) {
+                    responses.add(response);
+                }
+            } catch (RuntimeException error) {
+                log.warn("Automation provider catalog refresh failed for {}: {}", target, error.getMessage());
+            }
+        }
+        if (!responses.isEmpty()) {
+            replaceFrom(responses);
         }
     }
 
@@ -102,46 +128,57 @@ public class AutomationProviderCatalog {
     }
 
     void replaceFrom(JsonNode response) {
-        if (response == null || !response.path("providers").isArray()) {
-            throw new IllegalArgumentException("automation provider catalog is missing providers");
+        if (response != null) {
+            replaceFrom(List.of(response));
+        }
+    }
+
+    void replaceFrom(Collection<JsonNode> responses) {
+        if (responses == null || responses.isEmpty()) {
+            throw new IllegalArgumentException("automation provider catalog is missing responses");
         }
         var parsed = new LinkedHashMap<String, Set<AutomationOperation>>();
         var attemptModes = new LinkedHashMap<String, RegistrationAttemptMode>();
         var maxTargets = new LinkedHashMap<String, Integer>();
         var maxAttempts = new LinkedHashMap<String, Integer>();
         var actionBindings = new LinkedHashMap<String, Set<ProviderActionBinding>>();
-        for (var provider : response.path("providers")) {
-            var providerId = provider.path("id").asText("");
-            if (!PROVIDER_ID.matcher(providerId).matches()) {
-                throw new IllegalArgumentException("invalid automation provider id: " + providerId);
+        for (var response : responses) {
+            if (response == null || !response.path("providers").isArray()) {
+                continue;
             }
-            var operations = EnumSet.noneOf(AutomationOperation.class);
-            if (!provider.path("operations").isArray()) {
-                throw new IllegalArgumentException(
-                    "automation provider operations are missing: " + providerId);
+            for (var provider : response.path("providers")) {
+                var providerId = provider.path("id").asText("");
+                if (!PROVIDER_ID.matcher(providerId).matches()) {
+                    throw new IllegalArgumentException("invalid automation provider id: " + providerId);
+                }
+                var operations = EnumSet.noneOf(AutomationOperation.class);
+                if (!provider.path("operations").isArray()) {
+                    throw new IllegalArgumentException(
+                        "automation provider operations are missing: " + providerId);
+                }
+                for (var operation : provider.path("operations")) {
+                    operations.add(AutomationOperation.fromExternalName(operation.asText("")));
+                }
+                parsed.put(providerId, Set.copyOf(operations));
+                var attemptMode = RegistrationAttemptMode.fromExternalName(
+                    provider.path("registration_attempt_mode").asText("new_identity"));
+                attemptModes.put(providerId, attemptMode);
+                var targetLimit = boundedLimit(
+                    provider, "registration_max_target", 1, DEFAULT_MAX_TARGET, DEFAULT_MAX_TARGET);
+                var attemptLimit = boundedLimit(
+                    provider, "registration_max_attempts", 1, DEFAULT_MAX_ATTEMPTS,
+                    DEFAULT_MAX_ATTEMPTS);
+                if (attemptLimit < targetLimit) {
+                    throw new IllegalArgumentException(
+                        "registration attempt limit cannot be below target limit: " + providerId);
+                }
+                maxTargets.put(providerId, targetLimit);
+                maxAttempts.put(providerId, attemptLimit);
+                actionBindings.put(providerId, parseActions(providerId, provider.path("actions")));
             }
-            for (var operation : provider.path("operations")) {
-                operations.add(AutomationOperation.fromExternalName(operation.asText("")));
-            }
-            if (parsed.putIfAbsent(providerId, Set.copyOf(operations)) != null) {
-                throw new IllegalArgumentException(
-                    "duplicate automation provider id: " + providerId);
-            }
-            var attemptMode = RegistrationAttemptMode.fromExternalName(
-                provider.path("registration_attempt_mode").asText("new_identity"));
-            attemptModes.put(providerId, attemptMode);
-            var targetLimit = boundedLimit(
-                provider, "registration_max_target", 1, DEFAULT_MAX_TARGET, DEFAULT_MAX_TARGET);
-            var attemptLimit = boundedLimit(
-                provider, "registration_max_attempts", 1, DEFAULT_MAX_ATTEMPTS,
-                DEFAULT_MAX_ATTEMPTS);
-            if (attemptLimit < targetLimit) {
-                throw new IllegalArgumentException(
-                    "registration attempt limit cannot be below target limit: " + providerId);
-            }
-            maxTargets.put(providerId, targetLimit);
-            maxAttempts.put(providerId, attemptLimit);
-            actionBindings.put(providerId, parseActions(providerId, provider.path("actions")));
+        }
+        if (parsed.isEmpty()) {
+            throw new IllegalArgumentException("automation provider catalog is missing providers");
         }
         current.set(new Snapshot(
             Map.copyOf(parsed), Map.copyOf(attemptModes), Map.copyOf(maxTargets),
@@ -169,7 +206,7 @@ public class AutomationProviderCatalog {
 
     private Set<ProviderActionBinding> parseActions(String providerId, JsonNode values) {
         if (!values.isArray()) return Set.of();
-        var parsed = new java.util.LinkedHashSet<ProviderActionBinding>();
+        var parsed = new LinkedHashSet<ProviderActionBinding>();
         for (var value : values) {
             var action = ProviderAction.fromExternalName(value.path("action").asText(""));
             var channel = ProviderTransportMode.parse(value.path("channel").asText(""));

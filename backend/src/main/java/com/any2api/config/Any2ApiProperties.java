@@ -101,6 +101,7 @@ public class Any2ApiProperties {
 
     public static class Automation {
         private URI baseUrl = URI.create("http://localhost:8090");
+        private java.util.Map<String, URI> providerUrls = new java.util.LinkedHashMap<>();
         private int maxResponseBytes = 8 << 20;
 
         public URI getBaseUrl() {
@@ -110,6 +111,24 @@ public class Any2ApiProperties {
         public void setBaseUrl(URI baseUrl) {
             this.baseUrl = baseUrl;
         }
+
+        public java.util.Map<String, URI> getProviderUrls() {
+            return providerUrls;
+        }
+
+        public void setProviderUrls(java.util.Map<String, URI> providerUrls) {
+            this.providerUrls = providerUrls == null
+                ? new java.util.LinkedHashMap<>()
+                : new java.util.LinkedHashMap<>(providerUrls);
+        }
+
+        public URI resolveProviderBaseUrl(String providerId) {
+            if (providerId == null || providerId.isBlank()) {
+                return baseUrl;
+            }
+            return providerUrls.getOrDefault(providerId.trim(), baseUrl);
+        }
+
 
         public int getMaxResponseBytes() {
             return maxResponseBytes;

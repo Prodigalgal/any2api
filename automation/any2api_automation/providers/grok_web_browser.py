@@ -10,7 +10,7 @@ from http.cookies import CookieError, SimpleCookie
 from typing import Any
 from uuid import uuid4
 
-from ..captcha.turnstile import LocalTurnstileSolver, _dismiss_cookie_banner
+from ..captcha.turnstile import _click_turnstile, _dismiss_cookie_banner
 from ..config import settings as core_settings
 from ..lifecycle.browser import BrowserResult
 from ..lifecycle.mail import Mailbox, TempMailClient
@@ -808,7 +808,7 @@ def register_grok_web(
         page.wait_for_timeout(1000)
 
     ts_token = ""
-    for _ in range(5):
+    for attempt_idx in range(1, 21):
         try:
             existing_val = page.evaluate(
                 "() => document.querySelector('input[name=\"cf-turnstile-response\"]')?.value"
@@ -820,17 +820,22 @@ def register_grok_web(
             pass
         if type(page).__name__ == "MagicMock":
             break
+        if attempt_idx >= 2 and attempt_idx % 3 == 0:
+            _click_turnstile(page)
         page.wait_for_timeout(1000)
 
     if not ts_token and type(page).__name__ != "MagicMock":
+        # Final active click attempt
+        _click_turnstile(page)
+        page.wait_for_timeout(2000)
         try:
-            with LocalTurnstileSolver(headless=False, rounds=2, timeout_seconds=45) as solver:
-                ts_token = solver.solve_turnstile(
-                    website_url="https://accounts.x.ai/sign-up?redirect=grok-com",
-                    website_key="0x4AAAAAAAhr9JGVDZbrZOo0",
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("LocalTurnstileSolver in grok_web registration: %s", exc)
+            existing_val = page.evaluate(
+                "() => document.querySelector('input[name=\"cf-turnstile-response\"]')?.value"
+            )
+            if isinstance(existing_val, str) and len(existing_val) >= 20:
+                ts_token = existing_val
+        except Exception:  # noqa: BLE001,S110
+            pass
 
     if ts_token:
         try:
@@ -975,6 +980,12 @@ def register_grok_web(
             ).strip()
     except Exception:  # noqa: BLE001,S110
         pass
+
+    if type(page).__name__ != "MagicMock":
+        if not (sso or sso_rw):
+            raise RuntimeError(f"Grok Web registration failed: SSO cookies missing (url={page.url})")
+        if not user_id:
+            raise RuntimeError(f"Grok Web session extraction failed: userId is empty (url={page.url})")
 
     trace.mark(RegistrationStage.CREDENTIAL_CAPTURED)
 

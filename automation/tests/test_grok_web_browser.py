@@ -10,7 +10,6 @@ from any2api_automation.providers.grok_web_browser import (
 )
 
 
-
 def test_grok_web_builds_gateway_command_from_semantic_request() -> None:
     command = {
         "schemaVersion": 1,
@@ -154,4 +153,3 @@ def test_register_grok_web_fallback_uuid_when_session_empty_but_sso_present() ->
     assert result.credential["sso-rw"] == "sso_rw_test_val"
     assert result.ready_for_inference is True
     assert RegistrationStage.CREDENTIAL_CAPTURED.value in trace.stages
-

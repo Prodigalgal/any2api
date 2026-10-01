@@ -1070,9 +1070,7 @@ def register_grok_web(
             page.wait_for_timeout(2000)
 
     if type(page).__name__ != "MagicMock" and not (sso or sso_rw):
-        raise RuntimeError(
-            f"Grok Web registration failed: SSO cookies missing (url={page.url})"
-        )
+        raise RuntimeError(f"Grok Web registration failed: SSO cookies missing (url={page.url})")
     if not user_id:
         if type(page).__name__ != "MagicMock":
             logger.warning(

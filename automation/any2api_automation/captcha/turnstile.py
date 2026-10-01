@@ -180,11 +180,20 @@ def _inject_widget(page: Any, sitekey: str, action: str, cdata: str) -> None:
             }}
           }};
           const readyRender = () => {{
-            if (window.turnstile?.ready) window.turnstile.ready(render);
-            else render();
+            try {{
+              if (window.turnstile?.ready) {{
+                window.turnstile.ready(render);
+                return;
+              }}
+            }} catch (_) {{}}
+            render();
             setTimeout(render, 1000);
           }};
-          if (window.turnstile?.render) {{ readyRender(); return; }}
+          if (window.turnstile?.render) {{
+            render();
+            setTimeout(render, 1000);
+            return;
+          }}
           const existing = [...document.scripts].find(script =>
             script.src.includes('challenges.cloudflare.com/turnstile/v0/api.js'));
           if (existing) {{
@@ -240,8 +249,8 @@ def _turnstile_state(page: Any) -> str:
 
 def _click_turnstile(page: Any) -> bool:
     for selector in (
-        ".cf-turnstile",
         "[data-any2api-turnstile]",
+        ".cf-turnstile",
         'iframe[src*="challenges.cloudflare.com"]',
         'iframe[src*="turnstile"]',
         'iframe[title*="widget"]',
@@ -250,16 +259,13 @@ def _click_turnstile(page: Any) -> bool:
             target = page.locator(selector).first
             if not target.count() or not target.is_visible():
                 continue
-            try:
-                target.click(force=True, timeout=1000)
-            except Exception:  # noqa: BLE001 - coordinate fallback for browser click
-                box = target.bounding_box()
-                if not box:
-                    continue
-                page.mouse.click(
-                    box["x"] + box["width"] / 2,
-                    box["y"] + box["height"] / 2,
-                )
+            box = target.bounding_box()
+            if box:
+                click_x = box["x"] + min(35.0, box["width"] / 2)
+                click_y = box["y"] + box["height"] / 2
+                page.mouse.click(click_x, click_y)
+                return True
+            target.click(force=True, timeout=1000)
             return True
         except Exception:  # noqa: BLE001,S112 - try the next widget surface
             continue

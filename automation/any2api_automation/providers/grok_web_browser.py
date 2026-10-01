@@ -807,6 +807,24 @@ def register_grok_web(
         password_input.fill(password)
         page.wait_for_timeout(1000)
 
+    complete_button = _visible(
+        page,
+        (
+            'button[type="submit"]',
+            'button:has-text("Complete sign up")',
+            'button:has-text("登録を完了")',
+            'button:has-text("完了")',
+            'button:has-text("Done")',
+            'button:has-text("Continue")',
+            'button:has-text("Next")',
+            'button:has-text("次へ")',
+            'button:has-text("完成注册")',
+            'button:has-text("完成")',
+            'button:has-text("继续")',
+        ),
+        timeout_ms=5000,
+    )
+
     ts_token = ""
     for attempt_idx in range(1, 21):
         try:
@@ -820,12 +838,30 @@ def register_grok_web(
             pass
         if type(page).__name__ == "MagicMock":
             break
-        if attempt_idx >= 2 and attempt_idx % 3 == 0:
+
+        clicked = False
+        if complete_button is not None:
+            try:
+                b_box = complete_button.bounding_box()
+                if b_box:
+                    page.mouse.click(b_box["x"] + 25, b_box["y"] - 40)
+                    clicked = True
+            except Exception:  # noqa: BLE001,S110
+                pass
+        if not clicked:
             _click_turnstile(page)
-        page.wait_for_timeout(1000)
+
+        page.wait_for_timeout(1500)
 
     if not ts_token and type(page).__name__ != "MagicMock":
         # Final active click attempt
+        if complete_button is not None:
+            try:
+                b_box = complete_button.bounding_box()
+                if b_box:
+                    page.mouse.click(b_box["x"] + 25, b_box["y"] - 40)
+            except Exception:  # noqa: BLE001,S110
+                pass
         _click_turnstile(page)
         page.wait_for_timeout(2000)
         try:
@@ -859,23 +895,6 @@ def register_grok_web(
 
     trace.mark(RegistrationStage.CHALLENGE_CLEARED)
 
-    complete_button = _visible(
-        page,
-        (
-            'button[type="submit"]',
-            'button:has-text("Complete sign up")',
-            'button:has-text("登録を完了")',
-            'button:has-text("完了")',
-            'button:has-text("Done")',
-            'button:has-text("Continue")',
-            'button:has-text("Next")',
-            'button:has-text("次へ")',
-            'button:has-text("完成注册")',
-            'button:has-text("完成")',
-            'button:has-text("继续")',
-        ),
-        timeout_ms=5000,
-    )
     if complete_button is not None:
         complete_button.click()
     elif password_input is not None:

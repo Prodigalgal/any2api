@@ -666,8 +666,13 @@ def register_grok_web(
     email_btn = _visible(
         page,
         (
+            'button:has-text("メールで登録")',
+            'button:has-text("メール")',
             'button:has-text("Sign up with email")',
             'a:has-text("Sign up with email")',
+            'button:has-text("使用邮箱注册")',
+            'button:has-text("通过电子邮件注册")',
+            'button:has-text("邮箱注册")',
             'button:has-text("Sign up")',
             'a:has-text("Sign up")',
         ),
@@ -697,10 +702,16 @@ def register_grok_web(
     submit_button = _visible(
         page,
         (
-            'button:has-text("Sign up")',
             'button[type="submit"]',
+            'button:has-text("新規登録")',
+            'button:has-text("Sign up")',
             'button:has-text("Continue")',
             'button:has-text("Next")',
+            'button:has-text("次へ")',
+            'button:has-text("続行")',
+            'button:has-text("继续")',
+            'button:has-text("下一步")',
+            'button:has-text("注册")',
         ),
         timeout_ms=3000,
     )
@@ -740,10 +751,16 @@ def register_grok_web(
         confirm_button = _visible(
             page,
             (
+                'button[type="submit"]',
                 'button:has-text("Confirm email")',
                 'button:has-text("Verify")',
                 'button:has-text("Continue")',
-                'button[type="submit"]',
+                'button:has-text("確認")',
+                'button:has-text("認証")',
+                'button:has-text("次へ")',
+                'button:has-text("验证")',
+                'button:has-text("确认")',
+                'button:has-text("继续")',
             ),
             timeout_ms=3000,
         )
@@ -840,11 +857,17 @@ def register_grok_web(
     complete_button = _visible(
         page,
         (
-            'button:has-text("Complete sign up")',
             'button[type="submit"]',
+            'button:has-text("Complete sign up")',
+            'button:has-text("登録を完了")',
+            'button:has-text("完了")',
+            'button:has-text("Done")',
             'button:has-text("Continue")',
             'button:has-text("Next")',
-            'button:has-text("Done")',
+            'button:has-text("次へ")',
+            'button:has-text("完成注册")',
+            'button:has-text("完成")',
+            'button:has-text("继续")',
         ),
         timeout_ms=5000,
     )
@@ -874,6 +897,12 @@ def register_grok_web(
                 'button:has-text("I agree")',
                 'button:has-text("Agree")',
                 'button:has-text("Continue")',
+                'button:has-text("同意する")',
+                'button:has-text("承諾")',
+                'button:has-text("同意")',
+                'button:has-text("接受")',
+                'button:has-text("次へ")',
+                'button:has-text("继续")',
             ),
             timeout_ms=3000,
         )

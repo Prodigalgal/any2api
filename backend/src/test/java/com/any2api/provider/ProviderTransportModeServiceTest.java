@@ -84,6 +84,51 @@ class ProviderTransportModeServiceTest {
             .hasMessageContaining("does not support transport mode API");
     }
 
+    @Test
+    void autoPrefersRuntimeWhenProviderDeclaresRuntimeAsDefault() {
+        var provider = new RuntimeDefaultProvider(Set.of(
+            ProviderTransportMode.API, ProviderTransportMode.RUNTIME));
+        var plan = new ProviderTransportModeService(mock(JdbcClient.class))
+            .plan(provider, ProviderTransportMode.AUTO);
+
+        assertThat(plan.requested()).isEqualTo(ProviderTransportMode.AUTO);
+        assertThat(plan.primary()).isEqualTo(ProviderTransportMode.RUNTIME);
+        assertThat(plan.fallback()).isNull();
+    }
+
+    private static final class RuntimeDefaultProvider implements InferenceProvider {
+        private final Set<ProviderTransportMode> modes;
+
+        private RuntimeDefaultProvider(Set<ProviderTransportMode> modes) {
+            this.modes = modes;
+        }
+
+        @Override public ProviderManifest manifest() {
+            return new ProviderManifest("runtime-default", "RuntimeDefault", "test", "1", List.of("model"),
+                Map.of(ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                    ProviderCapability.RESPONSES, SupportLevel.NATIVE), true);
+        }
+
+        @Override public Set<ProviderTransportMode> supportedTransportModes() { return modes; }
+
+        @Override public ProviderTransportMode defaultTransportMode() { return ProviderTransportMode.RUNTIME; }
+
+        @Override
+        public Flux<CanonicalEvent> generate(
+            CanonicalRequest request,
+            ProviderExecutionContext context,
+            LeasedProviderAccount account
+        ) {
+            return Flux.empty();
+        }
+
+        @Override
+        public ProviderFailure classify(Throwable error) {
+            return new ProviderFailure("test", "test", false, Map.of());
+        }
+    }
+
+
     private static final class TestProvider implements InferenceProvider {
         private final Set<ProviderTransportMode> modes;
 

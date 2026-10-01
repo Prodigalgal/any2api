@@ -364,6 +364,7 @@ def _launch_browser(
             prepared = camoufox_launch_options(
                 exact if isinstance(exact, dict) else {},
                 proxy_url,
+                humanize=True,
             )
             manager = Camoufox(from_options=prepared)
             browser = manager.__enter__()

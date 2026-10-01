@@ -956,18 +956,30 @@ class GlmAliyunChallenge:
         page: Any,
         start: tuple[float, float],
         end: tuple[float, float],
+        *,
+        overshoot: bool = False,
     ) -> tuple[float, float]:
         distance = math.dist(start, end)
-        steps = max(6, min(24, round(distance / 10)))
-        bend = random.uniform(-1.5, 1.5)
+        steps = max(16, min(45, round(distance / 6)))
+        bend = random.uniform(-1.0, 1.0)
         for index in range(1, steps + 1):
             progress = index / steps
-            eased = 3 * progress**2 - 2 * progress**3
+            eased = 10 * (progress**3) - 15 * (progress**4) + 6 * (progress**5)
             x = start[0] + (end[0] - start[0]) * eased
             y = start[1] + (end[1] - start[1]) * eased
-            y += math.sin(math.pi * progress) * bend
+            y += math.sin(math.pi * progress) * bend + random.gauss(0, 0.25)
             page.mouse.move(x, y)
-            page.wait_for_timeout(random.randint(7, 18))
+            page.wait_for_timeout(random.randint(6, 14))
+        if overshoot and distance > 50:
+            overshoot_px = random.uniform(1.5, 2.6)
+            overshoot_steps = random.randint(6, 10)
+            target_x = end[0]
+            for step in range(1, overshoot_steps + 1):
+                t = step / overshoot_steps
+                shift = math.sin(math.pi * t) * overshoot_px
+                page.mouse.move(target_x + shift, end[1] + random.gauss(0, 0.2))
+                page.wait_for_timeout(random.randint(8, 14))
+            page.mouse.move(target_x, end[1])
         return end
 
     def _slider_drag_points(
@@ -1019,22 +1031,14 @@ class GlmAliyunChallenge:
         start: tuple[float, float],
         end: tuple[float, float],
     ) -> None:
-        page.mouse.move(*start, steps=random.randint(4, 8))
-        page.wait_for_timeout(random.randint(90, 220))
+        page.mouse.move(*start, steps=random.randint(4, 7))
+        page.wait_for_timeout(random.randint(100, 200))
         page.mouse.down()
-        distance = math.dist(start, end)
-        steps = max(14, min(38, round(distance / 12)))
-        bend = random.uniform(-0.08, 0.08) * max(30.0, distance)
-        for index in range(1, steps + 1):
-            progress = index / steps
-            eased = 3 * progress**2 - 2 * progress**3
-            x = start[0] + (end[0] - start[0]) * eased
-            y = start[1] + (end[1] - start[1]) * eased
-            y += math.sin(math.pi * progress) * bend
-            page.mouse.move(x, y)
-            page.wait_for_timeout(random.randint(8, 24))
-        page.wait_for_timeout(random.randint(80, 180))
-        page.mouse.up()
+        try:
+            self._move_held_slider(page, start, end, overshoot=True)
+            page.wait_for_timeout(random.randint(100, 200))
+        finally:
+            page.mouse.up()
 
 
 _OBSERVE_OFFICIAL_CAPTCHA = """
@@ -1109,19 +1113,19 @@ async config => {
     host.id = hostId;
     host.style.cssText = config.mode === 'embed'
       ? 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.96);z-index:2147483646;'
-      : 'position:absolute;left:-99999px;top:-99999px;width:0;height:0;overflow:hidden;';
+      : 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483646;min-width:320px;min-height:40px;pointer-events:auto;';
     document.body.appendChild(host);
   } else {
     host.style.cssText = config.mode === 'embed'
       ? 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.96);z-index:2147483646;'
-      : 'position:absolute;left:-99999px;top:-99999px;width:0;height:0;overflow:hidden;';
+      : 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483646;min-width:320px;min-height:40px;pointer-events:auto;';
   }
   let button = document.getElementById(buttonId);
   if (!button) {
     button = document.createElement('button');
     button.id = buttonId;
     button.type = 'button';
-    button.style.cssText = 'position:absolute;left:-99999px;top:-99999px;width:1px;height:1px;opacity:0;';
+    button.style.cssText = 'position:fixed;bottom:12px;right:12px;width:100px;height:36px;opacity:0.01;pointer-events:auto;z-index:1;';
     document.body.appendChild(button);
   }
   window.AliyunCaptchaConfig = {region: config.region, prefix: config.prefix};

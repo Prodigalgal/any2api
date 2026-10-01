@@ -94,6 +94,11 @@ public final class GlmProvider implements InferenceProvider {
         return java.util.Set.of(ProviderTransportMode.API, ProviderTransportMode.RUNTIME);
     }
 
+    @Override
+    public ProviderTransportMode defaultTransportMode() {
+        return ProviderTransportMode.RUNTIME;
+    }
+
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
     @Override

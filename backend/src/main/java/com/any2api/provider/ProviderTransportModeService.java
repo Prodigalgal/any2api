@@ -45,8 +45,11 @@ public class ProviderTransportModeService {
         var selected = requested == null ? configured.get().getOrDefault(
             provider.manifest().id(), provider.defaultTransportMode()) : requested;
         if (selected == ProviderTransportMode.AUTO) {
-            var primary = supported.contains(ProviderTransportMode.API)
-                ? ProviderTransportMode.API : ProviderTransportMode.RUNTIME;
+            var defaultMode = provider.defaultTransportMode();
+            var primary = (defaultMode == ProviderTransportMode.RUNTIME && supported.contains(ProviderTransportMode.RUNTIME))
+                ? ProviderTransportMode.RUNTIME
+                : (supported.contains(ProviderTransportMode.API)
+                    ? ProviderTransportMode.API : ProviderTransportMode.RUNTIME);
             var fallback = primary == ProviderTransportMode.API
                 && supported.contains(ProviderTransportMode.RUNTIME)
                 ? ProviderTransportMode.RUNTIME : null;

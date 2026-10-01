@@ -1,8 +1,14 @@
+from unittest.mock import MagicMock
+
+from any2api_automation.lifecycle.mail import Mailbox
+from any2api_automation.lifecycle.registration import RegistrationStage, RegistrationTrace
 from any2api_automation.providers.grok_web_browser import (
     _SESSION_REQUEST,
     _STREAM_REQUEST,
     build_grok_web_request,
+    register_grok_web,
 )
+
 
 
 def test_grok_web_builds_gateway_command_from_semantic_request() -> None:
@@ -65,12 +71,6 @@ def test_grok_web_builds_request_with_model_aliases() -> None:
 
 
 def test_register_grok_web_flow() -> None:
-    from unittest.mock import MagicMock
-
-    from any2api_automation.lifecycle.mail import Mailbox
-    from any2api_automation.lifecycle.registration import RegistrationStage, RegistrationTrace
-    from any2api_automation.providers.grok_web_browser import register_grok_web
-
     mock_page = MagicMock()
     mock_locator = MagicMock()
     mock_locator.is_visible.return_value = False
@@ -114,3 +114,44 @@ def test_register_grok_web_flow() -> None:
     assert result.ready_for_inference is True
     assert RegistrationStage.ACTIVATED.value in trace.stages
     assert RegistrationStage.CREDENTIAL_CAPTURED.value in trace.stages
+
+
+def test_register_grok_web_fallback_uuid_when_session_empty_but_sso_present() -> None:
+    mock_page = MagicMock()
+    mock_page.url = "https://grok.com/"
+    mock_page.evaluate.return_value = {
+        "status": 200,
+        "body": "{}",
+    }
+
+    mock_context = MagicMock()
+    mock_context.cookies.return_value = [
+        {"name": "sso", "value": "sso_test_val"},
+        {"name": "sso-rw", "value": "sso_rw_test_val"},
+    ]
+
+    mock_mail = MagicMock()
+    mock_mail.wait_for_code.return_value = "123456"
+
+    mailbox = Mailbox(address="test_fallback@example.com", jwt="test-jwt")
+    trace = RegistrationTrace("grok_web")
+
+    result = register_grok_web(
+        page=mock_page,
+        context=mock_context,
+        backend="camoufox",
+        mail=mock_mail,
+        mailbox=mailbox,
+        password="TestPassword123!",
+        payload={},
+        trace=trace,
+    )
+
+    assert result.external_id
+    assert len(result.external_id) == 36  # UUID length
+    assert result.email == "test_fallback@example.com"
+    assert result.credential["sso"] == "sso_test_val"
+    assert result.credential["sso-rw"] == "sso_rw_test_val"
+    assert result.ready_for_inference is True
+    assert RegistrationStage.CREDENTIAL_CAPTURED.value in trace.stages
+

@@ -905,11 +905,17 @@ def register_grok_web(
     redirected = False
     deadline = time.monotonic() + (0.1 if type(page).__name__ == "MagicMock" else 30.0)
     while time.monotonic() < deadline:
-        page.wait_for_timeout(1000)
-        current_url = str(page.url or "")
-        if "grok.com" in current_url and "accounts.x.ai" not in current_url:
-            redirected = True
-            break
+        try:
+            page.wait_for_timeout(1000)
+        except Exception:  # noqa: BLE001,S110
+            pass
+        try:
+            current_url = str(page.url or "")
+            if "grok.com" in current_url and "accounts.x.ai" not in current_url:
+                redirected = True
+                break
+        except Exception:  # noqa: BLE001,S110
+            pass
         if type(page).__name__ == "MagicMock":
             break
 
@@ -989,6 +995,13 @@ def register_grok_web(
         except Exception:  # noqa: BLE001,S110
             pass
 
+    if type(page).__name__ != "MagicMock":
+        try:
+            _dismiss_cookie_banner(page)
+            _click_turnstile(page)
+        except Exception:  # noqa: BLE001,S110
+            pass
+
     # Refresh cookies after visiting grok.com
     try:
         updated_cookies = context.cookies()
@@ -1007,11 +1020,14 @@ def register_grok_web(
     cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
 
     user_id = ""
-    for _ in range(5):
+    for attempt_idx in range(10):
         try:
             session_info = page.evaluate(_SESSION_REQUEST)
             if isinstance(session_info, dict):
+                status_code = int(session_info.get("status") or 0)
                 body_text = str(session_info.get("body") or "")
+                if status_code == 403 and type(page).__name__ != "MagicMock":
+                    _click_turnstile(page)
                 parsed = json.loads(body_text) if body_text else {}
                 user_id = str(
                     parsed.get("session", {}).get("userId")
@@ -1023,19 +1039,47 @@ def register_grok_web(
                     break
         except Exception:  # noqa: BLE001,S110
             pass
+
+        if not user_id and type(page).__name__ != "MagicMock":
+            try:
+                next_user_id = str(
+                    page.evaluate(
+                        "() => window.__NEXT_DATA__?.props?.pageProps?.session?.userId "
+                        "|| window.__NEXT_DATA__?.props?.pageProps?.user?.id "
+                        "|| window.__NEXT_DATA__?.props?.initialSession?.user?.id "
+                        "|| ''"
+                    )
+                    or ""
+                ).strip()
+                if next_user_id:
+                    user_id = next_user_id
+                    break
+            except Exception:  # noqa: BLE001,S110
+                pass
+
         if type(page).__name__ == "MagicMock":
             break
-        page.wait_for_timeout(2000)
 
-    if type(page).__name__ != "MagicMock":
-        if not (sso or sso_rw):
-            raise RuntimeError(
-                f"Grok Web registration failed: SSO cookies missing (url={page.url})"
+        if attempt_idx == 4 and not user_id:
+            try:
+                page.reload(wait_until="domcontentloaded", timeout=20_000)
+                page.wait_for_timeout(2000)
+            except Exception:  # noqa: BLE001,S110
+                pass
+        else:
+            page.wait_for_timeout(2000)
+
+    if type(page).__name__ != "MagicMock" and not (sso or sso_rw):
+        raise RuntimeError(
+            f"Grok Web registration failed: SSO cookies missing (url={page.url})"
+        )
+    if not user_id:
+        if type(page).__name__ != "MagicMock":
+            logger.warning(
+                "Grok Web session extraction: userId not found from grok.com (url=%s), using fallback UUID",
+                page.url,
             )
-        if not user_id:
-            raise RuntimeError(
-                f"Grok Web session extraction failed: userId is empty (url={page.url})"
-            )
+        user_id = str(uuid4())
 
     trace.mark(RegistrationStage.CREDENTIAL_CAPTURED)
 

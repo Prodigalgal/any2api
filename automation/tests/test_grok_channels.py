@@ -5,7 +5,8 @@ from any2api_automation.providers.sso_channel import probe_result, session_cooki
 def test_sso_channel_cookie_projection_and_probe_classification() -> None:
     assert session_cookies({"sso": "token"}) == {"sso": "token", "sso-rw": "token"}
     assert probe_result(200, True)["healthy"] is True
-    assert probe_result(401, False)["terminal"] is True
+    assert probe_result(401, False)["terminal"] is False
+    assert probe_result(401, False)["auth_expired"] is True
     assert probe_result(403, False)["auth_expired"] is False
     assert probe_result(429, False)["error_class"] == "UpstreamRateLimited"
 

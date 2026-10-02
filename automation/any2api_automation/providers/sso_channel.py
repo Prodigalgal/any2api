@@ -24,7 +24,7 @@ def probe_result(status: int, completed: bool) -> dict[str, Any]:
         return {
             "healthy": False,
             "auth_expired": True,
-            "terminal": True,
+            "terminal": False,
             "error_class": "SsoSessionExpired",
             "credential_patch": None,
         }
@@ -32,7 +32,7 @@ def probe_result(status: int, completed: bool) -> dict[str, Any]:
         return {
             "healthy": False,
             "auth_expired": True,
-            "terminal": True,
+            "terminal": False,
             "error_class": "SsoExpired",
             "credential_patch": None,
         }

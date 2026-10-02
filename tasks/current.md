@@ -3,7 +3,7 @@
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-03 WEB 厂商常用 OpenAI 桥接补齐（0.25.0 → 0.25.1）
+## 2026-10-03 WEB 厂商常用 OpenAI 桥接补齐（0.25.0 → 0.25.2）
 
 - 执行规格：[WEB_OPENAI_BRIDGE_FOLLOWUP](../docs/requirements/WEB_OPENAI_BRIDGE_FOLLOWUP.md)。沿用用户授权，继续实现、提交、部署和真实验收。
 - DeepSeek / Qwen / GLM / MiniMax / Arena 复用 ToolEmulationEngine，补齐 function definitions、required/named choice、结果回放、SSE 和 usage；保留 native search / reasoning / media。
@@ -13,6 +13,10 @@
 - 0.25.1 修复候选：工具契约写入实际 user turn，明确由调用方执行；LongCat 兼容单个 JSON call；普通/预租约路由的前置参数错误统一 typed 400；Arena 忽略网关负责的 store/previous_response_id；Grok 等待已收到的终态帧处理完再判断连接关闭。Backend 390 passed / 5 skipped，Web lint/build、Automation 回归与版本契约通过后部署复测。
 - 0.25.2 Read 修复规格：代理池列表采用必要列投影 + 每批 500 个 ID 的绑定读取，消除按池查询；设置页一次读取三类配置，保留解密、默认值和校验。影响 ProxyPoolService、RuntimeSettingsService、集成测试及统一版本；不改 API/数据结构/写事务。验收绑定隔离、空池、批量上界、设置默认/已保存/损坏失败路径，并部署后比较两类 Read 实际耗时。
 - 0.25.1 实测 GLM、MiniMax、LongCat、Grok 核心六组通过，LongCat 历史媒体 direct/public JSON 400。Arena 文本/SSE通过，function 请求被 canonical generation 中的 tool_choice/parallel_tool_calls/stream_options 误拒绝；0.25.2 在 Web 边界消费这些控制，并把跨厂商回归改为真实 Parser → ToolBridge → Provider 验证链路。
+- 0.25.2 已部署：源码 `129dbf9`、CI `37046918505` success、GitOps `6498b47` Synced/Healthy，四应用 1/1 Ready、restart 0；Backend 398 passed / 5 skipped，Automation 494 passed、Web lint/build 与版本契约通过。无数据库新迁移。
+- Read 实测 18 × 3 在 cluster/direct 均 200；集群 proxy-pools **314.32 → 162.40ms**、settings **313.41 → 88.71ms**。模型目录 SQL 318 行双向差异 0，Execution **282.316 → 17.800ms**；公网基础网络与 DB 跨节点往返仍影响其余 Read。
+- MiMo 最终候选核心六组和标准 Responses 工具图片通过；DeepSeek/GLM/MiniMax 显式 none + parallel=false 的两种协议验证通过。Qwen 当前 0 账号，最终候选仍返回预期 model_unavailable 503。LongCat 图片识别样本仍失败；Arena 首轮 Chat 遇到厂家 LOGIN_GATE，第二轮核心六组全部通过，账号不稳定风险保留。
+- 发布、逐厂商状态、原始证据、性能限制与回滚：[2026-10-03 验收报告](../docs/reports/WEB_OPENAI_BRIDGE_2026-10-03.md)。
 
 ## 2026-10-02 发布部署与 Read 性能核验（0.24.1 → 0.24.4）
 
@@ -30,7 +34,7 @@
 
 - 阶段 1–3 已实现：历史回放、function/custom/namespace、流式终态、缓存隔离、网关 Responses 状态、所有权与资源接口。
 - 阶段 4 本地候选验收：官方 SDK、真实 PostgreSQL 迁移和回滚；Codex 图片实验保留补充证据。0.24.0 [验收记录](../docs/reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)为历史结果。
-- 用户已授权真实厂商和生产部署；当前 0.24.4 已部署，常用核心链路在 MiMo/LongCat 完成真实 SDK 验收，其他厂商/图片边界按需继续。扩展失败与本机工具权限不作为常用协议全线阻断。
+- 用户已授权真实厂商和生产部署；当时 0.24.4 已部署，常用核心链路在 MiMo/LongCat 完成真实 SDK 验收；后续结果见任务板顶部。扩展失败与本机工具权限不作为常用协议全线阻断。
 - [任务记录](in-progress/OPENAI_AGENT_COMPATIBILITY.md)、[需求契约](../docs/requirements/OPENAI_AGENT_COMPATIBILITY.md)、[OpenAI API 桥接](../docs/integrations/OPENAI_AGENTS.md)。
 
 ## 2026-09-30 Grok Web 双域SSO Cookie双向复制、注册跨域会话导航与多端版本升级（0.22.10）

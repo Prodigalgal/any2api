@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.25.0 候选）
+# OpenAI API 到厂商 WEB 的桥接（0.25.2）
 
 ## 范围
 
@@ -13,7 +13,7 @@
 | 能力 | 支持范围 |
 |---|---|
 | JSON / SSE | Chat 与 Responses；SDK 可重建最终输出和工具参数 |
-| function tools | 当前 MiMo、LongCat、Grok Web 的模拟工具实现；auto/none/required/指定 function 按模型校验，其他厂商沿用自己的能力 |
+| function tools | 八家现有 WEB Provider 均有模拟工具桥接；auto/none/required/指定 function 按模型校验。Qwen 缺账号，真实验收与其他模型限制见发布报告 |
 | namespace / custom（可选扩展） | namespace 函数与 text custom 转 function，再还原输出身份；并行调用与 allowed_tools；不保证每个 WEB 上游稳定支持 |
 | 历史回放 | 多轮文本、function call/output；保留已有 reasoning、phase、custom、refusal；图片结果需模型和 Key 的媒体权限，适配情况见真实验收 |
 | 状态 | `store:true`、`previous_response_id`、retrieve/delete/input_items，按 Key 隔离 |
@@ -23,7 +23,9 @@
 
 工具上限、schema、媒体、generation 参数和 token 预算仍由当前 Provider 校验。MiMo/LongCat 现有工具上限是 128。能力声明与真实厂商验收、模型可调用状态是不同证据。
 
-0.25.0 为 DeepSeek / Qwen / GLM / MiniMax / Arena 补齐 emulated function 桥接，保留原生搜索、推理、媒体和通道逻辑；LongCat 增加尾部匹配工具结果的媒体上传。使用 `openai_agent_smoke.py --core` 验收常用 Chat/Responses、function 回传和普通 function SSE，默认完整脚本仍保留 namespace/custom 扩展测试。八家厂商真实验收结果以 2026-10-03 发布报告为准；Qwen 无账号时只具备代码与离线契约证据。
+0.25.0 为 DeepSeek / Qwen / GLM / MiniMax / Arena 补齐 emulated function 桥接，保留原生搜索、推理、媒体和通道逻辑；0.25.1/0.25.2 修复实际 user turn 的工具契约和网关工具控制的 WEB 转译边界。使用 `openai_agent_smoke.py --core` 验收常用 Chat/Responses、function 回传和普通 function SSE，默认完整脚本仍保留 namespace/custom 扩展测试。真实厂商验收、部署、Read 性能及遗留事项见 [2026-10-03 发布报告](../reports/WEB_OPENAI_BRIDGE_2026-10-03.md)。Qwen 无账号时只具备代码与离线契约证据；LongCat 媒体上传可完成，但图片识别准确性尚未通过。
+
+### 历史验收（0.24.4，后续修复见当前发布报告）
 
 最终 0.24.4 的 MiMo `mimo-v2.6-flash`、LongCat `longcat-flash` 官方 SDK 7 组均通过，包含 Chat/Responses 文本工具闭环与可选扩展。MiMo 的标准 Responses 工具图片结果回放也通过。LongCat 工具图片回传尚有 502/熔断缺陷；Grok 的普通 Responses/SSE/function 续接通过前三组，namespace 扩展返回空输出；独立的常用 Chat required function 在 120s 客户端超时，Chat 回传/SSE 未执行。不能将任何一家这些结果扩展到其他模型或全部厂商。证据见 [发布验收与性能](../reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)。
 
@@ -99,7 +101,7 @@ Set-Location backend
 $env:ANY2API_E2E_API_KEY = 'fixture-primary'
 python tools/compatibility/openai_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --fixture --sdk-path backend/build/agent-interop-python --report backend/build/agent-sdk-report.json
 python tools/compatibility/codex_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture-codex-image --fixture --tool image --report backend/build/agent-codex-report.json
-python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.24.4.jar
+python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.25.2.jar
 ```
 
 关闭本地服务：
@@ -116,9 +118,9 @@ python -c "import urllib.request; urllib.request.urlopen(urllib.request.Request(
 
 模型能力不支持 reasoning 时（例如当前 Grok Web），SDK smoke 加 `--no-reasoning`，报告记录该参数被省略；直接请求 unsupported reasoning 会返回 400。MiMo 验收优先使用当前仍有成功探针的模型，历史模型名称存在于目录不代表上游仍支持工具调用。
 
-真实上游首帧可能超过 smoke 默认 30s，可用 `--timeout 120` 单独核验协议闭环。报告记录客户端超时；增大测试超时不代表厂商延迟达到生产目标。Chat assistant 工具历史的缺省/null content 会在 canonical messages 规范为无文本，原始请求和工具身份保留。
+真实上游首帧可能超过 smoke 默认 30s，本轮用 `--core --no-reasoning --timeout 180` 单独核验常用协议闭环。报告记录客户端超时；增大测试超时不代表厂商延迟达到生产目标。Chat assistant 工具历史的缺省/null content 会在 canonical messages 规范为无文本，原始请求和工具身份保留。
 
-先验证实际使用厂商的普通对话/SSE/function 循环，再验证需要的图片、长对话、失败、续接和并发；不要求所有 WEB 上游实现相同扩展。记录源码版本、不可变镜像、GitOps/Pod、模型、Key scope、SDK 版本和请求结果。本轮真实 SDK 使用 direct 入口；public 入口的 Read 验证通过，但 Cloudflare 曾将 502 body 包装为通用错误，OpenAI 错误透传仍需核验。新增外部账号/凭据或破坏性操作遵守 AGENTS.md Stop Conditions。
+先验证实际使用厂商的普通对话/SSE/function 循环，再验证需要的图片、长对话、失败、续接和并发；不要求所有 WEB 上游实现相同扩展。记录源码版本、不可变镜像、GitOps/Pod、模型、Key scope、SDK 版本和请求结果。本轮真实 SDK 使用 direct 入口；public 的 LongCat 参数错误已验证为 OpenAI JSON 400。Cloudflare 曾将 502 body 包装为通用错误，真实上游 502/504 的完整透传仍需专门核验。新增外部账号/凭据或破坏性操作遵守 AGENTS.md Stop Conditions。
 
 ## 状态与兼容边界
 
@@ -134,5 +136,6 @@ API 增量兼容，普通文本与厂商通道选择保持既有契约。缓存 
 
 - [OpenAI gateway compatibility](https://learn.chatgpt.com/docs/enterprise/gateway-compatibility)
 - [Function calling](https://developers.openai.com/api/docs/guides/function-calling)
-- [当前部署与真实厂商验收](../reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)
+- [当前部署与真实厂商验收](../reports/WEB_OPENAI_BRIDGE_2026-10-03.md)
+- [历史 0.24.4 发布与性能](../reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)
 - [历史本地候选验收](../reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)

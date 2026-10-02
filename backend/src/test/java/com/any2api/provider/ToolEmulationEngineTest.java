@@ -243,6 +243,21 @@ class ToolEmulationEngineTest {
     }
 
     @Test
+    void preservesNativeGenerationWhileConsumingGatewayToolAndSseControls() {
+        var base = createRequest(mapper.createArrayNode(), mapper.createObjectNode());
+        var request = new CanonicalRequest(base.requestId(), base.protocol(), base.providerId(),
+            base.model(), base.stream(), base.messages(), Map.of("temperature", 0.4,
+                "tool_choice", "none", "parallel_tool_calls", false,
+                "stream_options", Map.of("include_usage", true)), base.reasoning(),
+            base.tools(), base.providerOptions(), base.rawRequest());
+
+        var prepared = engine.prepare(request, engine.plan(request));
+
+        assertThat(prepared.generation()).containsOnlyKeys("temperature").containsEntry("temperature", 0.4);
+        assertThat(request.generation()).hasSize(4);
+    }
+
+    @Test
     void failsInvalidArgumentsAndForbiddenParallelCallsWithoutLeakingJsonAsText() {
         var tools = mapper.createArrayNode();
         tools.addObject().put("type", "function").putObject("function").put("name", "inspect");

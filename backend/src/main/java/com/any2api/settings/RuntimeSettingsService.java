@@ -43,14 +43,27 @@ public class RuntimeSettingsService {
         this.properties = properties;
     }
 
-    @Transactional(readOnly = true)
     public SettingsView get() {
-        return new SettingsView(tempMail(), registrationDefaults(), providerKeepalive());
+        var stored = jdbc.sql("""
+            SELECT setting_key, encrypted_value, nonce FROM system_settings
+            WHERE setting_key IN (:keys)
+            """).param("keys", List.of(TEMP_MAIL, REGISTRATION_DEFAULTS, PROVIDER_KEEPALIVE))
+            .query((row, ignored) -> {
+                var key = row.getString("setting_key");
+                var plaintext = cipher.open(row.getBytes("encrypted_value"), row.getBytes("nonce"), aad(key));
+                return Map.entry(key, mapper.readTree(plaintext));
+            }).list().stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        return new SettingsView(
+            normalizedTempMail(decode(stored, TEMP_MAIL, TempMailSettings.class)),
+            normalizedRegistrationDefaults(decode(stored, REGISTRATION_DEFAULTS, RegistrationDefaults.class)),
+            normalizedProviderKeepalive(decode(stored, PROVIDER_KEEPALIVE, ProviderKeepaliveSettings.class)));
     }
 
-    @Transactional(readOnly = true)
     public TempMailSettings tempMail() {
-        var configured = load(TEMP_MAIL, TempMailSettings.class);
+        return normalizedTempMail(load(TEMP_MAIL, TempMailSettings.class));
+    }
+
+    private TempMailSettings normalizedTempMail(TempMailSettings configured) {
         if (configured != null) return configured.normalized();
         var fallback = properties.getTempMail();
         return new TempMailSettings(
@@ -66,9 +79,11 @@ public class RuntimeSettingsService {
         return value;
     }
 
-    @Transactional(readOnly = true)
     public RegistrationDefaults registrationDefaults() {
-        var configured = load(REGISTRATION_DEFAULTS, RegistrationDefaults.class);
+        return normalizedRegistrationDefaults(load(REGISTRATION_DEFAULTS, RegistrationDefaults.class));
+    }
+
+    private RegistrationDefaults normalizedRegistrationDefaults(RegistrationDefaults configured) {
         return (configured == null ? RegistrationDefaults.standard() : configured).normalized();
     }
 
@@ -79,9 +94,11 @@ public class RuntimeSettingsService {
         return value;
     }
 
-    @Transactional(readOnly = true)
     public ProviderKeepaliveSettings providerKeepalive() {
-        var configured = load(PROVIDER_KEEPALIVE, ProviderKeepaliveSettings.class);
+        return normalizedProviderKeepalive(load(PROVIDER_KEEPALIVE, ProviderKeepaliveSettings.class));
+    }
+
+    private ProviderKeepaliveSettings normalizedProviderKeepalive(ProviderKeepaliveSettings configured) {
         return (configured == null ? ProviderKeepaliveSettings.standard() : configured).normalized();
     }
 
@@ -127,6 +144,11 @@ public class RuntimeSettingsService {
             mail.put("domain", normalized);
         }
         payload.put("mail", mail);
+    }
+
+    private <T> T decode(Map<String, tools.jackson.databind.JsonNode> stored, String key, Class<T> type) {
+        var value = stored.get(key);
+        return value == null ? null : mapper.treeToValue(value, type);
     }
 
     private <T> T load(String key, Class<T> type) {

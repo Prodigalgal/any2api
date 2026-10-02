@@ -1,4 +1,4 @@
-# 当前任务板（源码 0.25.1）
+# 当前任务板（源码 0.25.2）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
@@ -11,6 +11,8 @@
 - 模型目录冷缓存账号查询按厂商汇总，部署前验证查询结果等价与执行计划。
 - 0.25.0 已部署：源码 707d9c7，CI 37035202075 success / GitOps 5a884a4 Synced/Healthy。DeepSeek、MiMo 核心六组通过；GLM/MiniMax 工具生成、LongCat 部分 required/参数错误映射、Arena Max 422 继续修复。Qwen 无账号，真实请求正确返回 model_unavailable 503。
 - 0.25.1 修复候选：工具契约写入实际 user turn，明确由调用方执行；LongCat 兼容单个 JSON call；普通/预租约路由的前置参数错误统一 typed 400；Arena 忽略网关负责的 store/previous_response_id；Grok 等待已收到的终态帧处理完再判断连接关闭。Backend 390 passed / 5 skipped，Web lint/build、Automation 回归与版本契约通过后部署复测。
+- 0.25.2 Read 修复规格：代理池列表采用必要列投影 + 每批 500 个 ID 的绑定读取，消除按池查询；设置页一次读取三类配置，保留解密、默认值和校验。影响 ProxyPoolService、RuntimeSettingsService、集成测试及统一版本；不改 API/数据结构/写事务。验收绑定隔离、空池、批量上界、设置默认/已保存/损坏失败路径，并部署后比较两类 Read 实际耗时。
+- 0.25.1 实测 GLM、MiniMax、LongCat、Grok 核心六组通过，LongCat 历史媒体 direct/public JSON 400。Arena 文本/SSE通过，function 请求被 canonical generation 中的 tool_choice/parallel_tool_calls/stream_options 误拒绝；0.25.2 在 Web 边界消费这些控制，并把跨厂商回归改为真实 Parser → ToolBridge → Provider 验证链路。
 
 ## 2026-10-02 发布部署与 Read 性能核验（0.24.1 → 0.24.4）
 

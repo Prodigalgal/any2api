@@ -93,9 +93,15 @@ public class ToolEmulationEngine {
         var raw = (tools.jackson.databind.node.ObjectNode) request.rawRequest().deepCopy();
         raw.set("tools", mapper.valueToTree(nativeTools));
         raw.remove("parallel_tool_calls");
-        if (!plan.tools().isEmpty() && !plan.choice().disabled()) raw.remove("tool_choice");
+        if (nativeTools.isEmpty() || (!plan.tools().isEmpty() && !plan.choice().disabled())) {
+            raw.remove("tool_choice");
+        }
+        var generation = new java.util.LinkedHashMap<>(request.generation());
+        // The caller's function policy and SSE usage are consumed by the gateway,
+        // independently of the Web model's native generation controls.
+        generation.keySet().removeAll(Set.of("tool_choice", "parallel_tool_calls", "stream_options"));
         return new CanonicalRequest(request.requestId(), request.protocol(), request.providerId(),
-            request.model(), request.stream(), List.copyOf(messages), request.generation(),
+            request.model(), request.stream(), List.copyOf(messages), Map.copyOf(generation),
             request.reasoning(), nativeTools, request.providerOptions(), raw);
     }
 

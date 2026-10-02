@@ -23,6 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class ProxyPoolService {
     private static final int MAX_NODES = 500;
+    private static final int BINDING_BATCH_SIZE = 500;
     private static final TypeReference<Map<String, Object>> SECRET_TYPE = new TypeReference<>() {};
 
     private final JdbcClient jdbc;
@@ -45,10 +46,31 @@ public class ProxyPoolService {
         this.mapper = mapper;
     }
 
-    @Transactional(readOnly = true)
     public List<ProxyPoolView> list() {
-        return jdbc.sql("SELECT * FROM proxy_pools ORDER BY name, id")
-            .query(this::viewRow).list();
+        var pools = jdbc.sql("""
+            SELECT id, name, mode, enabled, node_count, created_at, updated_at
+            FROM proxy_pools ORDER BY name, id
+            """).query((row, ignored) -> new PoolSummary(
+                row.getObject("id", UUID.class), row.getString("name"),
+                Mode.parse(row.getString("mode")), row.getBoolean("enabled"),
+                row.getInt("node_count"), PostgresResultValues.instant(row, "created_at"),
+                PostgresResultValues.instant(row, "updated_at"))).list();
+        if (pools.isEmpty()) return List.of();
+        var ids = pools.stream().map(PoolSummary::id).toList();
+        var bindings = new LinkedHashMap<UUID, Map<String, List<String>>>();
+        for (var offset = 0; offset < ids.size(); offset += BINDING_BATCH_SIZE) {
+            jdbc.sql("""
+                SELECT proxy_pool_id, provider_id, traffic_scopes FROM provider_proxy_bindings
+                WHERE proxy_pool_id IN (:ids) ORDER BY proxy_pool_id, provider_id
+                """).param("ids", ids.subList(offset, Math.min(offset + BINDING_BATCH_SIZE, ids.size())))
+                .query((row, ignored) -> new PoolBinding(
+                    row.getObject("proxy_pool_id", UUID.class), row.getString("provider_id"),
+                    List.of((String[]) row.getArray("traffic_scopes").getArray())))
+                .list().forEach(binding -> bindings.computeIfAbsent(binding.poolId(),
+                    ignored -> new LinkedHashMap<>()).put(binding.providerId(), binding.scopes()));
+        }
+        return pools.stream().map(pool -> pool.view(
+            Map.copyOf(bindings.getOrDefault(pool.id(), Map.of())))).toList();
     }
 
     @Transactional
@@ -121,7 +143,6 @@ public class ProxyPoolService {
             poolName, Mode.NODE_LIST.name(), true, source, bindingIds(id), bindingScopes(id)));
     }
 
-    @Transactional(readOnly = true)
     public Optional<Map<String, Object>> runtimeForProvider(
         String providerId,
         ProxyTrafficScope scope
@@ -165,15 +186,9 @@ public class ProxyPoolService {
             PostgresResultValues.instant(row, "updated_at"));
     }
 
-    private ProxyPoolView viewRow(ResultSet row, int ignored) throws SQLException {
-        return view(mapRow(row, ignored));
-    }
-
     private ProxyPoolView view(PoolRow row) {
-        var scopes = bindingScopes(row.id());
-        return new ProxyPoolView(
-            row.id(), row.name(), row.mode().name(), row.enabled(), row.nodeCount(),
-            true, List.copyOf(scopes.keySet()), scopes, row.createdAt(), row.updatedAt());
+        return new PoolSummary(row.id(), row.name(), row.mode(), row.enabled(),
+            row.nodeCount(), row.createdAt(), row.updatedAt()).view(bindingScopes(row.id()));
     }
 
     private List<String> bindingIds(UUID poolId) {
@@ -315,6 +330,18 @@ public class ProxyPoolService {
             }
         }
     }
+
+    private record PoolSummary(
+        UUID id, String name, Mode mode, boolean enabled, int nodeCount,
+        Instant createdAt, Instant updatedAt
+    ) {
+        ProxyPoolView view(Map<String, List<String>> scopes) {
+            return new ProxyPoolView(id, name, mode.name(), enabled, nodeCount, true,
+                List.copyOf(scopes.keySet()), scopes, createdAt, updatedAt);
+        }
+    }
+
+    private record PoolBinding(UUID poolId, String providerId, List<String> scopes) {}
 
     private record PoolRow(
         UUID id, String name, Mode mode, boolean enabled, byte[] encryptedPayload,

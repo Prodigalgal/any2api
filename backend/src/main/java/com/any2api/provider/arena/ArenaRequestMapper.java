@@ -2,6 +2,7 @@ package com.any2api.provider.arena;
 
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.OpenAiRequestException;
+import com.any2api.provider.ProviderRequestValidation;
 import java.util.Set;
 
 /** Validates the small semantic subset that the Arena Web mapper can translate. */
@@ -34,10 +35,8 @@ final class ArenaRequestMapper {
         }
         requireBoolean(request.providerOptions().get("web_search"),
             "provider_options.arena.web_search");
-        if (!request.generation().isEmpty()) {
-            throw OpenAiRequestException.unsupported(
-                "generation", "Arena does not translate generation parameters");
-        }
+        ProviderRequestValidation.requireKnownGenerationParameters(
+            request, Set.of("tool_choice", "parallel_tool_calls"));
         if (!request.reasoning().isEmpty()) {
             throw OpenAiRequestException.unsupported(
                 "reasoning", "Arena does not translate reasoning parameters");

@@ -63,7 +63,7 @@ class ArenaProtocolTest {
 
         assertThatThrownBy(() -> new ArenaRequestMapper().validate(request))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("generation");
+            .hasMessageContaining("temperature");
     }
 
     @Test

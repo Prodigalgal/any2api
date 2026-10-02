@@ -14,6 +14,17 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Service
 public class ProviderRuntimeService {
+    private static final String STATE_QUERY = """
+        SELECT provider.id, provider.enabled, provider.installed,
+               (SELECT COUNT(*) FROM accounts account
+                WHERE account.provider_id = provider.id) AS account_count,
+               (SELECT COUNT(*) FROM accounts account
+                WHERE account.provider_id = provider.id AND account.enabled = TRUE
+                  AND account.status IN ('ACTIVE', 'DEGRADED')) AS enabled_account_count,
+               (SELECT COUNT(*) FROM models model
+                WHERE model.provider_id = provider.id AND model.enabled = TRUE) AS model_count
+        FROM providers provider
+        """;
     private final ProviderRegistry providers;
     private final ProviderInstallationCatalog installations;
     private final PostgresAdvisoryLocks locks;
@@ -39,9 +50,19 @@ public class ProviderRuntimeService {
 
     @Transactional(readOnly = true)
     public List<ProviderRuntimeView> list() {
-        return providers.plugins().stream()
-            .map(plugin -> state(plugin.manifest()))
-            .toList();
+        var plugins = providers.plugins();
+        if (plugins.isEmpty()) return List.of();
+        var providerIds = plugins.stream().map(plugin -> plugin.manifest().id()).toList();
+        var stored = jdbc.sql(STATE_QUERY + " WHERE provider.id IN (:providerIds)")
+            .param("providerIds", providerIds)
+            .query((row, ignored) -> map(row,
+                providers.requirePlugin(row.getString("id")).manifest()))
+            .list().stream().collect(java.util.stream.Collectors.toMap(
+                ProviderRuntimeView::id, java.util.function.Function.identity()));
+        return plugins.stream().map(plugin -> {
+            var view = stored.get(plugin.manifest().id());
+            return view == null ? runtimeViewWithoutRow(plugin.manifest()) : view;
+        }).toList();
     }
 
     @Transactional
@@ -125,17 +146,7 @@ public class ProviderRuntimeService {
     }
 
     private ProviderRuntimeView state(ProviderManifest manifest) {
-        return jdbc.sql("""
-            SELECT provider.enabled, provider.installed,
-                   (SELECT COUNT(*) FROM accounts account
-                    WHERE account.provider_id = provider.id) AS account_count,
-                   (SELECT COUNT(*) FROM accounts account
-                    WHERE account.provider_id = provider.id AND account.enabled = TRUE
-                      AND account.status IN ('ACTIVE', 'DEGRADED')) AS enabled_account_count,
-                   (SELECT COUNT(*) FROM models model
-                    WHERE model.provider_id = provider.id AND model.enabled = TRUE) AS model_count
-            FROM providers provider WHERE provider.id = :providerId
-            """)
+        return jdbc.sql(STATE_QUERY + " WHERE provider.id = :providerId")
             .param("providerId", manifest.id())
             .query((row, ignored) -> map(row, manifest))
             .optional()

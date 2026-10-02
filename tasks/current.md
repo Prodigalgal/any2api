@@ -1,12 +1,13 @@
-# 当前任务板（源码 0.24.1）
+# 当前任务板（源码 0.24.2）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-02 发布部署与 Read 性能核验（0.24.1）
+## 2026-10-02 发布部署与 Read 性能核验（0.24.1 → 0.24.2）
 
 - 用户已授权提交、部署和测试。0.24.0 本地候选验收后补齐日期/版本/用途镜像标签，正式候选升为 0.24.1；流水线忽略纯 docs/tasks 变动，避免验收记录触发同版本重新发布。
 - 发布与性能范围：[执行规格](../docs/requirements/RELEASE_AND_READ_PERFORMANCE.md)。先测旧生产 Read 基线，再跟踪 CI、GitOps、Pod 和真实厂商工具闭环。
+- 0.24.1 已部署，CI `37011929616`、GitOps `39a59fb`、四个应用 Ready，迁移 032 完成。实测确认 Runtime 对象 tool_choice 的 dict membership 错误、权限和 Runtime rules 的 N+1、同步 Controller 未配置 blocking executor；0.24.2 正在修复并补齐 SQL/线程隔离测试。
 
 ## 2026-10-02 OpenAI Chat/Responses agent 协议升级（0.24.0）
 

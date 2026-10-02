@@ -25,6 +25,12 @@ public class ProviderRuntimeRuleService {
     private static final Pattern RULE_KEY = Pattern.compile("^[A-Za-z][A-Za-z0-9]{0,63}$");
     private static final Pattern BUILD_ID = Pattern.compile("^[a-f0-9]{64}$");
     private static final int MAX_RULE_BYTES = 32_768;
+    private static final String STATE_QUERY = """
+        SELECT provider_id, active_revision, candidate_revision,
+               last_known_good_revision, candidate_status,
+               active_build_id, candidate_build_id, failure_reason, updated_at
+        FROM provider_runtime_rule_states
+        """;
 
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
@@ -36,9 +42,34 @@ public class ProviderRuntimeRuleService {
 
     @Transactional(readOnly = true)
     public List<RuleStateView> list() {
-        return jdbc.sql("""
-            SELECT provider_id FROM provider_runtime_rule_states ORDER BY provider_id
-            """).query(String.class).list().stream().map(this::get).toList();
+        var states = jdbc.sql(STATE_QUERY + " ORDER BY provider_id").query(this::mapState).list();
+        if (states.isEmpty()) return List.of();
+        var providerIds = states.stream().map(RuleState::providerId).toList();
+        var revisions = jdbc.sql("""
+            SELECT history.* FROM provider_runtime_rule_states state
+            CROSS JOIN LATERAL (
+                SELECT provider_id, revision, schema_version, rules, checksum, created_at
+                FROM provider_runtime_rule_revisions
+                WHERE provider_id = state.provider_id
+                ORDER BY revision DESC LIMIT 50
+            ) history
+            WHERE state.provider_id IN (:providerIds)
+            UNION ALL
+            SELECT revision.provider_id, revision.revision, revision.schema_version,
+                   revision.rules, revision.checksum, revision.created_at
+            FROM provider_runtime_rule_revisions revision
+            JOIN provider_runtime_rule_states state ON state.provider_id = revision.provider_id
+              AND revision.revision IN (state.active_revision, state.candidate_revision)
+            WHERE state.provider_id IN (:providerIds)
+            ORDER BY provider_id, revision DESC
+            """).param("providerIds", providerIds).query(this::mapRevision).list();
+        var byProvider = new LinkedHashMap<String, LinkedHashMap<Long, RuleRevisionView>>();
+        revisions.forEach(revision -> byProvider.computeIfAbsent(revision.providerId(),
+            ignored -> new LinkedHashMap<>()).put(revision.revision(), revision));
+        return states.stream().map(state -> {
+            var known = byProvider.getOrDefault(state.providerId(), new LinkedHashMap<>());
+            return view(state, known.values().stream().limit(50).toList(), known);
+        }).toList();
     }
 
     @Transactional(readOnly = true)
@@ -236,12 +267,8 @@ public class ProviderRuntimeRuleService {
     }
 
     private Optional<RuleState> optionalState(String providerId, boolean forUpdate) {
-        return jdbc.sql("""
-            SELECT provider_id, active_revision, candidate_revision,
-                   last_known_good_revision, candidate_status,
-                   active_build_id, candidate_build_id, failure_reason, updated_at
-            FROM provider_runtime_rule_states WHERE provider_id = :provider
-            """ + (forUpdate ? " FOR UPDATE" : ""))
+        return jdbc.sql(STATE_QUERY + " WHERE provider_id = :provider"
+            + (forUpdate ? " FOR UPDATE" : ""))
             .param("provider", providerId)
             .query(this::mapState)
             .optional();
@@ -262,6 +289,12 @@ public class ProviderRuntimeRuleService {
     private RuleStateView view(RuleState state, List<RuleRevisionView> revisions) {
         var byRevision = new LinkedHashMap<Long, RuleRevisionView>();
         revisions.forEach(value -> byRevision.put(value.revision(), value));
+        return view(state, revisions, byRevision);
+    }
+
+    private RuleStateView view(
+        RuleState state, List<RuleRevisionView> revisions, Map<Long, RuleRevisionView> byRevision
+    ) {
         var active = byRevision.get(state.activeRevision());
         if (active == null) active = revision(state.providerId(), state.activeRevision());
         RuleRevisionView candidate = null;

@@ -78,6 +78,8 @@ python -c "import urllib.request; urllib.request.urlopen(urllib.request.Request(
 
 在授权的测试环境中，将脚本的 base_url/model 改为已部署候选，使用授权 Key，去掉 `--fixture`。SDK 验证真实模型必须能够按指定 tool_choice 生成调用；Codex 脚本默认要求本地目录只读命令成功，并验证结果进入最终回答。
 
+模型能力不支持 reasoning 时（例如当前 Grok Web），SDK smoke 加 `--no-reasoning`，报告记录该参数被省略；直接请求 unsupported reasoning 会返回 400。MiMo 验收优先使用当前仍有成功探针的模型，历史模型名称存在于目录不代表上游仍支持工具调用。
+
 先分别验证 MiMo、LongCat、Grok Web 的工具循环，再验证实际需要的媒体、长对话、失败、续接和并发。记录源码版本、不可变镜像、GitOps/Pod、模型、Key scope、客户端版本和请求结果。真实厂商凭据与外部环境写入遵守 AGENTS.md Stop Conditions。
 
 ## 状态与兼容边界

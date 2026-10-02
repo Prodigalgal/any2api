@@ -13,6 +13,11 @@ def main() -> None:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--fixture", action="store_true")
+    parser.add_argument(
+        "--no-reasoning",
+        action="store_true",
+        help="Omit reasoning for models that do not support it.",
+    )
     parser.add_argument("--sdk-path", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
@@ -36,7 +41,7 @@ def main() -> None:
         input="Reply with a short confirmation.",
         store=False,
         include=["reasoning.encrypted_content"],
-        reasoning={"summary": "auto"},
+        **({} if args.no_reasoning else {"reasoning": {"summary": "auto"}}),
         text={"verbosity": "low"},
         extra_body={"client_metadata": {"client": "any2api-sdk-smoke"}},
     )
@@ -98,8 +103,9 @@ def main() -> None:
         second.id, limit=100, order="asc", after=page.last_id
     )
     assert next_page.data
-    if args.fixture:
-        other = OpenAI(api_key="fixture-other", base_url=args.base_url, timeout=30, max_retries=0)
+    other_key = "fixture-other" if args.fixture else os.environ.get("ANY2API_E2E_OTHER_API_KEY")
+    if other_key:
+        other = OpenAI(api_key=other_key, base_url=args.base_url, timeout=30, max_retries=0)
         try:
             other.responses.retrieve(first.id)
             raise AssertionError("cross-key access succeeded")
@@ -292,6 +298,8 @@ def main() -> None:
         "sdk_version": openai.__version__,
         "upstream": "fixture" if args.fixture else "authorized-provider",
         "model": args.model,
+        "reasoning_requested": not args.no_reasoning,
+        "cross_key_checked": bool(other_key),
         "checks": checks,
         "first_delta_seconds": first_delta,
         "stream_seconds": elapsed,

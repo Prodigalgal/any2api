@@ -490,7 +490,7 @@ def build_mimo_chat_request(
     provider_options = command.get("providerOptions") or {}
     tools = list(command.get("tools") or [])
     choice = controls.get("tool_choice", "auto")
-    required = choice in {"required", "any"}
+    required = isinstance(choice, str) and choice in {"required", "any"}
     if choice == "none":
         tools = []
     elif isinstance(choice, dict):

@@ -42,7 +42,9 @@ public class ApiKeyService {
 
     @Transactional(readOnly = true)
     public List<View> list() {
-        return keys.findAllByOrderByCreatedAtDesc().stream().map(this::view).toList();
+        var entities = keys.findAllByOrderByCreatedAtDesc();
+        var grants = grantStore.readAll(entities);
+        return entities.stream().map(key -> View.from(key, grants.get(key.getId()))).toList();
     }
 
     @Transactional(readOnly = true)

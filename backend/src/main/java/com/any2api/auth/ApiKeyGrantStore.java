@@ -2,6 +2,7 @@ package com.any2api.auth;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -11,23 +12,24 @@ import org.springframework.stereotype.Component;
 @Component
 final class ApiKeyGrantStore {
     private static final String GRANT_QUERY = """
-        SELECT 1 AS kind, provider_id, NULL::VARCHAR AS value, all_models
+        SELECT api_key_id, 1 AS kind, provider_id, NULL::VARCHAR AS value, all_models
         FROM api_key_provider_grants
-        WHERE api_key_id = :apiKeyId
+        WHERE api_key_id IN (:apiKeyIds)
         UNION ALL
-        SELECT 2 AS kind, provider_id, model_upstream_id AS value, FALSE AS all_models
+        SELECT api_key_id, 2 AS kind, provider_id, model_upstream_id AS value, FALSE AS all_models
         FROM api_key_model_grants
-        WHERE api_key_id = :apiKeyId
+        WHERE api_key_id IN (:apiKeyIds)
         UNION ALL
-        SELECT 3 AS kind, NULL::VARCHAR AS provider_id, protocol AS value, FALSE AS all_models
+        SELECT api_key_id, 3 AS kind, NULL::VARCHAR AS provider_id, protocol AS value, FALSE AS all_models
         FROM api_key_protocol_grants
-        WHERE api_key_id = :apiKeyId
+        WHERE api_key_id IN (:apiKeyIds)
         UNION ALL
-        SELECT 4 AS kind, NULL::VARCHAR AS provider_id, feature AS value, FALSE AS all_models
+        SELECT api_key_id, 4 AS kind, NULL::VARCHAR AS provider_id, feature AS value, FALSE AS all_models
         FROM api_key_feature_grants
-        WHERE api_key_id = :apiKeyId
-        ORDER BY kind, provider_id, value
+        WHERE api_key_id IN (:apiKeyIds)
+        ORDER BY api_key_id, kind, provider_id, value
         """;
+    private static final int READ_BATCH_SIZE = 500;
 
     private final JdbcClient jdbc;
 
@@ -83,38 +85,54 @@ final class ApiKeyGrantStore {
     }
 
     ApiKeyGrant read(ApiKeyEntity key) {
+        return readAll(List.of(key)).get(key.getId());
+    }
+
+    Map<UUID, ApiKeyGrant> readAll(List<ApiKeyEntity> keys) {
+        if (keys.isEmpty()) return Map.of();
+        var rows = new LinkedHashMap<UUID, List<GrantRow>>();
+        for (var offset = 0; offset < keys.size(); offset += READ_BATCH_SIZE) {
+            var ids = keys.subList(offset, Math.min(offset + READ_BATCH_SIZE, keys.size()))
+                .stream().map(ApiKeyEntity::getId).toList();
+            jdbc.sql(GRANT_QUERY).param("apiKeyIds", ids)
+                .query((result, rowNumber) -> new GrantRow(
+                    result.getObject("api_key_id", UUID.class), result.getInt("kind"),
+                    result.getString("provider_id"), result.getString("value"),
+                    result.getBoolean("all_models")))
+                .list().forEach(row -> rows.computeIfAbsent(row.apiKeyId(),
+                    ignored -> new java.util.ArrayList<>()).add(row));
+        }
+        var grants = new LinkedHashMap<UUID, ApiKeyGrant>();
+        keys.forEach(key -> grants.put(key.getId(),
+            grant(key, rows.getOrDefault(key.getId(), List.of()))));
+        return Map.copyOf(grants);
+    }
+
+    private ApiKeyGrant grant(ApiKeyEntity key, List<GrantRow> rows) {
         var providers = new LinkedHashMap<String, MutableProviderScope>();
         var protocols = new LinkedHashSet<ApiKeyProtocol>();
         var features = new LinkedHashSet<ApiKeyFeature>();
-        jdbc.sql(GRANT_QUERY)
-            .param("apiKeyId", key.getId())
-            .query((result, rowNumber) -> new GrantRow(
-                result.getInt("kind"),
-                result.getString("provider_id"),
-                result.getString("value"),
-                result.getBoolean("all_models")))
-            .list()
-            .forEach(row -> {
-                if (row.kind() == 1) {
-                    providers.put(row.providerId(),
-                        new MutableProviderScope(row.allModels(), new LinkedHashSet<>()));
-                } else if (row.kind() == 2) {
-                    var scope = providers.get(row.providerId());
-                    if (scope != null && !scope.allModels()) scope.models().add(row.value());
-                } else if (row.kind() == 3) {
-                    try {
-                        protocols.add(ApiKeyProtocol.valueOf(row.value()));
-                    } catch (IllegalArgumentException ignored) {
-                        // Unknown persisted permissions fail closed.
-                    }
-                } else if (row.kind() == 4) {
-                    try {
-                        features.add(ApiKeyFeature.valueOf(row.value()));
-                    } catch (IllegalArgumentException ignored) {
-                        // Unknown persisted permissions fail closed.
-                    }
+        rows.forEach(row -> {
+            if (row.kind() == 1) {
+                providers.put(row.providerId(),
+                    new MutableProviderScope(row.allModels(), new LinkedHashSet<>()));
+            } else if (row.kind() == 2) {
+                var scope = providers.get(row.providerId());
+                if (scope != null && !scope.allModels()) scope.models().add(row.value());
+            } else if (row.kind() == 3) {
+                try {
+                    protocols.add(ApiKeyProtocol.valueOf(row.value()));
+                } catch (IllegalArgumentException ignored) {
+                    // Unknown persisted permissions fail closed.
                 }
-            });
+            } else if (row.kind() == 4) {
+                try {
+                    features.add(ApiKeyFeature.valueOf(row.value()));
+                } catch (IllegalArgumentException ignored) {
+                    // Unknown persisted permissions fail closed.
+                }
+            }
+        });
 
         var immutable = new LinkedHashMap<String, ApiKeyProviderScope>();
         providers.forEach((providerId, scope) -> {
@@ -130,7 +148,7 @@ final class ApiKeyGrantStore {
             key.getExpiresAt(), false, key.getTransportMode());
     }
 
-    private record GrantRow(int kind, String providerId, String value, boolean allModels) {}
+    private record GrantRow(UUID apiKeyId, int kind, String providerId, String value, boolean allModels) {}
 
     private record MutableProviderScope(boolean allModels, LinkedHashSet<String> models) {}
 }

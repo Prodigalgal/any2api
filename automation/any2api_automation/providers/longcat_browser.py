@@ -387,7 +387,7 @@ def _append_tool_contract(
 ) -> str:
     if choice == "none":
         return prompt
-    label = "required" if choice in {"required", "any"} else "auto"
+    label = "required" if isinstance(choice, str) and choice in {"required", "any"} else "auto"
     if isinstance(choice, dict):
         function = choice.get("function") if isinstance(choice.get("function"), dict) else choice
         label = str(function.get("name") or "").strip() or "required"

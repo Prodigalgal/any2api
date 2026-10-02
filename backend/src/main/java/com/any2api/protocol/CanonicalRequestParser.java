@@ -93,7 +93,7 @@ public class CanonicalRequestParser {
         if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
         var stream = raw.path("stream").asBoolean(false);
         var messages = protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
-            ? elements(raw.path("messages"))
+            ? chatMessages(raw.path("messages"))
             : responseMessages(raw.path("input"));
         if (protocol == CanonicalRequest.Protocol.RESPONSES && raw.has("instructions")
             && !raw.path("instructions").isNull()) {
@@ -141,6 +141,18 @@ public class CanonicalRequestParser {
             tools,
             providerOptions,
             raw.deepCopy());
+    }
+
+    private List<JsonNode> chatMessages(JsonNode input) {
+        return elements(input).stream().map(message -> {
+            if (message instanceof ObjectNode object
+                && "assistant".equals(object.path("role").asText())
+                && object.path("tool_calls").isArray() && !object.path("tool_calls").isEmpty()
+                && !object.hasNonNull("content")) {
+                return (JsonNode) object.deepCopy().put("content", "");
+            }
+            return message;
+        }).toList();
     }
 
     private List<JsonNode> elements(JsonNode value) {

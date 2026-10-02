@@ -80,6 +80,8 @@ python -c "import urllib.request; urllib.request.urlopen(urllib.request.Request(
 
 模型能力不支持 reasoning 时（例如当前 Grok Web），SDK smoke 加 `--no-reasoning`，报告记录该参数被省略；直接请求 unsupported reasoning 会返回 400。MiMo 验收优先使用当前仍有成功探针的模型，历史模型名称存在于目录不代表上游仍支持工具调用。
 
+真实上游首帧可能超过 smoke 默认 30s，可用 `--timeout 120` 单独核验协议闭环。报告记录客户端超时；增大测试超时不代表厂商延迟达到生产目标。Chat assistant 工具历史的缺省/null content 会在 canonical messages 规范为无文本，原始请求和工具身份保留。
+
 先分别验证 MiMo、LongCat、Grok Web 的工具循环，再验证实际需要的媒体、长对话、失败、续接和并发。记录源码版本、不可变镜像、GitOps/Pod、模型、Key scope、客户端版本和请求结果。真实厂商凭据与外部环境写入遵守 AGENTS.md Stop Conditions。
 
 ## 状态与兼容边界

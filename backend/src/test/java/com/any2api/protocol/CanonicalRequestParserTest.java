@@ -5,12 +5,61 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.any2api.routing.ResolvedRoute;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.ObjectMapper;
 
 class CanonicalRequestParserTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final CanonicalRequestParser parser = new CanonicalRequestParser(mapper);
     private final ResolvedRoute route = new ResolvedRoute("qwen", "qwen3.7-plus");
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void normalizesAssistantToolReplayWithNullOrMissingContent(boolean explicitNull) {
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");
+        var messages = raw.putArray("messages");
+        messages.addObject().put("role", "user").put("content", "Inspect the directory");
+        var assistant = messages.addObject().put("role", "assistant").put("phase", "commentary");
+        if (explicitNull) assistant.putNull("content");
+        var calls = assistant.putArray("tool_calls");
+        calls.addObject().put("id", "call-1").put("type", "function")
+            .putObject("function").put("name", "inspect_workspace").put("arguments", "{}");
+        messages.addObject().put("role", "tool").put("tool_call_id", "call-1")
+            .put("content", "demo.txt");
+        var original = raw.deepCopy();
+
+        var request = parser.parse(CanonicalRequest.Protocol.CHAT_COMPLETIONS, route, raw);
+
+        var replay = request.messages().get(1);
+        assertThat(replay.path("content").isTextual()).isTrue();
+        assertThat(replay.path("content").asText()).isEmpty();
+        assertThat(replay.path("tool_calls")).isEqualTo(calls);
+        assertThat(replay.path("phase").asText()).isEqualTo("commentary");
+        assertThat(request.messages().getLast().path("tool_call_id").asText()).isEqualTo("call-1");
+        assertThat(raw).isEqualTo(original);
+        assertThat(request.rawRequest()).isEqualTo(original);
+    }
+
+    @Test
+    void preservesTextAndMediaToolReplayAndDoesNotNormalizeOtherNullContent() {
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");
+        var messages = raw.putArray("messages");
+        messages.addObject().put("role", "user").putNull("content");
+        messages.addObject().put("role", "assistant").putNull("content");
+        var assistant = messages.addObject().put("role", "assistant");
+        assistant.putArray("tool_calls").addObject().put("id", "call-1");
+        var content = assistant.putArray("content");
+        content.addObject().put("type", "text").put("text", "Inspecting");
+        content.addObject().put("type", "image_url")
+            .putObject("image_url").put("url", "https://example.com/demo.png");
+
+        var request = parser.parse(CanonicalRequest.Protocol.CHAT_COMPLETIONS, route, raw);
+
+        assertThat(request.messages().getFirst().path("content").isNull()).isTrue();
+        assertThat(request.messages().get(1).path("content").isNull()).isTrue();
+        assertThat(request.messages().getLast().path("content")).isEqualTo(content);
+    }
 
     @Test
     void normalizesResponsesStringInputIntoUserMessage() {

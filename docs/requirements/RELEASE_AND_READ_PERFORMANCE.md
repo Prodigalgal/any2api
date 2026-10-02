@@ -11,6 +11,7 @@
 - 真实厂商 Responses/Chat、SSE、工具循环、存储续接、资源权限和实际 Codex 客户端验收。
 - 对管理 Read 和模型目录进行低并发采样，比较外网、集群内、SQL 和响应体成本，按当前证据定位瓶颈。
 - 0.24.1 真实验收后：0.24.2 修复 MiMo/LongCat Runtime 强制工具对象解析；权限、Provider 状态和 Runtime rules 批量投影保持原 API 字段/顺序/历史上限；沿用 databaseExecutor 隔离同步 Controller；压缩 JSON，排除 SSE。
+- 0.24.2 真实 SDK 验收后：0.24.3 在 CanonicalRequestParser 统一规范化 assistant/tool_calls 的 null 或缺省 content，保留 raw request、调用身份、文本/媒体和其他 role 的校验边界；补齐真实 Chat 工具结果回传回归。
 
 ## 非目标与兼容
 

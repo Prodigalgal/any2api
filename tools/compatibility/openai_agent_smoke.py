@@ -12,6 +12,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--timeout", type=float, default=30, help="Client read timeout in seconds."
+    )
     parser.add_argument("--fixture", action="store_true")
     parser.add_argument(
         "--no-reasoning",
@@ -21,6 +24,8 @@ def main() -> None:
     parser.add_argument("--sdk-path", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
+    if args.timeout <= 0:
+        parser.error("--timeout must be positive")
     if args.sdk_path:
         sys.path.insert(0, str(args.sdk_path.resolve()))
     import openai
@@ -29,7 +34,9 @@ def main() -> None:
     key = os.environ.get("ANY2API_E2E_API_KEY")
     if not key:
         raise SystemExit("Set ANY2API_E2E_API_KEY to an authorized test key.")
-    client = OpenAI(api_key=key, base_url=args.base_url, timeout=30, max_retries=0)
+    client = OpenAI(
+        api_key=key, base_url=args.base_url, timeout=args.timeout, max_retries=0
+    )
     checks = []
 
     def passed(name: str) -> None:
@@ -103,9 +110,16 @@ def main() -> None:
         second.id, limit=100, order="asc", after=page.last_id
     )
     assert next_page.data
-    other_key = "fixture-other" if args.fixture else os.environ.get("ANY2API_E2E_OTHER_API_KEY")
+    other_key = (
+        "fixture-other" if args.fixture else os.environ.get("ANY2API_E2E_OTHER_API_KEY")
+    )
     if other_key:
-        other = OpenAI(api_key=other_key, base_url=args.base_url, timeout=30, max_retries=0)
+        other = OpenAI(
+            api_key=other_key,
+            base_url=args.base_url,
+            timeout=args.timeout,
+            max_retries=0,
+        )
         try:
             other.responses.retrieve(first.id)
             raise AssertionError("cross-key access succeeded")
@@ -152,7 +166,9 @@ def main() -> None:
         ],
         tool_choice={"type": "custom", "name": "echo"},
     )
-    custom_call = next(item for item in custom.output if item.type == "custom_tool_call")
+    custom_call = next(
+        item for item in custom.output if item.type == "custom_tool_call"
+    )
     assert custom_call.name == "echo" and custom_call.input
     replay = [item.model_dump(exclude_none=True) for item in custom.output]
     follow = client.responses.create(
@@ -182,14 +198,18 @@ def main() -> None:
             if event.type == "response.custom_tool_call_input.delta":
                 custom_deltas.append(event.delta)
         streamed_custom = stream.get_final_response()
-    custom_call = next(item for item in streamed_custom.output if item.type == "custom_tool_call")
+    custom_call = next(
+        item for item in streamed_custom.output if item.type == "custom_tool_call"
+    )
     assert custom_deltas and "".join(custom_deltas) == custom_call.input
     passed("custom SDK stream accumulation")
 
     chat_tools = [
         {
             "type": "function",
-            "function": {key: value for key, value in function.items() if key != "type"},
+            "function": {
+                key: value for key, value in function.items() if key != "type"
+            },
         }
     ]
     chat = client.chat.completions.create(
@@ -275,7 +295,9 @@ def main() -> None:
             client.responses.create(model=args.model, input=history, store=False).status
             == "completed"
         )
-        incomplete = client.responses.create(model=args.model, input="fixture:length", store=False)
+        incomplete = client.responses.create(
+            model=args.model, input="fixture:length", store=False
+        )
         assert (
             incomplete.status == "incomplete"
             and incomplete.incomplete_details.reason == "max_output_tokens"
@@ -288,7 +310,9 @@ def main() -> None:
         except openai.RateLimitError:
             pass
         try:
-            client.responses.create(model="mimo/unknown", input="Hello", stream=True, store=False)
+            client.responses.create(
+                model="mimo/unknown", input="Hello", stream=True, store=False
+            )
             raise AssertionError("unknown model was accepted")
         except openai.BadRequestError:
             pass
@@ -296,6 +320,7 @@ def main() -> None:
 
     report = {
         "sdk_version": openai.__version__,
+        "client_timeout_seconds": args.timeout,
         "upstream": "fixture" if args.fixture else "authorized-provider",
         "model": args.model,
         "reasoning_requested": not args.no_reasoning,
@@ -306,7 +331,9 @@ def main() -> None:
     }
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        args.report.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     print(json.dumps(report, ensure_ascii=False), flush=True)
 
 

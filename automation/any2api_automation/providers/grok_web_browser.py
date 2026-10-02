@@ -189,7 +189,11 @@ _STREAM_REQUEST = r"""async request => {
     };
     socket.onerror = () => { void fail(502, 'Grok Web gateway websocket error'); };
     socket.onclose = () => {
-      if (!finished) void fail(502, 'Grok Web gateway closed before response.done');
+      // The peer can close immediately after response.done while the binding is
+      // still delivering queued frames. Drain those frames before classifying EOF.
+      void processing.then(() => {
+        if (!finished) return fail(502, 'Grok Web gateway closed before response.done');
+      });
     };
     await emit({type: 'status', status: 200});
     await new Promise(resolve => {
@@ -530,7 +534,10 @@ def _tool_prompt(
         else "Call a tool when it is clearly needed. Otherwise respond in plain text."
     )
     return (
-        "[system]\nYou have access to the following tools.\n\nAVAILABLE TOOLS:\n"
+        prompt
+        + "\n\n[Tool calling contract]\n"
+        + "These functions belong to the caller and are executed by the caller after your reply.\n"
+        + "Generate the invocation without executing the function yourself.\n\nAVAILABLE TOOLS:\n"
         + "\n\n".join(definitions)
         + "\n\nTOOL CALL FORMAT:\n"
         + "<tool_calls>\n  <tool_call>\n    <tool_name>TOOL_NAME</tool_name>\n"
@@ -538,8 +545,6 @@ def _tool_prompt(
         + "WHEN TO CALL: "
         + instruction
         + ("\nCall at most one tool." if parallel is False else "")
-        + "\n\n"
-        + prompt
     )
 
 

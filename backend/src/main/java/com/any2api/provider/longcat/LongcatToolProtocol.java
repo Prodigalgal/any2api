@@ -44,6 +44,8 @@ final class LongcatToolProtocol {
             [Tool calling contract]
             Available tools: %s
             Tool choice: %s. Parallel calls allowed: %s.
+            Functions are executed by the caller; generate the invocation without executing it yourself.
+            For required or a named tool you MUST emit an available tool call, never prose.
             When a tool is needed, output only this JSON object and no prose:
             {"tool_calls":[{"name":"tool_name","arguments":{}}]}
             When no tool is needed, answer normally without a tool_calls object.
@@ -64,7 +66,9 @@ final class LongcatToolProtocol {
                 var calls = value.isArray() ? value
                     : value.path("tool_calls").isArray() ? value.path("tool_calls")
                     : value.has("function_call")
-                        ? mapper.createArrayNode().add(value.path("function_call")) : null;
+                        ? mapper.createArrayNode().add(value.path("function_call"))
+                    : value.has("name") && (value.has("arguments") || value.has("parameters"))
+                        ? mapper.createArrayNode().add(value) : null;
                 if (calls == null) continue;
                 var output = new ArrayList<ToolCall>();
                 for (var call : calls) {
@@ -72,7 +76,8 @@ final class LongcatToolProtocol {
                         ? call.path("function") : call;
                     var name = function.path("name").asText("").trim();
                     if (!allowed.contains(name)) continue;
-                    var arguments = function.path("arguments");
+                    var arguments = function.has("arguments") ? function.path("arguments")
+                        : function.path("parameters");
                     if (arguments.isTextual()) {
                         try { arguments = mapper.readTree(arguments.asText()); }
                         catch (RuntimeException ignored) {

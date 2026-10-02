@@ -56,11 +56,27 @@ class InferenceCoordinatorTest {
         var coordinator = coordinator(provider, accounts);
 
         StepVerifier.create(coordinator.execute(request("alpha"), leased))
-            .expectErrorMatches(error -> error instanceof IllegalArgumentException
-                && error.getMessage().contains("rejected"))
+            .expectErrorMatches(error -> error instanceof com.any2api.protocol.OpenAiRequestException invalid
+                && invalid.type().equals("invalid_request_error")
+                && invalid.getMessage().contains("rejected"))
             .verify();
 
         verify(accounts).release(leased);
+    }
+
+    @Test
+    void convertsProviderPreflightErrorsBeforeAcquiringAnAccount() {
+        var accounts = mock(AccountSelectionService.class);
+        var coordinator = coordinator(new TestProvider(true), accounts);
+
+        StepVerifier.create(coordinator.execute(request("alpha")))
+            .expectErrorMatches(error -> error instanceof com.any2api.protocol.OpenAiRequestException invalid
+                && invalid.type().equals("invalid_request_error")
+                && invalid.parameter().equals("request")
+                && invalid.getMessage().contains("rejected"))
+            .verify();
+
+        verify(accounts, never()).acquire(anyString(), anyString(), any());
     }
 
     @Test

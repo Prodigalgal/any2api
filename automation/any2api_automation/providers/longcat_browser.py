@@ -411,6 +411,8 @@ def _append_tool_contract(
         "[Tool calling contract]\n"
         f"Available tools: {json.dumps(definitions, ensure_ascii=True, separators=(',', ':'))}\n"
         f"Tool choice: {label}. Parallel calls allowed: {parallel is not False}.\n"
+        "Functions are executed by the caller; generate the invocation without executing it yourself.\n"
+        "For required or a named tool you MUST emit an available tool call, never prose.\n"
         "When a tool is needed, output only this JSON object and no prose:\n"
         '{"tool_calls":[{"name":"tool_name","arguments":{}}]}\n'
         "When no tool is needed, answer normally without a tool_calls object."

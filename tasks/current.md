@@ -1,15 +1,16 @@
-# 当前任务板（源码 0.25.0）
+# 当前任务板（源码 0.25.1）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-03 WEB 厂商常用 OpenAI 桥接补齐（0.25.0 候选）
+## 2026-10-03 WEB 厂商常用 OpenAI 桥接补齐（0.25.0 → 0.25.1）
 
 - 执行规格：[WEB_OPENAI_BRIDGE_FOLLOWUP](../docs/requirements/WEB_OPENAI_BRIDGE_FOLLOWUP.md)。沿用用户授权，继续实现、提交、部署和真实验收。
 - DeepSeek / Qwen / GLM / MiniMax / Arena 复用 ToolEmulationEngine，补齐 function definitions、required/named choice、结果回放、SSE 和 usage；保留 native search / reasoning / media。
 - LongCat 媒体结果保留 call_id，提前拒绝历史/孤立媒体；请求与工具生成错误不计入模型熔断。Grok Web 二进制帧、帧顺序、独立推理超时和取消清理补齐。
 - 模型目录冷缓存账号查询按厂商汇总，部署前验证查询结果等价与执行计划。
-- 当前生产仍为 0.24.4；0.25.0 部署与八家厂商真实状态以本轮发布报告回写为准。Qwen 当前没有账号记录，真实请求验收待账号就绪。
+- 0.25.0 已部署：源码 707d9c7，CI 37035202075 success / GitOps 5a884a4 Synced/Healthy。DeepSeek、MiMo 核心六组通过；GLM/MiniMax 工具生成、LongCat 部分 required/参数错误映射、Arena Max 422 继续修复。Qwen 无账号，真实请求正确返回 model_unavailable 503。
+- 0.25.1 修复候选：工具契约写入实际 user turn，明确由调用方执行；LongCat 兼容单个 JSON call；普通/预租约路由的前置参数错误统一 typed 400；Arena 忽略网关负责的 store/previous_response_id；Grok 等待已收到的终态帧处理完再判断连接关闭。Backend 390 passed / 5 skipped，Web lint/build、Automation 回归与版本契约通过后部署复测。
 
 ## 2026-10-02 发布部署与 Read 性能核验（0.24.1 → 0.24.4）
 

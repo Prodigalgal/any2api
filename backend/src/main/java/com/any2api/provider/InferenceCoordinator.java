@@ -220,6 +220,10 @@ public class InferenceCoordinator {
         } catch (com.any2api.protocol.OpenAiRequestException error) {
             throw error.withAcceptedParameters(ProviderRequestValidation.acceptedParameters(
                 request.protocol(), provider.protocolContract()));
+        } catch (IllegalArgumentException error) {
+            throw com.any2api.protocol.OpenAiRequestException.invalid("request", error.getMessage())
+                .withAcceptedParameters(ProviderRequestValidation.acceptedParameters(
+                    request.protocol(), provider.protocolContract()));
         }
     }
 
@@ -366,9 +370,7 @@ public class InferenceCoordinator {
                 observed.account(account.accountId());
                 observed.accountAcquired();
                 if (validateInsideLease) {
-                    ProviderRequestValidation.requireSupportedRequest(
-                        request, provider.manifest(), provider.protocolContract(), modelCapabilities);
-                    provider.validate(request);
+                    validateRequest(request, provider, modelCapabilities);
                 }
                 var lastSequence = new AtomicLong();
                 return withLeaseRenewal(

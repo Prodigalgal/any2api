@@ -118,8 +118,11 @@ final class GrokWebToolProtocol {
             instruction = "You MUST call at least one available tool and must not write a plain-text reply.";
         }
         return """
-            [system]
-            You have access to the following tools.
+            %s
+
+            [Tool calling contract]
+            These functions belong to the caller and are executed by the caller after your reply.
+            Generate the invocation without executing the function yourself.
 
             AVAILABLE TOOLS:
             %s
@@ -140,7 +143,8 @@ final class GrokWebToolProtocol {
             WHEN TO CALL: %s
 
             %s
-            """.formatted(definitions, instruction, prompt).trim();
+            """.formatted(prompt, definitions, instruction,
+                configuration.parallel() ? "" : "Call at most one tool.").trim();
     }
 
     String history(JsonNode message) {

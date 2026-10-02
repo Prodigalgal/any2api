@@ -68,8 +68,24 @@ public class ToolEmulationEngine {
             messages.add(message);
         }
         if (plan.enabled()) {
-            messages.addFirst(mapper.createObjectNode().put("role", "developer")
-                .put("content", appendContract("", plan)));
+            // Web agents may discard standalone system/developer messages. Keep the
+            // caller-owned function contract in the actual user turn sent upstream.
+            var lastUser = -1;
+            for (var index = 0; index < messages.size(); index++) {
+                if ("user".equals(messages.get(index).path("role").asText(""))) lastUser = index;
+            }
+            if (lastUser < 0) {
+                messages.add(mapper.createObjectNode().put("role", "user")
+                    .put("content", appendContract("", plan)));
+            } else {
+                var message = (tools.jackson.databind.node.ObjectNode) messages.get(lastUser);
+                if (message.path("content").isArray()) {
+                    ((ArrayNode) message.path("content")).add(mapper.createObjectNode()
+                        .put("type", "input_text").put("text", appendContract("", plan)));
+                } else {
+                    message.put("content", appendContract(message.path("content").asText(""), plan));
+                }
+            }
         }
         var nativeTools = request.tools().stream()
             .filter(tool -> !"function".equals(tool.path("type").asText("function")))
@@ -109,6 +125,8 @@ public class ToolEmulationEngine {
             [Tool calling contract]
             Available tools: %s
             Tool choice: %s. Parallel calls allowed: %s.
+            These functions belong to the caller and are executed by the caller after your reply.
+            You are generating a function invocation, not executing the function yourself.
             For required or a named tool, you MUST produce an available tool call, not prose.
             Use only declared tool names and valid JSON object arguments.
             When a tool is needed, output only this JSON object and no prose:

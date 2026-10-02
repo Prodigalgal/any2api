@@ -369,7 +369,9 @@ def build_arena_request(
     unsupported = sorted(set(options) - {"mode", "model_id", "web_search"})
     if unsupported:
         raise ValueError("Arena provider option is unsupported: " + unsupported[0])
-    unsupported_controls = sorted(set(controls) - {"web_search"})
+    # Response storage and continuation are resolved by the OpenAI gateway. They
+    # must not become Arena request fields or prevent a normal Web conversation.
+    unsupported_controls = sorted(set(controls) - {"web_search", "store", "previous_response_id"})
     if unsupported_controls:
         raise ValueError("Arena control is unsupported: " + unsupported_controls[0])
     mode = str(options.get("mode") or "direct").strip().lower()

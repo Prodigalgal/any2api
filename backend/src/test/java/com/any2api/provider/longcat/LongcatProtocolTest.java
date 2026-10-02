@@ -224,6 +224,30 @@ class LongcatProtocolTest {
             .isEqualTo("invalid_request");
     }
 
+    @Test
+    void acceptsSingleFunctionJsonAndStillRejectsInvalidArguments() {
+        var mapper = new ObjectMapper();
+        var rawTools = mapper.createArrayNode();
+        rawTools.addObject().put("type", "function").put("name", "inspect")
+            .putObject("parameters").put("type", "object");
+        var raw = mapper.createObjectNode();
+        raw.putObject("tool_choice").put("type", "function").put("name", "inspect");
+        var tools = new LongcatToolProtocol(mapper);
+        var plan = tools.plan(request(mapper, rawTools, raw));
+
+        for (var field : List.of("arguments", "parameters")) {
+            var calls = tools.parse("{\"name\":\"inspect\",\"" + field
+                + "\":{\"path\":\"demo.txt\"}}", plan);
+            assertThat(calls).singleElement().satisfies(call -> {
+                assertThat(call.name()).isEqualTo("inspect");
+                assertThat(call.arguments()).isEqualTo("{\"path\":\"demo.txt\"}");
+            });
+        }
+        assertThat(tools.parse("{\"name\":\"other\",\"arguments\":{}}", plan)).isEmpty();
+        assertThatThrownBy(() -> tools.parse("{\"name\":\"inspect\",\"arguments\":[]}", plan))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("non-object");
+    }
+
     private CanonicalRequest request(
         ObjectMapper mapper,
         tools.jackson.databind.JsonNode toolNodes,

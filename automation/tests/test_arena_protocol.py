@@ -144,6 +144,24 @@ def _command(messages: list[dict[str, object]], **overrides: object) -> dict[str
     return command
 
 
+@pytest.mark.parametrize("store", [True, False])
+def test_arena_ignores_gateway_storage_controls_and_preserves_reconstructed_history(store) -> None:
+    command = _command(
+        [
+            {"role": "user", "content": "Earlier question"},
+            {"role": "assistant", "content": "Earlier answer"},
+            {"role": "user", "content": "Continue"},
+        ],
+        protocol="RESPONSES",
+        controls={"store": store, "previous_response_id": "resp_previous"},
+    )
+    body = build_arena_request(command, model_id=_MODEL_UUID)
+    assert "Earlier answer" in body["userMessage"]["content"]
+    assert "Continue" in body["userMessage"]["content"]
+    assert "store" not in body
+    assert "previous_response_id" not in body
+
+
 def test_arena_mapper_translates_search_and_signed_attachments() -> None:
     command = _command(
         [

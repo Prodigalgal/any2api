@@ -187,7 +187,7 @@ class ToolEmulationEngineTest {
 
         assertThat(prepared.tools()).hasSize(1);
         assertThat(prepared.tools().getFirst().path("type").asText()).isEqualTo("web_search");
-        assertThat(prepared.messages().getFirst().path("content").asText())
+        assertThat(prepared.messages().getLast().path("content").asText())
             .contains("Tool calling contract", "inspect");
         assertThat(prepared.messages().getLast().path("content").asText())
             .contains("call_inspect", "demo.txt");
@@ -215,6 +215,31 @@ class ToolEmulationEngineTest {
 
         assertThat(transformed).hasSize(6).anyMatch(CanonicalEvent.Usage.class::isInstance);
         assertThat(transformed.getLast()).isInstanceOf(CanonicalEvent.Completed.class);
+    }
+
+    @Test
+    void placesTheContractInTheCurrentUserTurnWithoutRemovingMediaOrInstructions() {
+        var tools = mapper.createArrayNode();
+        tools.addObject().put("type", "function").putObject("function").put("name", "inspect");
+        var base = createRequest(tools, mapper.createObjectNode().put("tool_choice", "required"));
+        var system = mapper.createObjectNode().put("role", "system").put("content", "Be concise");
+        var user = mapper.createObjectNode().put("role", "user");
+        user.putArray("content").addObject().put("type", "input_text").put("text", "Inspect this");
+        ((ArrayNode) user.path("content")).addObject().put("type", "input_image")
+            .put("image_url", "data:image/png;base64,YQ==");
+        var request = new CanonicalRequest(base.requestId(), base.protocol(), base.providerId(),
+            base.model(), base.stream(), List.of(system, user), base.generation(),
+            base.reasoning(), base.tools(), base.providerOptions(), base.rawRequest());
+
+        var prepared = engine.prepare(request, engine.plan(request));
+
+        assertThat(prepared.messages()).hasSize(2);
+        assertThat(prepared.messages().getFirst()).isEqualTo(system);
+        assertThat(prepared.messages().getLast().path("role").asText()).isEqualTo("user");
+        assertThat(prepared.messages().getLast().path("content").get(1)).isEqualTo(user.path("content").get(1));
+        assertThat(prepared.messages().getLast().path("content").get(2).path("text").asText())
+            .contains("executed by the caller", "MUST produce");
+        assertThat(user.path("content").size()).isEqualTo(2);
     }
 
     @Test

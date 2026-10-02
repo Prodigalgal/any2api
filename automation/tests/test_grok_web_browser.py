@@ -43,6 +43,8 @@ def test_grok_web_builds_gateway_command_from_semantic_request() -> None:
     assert request["parentResponseId"] == "response-1"
     assert "<tool_calls>" in request["message"]
     assert "lookup" in request["message"]
+    assert "executed by the caller" in request["message"]
+    assert request["message"].index("hello") < request["message"].index("Tool calling contract")
     assert request["enableSideBySide"] is False
 
 
@@ -75,7 +77,7 @@ def test_grok_web_builds_request_with_model_aliases() -> None:
         assert request["mode"] == expected_mode
 
 
-@pytest.mark.parametrize("scenario", ["binary", "silent", "http_error"])
+@pytest.mark.parametrize("scenario", ["binary", "binary_close", "silent", "http_error"])
 def test_gateway_preserves_frame_order_and_closes_on_completion_or_timeout(scenario: str) -> None:
     node = shutil.which("node")
     if node is None:
@@ -99,10 +101,11 @@ global.WebSocket = class {
     const type = JSON.parse(raw).event.type;
     const frame = event => this.onmessage({data: new Blob([JSON.stringify({session_id: 'test', event})])});
     if (type === 'session.create') setTimeout(() => frame({type: 'conversation.attached'}), 0);
-    if (type === 'response.create' && input.scenario === 'binary') setTimeout(() => {
+    if (type === 'response.create' && input.scenario.startsWith('binary')) setTimeout(() => {
       frame({type: 'response.output_text.delta', delta: 'first'});
       frame({type: 'response.output_text.delta', delta: 'second'});
       frame({type: 'response.done'});
+      if (input.scenario === 'binary_close') this.onclose();
     }, 0);
   }
   close() { closed = true; this.onclose?.(); }
@@ -123,7 +126,7 @@ global.WebSocket = class {
     )
     result = json.loads(completed.stdout)
     assert result["streams"] == 0
-    if scenario == "binary":
+    if scenario.startswith("binary"):
         assert result["closed"]
         frames = [
             json.loads(event["data"])["event"]

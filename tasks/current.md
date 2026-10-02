@@ -7,16 +7,20 @@
 
 - 用户已授权提交、部署和测试。0.24.0 本地候选验收后补齐日期/版本/用途镜像标签，正式候选升为 0.24.1；流水线忽略纯 docs/tasks 变动，避免验收记录触发同版本重新发布。
 - 发布与性能范围：[执行规格](../docs/requirements/RELEASE_AND_READ_PERFORMANCE.md)。先测旧生产 Read 基线，再跟踪 CI、GitOps、Pod 和真实厂商工具闭环。
+- 用户最新范围：调用方只用 OpenAI Chat/Responses 常用接口，后端桥接厂商 WEB；工具在调用方执行。保留已有扩展，不再以全量协议或 Codex 专属配置/本机执行策略为目标。
 - 0.24.1 / 0.24.2 已部署，CI `37011929616` / `37016567168`，GitOps `39a59fb` / `3043e12`，四个应用 Ready，迁移 032 完成。0.24.2 修复对象 tool_choice、列表 N+1 和同步 Controller 线程阻塞，Key/规则/厂商列表耗时实测下降。
 - 0.24.2 LongCat 真实 SDK 7 组验收通过；MiMo Responses 6 组通过、Chat null assistant content 翻译失败。0.24.3 在 canonical 边界修复 null/missing content，补充 3 项回归与可配置 smoke 超时，CI `37019554190` / GitOps `116df49` 已部署。
-- 0.24.4 补齐 Automation 两个镜像的当前包安装与 artifact version 门禁，纠正固定 browser-runtime 内旧的 `0.1.0` distribution metadata；不更新 browser-runtime/运行依赖。正在核验最终候选。
+- **0.24.4 已提交并部署**：源码 `b81886c`，CI `37020984892` success，GitOps `49b70b3` Synced/Healthy；四应用各 1/1 Ready、restart 0。两个 Automation Pod project/installed/API 0.24.4 PASS，纠正固定基座的旧 `0.1.0` metadata；browser-runtime/运行依赖保持当前版本。
+- 最终验证：Backend 379 passed / 5 live 条件 skipped、Automation 486 passed、Web lint/build、版本契约通过。MiMo/LongCat 官方 SDK 7 组各通过；MiMo 标准 Responses 工具图片结果正确识别。Grok 普通 Responses/SSE/function 续接前三组通过，namespace 扩展空输出另记。
+- Read 最终集群内 p50：Key **244.87ms**（原 2711.77）、规则 **272.42ms**（原 1412.33）、厂商 **165.50ms**（原 727.65）；最终 direct 18 × 3 次均 200。WAN 基础约 470–530ms，多数 DB Read 仍约 0.7–1.1s；n=3 不是生产 p95/容量验收。
+- 后续按常用路径优先：Grok 独立 Chat required function 120s 超时、LongCat 工具图片适配/输入错误熔断隔离、所用厂商 function/图片能力验证、公网 OpenAI 错误透传、DB 网络/多次读往返和目录 SQL。完整证据与回滚见 [发布与性能记录](../docs/reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)。
 
 ## 2026-10-02 OpenAI Chat/Responses agent 协议升级（0.24.0）
 
 - 阶段 1–3 已实现：历史回放、function/custom/namespace、流式终态、缓存隔离、网关 Responses 状态、所有权与资源接口。
-- 阶段 4 本地候选验收：官方 SDK、真实 Codex CLI 图片工具闭环、真实 PostgreSQL 迁移和回滚；结果见 [验收记录](../docs/reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)。
-- 用户已授权真实厂商和生产部署；当前已发布至 0.24.3，0.24.4 候选正在验证。SDK/Codex 与 Read 结果见 [发布与性能记录](../docs/reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)，阶段 4 仍按厂商逐项核验。
-- [任务记录](in-progress/OPENAI_AGENT_COMPATIBILITY.md)、[需求契约](../docs/requirements/OPENAI_AGENT_COMPATIBILITY.md)、[客户端接入](../docs/integrations/OPENAI_AGENTS.md)。
+- 阶段 4 本地候选验收：官方 SDK、真实 PostgreSQL 迁移和回滚；Codex 图片实验保留补充证据。0.24.0 [验收记录](../docs/reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)为历史结果。
+- 用户已授权真实厂商和生产部署；当前 0.24.4 已部署，常用核心链路在 MiMo/LongCat 完成真实 SDK 验收，其他厂商/图片边界按需继续。扩展失败与本机工具权限不作为常用协议全线阻断。
+- [任务记录](in-progress/OPENAI_AGENT_COMPATIBILITY.md)、[需求契约](../docs/requirements/OPENAI_AGENT_COMPATIBILITY.md)、[OpenAI API 桥接](../docs/integrations/OPENAI_AGENTS.md)。
 
 ## 2026-09-30 Grok Web 双域SSO Cookie双向复制、注册跨域会话导航与多端版本升级（0.22.10）
 
@@ -146,7 +150,7 @@
 ## 待处理
 
 - [ ] 核实 Liquibase 031 执行前的数据备份、删除量和恢复策略；已执行变更集不原地改写。
-- [ ] 为发布流水线补版本契约、不可覆盖镜像 tag 和空库 Liquibase 校验。
+- [x] 发布流水线版本契约、日期/版本/用途/SHA 不可变镜像 tag 和空库 Liquibase 验证已在 0.24.x 本地/CI 验收；记录见本轮发布报告。
 - [ ] 明确 Grok Web API binding 的发布意图，并使 Java 通道声明与验收证据一致。
 - [ ] 启用 Grok Web API 前补齐直接 `websockets` 依赖声明。
 - [ ] 明确 LongCat 模型发现的真实接口或验收例外。

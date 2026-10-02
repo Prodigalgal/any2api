@@ -1,4 +1,10 @@
-# OpenAI SDK 与 Codex 接入（0.24.0）
+# OpenAI API 到厂商 WEB 的桥接（0.24.4）
+
+## 范围
+
+调用方使用 OpenAI API，后端负责转译到各厂商现有 WEB 请求 / Browser Runtime。重点是模型发现、Chat Completions / Responses 的文本与多轮、JSON/SSE、function 工具调用及结果回传，图片按厂商 WEB/模型能力提供。后端不执行调用方的工具。已有 API / RUNTIME / AUTO 内部通道选择保持兼容，不意味着对齐厂商官方 API。
+
+不以完整 OpenAI 协议兼容作为目标；namespace/custom 和状态资源的现有实现保留，扩展按需使用。Codex 配置、模型 metadata 和本机工具策略属于可选客户端事项，不纳入后端交付。
 
 ## 当前能力
 
@@ -7,17 +13,45 @@
 | 能力 | 支持范围 |
 |---|---|
 | JSON / SSE | Chat 与 Responses；SDK 可重建最终输出和工具参数 |
-| function tools | 当前 MiMo、LongCat、Grok Web 的模拟工具实现；其他厂商沿用自己的工具能力 |
-| namespace / custom | namespace 函数与 text custom 转 function，再还原输出身份；并行调用与 allowed_tools |
-| 历史回放 | reasoning、phase、function/custom call 与 output、refusal；图片结果需模型和 Key 的媒体权限 |
+| function tools | 当前 MiMo、LongCat、Grok Web 的模拟工具实现；auto/none/required/指定 function 按模型校验，其他厂商沿用自己的能力 |
+| namespace / custom（可选扩展） | namespace 函数与 text custom 转 function，再还原输出身份；并行调用与 allowed_tools；不保证每个 WEB 上游稳定支持 |
+| 历史回放 | 多轮文本、function call/output；保留已有 reasoning、phase、custom、refusal；图片结果需模型和 Key 的媒体权限，适配情况见真实验收 |
 | 状态 | `store:true`、`previous_response_id`、retrieve/delete/input_items，按 Key 隔离 |
 | 上下文 | 默认 32 条消息裁剪目标，保留首部规则和完整工具组；`truncation:disabled` 超限报错 |
 
 `strict:true`、custom grammar、defer_loading/tool search、原生 hosted tools、opaque encrypted-only reasoning、item_reference、WebSocket、background、Conversations、`/responses/compact`、流式续传均未形成通用实现保证。请求会按具体 Provider 契约明确拒绝。请求 `include:["reasoning.encrypted_content"]` 不会获得伪造的加密内容。
 
-工具上限、schema、媒体、generation 参数和 token 预算仍由当前 Provider 校验。MiMo/LongCat 现有工具上限是 128；开启全部插件可能超过此上限。能力声明与真实厂商验收、模型可调用状态是不同证据。
+工具上限、schema、媒体、generation 参数和 token 预算仍由当前 Provider 校验。MiMo/LongCat 现有工具上限是 128。能力声明与真实厂商验收、模型可调用状态是不同证据。
 
-## Codex 配置
+最终 0.24.4 的 MiMo `mimo-v2.6-flash`、LongCat `longcat-flash` 官方 SDK 7 组均通过，包含 Chat/Responses 文本工具闭环与可选扩展。MiMo 的标准 Responses 工具图片结果回放也通过。LongCat 工具图片回传尚有 502/熔断缺陷；Grok 的普通 Responses/SSE/function 续接通过前三组，namespace 扩展返回空输出；独立的常用 Chat required function 在 120s 客户端超时，Chat 回传/SSE 未执行。不能将任何一家这些结果扩展到其他模型或全部厂商。证据见 [发布验收与性能](../reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)。
+
+## 常用 API
+
+主要入口为 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`。`messages` / `input` 和多轮历史由调用方提供；工具输出按 call_id 回传。Responses 也可使用已实现的 `store:true` / `previous_response_id` 续接，无需厂商 WEB 提供同名资源接口。
+
+```python
+import os
+from openai import OpenAI
+
+with OpenAI(
+    base_url="https://any2api-direct.mnnu.eu.org/v1",
+    api_key=os.environ["ANY2API_E2E_API_KEY"],
+    timeout=120,
+) as client:
+    chat = client.chat.completions.create(
+        model="mimo/mimo-v2.6-flash",
+        messages=[{"role": "user", "content": "你好"}],
+    )
+    print(chat.choices[0].message.content)
+    response = client.responses.create(
+        model="mimo/mimo-v2.6-flash", input="你好", store=False,
+    )
+    print(response.output_text)
+```
+
+示例模型需按当前 `/v1/models` 和 Key scope 选择；120s 是真实 WEB 验收的显式客户端超时，不是延迟目标。流式设置 `stream=True`，工具/媒体按下述权限及模型能力使用。
+
+## 可选：Codex 配置与历史实验
 
 在独立测试配置中选择真实存在、声明 function tools 的模型。示例中的模型 ID 必须替换为当前目录里的有效 ID：
 
@@ -38,7 +72,7 @@ supports_websockets = false
 
 本次验收使用 Codex CLI 0.159.2，关闭 apps/plugins/multi_agent，使用 HTTP/SSE、函数工具和 `read-only` sandbox。自定义路由名可能触发 CLI model metadata fallback 提示；已有 OpenAI 原生模型的 metadata 不应被用来承诺本桥接不支持的 grammar/strict/encryption 能力。
 
-本机 PowerShell 命令工具被 CLI policy 拒绝，未绕过该策略。通过 `view_image` 成功执行本地图片读取、回传工具结果和图片输入、取得最终回答。Shell/patch 工具的执行权限需要在实际客户端环境单独验证。
+0.24.0 的受控上游实验完成 `view_image` 工具闭环；本机 PowerShell 命令工具被 CLI policy 拒绝，未绕过。0.24.4 真实 MiMo 图片实验返回正确颜色，但 CLI JSON 没有显式 image_view completion item，不能仅凭最终标记认定该工具执行轨迹。标准 API 的工具图片回放已单独验证。Shell/patch 权限和 metadata fallback 不属于本项目后端缺口。
 
 ## 可复现的本地验收
 
@@ -63,7 +97,7 @@ Set-Location backend
 $env:ANY2API_E2E_API_KEY = 'fixture-primary'
 python tools/compatibility/openai_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --fixture --sdk-path backend/build/agent-interop-python --report backend/build/agent-sdk-report.json
 python tools/compatibility/codex_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture-codex-image --fixture --tool image --report backend/build/agent-codex-report.json
-python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.24.0.jar
+python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.24.4.jar
 ```
 
 关闭本地服务：
@@ -76,13 +110,13 @@ python -c "import urllib.request; urllib.request.urlopen(urllib.request.Request(
 
 ## 真实环境验收
 
-在授权的测试环境中，将脚本的 base_url/model 改为已部署候选，使用授权 Key，去掉 `--fixture`。SDK 验证真实模型必须能够按指定 tool_choice 生成调用；Codex 脚本默认要求本地目录只读命令成功，并验证结果进入最终回答。
+用户已授权本轮生产部署与现有凭据测试。标准 API/官方 SDK 验收时，将脚本的 base_url/model 改为已部署候选，使用限模型/协议/feature 的临时 Key，去掉 `--fixture`。实际需要 function 的模型必须按 tool_choice 生成结构化调用、保留 call_id 并消费回传结果。脚本包含 namespace/custom 扩展，完整脚本失败须按具体检查区分，不能把扩展失败写成常用协议整体失败。可选 Codex 命令脚本对本地工具权限的要求单独判断。
 
 模型能力不支持 reasoning 时（例如当前 Grok Web），SDK smoke 加 `--no-reasoning`，报告记录该参数被省略；直接请求 unsupported reasoning 会返回 400。MiMo 验收优先使用当前仍有成功探针的模型，历史模型名称存在于目录不代表上游仍支持工具调用。
 
 真实上游首帧可能超过 smoke 默认 30s，可用 `--timeout 120` 单独核验协议闭环。报告记录客户端超时；增大测试超时不代表厂商延迟达到生产目标。Chat assistant 工具历史的缺省/null content 会在 canonical messages 规范为无文本，原始请求和工具身份保留。
 
-先分别验证 MiMo、LongCat、Grok Web 的工具循环，再验证实际需要的媒体、长对话、失败、续接和并发。记录源码版本、不可变镜像、GitOps/Pod、模型、Key scope、客户端版本和请求结果。真实厂商凭据与外部环境写入遵守 AGENTS.md Stop Conditions。
+先验证实际使用厂商的普通对话/SSE/function 循环，再验证需要的图片、长对话、失败、续接和并发；不要求所有 WEB 上游实现相同扩展。记录源码版本、不可变镜像、GitOps/Pod、模型、Key scope、SDK 版本和请求结果。本轮真实 SDK 使用 direct 入口；public 入口的 Read 验证通过，但 Cloudflare 曾将 502 body 包装为通用错误，OpenAI 错误透传仍需核验。新增外部账号/凭据或破坏性操作遵守 AGENTS.md Stop Conditions。
 
 ## 状态与兼容边界
 
@@ -98,4 +132,5 @@ API 增量兼容，普通文本与厂商通道选择保持既有契约。缓存 
 
 - [OpenAI gateway compatibility](https://learn.chatgpt.com/docs/enterprise/gateway-compatibility)
 - [Function calling](https://developers.openai.com/api/docs/guides/function-calling)
-- [本次验收记录](../reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)
+- [当前部署与真实厂商验收](../reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)
+- [历史本地候选验收](../reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)

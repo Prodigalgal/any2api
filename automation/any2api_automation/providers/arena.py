@@ -20,6 +20,7 @@ from .arena_browser import (
     _allowlisted_base_url,
     _arena_config,
     account_status_is_healthy,
+    reauthenticate_with_credentials,
     register_with_magic_link,
 )
 from .base import (
@@ -117,7 +118,44 @@ class ArenaAutomationProvider(AutomationProvider):
             raise trace.failure(error) from error
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._account_probe(payload, operation="reauthenticate")
+        current = credential(payload)
+        email = current.get("email") or current.get("user_id")
+        password = current.get("password")
+        if not email or not password:
+            return await self._account_probe(payload, operation="reauthenticate")
+
+        mail = None
+        try:
+            mail = mail_client(payload)
+        except Exception:  # noqa: BLE001
+            mail = None
+
+        base_url = _allowlisted_base_url(_runtime_option(payload, "base_url"))
+        flow_payload = proxy_attempt_payload(
+            {**payload, "proxy_check_url": base_url},
+            identity=str(email),
+            attempt=1,
+        )
+        flow_payload["strict_proxy_affinity"] = True
+        result = await asyncio.to_thread(
+            run_browser_flow,
+            lambda page, context, backend, proxy_url: reauthenticate_with_credentials(
+                page,
+                context,
+                backend,
+                mail,
+                current,
+                flow_payload,
+            ),
+            preferred=self.manifest.browser_backend,
+            fallback=self.manifest.fallback_backend,
+            payload=flow_payload,
+            context_profile=self.browser_context_profile(),
+            launch_profile=self.browser_launch_profile(),
+        )
+        response = result.response()
+        response["credential_patch"] = result.credential
+        return response
 
     async def keepalive(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._account_probe(payload, operation="keepalive")
@@ -210,10 +248,6 @@ def _account_probe_response(result: dict[str, Any], operation: str) -> dict[str,
         "inference_probe_required": authenticated,
         "error_class": error_class,
     }
-    if operation == "reauthenticate" and status in {401, 403}:
-        # Arena reauth cannot recover cookies without interactive magic-link.
-        # Stop the scheduler from burning browser budget on a probe-only path.
-        response["terminal"] = True
     patch = result.get("credential_patch")
     if isinstance(patch, dict) and patch:
         response["credential_patch"] = patch

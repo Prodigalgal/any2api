@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 import pytest
 
@@ -26,6 +27,7 @@ from any2api_automation.providers.arena_browser import (
     arena_media_sources,
     build_arena_request,
     parse_arena_models,
+    reauthenticate_with_credentials,
     register_with_magic_link,
 )
 from any2api_automation.providers.arena_settings import settings as arena_settings
@@ -560,3 +562,192 @@ def test_arena_registration_uses_one_new_temp_mail_message_and_activates_account
     assert result.metadata["inference_probe_required"] is False
     assert result.credential["password"] == "TestPassword123!"
     assert result.credential["authentication"] == "email_magic_link"
+
+
+def test_arena_reauthenticate_with_password_success() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.signed_in = False
+            self.reloaded = False
+
+        def evaluate(self, script: str, *args: object) -> dict[str, Any]:
+            if "input.password" in script:
+                self.signed_in = True
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "success": True,
+                    "emailConfirmed": True,
+                }
+            if "response.json()" in script:
+                if not self.signed_in:
+                    return {"ok": False, "status": 401, "id": "", "email": ""}
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "id": "arena-user-recovered",
+                    "email": "recovered@example.test",
+                }
+            if "localStorage" in script:
+                return {}
+            if "navigator.userAgent" in script:
+                return {"user_agent": "Mozilla/5.0", "os_name": "Windows"}
+            raise AssertionError("unexpected evaluate call")
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            pass
+
+        def goto(self, url: str, **kwargs: object) -> None:
+            pass
+
+        def reload(self, **kwargs: object) -> None:
+            self.reloaded = True
+
+    class Context:
+        def cookies(self) -> list[dict[str, str]]:
+            return [{"name": "arena-auth-prod-v1", "value": "new-session-token"}]
+
+    page = Page()
+    current = {
+        "email": "recovered@example.test",
+        "password": "Password123!",
+        "mail_jwt": "jwt-token-123",
+        "proxy_affinity_key": "affinity-abc",
+    }
+    result = reauthenticate_with_credentials(
+        page,
+        Context(),
+        "camoufox",
+        None,
+        current,
+        {"runtime_options": {"base_url": "https://arena.ai"}},
+    )
+
+    assert page.reloaded is True
+    assert result.external_id == "arena-user-recovered"
+    assert result.email == "recovered@example.test"
+    assert result.credential["password"] == "Password123!"
+    assert result.credential["mail_jwt"] == "jwt-token-123"
+    assert result.credential["cookies"]["arena-auth-prod-v1"] == "new-session-token"
+    assert result.credential["proxy_affinity_key"] == "affinity-abc"
+    assert result.ready_for_inference is True
+    assert result.metadata["authentication"] == "reauthenticated_credentials"
+
+
+def test_arena_reauthenticate_with_existing_active_session() -> None:
+    class Page:
+        def evaluate(self, script: str, *args: object) -> dict[str, Any]:
+            if "response.json()" in script:
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "id": "arena-user-active",
+                    "email": "active@example.test",
+                }
+            if "localStorage" in script:
+                return {}
+            if "navigator.userAgent" in script:
+                return {"user_agent": "Mozilla/5.0", "os_name": "Windows"}
+            raise AssertionError("unexpected evaluate call")
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            pass
+
+        def goto(self, url: str, **kwargs: object) -> None:
+            pass
+
+    class Context:
+        def cookies(self) -> list[dict[str, str]]:
+            return [{"name": "arena-auth-prod-v1", "value": "active-token"}]
+
+    page = Page()
+    current = {
+        "email": "active@example.test",
+        "password": "Password123!",
+    }
+    result = reauthenticate_with_credentials(
+        page,
+        Context(),
+        "camoufox",
+        None,
+        current,
+        {"runtime_options": {"base_url": "https://arena.ai"}},
+    )
+
+    assert result.external_id == "arena-user-active"
+    assert result.credential["cookies"]["arena-auth-prod-v1"] == "active-token"
+    assert result.ready_for_inference is True
+
+
+def test_arena_reauthenticate_with_magic_link_fallback() -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.mail_link_visited = False
+
+        def evaluate(self, script: str, *args: object) -> dict[str, Any]:
+            if "input.password" in script:
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "success": False,
+                    "requiresVerification": True,
+                }
+            if "response.json()" in script:
+                if not self.mail_link_visited:
+                    return {"ok": False, "status": 401, "id": "", "email": ""}
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "id": "arena-user-verified",
+                    "email": "verified@example.test",
+                }
+            if "localStorage" in script:
+                return {}
+            if "navigator.userAgent" in script:
+                return {"user_agent": "Mozilla/5.0", "os_name": "Windows"}
+            raise AssertionError("unexpected evaluate call")
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            pass
+
+        def goto(self, url: str, **kwargs: object) -> None:
+            if "auth/verify" in url:
+                self.mail_link_visited = True
+
+        def reload(self, **kwargs: object) -> None:
+            pass
+
+    class Context:
+        def cookies(self) -> list[dict[str, str]]:
+            return [{"name": "arena-auth-prod-v1", "value": "verified-token"}]
+
+    class Mail:
+        def message_ids_sync(self, mailbox: Mailbox) -> set[str]:
+            return set()
+
+        def wait_for_link_sync(self, mailbox: Mailbox, **kwargs: object) -> str:
+            assert mailbox.address == "verified@example.test"
+            assert mailbox.jwt == "mail-jwt-val"
+            return "https://arena.ai/auth/verify?token=link-token"
+
+    page = Page()
+    current = {
+        "email": "verified@example.test",
+        "password": "Password123!",
+        "mail_jwt": "mail-jwt-val",
+    }
+    result = reauthenticate_with_credentials(
+        page,
+        Context(),
+        "camoufox",
+        Mail(),
+        current,
+        {"runtime_options": {"base_url": "https://arena.ai"}},
+    )
+
+    assert page.mail_link_visited is True
+    assert result.external_id == "arena-user-verified"
+    assert result.credential["cookies"]["arena-auth-prod-v1"] == "verified-token"
+    assert result.ready_for_inference is True
+
+

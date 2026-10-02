@@ -1982,6 +1982,126 @@ def register_with_magic_link(
     )
 
 
+def reauthenticate_with_credentials(
+    page: Any,
+    context: Any,
+    backend: str,
+    mail: TempMailClient | None,
+    current: dict[str, Any],
+    payload: dict[str, Any],
+    trace: RegistrationTrace | None = None,
+) -> BrowserResult:
+    config = _arena_config(payload)
+    email = str(current.get("email") or current.get("user_id") or "").strip()
+    password = str(current.get("password") or "").strip()
+    if not email or not password:
+        raise ValueError("Arena reauthentication requires email and password in current credential")
+
+    _arena_goto(page, f"{config['base_url']}{config['page_path']}")
+    page.wait_for_timeout(1_000)
+
+    profile: dict[str, Any] | None = None
+    for attempt in range(2):
+        if attempt:
+            page.wait_for_timeout(500)
+        candidate = page.evaluate(
+            _arena_me_script(),
+            {"path": config["me_path"], "timeoutMs": 30_000},
+        )
+        if isinstance(candidate, dict) and candidate.get("ok") and str(candidate.get("id") or ""):
+            profile = candidate
+            break
+
+    if not profile:
+        sign_in = page.evaluate(
+            _arena_sign_in_script(),
+            {
+                "path": config["sign_in_path"],
+                "email": email,
+                "password": password,
+                "timeoutMs": 60_000,
+            },
+        )
+        if not isinstance(sign_in, dict):
+            raise RuntimeError("Arena sign-in script returned invalid response")
+
+        if sign_in.get("ok") and sign_in.get("success") and sign_in.get("emailConfirmed"):
+            page.reload(wait_until="domcontentloaded", timeout=90_000)
+            for attempt in range(3):
+                page.wait_for_timeout(1_000 if attempt else 500)
+                candidate = page.evaluate(
+                    _arena_me_script(),
+                    {"path": config["me_path"], "timeoutMs": 60_000},
+                )
+                if isinstance(candidate, dict) and candidate.get("ok") and str(candidate.get("id") or ""):
+                    profile = candidate
+                    break
+        elif sign_in.get("requiresVerification") or not sign_in.get("emailConfirmed"):
+            mail_jwt = str(current.get("mail_jwt") or "").strip()
+            if mail and mail_jwt:
+                mailbox = Mailbox(address=email, jwt=mail_jwt)
+                seen_ids: set[str] = set()
+                try:
+                    seen_ids = set(mail.message_ids_sync(mailbox))
+                except Exception:  # noqa: BLE001
+                    seen_ids = set()
+                verification_link = mail.wait_for_link_sync(
+                    mailbox,
+                    host_pattern=r"(?<![A-Za-z0-9.-])(?:www\.)?arena\.ai(?:/|$)",
+                    timeout=float(config["mail_timeout_seconds"]),
+                    seen_ids=seen_ids,
+                )
+                verification_link = _validate_arena_link(verification_link)
+                _arena_goto(page, verification_link)
+                for attempt in range(3):
+                    page.wait_for_timeout(1_000 if attempt else 500)
+                    candidate = page.evaluate(
+                        _arena_me_script(),
+                        {"path": config["me_path"], "timeoutMs": 60_000},
+                    )
+                    if isinstance(candidate, dict) and candidate.get("ok") and str(candidate.get("id") or ""):
+                        profile = candidate
+                        break
+            else:
+                code = str(sign_in.get("code") or "email_verification_required")
+                raise RuntimeError(
+                    f"Arena sign-in requires email verification but mailbox client or mail_jwt is unavailable ({code})"
+                )
+        else:
+            error_code = str(sign_in.get("error") or sign_in.get("code") or "sign_in_rejected")
+            status = int(sign_in.get("status") or 401)
+            raise RuntimeError(f"Arena sign-in rejected with HTTP {status} ({error_code})")
+
+    if not profile or not str(profile.get("id") or ""):
+        raise RuntimeError("Arena reauthentication completed but failed to verify active profile")
+
+    mail_jwt = str(current.get("mail_jwt") or "").strip()
+    value = credential_from_context(context, page, password, mail_jwt)
+    value.update(
+        {
+            "email": email,
+            "arena_user_id": str(profile["id"]),
+            "registration_backend": backend,
+            "authentication": "reauthenticated_credentials",
+        }
+    )
+    if current.get("proxy_affinity_key"):
+        value["proxy_affinity_key"] = current["proxy_affinity_key"]
+
+    return BrowserResult(
+        external_id=str(profile["id"]),
+        email=email,
+        credential=value,
+        metadata={
+            "authentication": "reauthenticated_credentials",
+            "registration_protocol": "arena_nextjs_magic_link",
+            "password_setup": True,
+            "inference_probe_required": False,
+        },
+        ready_for_inference=True,
+    )
+
+
 class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
     # Enable Camoufox behaviour humanisation for inference sessions so that
     # reCAPTCHA Enterprise v3 accumulates positive behavioural signals before
@@ -2261,6 +2381,7 @@ def _arena_config(payload: dict[str, Any]) -> dict[str, Any]:
         "base_url": base_url,
         "page_path": _same_origin_path(config.arena_page_path),
         "registration_path": _same_origin_path(config.arena_registration_path),
+        "sign_in_path": _same_origin_path(config.arena_sign_in_path),
         "password_path": _same_origin_path(config.arena_password_path),
         "me_path": _same_origin_path(config.arena_me_path),
         "chat_path": _same_origin_path(config.arena_chat_path),

@@ -66,6 +66,13 @@ public interface InferenceProvider {
         return Optional.empty();
     }
 
+    /**
+     * Optional secondary models to probe when the primary model triggers anti-bot or rate limiting during readiness checks.
+     */
+    default List<String> fallbackProbeModels() {
+        return List.of();
+    }
+
     default Duration accountProbeTimeout() {
         return Duration.ofSeconds(30);
     }

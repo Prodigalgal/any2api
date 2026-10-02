@@ -255,6 +255,16 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                             status,
                             str(event.get("contentType") or "")[:120],
                         )
+                    if (
+                        event_type == "recaptcha"
+                        and event.get("version") == "v2"
+                        and event.get("state") == "required"
+                    ):
+                        self._logger.info(
+                            "official_browser_recaptcha_v2_challenge_detected endpoint=%s",
+                            endpoint_key or target_path,
+                        )
+                        asyncio.create_task(self._try_solve_page_recaptcha_v2(session.page))
                     if event_type == "data" and str(event.get("data") or ""):
                         data_seen = True
                         data_events += 1
@@ -359,6 +369,29 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         if queue is None:
             return
         queue.put_nowait({key: value for key, value in event.items() if key != "requestId"})
+
+    async def _try_solve_page_recaptcha_v2(self, page: Any) -> None:
+        """Attempt to click reCAPTCHA v2 checkbox through cross-origin iframe using Playwright."""
+        try:
+            for _ in range(12):
+                await asyncio.sleep(0.5)
+                if not hasattr(page, "frame_locator"):
+                    break
+                anchor_frame = page.frame_locator('iframe[src*="recaptcha"][src*="anchor"]')
+                checkbox = anchor_frame.locator(
+                    '#recaptcha-anchor, .recaptcha-checkbox, [role="checkbox"]'
+                ).first
+                if await checkbox.count() > 0 and await checkbox.is_visible():
+                    self._logger.info("official_browser_recaptcha_v2_clicking_checkbox")
+                    await checkbox.click(timeout=5000)
+                    self._logger.info("official_browser_recaptcha_v2_checkbox_clicked")
+                    return
+        except Exception as error:  # noqa: BLE001 - non-blocking helper
+            self._logger.debug(
+                "official_browser_recaptcha_v2_autoclick_failed error_type=%s reason=%s",
+                type(error).__name__,
+                _error_reason(error),
+            )
 
 
 def _method(value: str) -> str:

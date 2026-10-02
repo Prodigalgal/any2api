@@ -24,4 +24,21 @@ public class ArenaProperties {
         }
         modelProbeTimeout = value;
     }
+
+    private String probeModel = "gemini-3.1-flash-lite";
+    private java.util.List<String> fallbackProbeModels = java.util.List.of("gpt-5.4-mini-high", "Max");
+
+    public String getProbeModel() { return probeModel; }
+
+    public void setProbeModel(String value) {
+        this.probeModel = value == null ? "" : value.trim();
+    }
+
+    public java.util.List<String> getFallbackProbeModels() {
+        return fallbackProbeModels;
+    }
+
+    public void setFallbackProbeModels(java.util.List<String> values) {
+        this.fallbackProbeModels = values == null ? java.util.List.of() : java.util.List.copyOf(values);
+    }
 }

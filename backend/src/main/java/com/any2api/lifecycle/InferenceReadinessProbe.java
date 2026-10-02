@@ -75,18 +75,28 @@ final class InferenceReadinessProbe {
         var provider = providers.require(account.providerId());
         var transportPlan = transportModes.plan(provider);
         var model = requestedModel == null || requestedModel.isBlank()
-            ? probeModel(provider.manifest()) : requestedModel.trim();
-        var requestId = "probe-" + UUID.randomUUID();
-        var message = mapper.createObjectNode()
-            .put("role", "user")
-            .put("content", "Hello! Please reply with a short confirmation message.");
-        var raw = mapper.createObjectNode()
-            .put("model", model)
-            .put("stream", false);
-        var request = new CanonicalRequest(
-            requestId, CanonicalRequest.Protocol.CHAT_COMPLETIONS,
-            account.providerId(), model, false, List.of(message),
-            Map.of(), Map.of(), List.of(), Map.of(), raw);
+            ? probeModel(provider) : requestedModel.trim();
+        var request = createProbeRequest(account.providerId(), model);
+        return probeAttemptWithTransportFallback(provider, account, request, timeout, transportPlan)
+            .flatMap(result -> {
+                if (result.ready() || requestedModel != null || !canFallbackProbeModel(result.errorClass())) {
+                    return Mono.just(result);
+                }
+                var fallbackModels = provider.fallbackProbeModels();
+                if (fallbackModels.isEmpty()) {
+                    return Mono.just(result);
+                }
+                return tryFallbackProbeModels(provider, account, timeout, transportPlan, fallbackModels, result);
+            });
+    }
+
+    private Mono<Result> probeAttemptWithTransportFallback(
+        com.any2api.provider.InferenceProvider provider,
+        LeasedProviderAccount account,
+        CanonicalRequest request,
+        Duration timeout,
+        com.any2api.provider.ProviderTransportModeService.TransportPlan transportPlan
+    ) {
         return probeAttempt(provider, account, request, timeout, transportPlan.primary())
             .flatMap(result -> {
                 if (transportPlan.fallback() == null || result.ready()
@@ -103,6 +113,57 @@ final class InferenceReadinessProbe {
                         fallback.output(), fallback.durationMs(),
                         mergeCredentialPatches(result.credentialPatch(), fallback.credentialPatch())));
             });
+    }
+
+    private Mono<Result> tryFallbackProbeModels(
+        com.any2api.provider.InferenceProvider provider,
+        LeasedProviderAccount account,
+        Duration timeout,
+        com.any2api.provider.ProviderTransportModeService.TransportPlan transportPlan,
+        List<String> fallbackModels,
+        Result initialResult
+    ) {
+        return Flux.fromIterable(fallbackModels)
+            .filter(fbModel -> !fbModel.equalsIgnoreCase(initialResult.model()))
+            .concatMap(fbModel -> {
+                var req = createProbeRequest(account.providerId(), fbModel);
+                return probeAttemptWithTransportFallback(provider, account, req, timeout, transportPlan)
+                    .map(fbResult -> new Result(
+                        fbResult.ready(),
+                        fbResult.model(),
+                        fbResult.errorClass(),
+                        fbResult.output(),
+                        initialResult.durationMs() + fbResult.durationMs(),
+                        mergeCredentialPatches(initialResult.credentialPatch(), fbResult.credentialPatch())));
+            })
+            .filter(Result::ready)
+            .next()
+            .doOnNext(fbReady -> LOGGER.info(
+                "Inference readiness probe fallback succeeded provider={} initial_model={} fallback_model={}",
+                account.providerId(), initialResult.model(), fbReady.model()))
+            .defaultIfEmpty(initialResult);
+    }
+
+    private CanonicalRequest createProbeRequest(String providerId, String model) {
+        var requestId = "probe-" + UUID.randomUUID();
+        var message = mapper.createObjectNode()
+            .put("role", "user")
+            .put("content", "Hello! Please reply with a short confirmation message.");
+        var raw = mapper.createObjectNode()
+            .put("model", model)
+            .put("stream", false);
+        return new CanonicalRequest(
+            requestId, CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            providerId, model, false, List.of(message),
+            Map.of(), Map.of(), List.of(), Map.of(), raw);
+    }
+
+    private static boolean canFallbackProbeModel(String errorClass) {
+        if (errorClass == null || errorClass.isBlank()) return false;
+        return switch (errorClass) {
+            case "anti_bot_rejected", "rate_limited", "model_unavailable", "provider_upstream_error" -> true;
+            default -> false;
+        };
     }
 
     private Mono<Result> probeAttempt(
@@ -179,7 +240,12 @@ final class InferenceReadinessProbe {
                 model, "InferenceProbeIncomplete", safeOutput, durationMs, credentialPatch);
     }
 
-    private static String probeModel(com.any2api.provider.ProviderManifest manifest) {
+    private static String probeModel(com.any2api.provider.InferenceProvider provider) {
+        var scheduled = provider.scheduledProbeModel();
+        if (scheduled.isPresent() && !scheduled.get().isBlank()) {
+            return scheduled.get().trim();
+        }
+        var manifest = provider.manifest();
         var preferred = manifest.randomModelPreferences()
             .getOrDefault(RandomModelRole.TOP_TEXT, List.of());
         if (!preferred.isEmpty()) return preferred.getFirst();

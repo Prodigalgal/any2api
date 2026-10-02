@@ -98,7 +98,15 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override
     public java.util.Optional<String> scheduledProbeModel() {
-        return java.util.Optional.of("Max");
+        var configured = properties.getProbeModel();
+        return configured != null && !configured.isBlank()
+            ? java.util.Optional.of(configured.trim())
+            : java.util.Optional.of("gemini-3.1-flash-lite");
+    }
+
+    @Override
+    public List<String> fallbackProbeModels() {
+        return properties.getFallbackProbeModels();
     }
 
     @Override

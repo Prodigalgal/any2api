@@ -103,6 +103,57 @@ class InferenceReadinessProbeTest {
         assertThat(result.output()).isEqualTo("pong");
     }
 
+    @Test
+    void fallsBackToSecondaryProbeModelWhenPrimaryEncounteredAntiBot() {
+        var fallbackProvider = new InferenceProvider() {
+            @Override
+            public ProviderManifest manifest() {
+                return new ProviderManifest(
+                    "alpha", "Alpha", "test", "1", List.of("primary-model"),
+                    Map.of(
+                        ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                        ProviderCapability.RESPONSES, SupportLevel.NATIVE),
+                    Map.of(RandomModelRole.TOP_TEXT, List.of("primary-model")), true);
+            }
+
+            @Override
+            public List<String> fallbackProbeModels() {
+                return List.of("secondary-model");
+            }
+
+            @Override
+            public Flux<CanonicalEvent> generate(
+                CanonicalRequest request,
+                ProviderExecutionContext context,
+                LeasedProviderAccount account
+            ) {
+                if ("primary-model".equals(request.model())) {
+                    return Flux.just(new CanonicalEvent.Failed(
+                        1, request.requestId(), 1, "anti_bot_rejected", "blocked by cloudflare", Map.of()));
+                }
+                return Flux.just(
+                    new CanonicalEvent.ResponseStarted(1, request.requestId(), 0, "resp-probe"),
+                    new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1, "fallback ok"),
+                    new CanonicalEvent.Completed(1, request.requestId(), 2, "stop"));
+            }
+
+            @Override
+            public ProviderFailure classify(Throwable error) {
+                return new ProviderFailure("anti_bot_rejected", "blocked", false, Map.of());
+            }
+        };
+
+        var probe = new InferenceReadinessProbe(
+            ProviderRegistry.allEnabled(List.of(fallbackProvider)), mapper, transportModes());
+
+        var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.ready()).isTrue();
+        assertThat(result.model()).isEqualTo("secondary-model");
+        assertThat(result.output()).isEqualTo("fallback ok");
+    }
+
     private AccountEntity account() {
         var account = AccountEntity.create("alpha", "external", null, null, Map.of());
         account.updateState(AccountStatus.PENDING, false);

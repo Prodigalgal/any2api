@@ -749,5 +749,3 @@ def test_arena_reauthenticate_with_magic_link_fallback() -> None:
     assert result.external_id == "arena-user-verified"
     assert result.credential["cookies"]["arena-auth-prod-v1"] == "verified-token"
     assert result.ready_for_inference is True
-
-

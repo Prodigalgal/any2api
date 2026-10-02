@@ -2033,7 +2033,11 @@ def reauthenticate_with_credentials(
                     _arena_me_script(),
                     {"path": config["me_path"], "timeoutMs": 60_000},
                 )
-                if isinstance(candidate, dict) and candidate.get("ok") and str(candidate.get("id") or ""):
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("ok")
+                    and str(candidate.get("id") or "")
+                ):
                     profile = candidate
                     break
         elif sign_in.get("requiresVerification") or not sign_in.get("emailConfirmed"):
@@ -2059,7 +2063,11 @@ def reauthenticate_with_credentials(
                         _arena_me_script(),
                         {"path": config["me_path"], "timeoutMs": 60_000},
                     )
-                    if isinstance(candidate, dict) and candidate.get("ok") and str(candidate.get("id") or ""):
+                    if (
+                        isinstance(candidate, dict)
+                        and candidate.get("ok")
+                        and str(candidate.get("id") or "")
+                    ):
                         profile = candidate
                         break
             else:

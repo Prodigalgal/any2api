@@ -541,7 +541,7 @@ public class OpenAiResponseWriter {
                 : Set.of("account_unavailable", "model_unavailable")
                     .contains(failure.errorType())
                     ? HttpStatus.SERVICE_UNAVAILABLE
-                    : Set.of("invalid_request_error", "unsupported_parameter",
+                    : Set.of("invalid_request_error", "invalid_request", "unsupported_parameter",
                         "unknown_provider_option", "parameter_conflict")
                         .contains(failure.errorType())
                         ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY;

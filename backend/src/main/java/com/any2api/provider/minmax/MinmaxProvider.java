@@ -15,6 +15,7 @@ import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
@@ -40,41 +41,45 @@ public final class MinmaxProvider implements InferenceProvider {
             "agent_id", ProviderProtocolContract.OptionType.STRING,
             "enable_team", ProviderProtocolContract.OptionType.BOOLEAN,
             "worktree_mode", ProviderProtocolContract.OptionType.BOOLEAN),
-        java.util.Set.of("reasoning", "reasoning_effort"),
-        java.util.Set.of("reasoning", "reasoning_effort"),
-        java.util.Set.of());
+        java.util.Set.of("reasoning", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of("reasoning", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of("function"));
 
     private final OfficialBrowserTransportClient transport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final ObjectMapper mapper;
+    private final ToolEmulationEngine toolEngine;
 
     public MinmaxProvider(
         OfficialBrowserTransportClient transport,
         OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
-        ObjectMapper mapper
+        ObjectMapper mapper,
+        ToolEmulationEngine toolEngine
     ) {
         this.transport = transport;
         this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.mapper = mapper;
+        this.toolEngine = toolEngine;
     }
 
     @Override
     public ProviderManifest manifest() {
         return new ProviderManifest("minmax", "MinMax", "official-browser-minmax-agent-v2", "3",
-            List.of("MiniMax-M3.1-Flash-Preview", "MiniMax-M3", "MiniMax-M2.7-highspeed"), Map.of(
-                ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
-                ProviderCapability.RESPONSES, SupportLevel.NATIVE,
-                ProviderCapability.STREAMING, SupportLevel.NATIVE,
-                ProviderCapability.REASONING, SupportLevel.NATIVE,
-                ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
-                ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
-                ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-                ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.NATIVE,
-                ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
-                ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
+            List.of("MiniMax-M3.1-Flash-Preview", "MiniMax-M3", "MiniMax-M2.7-highspeed"), Map.ofEntries(
+                Map.entry(ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.RESPONSES, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.STREAMING, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED),
+                Map.entry(ProviderCapability.REASONING, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.REGISTRATION, SupportLevel.NATIVE),
+                Map.entry(ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE)),
             Map.of(RandomModelRole.TOP_TEXT, List.of("MiniMax-M3.1-Flash-Preview", "MiniMax-M3")), true);
     }
 
@@ -106,9 +111,7 @@ public final class MinmaxProvider implements InferenceProvider {
     @Override
     public void validate(CanonicalRequest request) {
         ProviderRequestValidation.requireInlineImageUploads(request, "MinMax");
-        if (!request.tools().isEmpty()) {
-            throw new IllegalArgumentException("MinMax does not support tools");
-        }
+        toolEngine.plan(request);
     }
 
     @Override
@@ -118,6 +121,8 @@ public final class MinmaxProvider implements InferenceProvider {
         LeasedProviderAccount account
     ) {
         MinmaxCredential.from(account);
+        var toolPlan = toolEngine.plan(request);
+        var upstreamRequest = toolEngine.prepare(request, toolPlan);
         var proxyPool = proxyPool();
         var affinityKey = proxyAffinityKey(account);
         return Flux.defer(() -> {
@@ -126,7 +131,7 @@ public final class MinmaxProvider implements InferenceProvider {
             return transport.stream(
                     manifest().id(),
                     "chat",
-                    semanticCommands.chat(request),
+                    semanticCommands.chat(upstreamRequest),
                     account.credential(),
                     proxyPool,
                     affinityKey,
@@ -154,7 +159,8 @@ public final class MinmaxProvider implements InferenceProvider {
                     ? Flux.error(new MinmaxUpstreamException(
                         status.get() < 0 ? 502 : status.get(),
                         "MinMax upstream returned HTTP " + status.get()))
-                    : Flux.fromIterable(decoder.finish())));
+                    : Flux.fromIterable(decoder.finish())))
+                .transform(events -> toolEngine.transformStream(request.requestId(), toolPlan, events));
         });
     }
 

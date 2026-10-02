@@ -62,6 +62,25 @@ class ModelRuntimeGuardTest {
         assertThat(guard.snapshot("alpha", "model").circuitState()).isEqualTo("CLOSED");
     }
 
+    @Test
+    void requestSpecificFailuresReleaseAdmissionWithoutOpeningTheProviderCircuit() {
+        var properties = new Any2ApiProperties();
+        properties.getModelRuntime().setCircuitMinimumCalls(2);
+        properties.getModelRuntime().setCircuitSlidingWindow(2);
+        var guard = new ModelRuntimeGuard(properties, new SimpleMeterRegistry());
+        var request = request();
+        for (var errorType : List.of("invalid_request", "unsupported_parameter",
+                "tool_call_generation_failed", "invalid_request_error")) {
+            for (var attempt = 0; attempt < 3; attempt++) {
+                StepVerifier.create(guard.execute(request, ignored -> Flux.just(
+                    new CanonicalEvent.Failed(1, request.requestId(), 0, errorType, "invalid", Map.of()))))
+                    .expectNextCount(1).verifyComplete();
+            }
+        }
+        assertThat(guard.snapshot("alpha", "model").circuitState()).isEqualTo("CLOSED");
+        assertThat(guard.snapshot("alpha", "model").concurrent()).isZero();
+    }
+
     private CanonicalRequest request() {
         var message = JsonNodeFactory.instance.objectNode()
             .put("role", "user").put("content", "hello");

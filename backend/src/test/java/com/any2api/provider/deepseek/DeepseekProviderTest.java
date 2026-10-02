@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 import com.any2api.proxy.ProxyPoolService;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import com.any2api.transport.OfficialBrowserTransportClient;
 import java.time.Duration;
@@ -20,7 +21,7 @@ class DeepseekProviderTest {
         var provider = new DeepseekProvider(
             mock(OfficialBrowserTransportClient.class),
             new OfficialBrowserSemanticCommandFactory(mapper),
-            mock(ProxyPoolService.class), properties, mapper);
+            mock(ProxyPoolService.class), properties, mapper, new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
         assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
@@ -62,7 +63,7 @@ class DeepseekProviderTest {
         var provider = new DeepseekProvider(
             mock(OfficialBrowserTransportClient.class),
             new OfficialBrowserSemanticCommandFactory(mapper),
-            mock(ProxyPoolService.class), properties, mapper);
+            mock(ProxyPoolService.class), properties, mapper, new ToolEmulationEngine(new ObjectMapper()));
 
         var failure = provider.classify(
             new DeepseekUpstreamException(403, "x-amzn-waf-action: challenge"));
@@ -77,7 +78,7 @@ class DeepseekProviderTest {
         var provider = new DeepseekProvider(
             mock(OfficialBrowserTransportClient.class),
             new OfficialBrowserSemanticCommandFactory(mapper),
-            mock(ProxyPoolService.class), properties, mapper);
+            mock(ProxyPoolService.class), properties, mapper, new ToolEmulationEngine(new ObjectMapper()));
 
         var failure = provider.classify(new DeepseekUpstreamException(403, "forbidden"));
 

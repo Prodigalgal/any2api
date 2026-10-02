@@ -16,6 +16,7 @@ import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -44,17 +45,18 @@ public final class GlmProvider implements InferenceProvider {
         java.util.Set.of(
             "temperature", "top_p", "max_tokens", "max_completion_tokens",
             "max_output_tokens", "reasoning", "reasoning_effort", "web_search",
-            "preview_mode"),
+            "preview_mode", "tools", "tool_choice", "parallel_tool_calls"),
         java.util.Set.of(
             "temperature", "top_p", "max_tokens", "max_completion_tokens",
             "max_output_tokens", "reasoning", "reasoning_effort", "web_search",
-            "preview_mode"),
-        java.util.Set.of());
+            "preview_mode", "tools", "tool_choice", "parallel_tool_calls"),
+        java.util.Set.of("function"));
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "glm", "GLM", "official-browser-z-ai-web-v1", "3", List.of("glm-5.3", "glm-5.2", "glm-4-flash"), Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
             ProviderCapability.RESPONSES, SupportLevel.NATIVE,
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
+            ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
             ProviderCapability.REASONING, SupportLevel.NATIVE,
             ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
@@ -67,19 +69,22 @@ public final class GlmProvider implements InferenceProvider {
     private final ObjectMapper mapper;
     private final OfficialBrowserTransportClient officialTransport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
+    private final ToolEmulationEngine toolEngine;
 
     public GlmProvider(
         GlmProperties properties,
         ProxyPoolService proxyPools,
         ObjectMapper mapper,
         OfficialBrowserTransportClient officialTransport,
-        OfficialBrowserSemanticCommandFactory semanticCommands
+        OfficialBrowserSemanticCommandFactory semanticCommands,
+        ToolEmulationEngine toolEngine
     ) {
         this.properties = properties;
         this.proxyPools = proxyPools;
         this.mapper = mapper;
         this.officialTransport = officialTransport;
         this.semanticCommands = semanticCommands;
+        this.toolEngine = toolEngine;
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
@@ -127,9 +132,7 @@ public final class GlmProvider implements InferenceProvider {
         ProviderRequestValidation.requireInlineImageUploads(request, "GLM");
         ProviderRequestValidation.requireReasoningBooleanConsistency(
             request, "enable_thinking", java.util.Set.of("none", "minimal", "low"));
-        if (!request.tools().isEmpty()) {
-            throw new IllegalArgumentException("GLM does not support function tools");
-        }
+        toolEngine.plan(request);
     }
 
     @Override
@@ -139,16 +142,18 @@ public final class GlmProvider implements InferenceProvider {
         LeasedProviderAccount account
     ) {
         GlmCredential.from(account);
+        var toolPlan = toolEngine.plan(request);
+        var upstreamRequest = toolEngine.prepare(request, toolPlan);
         var decoder = new GlmEventDecoder(request.requestId(), mapper);
         var proxyPool = proxyPools.runtimeForProvider(
             manifest().id(), ProxyTrafficScope.INFERENCE).orElse(Map.of());
         var status = new AtomicInteger(-1);
         var upstream = context.transportMode() == ProviderTransportMode.API
             ? officialTransport.stream(
-                manifest().id(), "chat", semanticCommands.chat(request), account.credential(),
+                manifest().id(), "chat", semanticCommands.chat(upstreamRequest), account.credential(),
                 proxyPool, proxyAffinityKey(account), runtimeOptions(), context.transportMode())
             : officialTransport.stream(
-                manifest().id(), "chat", semanticCommands.chat(request),
+                manifest().id(), "chat", semanticCommands.chat(upstreamRequest),
                 account.credential(), proxyPool, proxyAffinityKey(account));
         return upstream
             .handle((frame, sink) -> {
@@ -181,7 +186,8 @@ public final class GlmProvider implements InferenceProvider {
                     "GLM upstream returned HTTP " + status.get()))
                 : Flux.fromIterable(decoder.finish())))
             .takeUntil(event -> event instanceof CanonicalEvent.Completed
-                || event instanceof CanonicalEvent.Failed);
+                || event instanceof CanonicalEvent.Failed)
+            .transform(events -> toolEngine.transformStream(request.requestId(), toolPlan, events));
     }
 
     @Override

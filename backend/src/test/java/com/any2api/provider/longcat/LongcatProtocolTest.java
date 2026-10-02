@@ -193,6 +193,37 @@ class LongcatProtocolTest {
         assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed);
     }
 
+    @Test
+    void acceptsMatchingToolResultImagesAndRejectsOrphanOrHistoricalUploadsBeforeExecution() {
+        var mapper = new ObjectMapper();
+        var provider = new LongcatProvider(mock(OfficialBrowserTransportClient.class),
+            new OfficialBrowserSemanticCommandFactory(mapper), mock(ProxyPoolService.class),
+            new LongcatProperties(), new LongcatToolProtocol(mapper), mapper);
+        var user = mapper.createObjectNode().put("role", "user").put("content", "Read the tool image");
+        var assistant = mapper.createObjectNode().put("role", "assistant").put("content", "");
+        assistant.putArray("tool_calls").addObject().put("id", "call_image")
+            .putObject("function").put("name", "capture").put("arguments", "{}");
+        var result = mapper.createObjectNode().put("role", "tool").put("tool_call_id", "call_image");
+        result.putArray("content").addObject().put("type", "input_image")
+            .put("image_url", "data:image/png;base64,YQ==");
+        var request = new CanonicalRequest("media-tool", CanonicalRequest.Protocol.RESPONSES,
+            "longcat", "longcat-flash", false, List.of(user, assistant, result),
+            Map.of(), Map.of(), List.of(), Map.of(), mapper.createObjectNode());
+        provider.validate(request);
+        assertThat(new LongcatRequestMapper(mapper, new LongcatToolProtocol(mapper))
+            .prepare(request).content()).contains("TOOL call_image");
+
+        result.put("tool_call_id", "orphan");
+        assertThatThrownBy(() -> provider.validate(request))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("matching trailing tool result");
+        result.put("role", "user");
+        var historical = new CanonicalRequest("old", request.protocol(), "longcat", request.model(),
+            false, List.of(result, user), Map.of(), Map.of(), List.of(), Map.of(), mapper.createObjectNode());
+        assertThatThrownBy(() -> provider.validate(historical)).hasMessageContaining("latest user");
+        assertThat(provider.classify(new LongcatUpstreamException(400, "invalid upload")).type())
+            .isEqualTo("invalid_request");
+    }
+
     private CanonicalRequest request(
         ObjectMapper mapper,
         tools.jackson.databind.JsonNode toolNodes,

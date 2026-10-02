@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.provider.DiscoveredModel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -181,7 +182,7 @@ class ArenaProtocolTest {
             mock(ProxyPoolService.class),
             mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         var failure = provider.classify(new ArenaUpstreamException(
             429, "Arena upstream returned HTTP 429: {\"error\":\"prompt failed\"}"));
@@ -198,7 +199,7 @@ class ArenaProtocolTest {
             mock(ProxyPoolService.class),
             mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         var failure = provider.classify(new ArenaUpstreamException(
             403, "Arena upstream returned HTTP 403: {\"error\":\"recaptcha validation failed\"}"));
@@ -214,7 +215,7 @@ class ArenaProtocolTest {
             mock(ProxyPoolService.class),
             mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
         var model = new DiscoveredModel("Max", "Max", Map.of(
             "arena_capabilities", Map.of(
                 "inputCapabilities", Map.of(
@@ -234,7 +235,7 @@ class ArenaProtocolTest {
             mock(ProxyPoolService.class),
             mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.scheduledModelProbeEnabled()).isTrue();
     }

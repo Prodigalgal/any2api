@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     captcha_diagnostics_max_files: int = 200
     registration_headless: bool = True
     registration_timeout_seconds: int = 360
+    inference_timeout_seconds: int = Field(default=240, ge=30, le=1800)
+    inference_first_frame_timeout_seconds: int = Field(default=90, ge=5, le=600)
     browser_cleanup_timeout_seconds: int = 5
     registration_proxy_url: str = ""
     registration_use_dynamic_proxy: bool = False

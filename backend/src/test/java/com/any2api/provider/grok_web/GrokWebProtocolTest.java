@@ -1,6 +1,7 @@
 package com.any2api.provider.grok_web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -443,6 +444,34 @@ class GrokWebProtocolTest {
         verify(transport, times(1)).sendWebSocket(anyString(), anyString(), any());
         verify(transport, times(2)).receiveWebSocket("session", "socket");
         verify(transport).closeWebSocket("session", "socket");
+    }
+
+    @Test
+    void requiredFunctionChoiceRejectsMissingWrongOrForbiddenParallelCalls() {
+        var tool = mapper.createObjectNode().put("type", "function").put("name", "lookup");
+        var other = mapper.createObjectNode().put("type", "function").put("name", "other");
+        var raw = mapper.createObjectNode().put("parallel_tool_calls", false);
+        raw.putObject("tool_choice").put("type", "function").put("name", "lookup");
+        var request = request(CanonicalRequest.Protocol.CHAT_COMPLETIONS, raw,
+            List.of(tool, other), List.of(message("user", "lookup")));
+        var protocol = new GrokWebToolProtocol(mapper);
+        var configuration = protocol.parse(request);
+        var missing = protocol.sieve(configuration);
+        assertThat(missing.feed("plain answer").safeText()).isEmpty();
+        assertThatThrownBy(missing::flush).hasMessageContaining("required function call");
+        var wrong = protocol.sieve(configuration);
+        assertThatThrownBy(() -> wrong.feed("<tool_calls><tool_call><tool_name>other</tool_name>"
+            + "<parameters>{}</parameters></tool_call></tool_calls>"))
+            .hasMessageContaining("required function call");
+        var multiple = protocol.sieve(configuration);
+        assertThatThrownBy(() -> multiple.feed("<tool_calls>"
+            + "<tool_call><tool_name>lookup</tool_name><parameters>{}</parameters></tool_call>"
+            + "<tool_call><tool_name>lookup</tool_name><parameters>{}</parameters></tool_call></tool_calls>"))
+            .hasMessageContaining("parallel_tool_calls=false");
+        var failure = new GrokWebFailureClassifier().classify(
+            new GrokWebEventDecoder.GrokWebStreamException("tool_call_generation_failed", "missing"));
+        assertThat(failure.type()).isEqualTo("tool_call_generation_failed");
+        assertThat(failure.retryable()).isFalse();
     }
 
     private GrokWebRequestMapper requestMapper() {

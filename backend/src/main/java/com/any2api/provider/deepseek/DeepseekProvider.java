@@ -17,6 +17,7 @@ import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -41,11 +42,11 @@ public final class DeepseekProvider implements InferenceProvider {
             "search_enabled", ProviderProtocolContract.OptionType.BOOLEAN),
         Set.of(
             "reasoning", "reasoning_effort", "enable_thinking",
-            "web_search", "enable_search", "search", "tools", "tool_choice"),
+            "web_search", "enable_search", "search", "tools", "tool_choice", "parallel_tool_calls"),
         Set.of(
             "reasoning", "reasoning_effort", "enable_thinking",
-            "web_search", "enable_search", "search", "tools", "tool_choice"),
-        Set.of("web_search", "web_search_preview", "search"));
+            "web_search", "enable_search", "search", "tools", "tool_choice", "parallel_tool_calls"),
+        Set.of("function", "web_search", "web_search_preview", "search"));
 
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "deepseek", "DeepSeek", "native-deepseek-web-v2.3", "2",
@@ -53,6 +54,7 @@ public final class DeepseekProvider implements InferenceProvider {
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
             ProviderCapability.RESPONSES, SupportLevel.NATIVE,
             ProviderCapability.STREAMING, SupportLevel.NATIVE,
+            ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
             ProviderCapability.REASONING, SupportLevel.NATIVE,
             ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
@@ -65,19 +67,22 @@ public final class DeepseekProvider implements InferenceProvider {
     private final ProxyPoolService proxyPools;
     private final DeepseekProperties properties;
     private final ObjectMapper mapper;
+    private final ToolEmulationEngine toolEngine;
 
     public DeepseekProvider(
         OfficialBrowserTransportClient transport,
         OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         DeepseekProperties properties,
-        ObjectMapper mapper
+        ObjectMapper mapper,
+        ToolEmulationEngine toolEngine
     ) {
         this.transport = transport;
         this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.properties = properties;
         this.mapper = mapper;
+        this.toolEngine = toolEngine;
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
@@ -104,15 +109,17 @@ public final class DeepseekProvider implements InferenceProvider {
             request, "enable_thinking", "web_search", "enable_search", "search");
         ProviderRequestValidation.requireConsistentBooleanAliases(
             request, "search_enabled", "web_search", "enable_search", "search");
+        toolEngine.plan(request);
         var toolChoice = request.rawRequest().path("tool_choice");
         if (!toolChoice.isMissingNode() && !toolChoice.isNull()
+            && request.tools().stream().noneMatch(tool -> "function".equals(tool.path("type").asText("function")))
             && (!toolChoice.isTextual()
                 || !Set.of("auto", "none").contains(toolChoice.asText().toLowerCase()))) {
             throw new IllegalArgumentException("DeepSeek tool_choice supports only auto or none");
         }
         var unsupported = request.tools().stream()
             .map(tool -> tool.path("type").asText("function"))
-            .filter(type -> !Set.of("web_search", "web_search_preview", "search").contains(type))
+            .filter(type -> !Set.of("function", "web_search", "web_search_preview", "search").contains(type))
             .sorted().toList();
         if (!unsupported.isEmpty()) {
             throw new IllegalArgumentException(
@@ -147,16 +154,18 @@ public final class DeepseekProvider implements InferenceProvider {
         LeasedProviderAccount account
     ) {
         validateCredential(account.credential());
+        var toolPlan = toolEngine.plan(request);
+        var upstreamRequest = toolEngine.prepare(request, toolPlan);
         return Flux.defer(() -> {
             var decoder = new DeepseekEventDecoder(request.requestId(), mapper);
             var status = new AtomicInteger(-1);
             var upstream = context.transportMode() == ProviderTransportMode.API
                 ? transport.stream(
-                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    MANIFEST.id(), "chat", semanticCommands.chat(upstreamRequest), account.credential(),
                     proxyPool(), proxyAffinityKey(account), runtimeOptions(),
                     context.transportMode())
                 : transport.stream(
-                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    MANIFEST.id(), "chat", semanticCommands.chat(upstreamRequest), account.credential(),
                     proxyPool(), proxyAffinityKey(account), runtimeOptions());
             return upstream
                 .handle((frame, sink) -> {
@@ -182,7 +191,8 @@ public final class DeepseekProvider implements InferenceProvider {
                     ? Flux.error(new DeepseekUpstreamException(
                         status.get() < 0 ? 502 : status.get(),
                         "DeepSeek upstream returned HTTP " + status.get()))
-                    : Flux.fromIterable(decoder.finish())));
+                    : Flux.fromIterable(decoder.finish())))
+                .transform(events -> toolEngine.transformStream(request.requestId(), toolPlan, events));
         });
     }
 

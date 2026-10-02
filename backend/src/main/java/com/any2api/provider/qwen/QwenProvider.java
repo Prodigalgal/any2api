@@ -17,6 +17,7 @@ import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -42,31 +43,34 @@ public final class QwenProvider implements InferenceProvider {
             "temperature", "top_p", "max_tokens", "max_completion_tokens",
             "max_output_tokens", "reasoning", "reasoning_effort", "thinking_mode",
             "enable_thinking", "thinking_budget", "web_search", "enable_search", "search",
-            "tools", "tool_choice"),
+            "tools", "tool_choice", "parallel_tool_calls"),
         Set.of(
             "temperature", "top_p", "max_tokens", "max_completion_tokens",
             "max_output_tokens", "reasoning", "reasoning_effort", "thinking_mode",
             "enable_thinking", "thinking_budget", "web_search", "enable_search", "search",
-            "tools", "tool_choice"),
-        Set.of("web_search", "web_search_preview", "search"));
+            "tools", "tool_choice", "parallel_tool_calls"),
+        Set.of("function", "web_search", "web_search_preview", "search"));
     private final OfficialBrowserTransportClient transport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
     private final QwenProperties properties;
     private final ObjectMapper mapper;
+    private final ToolEmulationEngine toolEngine;
 
     public QwenProvider(
         OfficialBrowserTransportClient transport,
         OfficialBrowserSemanticCommandFactory semanticCommands,
         ProxyPoolService proxyPools,
         QwenProperties properties,
-        ObjectMapper mapper
+        ObjectMapper mapper,
+        ToolEmulationEngine toolEngine
     ) {
         this.transport = transport;
         this.semanticCommands = semanticCommands;
         this.proxyPools = proxyPools;
         this.properties = properties;
         this.mapper = mapper;
+        this.toolEngine = toolEngine;
     }
 
     @Override
@@ -76,6 +80,7 @@ public final class QwenProvider implements InferenceProvider {
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.STREAMING, SupportLevel.NATIVE,
+                ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED,
                 ProviderCapability.REASONING, SupportLevel.NATIVE,
                 ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE,
                 ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
@@ -126,8 +131,10 @@ public final class QwenProvider implements InferenceProvider {
         ProviderRequestValidation.requireConsistentBooleanAliases(
             request, "web_search", "web_search", "enable_search", "search");
         validateThinkingAliases(request);
+        toolEngine.plan(request);
         var toolChoice = request.rawRequest().path("tool_choice");
         if (!toolChoice.isMissingNode() && !toolChoice.isNull()
+            && request.tools().stream().noneMatch(tool -> "function".equals(tool.path("type").asText("function")))
             && (!toolChoice.isTextual()
                 || !Set.of("auto", "none").contains(toolChoice.asText().toLowerCase()))) {
             throw new IllegalArgumentException(
@@ -135,7 +142,7 @@ public final class QwenProvider implements InferenceProvider {
         }
         var unsupportedTools = request.tools().stream()
             .map(tool -> tool.path("type").asText("function"))
-            .filter(type -> !Set.of("web_search", "web_search_preview", "search").contains(type))
+            .filter(type -> !Set.of("function", "web_search", "web_search_preview", "search").contains(type))
             .sorted()
             .toList();
         if (!unsupportedTools.isEmpty()) {
@@ -184,14 +191,16 @@ public final class QwenProvider implements InferenceProvider {
         ProviderExecutionContext context,
         LeasedProviderAccount account
     ) {
+        var toolPlan = toolEngine.plan(request);
+        var upstreamRequest = toolEngine.prepare(request, toolPlan);
         var decoder = new QwenEventDecoder(request.requestId());
         var status = new java.util.concurrent.atomic.AtomicInteger(-1);
         var upstream = context.transportMode() == ProviderTransportMode.API
             ? transport.stream(
-                manifest().id(), "chat", semanticCommands.chat(request), account.credential(),
+                manifest().id(), "chat", semanticCommands.chat(upstreamRequest), account.credential(),
                 proxyPool(), proxyAffinityKey(account), runtimeOptions(), context.transportMode())
             : transport.stream(
-                manifest().id(), "chat", semanticCommands.chat(request), account.credential(),
+                manifest().id(), "chat", semanticCommands.chat(upstreamRequest), account.credential(),
                 proxyPool(), proxyAffinityKey(account), runtimeOptions());
         return upstream
             .handle((frame, sink) -> {
@@ -221,7 +230,8 @@ public final class QwenProvider implements InferenceProvider {
                 ? Flux.error(new QwenUpstreamException(
                     status.get() < 0 ? 502 : status.get(),
                     "Qwen upstream returned HTTP " + status.get()))
-                : Flux.fromIterable(decoder.finish())));
+                : Flux.fromIterable(decoder.finish())))
+            .transform(events -> toolEngine.transformStream(request.requestId(), toolPlan, events));
     }
 
     @Override

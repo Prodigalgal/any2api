@@ -21,6 +21,26 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class ModelCatalogCache {
     private static final String MODEL_QUERY = """
+        WITH eligible_accounts AS MATERIALIZED (
+            SELECT id, provider_id FROM accounts
+            WHERE enabled = TRUE AND status IN ('ACTIVE', 'DEGRADED')
+              AND (cooldown_until IS NULL OR cooldown_until <= CURRENT_TIMESTAMP)
+              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+        ), provider_accounts AS (
+            SELECT provider_id, COUNT(*) AS eligible_accounts
+            FROM eligible_accounts GROUP BY provider_id
+        ), model_cooldowns AS (
+            SELECT account.provider_id, cooldown.model_id,
+                   COUNT(DISTINCT account.id) AS cooled_accounts,
+                   COUNT(DISTINCT account.id) FILTER (
+                       WHERE cooldown.reason ~* '(rate|quota|limit|credit|balance)'
+                   ) AS quota_limited_accounts
+            FROM eligible_accounts account
+            JOIN account_model_cooldowns cooldown
+              ON cooldown.account_id = account.id AND cooldown.provider_id = account.provider_id
+            WHERE cooldown.cooldown_until > CURRENT_TIMESTAMP
+            GROUP BY account.provider_id, cooldown.model_id
+        )
         SELECT m.upstream_id, m.display_name, m.provider_id,
                p.display_name AS provider_name,
                m.capabilities::text AS discovered_capabilities,
@@ -76,31 +96,15 @@ public class ModelCatalogCache {
                  ) AS available
         FROM models m
         JOIN providers p ON p.id = m.provider_id
-        LEFT JOIN LATERAL (
-            SELECT
-                COUNT(*) AS eligible_accounts,
-                COUNT(*) FILTER (WHERE NOT EXISTS (
-                    SELECT 1 FROM account_model_cooldowns cooldown
-                    WHERE cooldown.account_id = account.id
-                      AND cooldown.provider_id = m.provider_id
-                      AND cooldown.model_id = m.upstream_id
-                      AND cooldown.cooldown_until > CURRENT_TIMESTAMP
-                )) AS available_accounts,
-                COUNT(*) FILTER (WHERE EXISTS (
-                    SELECT 1 FROM account_model_cooldowns cooldown
-                    WHERE cooldown.account_id = account.id
-                      AND cooldown.provider_id = m.provider_id
-                      AND cooldown.model_id = m.upstream_id
-                      AND cooldown.cooldown_until > CURRENT_TIMESTAMP
-                      AND cooldown.reason ~* '(rate|quota|limit|credit|balance)'
-                )) AS quota_limited_accounts
-            FROM accounts account
-            WHERE account.provider_id = m.provider_id
-              AND account.enabled = TRUE
-              AND account.status IN ('ACTIVE', 'DEGRADED')
-              AND (account.cooldown_until IS NULL OR account.cooldown_until <= CURRENT_TIMESTAMP)
-              AND (account.expires_at IS NULL OR account.expires_at > CURRENT_TIMESTAMP)
-        ) account_runtime ON TRUE
+        LEFT JOIN provider_accounts ON provider_accounts.provider_id = m.provider_id
+        LEFT JOIN model_cooldowns
+          ON model_cooldowns.provider_id = m.provider_id AND model_cooldowns.model_id = m.upstream_id
+        CROSS JOIN LATERAL (
+            SELECT COALESCE(provider_accounts.eligible_accounts, 0) AS eligible_accounts,
+                   COALESCE(provider_accounts.eligible_accounts, 0)
+                     - COALESCE(model_cooldowns.cooled_accounts, 0) AS available_accounts,
+                   COALESCE(model_cooldowns.quota_limited_accounts, 0) AS quota_limited_accounts
+        ) account_runtime
         LEFT JOIN LATERAL (
             SELECT COUNT(*) AS request_count,
                    COALESCE(SUM(usage.attempt_count), 0) AS attempt_count,

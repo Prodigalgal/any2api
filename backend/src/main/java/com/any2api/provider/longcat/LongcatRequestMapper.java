@@ -49,11 +49,23 @@ final class LongcatRequestMapper {
 
     private String prompt(List<JsonNode> messages) {
         var blocks = new ArrayList<String>();
+        var attachment = 0;
         for (var message : messages) {
             var role = message.path("role").asText("user").toUpperCase();
             var content = content(message.path("content"));
             if ("ASSISTANT".equals(role) && message.path("tool_calls").isArray()) {
                 content += "\n" + message.path("tool_calls").toString();
+            }
+            if ("TOOL".equals(role)) role += " " + message.path("tool_call_id").asText("");
+            if (message.path("content").isArray()) {
+                for (var part : message.path("content")) {
+                    var type = part.path("type").asText("");
+                    if (Set.of("input_image", "image_url", "image").contains(type)) {
+                        content += "\n[Attached image " + (++attachment) + "]";
+                    } else if (Set.of("input_file", "file", "attachment").contains(type)) {
+                        content += "\n[Attached file " + (++attachment) + "]";
+                    }
+                }
             }
             if (!content.isBlank()) blocks.add("[" + role + "]\n" + content);
         }

@@ -17,6 +17,11 @@ def main() -> None:
     )
     parser.add_argument("--fixture", action="store_true")
     parser.add_argument(
+        "--core",
+        action="store_true",
+        help="Test common Chat/Responses function APIs only.",
+    )
+    parser.add_argument(
         "--no-reasoning",
         action="store_true",
         help="Omit reasoning for models that do not support it.",
@@ -43,14 +48,24 @@ def main() -> None:
         checks.append(name)
         print("PASS", name, flush=True)
 
+    if args.core:
+        assert client.models.list().data
+        passed("models discovery")
+
     text = client.responses.create(
         model=args.model,
         input="Reply with a short confirmation.",
         store=False,
-        include=["reasoning.encrypted_content"],
-        **({} if args.no_reasoning else {"reasoning": {"summary": "auto"}}),
-        text={"verbosity": "low"},
-        extra_body={"client_metadata": {"client": "any2api-sdk-smoke"}},
+        **(
+            {}
+            if args.core
+            else {
+                "include": ["reasoning.encrypted_content"],
+                "text": {"verbosity": "low"},
+                "extra_body": {"client_metadata": {"client": "any2api-sdk-smoke"}},
+                **({} if args.no_reasoning else {"reasoning": {"summary": "auto"}}),
+            }
+        ),
     )
     assert text.status == "completed" and text.output_text
     passed("responses nonstream/client fields")
@@ -82,7 +97,7 @@ def main() -> None:
     }
     first = client.responses.create(
         model=args.model,
-        input="Use inspect_workspace to inspect the directory.",
+        input="Use inspect_workspace to inspect the directory, then report the exact filename from its result.",
         tools=[function],
         tool_choice="required",
         store=True,
@@ -103,6 +118,8 @@ def main() -> None:
         store=True,
     )
     assert second.status == "completed" and second.output_text
+    if args.core:
+        assert "demo.txt" in second.output_text
     assert client.responses.retrieve(first.id).id == first.id
     page = client.responses.input_items.list(second.id, limit=1, order="asc")
     assert len(page.data) == 1 and page.has_more
@@ -133,76 +150,77 @@ def main() -> None:
         pass
     passed("stored function loop/retrieve/pagination/delete/ownership")
 
-    namespace = {
-        "type": "namespace",
-        "name": "local",
-        "tools": [{**function, "name": "inspect"}],
-    }
-    with client.responses.stream(
-        model=args.model,
-        input="Inspect using the local namespace.",
-        tools=[namespace],
-        tool_choice={"type": "function", "namespace": "local", "name": "inspect"},
-        store=False,
-    ) as stream:
-        for _ in stream:
-            pass
-        namespaced = stream.get_final_response()
-    call = next(item for item in namespaced.output if item.type == "function_call")
-    assert call.name == "inspect" and call.namespace == "local"
-    passed("namespace identity/function argument stream")
+    if not args.core:
+        namespace = {
+            "type": "namespace",
+            "name": "local",
+            "tools": [{**function, "name": "inspect"}],
+        }
+        with client.responses.stream(
+            model=args.model,
+            input="Inspect using the local namespace.",
+            tools=[namespace],
+            tool_choice={"type": "function", "namespace": "local", "name": "inspect"},
+            store=False,
+        ) as stream:
+            for _ in stream:
+                pass
+            namespaced = stream.get_final_response()
+        call = next(item for item in namespaced.output if item.type == "function_call")
+        assert call.name == "inspect" and call.namespace == "local"
+        passed("namespace identity/function argument stream")
 
-    custom = client.responses.create(
-        model=args.model,
-        input="Call echo.",
-        store=False,
-        tools=[
-            {
-                "type": "custom",
-                "name": "echo",
-                "description": "Echo a string",
-                "format": {"type": "text"},
-            }
-        ],
-        tool_choice={"type": "custom", "name": "echo"},
-    )
-    custom_call = next(
-        item for item in custom.output if item.type == "custom_tool_call"
-    )
-    assert custom_call.name == "echo" and custom_call.input
-    replay = [item.model_dump(exclude_none=True) for item in custom.output]
-    follow = client.responses.create(
-        model=args.model,
-        store=False,
-        input=replay
-        + [
-            {
-                "type": "custom_tool_call_output",
-                "call_id": custom_call.call_id,
-                "output": "demo.txt",
-            }
-        ],
-    )
-    assert follow.output_text
-    passed("custom tool/result replay")
+        custom = client.responses.create(
+            model=args.model,
+            input="Call echo.",
+            store=False,
+            tools=[
+                {
+                    "type": "custom",
+                    "name": "echo",
+                    "description": "Echo a string",
+                    "format": {"type": "text"},
+                }
+            ],
+            tool_choice={"type": "custom", "name": "echo"},
+        )
+        custom_call = next(
+            item for item in custom.output if item.type == "custom_tool_call"
+        )
+        assert custom_call.name == "echo" and custom_call.input
+        replay = [item.model_dump(exclude_none=True) for item in custom.output]
+        follow = client.responses.create(
+            model=args.model,
+            store=False,
+            input=replay
+            + [
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": custom_call.call_id,
+                    "output": "demo.txt",
+                }
+            ],
+        )
+        assert follow.output_text
+        passed("custom tool/result replay")
 
-    with client.responses.stream(
-        model=args.model,
-        input="Call echo.",
-        store=False,
-        tools=[{"type": "custom", "name": "echo", "format": {"type": "text"}}],
-        tool_choice={"type": "custom", "name": "echo"},
-    ) as stream:
-        custom_deltas = []
-        for event in stream:
-            if event.type == "response.custom_tool_call_input.delta":
-                custom_deltas.append(event.delta)
-        streamed_custom = stream.get_final_response()
-    custom_call = next(
-        item for item in streamed_custom.output if item.type == "custom_tool_call"
-    )
-    assert custom_deltas and "".join(custom_deltas) == custom_call.input
-    passed("custom SDK stream accumulation")
+        with client.responses.stream(
+            model=args.model,
+            input="Call echo.",
+            store=False,
+            tools=[{"type": "custom", "name": "echo", "format": {"type": "text"}}],
+            tool_choice={"type": "custom", "name": "echo"},
+        ) as stream:
+            custom_deltas = []
+            for event in stream:
+                if event.type == "response.custom_tool_call_input.delta":
+                    custom_deltas.append(event.delta)
+            streamed_custom = stream.get_final_response()
+        custom_call = next(
+            item for item in streamed_custom.output if item.type == "custom_tool_call"
+        )
+        assert custom_deltas and "".join(custom_deltas) == custom_call.input
+        passed("custom SDK stream accumulation")
 
     chat_tools = [
         {
@@ -214,7 +232,12 @@ def main() -> None:
     ]
     chat = client.chat.completions.create(
         model=args.model,
-        messages=[{"role": "user", "content": "Use the inspection tool."}],
+        messages=[
+            {
+                "role": "user",
+                "content": "Use the inspection tool, then report the exact filename from its result.",
+            }
+        ],
         tools=chat_tools,
         tool_choice="required",
     )
@@ -223,7 +246,10 @@ def main() -> None:
     reply = client.chat.completions.create(
         model=args.model,
         messages=[
-            {"role": "user", "content": "Use the inspection tool."},
+            {
+                "role": "user",
+                "content": "Use the inspection tool, then report the exact filename from its result.",
+            },
             message.model_dump(exclude_none=True),
         ]
         + [
@@ -232,6 +258,8 @@ def main() -> None:
         ],
     )
     assert reply.choices[0].message.content
+    if args.core:
+        assert "demo.txt" in reply.choices[0].message.content
     chunks = list(
         client.chat.completions.create(
             model=args.model,
@@ -244,6 +272,25 @@ def main() -> None:
         chunk.choices and chunk.choices[0].delta.content for chunk in chunks
     )
     passed("chat function loop/stream/usage")
+
+    if args.core:
+        with client.responses.stream(
+            model=args.model,
+            input="Call inspect_workspace.",
+            tools=[function],
+            tool_choice={"type": "function", "name": "inspect_workspace"},
+            parallel_tool_calls=False,
+            store=False,
+        ) as stream:
+            deltas = []
+            for event in stream:
+                if event.type == "response.function_call_arguments.delta":
+                    deltas.append(event.delta)
+            response = stream.get_final_response()
+        call = next(item for item in response.output if item.type == "function_call")
+        assert call.name == "inspect_workspace" and "".join(deltas) == call.arguments
+        assert isinstance(json.loads(call.arguments), dict)
+        passed("ordinary function SSE/named choice/argument accumulation")
 
     if args.fixture:
         with client.responses.stream(
@@ -323,7 +370,8 @@ def main() -> None:
         "client_timeout_seconds": args.timeout,
         "upstream": "fixture" if args.fixture else "authorized-provider",
         "model": args.model,
-        "reasoning_requested": not args.no_reasoning,
+        "core_only": args.core,
+        "reasoning_requested": not (args.no_reasoning or args.core),
         "cross_key_checked": bool(other_key),
         "checks": checks,
         "first_delta_seconds": first_delta,

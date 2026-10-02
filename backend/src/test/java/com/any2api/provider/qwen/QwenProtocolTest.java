@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -33,7 +34,7 @@ class QwenProtocolTest {
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class), mock(ProxyPoolService.class),
             new QwenProperties(),
-            new ObjectMapper());
+            new ObjectMapper(), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
         assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
@@ -85,7 +86,7 @@ class QwenProtocolTest {
             .thenReturn(Mono.just(response));
         var provider = new QwenProvider(
             transport, mock(OfficialBrowserSemanticCommandFactory.class), proxyPools,
-            new QwenProperties(), mapper);
+            new QwenProperties(), mapper, new ToolEmulationEngine(new ObjectMapper()));
 
         StepVerifier.create(provider.discoverModels(account))
             .assertNext(models -> assertThat(models).isEmpty())
@@ -138,7 +139,7 @@ class QwenProtocolTest {
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class), mock(ProxyPoolService.class),
             new QwenProperties(),
-            new ObjectMapper());
+            new ObjectMapper(), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.manifest().randomModelPreferences())
             .containsKey(RandomModelRole.TOP_TEXT)
@@ -151,7 +152,7 @@ class QwenProtocolTest {
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class), mock(ProxyPoolService.class),
             new QwenProperties(),
-            new ObjectMapper());
+            new ObjectMapper(), new ToolEmulationEngine(new ObjectMapper()));
 
         var failure = provider.classify(new QwenUpstreamException(
             403, "Qwen native browser was redirected to an anti-bot challenge"));

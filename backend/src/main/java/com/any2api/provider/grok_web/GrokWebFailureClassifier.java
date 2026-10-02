@@ -36,6 +36,9 @@ final class GrokWebFailureClassifier {
                 Map.of("status", upstream.status(), "channel", "web"));
         }
         if (error instanceof GrokWebEventDecoder.GrokWebStreamException stream) {
+            if ("tool_call_generation_failed".equals(stream.code())) {
+                return new ProviderFailure(stream.code(), stream.getMessage(), false, Map.of("channel", "web"));
+            }
             if (rateLimited(stream.code() + " " + message)) {
                 return new ProviderFailure("rate_limited", "Grok Web model quota is exhausted",
                     true, Map.of("code", stream.code(), "channel", "web"));

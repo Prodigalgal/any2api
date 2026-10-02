@@ -42,23 +42,12 @@ final class ArenaRequestMapper {
             throw OpenAiRequestException.unsupported(
                 "reasoning", "Arena does not translate reasoning parameters");
         }
-        if (!request.tools().isEmpty()) {
-            throw OpenAiRequestException.unsupported("tools", "Arena does not support tools");
-        }
         var raw = request.rawRequest();
         if (raw == null) return;
         requireBoolean(raw.path("web_search"), "web_search");
         rejectIfPresent(raw, "response_format");
-        rejectIfPresent(raw, "stream_options");
         rejectIfPresent(raw, "text");
         rejectIfPresent(raw, "metadata");
-        rejectIfPresent(raw, "parallel_tool_calls");
-        var toolChoice = raw.path("tool_choice");
-        if (!toolChoice.isMissingNode() && !toolChoice.isNull()
-            && (!toolChoice.isTextual() || !"none".equalsIgnoreCase(toolChoice.asText().trim()))) {
-            throw OpenAiRequestException.unsupported(
-                "tool_choice", "Arena only accepts tool_choice=none because tools are unsupported");
-        }
     }
 
     private static void requireBoolean(Object value, String field) {

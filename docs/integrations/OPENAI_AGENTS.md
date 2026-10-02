@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.24.4）
+# OpenAI API 到厂商 WEB 的桥接（0.25.0 候选）
 
 ## 范围
 
@@ -22,6 +22,8 @@
 `strict:true`、custom grammar、defer_loading/tool search、原生 hosted tools、opaque encrypted-only reasoning、item_reference、WebSocket、background、Conversations、`/responses/compact`、流式续传均未形成通用实现保证。请求会按具体 Provider 契约明确拒绝。请求 `include:["reasoning.encrypted_content"]` 不会获得伪造的加密内容。
 
 工具上限、schema、媒体、generation 参数和 token 预算仍由当前 Provider 校验。MiMo/LongCat 现有工具上限是 128。能力声明与真实厂商验收、模型可调用状态是不同证据。
+
+0.25.0 为 DeepSeek / Qwen / GLM / MiniMax / Arena 补齐 emulated function 桥接，保留原生搜索、推理、媒体和通道逻辑；LongCat 增加尾部匹配工具结果的媒体上传。使用 `openai_agent_smoke.py --core` 验收常用 Chat/Responses、function 回传和普通 function SSE，默认完整脚本仍保留 namespace/custom 扩展测试。八家厂商真实验收结果以 2026-10-03 发布报告为准；Qwen 无账号时只具备代码与离线契约证据。
 
 最终 0.24.4 的 MiMo `mimo-v2.6-flash`、LongCat `longcat-flash` 官方 SDK 7 组均通过，包含 Chat/Responses 文本工具闭环与可选扩展。MiMo 的标准 Responses 工具图片结果回放也通过。LongCat 工具图片回传尚有 502/熔断缺陷；Grok 的普通 Responses/SSE/function 续接通过前三组，namespace 扩展返回空输出；独立的常用 Chat required function 在 120s 客户端超时，Chat 回传/SSE 未执行。不能将任何一家这些结果扩展到其他模型或全部厂商。证据见 [发布验收与性能](../reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)。
 

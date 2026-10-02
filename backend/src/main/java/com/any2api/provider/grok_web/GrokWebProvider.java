@@ -160,7 +160,8 @@ public final class GrokWebProvider implements InferenceProvider {
                 } else if ("error".equals(type)) {
                     var code = status.get() < 0 ? 502 : status.get();
                     sink.error(new GrokWebEventDecoder.GrokWebStreamException(
-                        "runtime_error", failuresMessage(code, frame.path("data").asText(""))));
+                        code >= 400 ? "http_" + code : "runtime_error",
+                        failuresMessage(code, frame.path("data").asText(""))));
                 } else if ("data".equals(type) && status.get() < 400) {
                     sink.next(frame.path("data").asText("").getBytes(StandardCharsets.UTF_8));
                 } else if ("credential_patch".equals(type)) {

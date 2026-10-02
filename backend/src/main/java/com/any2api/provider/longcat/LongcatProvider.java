@@ -121,6 +121,7 @@ public final class LongcatProvider implements InferenceProvider {
             request, "reason_enabled", "search_enabled");
         ProviderRequestValidation.requireInlineMediaUploads(
             request, "LongCat", Set.of(ProviderCapability.IMAGE_INPUT, ProviderCapability.FILE_INPUT));
+        validateMediaPlacement(request);
         ProviderRequestValidation.requireReasoningBooleanConsistency(
             request, "reason_enabled", Set.of("none", "minimal"), "reason_enabled");
         toolProtocol.plan(request);
@@ -196,6 +197,7 @@ public final class LongcatProvider implements InferenceProvider {
             var type = credentialRejected ? "credential_rejected" : switch (upstream.status()) {
                 case 401, 403 -> "credential_rejected";
                 case 429 -> "rate_limited";
+                case 400, 422 -> "invalid_request";
                 default -> "provider_upstream_error";
             };
             return new ProviderFailure(type, upstream.getMessage(), retryable,
@@ -206,6 +208,44 @@ public final class LongcatProvider implements InferenceProvider {
             error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
             true,
             Map.of());
+    }
+
+    private void validateMediaPlacement(CanonicalRequest request) {
+        var messages = request.messages();
+        var lastUser = -1;
+        for (var index = 0; index < messages.size(); index++) {
+            if ("user".equals(messages.get(index).path("role").asText("user"))) lastUser = index;
+        }
+        var callIds = new java.util.HashSet<String>();
+        var imageCount = 0;
+        var fileCount = 0;
+        for (var index = 0; index < messages.size(); index++) {
+            var message = messages.get(index);
+            var role = message.path("role").asText("user");
+            if ("assistant".equals(role)) {
+                for (var call : message.path("tool_calls")) {
+                    var id = call.path("id").asText("");
+                    if (!id.isBlank()) callIds.add(id);
+                }
+            }
+            if (!message.path("content").isArray()) continue;
+            for (var part : message.path("content")) {
+                var type = part.path("type").asText("");
+                var image = Set.of("image", "input_image", "image_url").contains(type);
+                var file = Set.of("input_file", "file", "attachment").contains(type);
+                if (!image && !file) continue;
+                var toolResult = index > lastUser && "tool".equals(role)
+                    && callIds.contains(message.path("tool_call_id").asText(""));
+                if (lastUser < 0 || (index != lastUser && !toolResult)) {
+                    throw new IllegalArgumentException(
+                        "LongCat media requires the latest user message or a matching trailing tool result");
+                }
+                if (image) imageCount++; else fileCount++;
+            }
+        }
+        if (imageCount > 9 || fileCount > 1 || (imageCount > 0 && fileCount > 0)) {
+            throw new IllegalArgumentException("LongCat accepts up to 9 images or one document per request");
+        }
     }
 
     private boolean reasoningEnabled(CanonicalRequest request) {

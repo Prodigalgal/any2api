@@ -365,13 +365,21 @@ def _prompt(messages: Any, *, allow_media: bool = False) -> str:
     if not isinstance(messages, list):
         raise TypeError("LongCat messages must be an array")
     blocks: list[str] = []
-    for message in messages:
+    attachments: dict[int, list[str]] = {}
+    if allow_media:
+        for ordinal, (index, kind, _) in enumerate(_longcat_media_blocks(messages), start=1):
+            attachments.setdefault(index, []).append(f"[Attached {kind} {ordinal}]")
+    for index, message in enumerate(messages):
         if not isinstance(message, dict):
             continue
         role = str(message.get("role") or "user").upper()
         content = _text(message.get("content"), allow_media=allow_media)
         if role == "ASSISTANT" and isinstance(message.get("tool_calls"), list):
             content += "\n" + json.dumps(message["tool_calls"], ensure_ascii=True)
+        if role == "TOOL":
+            role += " " + str(message.get("tool_call_id") or "")
+        if index in attachments:
+            content += "\n" + "\n".join(attachments[index])
         if content.strip():
             blocks.append(f"[{role}]\n{content}")
     if not blocks:
@@ -483,8 +491,25 @@ def _longcat_media_blocks(messages: Any) -> list[tuple[int, str, dict[str, Any]]
         ),
         default=-1,
     )
-    if last_user_index < 0 or any(index != last_user_index for index, _, _ in media_blocks):
-        raise ValueError("LongCat media must be attached to the last user message")
+    call_ids: set[str] = set()
+    allowed_indices = {last_user_index} if last_user_index >= 0 else set()
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") == "assistant":
+            for call in message.get("tool_calls") or []:
+                if isinstance(call, dict) and call.get("id"):
+                    call_ids.add(str(call["id"]))
+        if (
+            index > last_user_index >= 0
+            and message.get("role") == "tool"
+            and message.get("tool_call_id") in call_ids
+        ):
+            allowed_indices.add(index)
+    if any(index not in allowed_indices for index, _, _ in media_blocks):
+        raise ValueError(
+            "LongCat media requires the last user message or a matching trailing tool result"
+        )
     image_count = sum(kind == "image" for _, kind, _ in media_blocks)
     file_count = sum(kind == "file" for _, kind, _ in media_blocks)
     if image_count > 9:

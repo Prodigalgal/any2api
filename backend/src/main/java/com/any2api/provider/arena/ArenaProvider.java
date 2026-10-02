@@ -16,6 +16,7 @@ import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -48,9 +49,9 @@ public final class ArenaProvider implements InferenceProvider {
             "mode", ProviderProtocolContract.OptionType.STRING,
             "model_id", ProviderProtocolContract.OptionType.STRING,
             "web_search", ProviderProtocolContract.OptionType.BOOLEAN),
-        Set.of("web_search"),
-        Set.of("web_search"),
-        Set.of());
+        Set.of("web_search", "tools", "tool_choice", "parallel_tool_calls"),
+        Set.of("web_search", "tools", "tool_choice", "parallel_tool_calls"),
+        Set.of("function"));
 
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "arena",
@@ -62,6 +63,7 @@ public final class ArenaProvider implements InferenceProvider {
             Map.entry(ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE),
             Map.entry(ProviderCapability.RESPONSES, SupportLevel.NATIVE),
             Map.entry(ProviderCapability.STREAMING, SupportLevel.NATIVE),
+            Map.entry(ProviderCapability.FUNCTION_TOOLS, SupportLevel.EMULATED),
             Map.entry(ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE),
             Map.entry(ProviderCapability.FILE_INPUT, SupportLevel.NATIVE),
             Map.entry(ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE),
@@ -78,6 +80,7 @@ public final class ArenaProvider implements InferenceProvider {
     private final ObjectMapper mapper;
     private final OfficialBrowserTransportClient transport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
+    private final ToolEmulationEngine toolEngine;
     private final ArenaRequestMapper requestMapper = new ArenaRequestMapper();
 
     public ArenaProvider(
@@ -85,13 +88,15 @@ public final class ArenaProvider implements InferenceProvider {
         ProxyPoolService proxyPools,
         ObjectMapper mapper,
         OfficialBrowserTransportClient transport,
-        OfficialBrowserSemanticCommandFactory semanticCommands
+        OfficialBrowserSemanticCommandFactory semanticCommands,
+        ToolEmulationEngine toolEngine
     ) {
         this.properties = properties;
         this.proxyPools = proxyPools;
         this.mapper = mapper;
         this.transport = transport;
         this.semanticCommands = semanticCommands;
+        this.toolEngine = toolEngine;
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
@@ -141,6 +146,7 @@ public final class ArenaProvider implements InferenceProvider {
     @Override
     public void validate(CanonicalRequest request) {
         requestMapper.validate(request);
+        toolEngine.plan(request);
         ProviderRequestValidation.requireBooleanParameters(request, "web_search");
         ProviderRequestValidation.requireInlineMediaUploads(
             request, "Arena", Set.of(ProviderCapability.IMAGE_INPUT, ProviderCapability.FILE_INPUT));
@@ -167,17 +173,19 @@ public final class ArenaProvider implements InferenceProvider {
     ) {
         validateCredential(account.credential(), context.transportMode());
         requestMapper.validate(request);
+        var toolPlan = toolEngine.plan(request);
+        var upstreamRequest = toolEngine.prepare(request, toolPlan);
         return Flux.defer(() -> {
             var decoder = new ArenaEventDecoder(request.requestId());
             var status = new AtomicInteger(-1);
             var frameCount = new AtomicInteger();
             var upstream = context.transportMode() == ProviderTransportMode.API
                 ? transport.stream(
-                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    MANIFEST.id(), "chat", semanticCommands.chat(upstreamRequest), account.credential(),
                     proxyPool(), proxyAffinityKey(account), runtimeOptions(),
                     context.transportMode())
                 : transport.stream(
-                    MANIFEST.id(), "chat", semanticCommands.chat(request), account.credential(),
+                    MANIFEST.id(), "chat", semanticCommands.chat(upstreamRequest), account.credential(),
                     proxyPool(), proxyAffinityKey(account), runtimeOptions());
             return upstream
                 .handle((frame, sink) -> {
@@ -224,7 +232,8 @@ public final class ArenaProvider implements InferenceProvider {
                         "Arena upstream returned HTTP " + status.get()))
                     : Flux.fromIterable(decoder.finish())))
                 .takeUntil(event -> event instanceof CanonicalEvent.Completed
-                    || event instanceof CanonicalEvent.Failed);
+                    || event instanceof CanonicalEvent.Failed)
+                .transform(events -> toolEngine.transformStream(request.requestId(), toolPlan, events));
         });
     }
 

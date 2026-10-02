@@ -20,6 +20,7 @@ import tools.jackson.databind.node.ArrayNode;
 @Component
 public class ToolEmulationEngine {
     private static final int MAX_TOOLS = 128;
+    private static final int MAX_CAPTURE_CHARS = 1 << 20;
     private static final Pattern TOOL_NAME = Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
     private static final Pattern FENCED_JSON = Pattern.compile(
         "```(?:json)?\\s*([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
@@ -37,7 +38,9 @@ public class ToolEmulationEngine {
     }
 
     public Plan plan(CanonicalRequest request) {
-        var tools = normalize(request.tools());
+        var tools = normalize(request.tools().stream()
+            .filter(tool -> "function".equals(tool.path("type").asText("function")))
+            .toList());
         var choice = choice(request.rawRequest().path("tool_choice"), tools);
         if (tools.isEmpty() && choice.required()) {
             throw new IllegalArgumentException("tool_choice requires at least one function tool");
@@ -45,6 +48,52 @@ public class ToolEmulationEngine {
         var parallel = !request.rawRequest().path("parallel_tool_calls").isBoolean()
             || request.rawRequest().path("parallel_tool_calls").asBoolean();
         return new Plan(tools, choice, parallel);
+    }
+
+    public CanonicalRequest prepare(CanonicalRequest request, Plan plan) {
+        var messages = new ArrayList<JsonNode>();
+        for (var source : request.messages()) {
+            var message = (tools.jackson.databind.node.ObjectNode) source.deepCopy();
+            var calls = message.path("tool_calls");
+            if (calls.isArray() && !calls.isEmpty()) {
+                prependText(message, "Previous assistant function calls (JSON): " + calls);
+                message.remove("tool_calls");
+            }
+            var callId = message.path("tool_call_id").asText("");
+            if (!callId.isBlank()) {
+                prependText(message, "[Function result call_id=" + callId + "]");
+                // These Web transports have no native function-result role.
+                message.put("role", "user");
+            }
+            messages.add(message);
+        }
+        if (plan.enabled()) {
+            messages.addFirst(mapper.createObjectNode().put("role", "developer")
+                .put("content", appendContract("", plan)));
+        }
+        var nativeTools = request.tools().stream()
+            .filter(tool -> !"function".equals(tool.path("type").asText("function")))
+            .toList();
+        var raw = (tools.jackson.databind.node.ObjectNode) request.rawRequest().deepCopy();
+        raw.set("tools", mapper.valueToTree(nativeTools));
+        raw.remove("parallel_tool_calls");
+        if (!plan.tools().isEmpty() && !plan.choice().disabled()) raw.remove("tool_choice");
+        return new CanonicalRequest(request.requestId(), request.protocol(), request.providerId(),
+            request.model(), request.stream(), List.copyOf(messages), request.generation(),
+            request.reasoning(), nativeTools, request.providerOptions(), raw);
+    }
+
+    private void prependText(tools.jackson.databind.node.ObjectNode message, String prefix) {
+        var content = message.path("content");
+        if (content.isArray()) {
+            var blocks = mapper.createArrayNode().add(mapper.createObjectNode()
+                .put("type", "input_text").put("text", prefix));
+            content.forEach(part -> blocks.add(part.deepCopy()));
+            message.set("content", blocks);
+        } else {
+            message.put("content", prefix + (content.asText("").isBlank()
+                ? "" : "\n" + content.asText("")));
+        }
     }
 
     public String appendContract(String prompt, Plan plan) {
@@ -60,6 +109,8 @@ public class ToolEmulationEngine {
             [Tool calling contract]
             Available tools: %s
             Tool choice: %s. Parallel calls allowed: %s.
+            For required or a named tool, you MUST produce an available tool call, not prose.
+            Use only declared tool names and valid JSON object arguments.
             When a tool is needed, output only this JSON object and no prose:
             {"tool_calls":[{"name":"tool_name","arguments":{}}]}
             Alternative supported format:
@@ -153,6 +204,11 @@ public class ToolEmulationEngine {
                 if (event instanceof CanonicalEvent.OutputTextDelta delta) {
                     if (isBuffering.get()) {
                         buffer.append(delta.delta());
+                        if (buffer.length() > MAX_CAPTURE_CHARS) {
+                            return Flux.just(new CanonicalEvent.Failed(
+                                delta.schemaVersion(), requestId, delta.sequenceNumber(),
+                                "tool_call_generation_failed", "Emulated tool output exceeds capture limit", Map.of()));
+                        }
                         var current = buffer.toString().stripLeading();
                         if (!plan.required() && looksDefinitelyLikeProse(current)) {
                             isBuffering.set(false);
@@ -172,7 +228,14 @@ public class ToolEmulationEngine {
                     buffer.setLength(0);
 
                     if (isBuffering.get()) {
-                        var calls = parse(answer, plan);
+                        List<ToolCall> calls;
+                        try {
+                            calls = parse(answer, plan);
+                        } catch (IllegalArgumentException error) {
+                            return Flux.just(new CanonicalEvent.Failed(
+                                completed.schemaVersion(), requestId, completed.sequenceNumber(),
+                                "tool_call_generation_failed", error.getMessage(), Map.of()));
+                        }
                         if (!calls.isEmpty()) {
                             if (!plan.parallel() && calls.size() > 1) {
                                 return Flux.just(new CanonicalEvent.Failed(
@@ -225,8 +288,37 @@ public class ToolEmulationEngine {
                 }
 
                 return Flux.just(event);
-            });
+            }).map(event -> resequence(event, sequence.incrementAndGet()))
+                .takeUntil(event -> event instanceof CanonicalEvent.Completed
+                || event instanceof CanonicalEvent.Failed);
         });
+    }
+
+    private CanonicalEvent resequence(CanonicalEvent event, long sequence) {
+        var version = event.schemaVersion();
+        var requestId = event.requestId();
+        return switch (event) {
+            case CanonicalEvent.ResponseStarted started -> new CanonicalEvent.ResponseStarted(
+                version, requestId, sequence, started.responseId(), started.createdAt());
+            case CanonicalEvent.ReasoningDelta delta -> new CanonicalEvent.ReasoningDelta(
+                version, requestId, sequence, delta.delta());
+            case CanonicalEvent.OutputTextDelta delta -> new CanonicalEvent.OutputTextDelta(
+                version, requestId, sequence, delta.delta());
+            case CanonicalEvent.ToolCallStarted call -> new CanonicalEvent.ToolCallStarted(
+                version, requestId, sequence, call.toolCallId(), call.name());
+            case CanonicalEvent.ToolArgumentsDelta delta -> new CanonicalEvent.ToolArgumentsDelta(
+                version, requestId, sequence, delta.toolCallId(), delta.delta());
+            case CanonicalEvent.ToolCallCompleted call -> new CanonicalEvent.ToolCallCompleted(
+                version, requestId, sequence, call.toolCallId(), call.arguments());
+            case CanonicalEvent.Usage usage -> new CanonicalEvent.Usage(
+                version, requestId, sequence, usage.inputTokens(), usage.outputTokens(),
+                usage.cacheReadTokens(), usage.source(), usage.rawInputTokens(),
+                usage.rawOutputTokens(), usage.rawCacheReadTokens());
+            case CanonicalEvent.Completed completed -> new CanonicalEvent.Completed(
+                version, requestId, sequence, completed.finishReason());
+            case CanonicalEvent.Failed failed -> new CanonicalEvent.Failed(
+                version, requestId, sequence, failed.errorType(), failed.message(), failed.detail());
+        };
     }
 
     private boolean looksDefinitelyLikeProse(String text) {

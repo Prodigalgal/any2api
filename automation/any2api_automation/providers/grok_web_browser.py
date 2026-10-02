@@ -62,29 +62,39 @@ _STREAM_REQUEST = r"""async request => {
   const emit = event => window.__any2apiGrokWebEmit({requestId: request.requestId, ...event});
   let socket;
   let finished = false;
+  let failing = false;
   let promptSent = false;
-  const timeout = setTimeout(() => {
-    if (!finished) {
-      finished = true;
-      try { socket?.close(); } catch (_) {}
-      emit({type: 'error', data: 'Grok Web gateway timed out'});
-    }
-  }, request.timeoutMs);
+  const controller = new AbortController();
+  let processing = Promise.resolve();
+  let timeout;
+  let firstFrameTimeout;
   const done = () => {
     if (finished) return;
     finished = true;
     clearTimeout(timeout);
+    clearTimeout(firstFrameTimeout);
+    controller.abort();
     try { socket?.close(); } catch (_) {}
   };
   const fail = async (status, detail) => {
-    await emit({type: 'status', status});
-    await emit({type: 'error', data: String(detail || 'Grok Web gateway failed').slice(0, 16384)});
-    done();
+    if (finished || failing) return;
+    failing = true;
+    try {
+      await emit({type: 'status', status});
+      await emit({type: 'error', data: String(detail || 'Grok Web gateway failed').slice(0, 16384)});
+    } finally { done(); }
   };
+  timeout = setTimeout(() => { void fail(504, 'Grok Web gateway timed out'); }, request.timeoutMs);
+  firstFrameTimeout = setTimeout(() => {
+    void fail(504, 'Grok Web gateway produced no response frame before the deadline');
+  }, Math.min(request.firstFrameTimeoutMs, request.timeoutMs));
+  window.__any2apiGrokWebStreams ??= new Map();
+  window.__any2apiGrokWebStreams.set(request.requestId, done);
   try {
     const sessionResponse = await fetch('/api/auth/session', {
       credentials: 'include',
-      cache: 'no-store'
+      cache: 'no-store',
+      signal: controller.signal
     });
     const sessionText = await sessionResponse.text();
     let session;
@@ -98,6 +108,7 @@ _STREAM_REQUEST = r"""async request => {
     const websocketUrl = new URL('/ws/mgw/?uid=' + encodeURIComponent(userId), location.href);
     websocketUrl.protocol = websocketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(websocketUrl.toString());
+    socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
       socket.send(JSON.stringify({event: {
         type: 'session.create',
@@ -126,14 +137,17 @@ _STREAM_REQUEST = r"""async request => {
         }
       }}));
     };
-    socket.onmessage = async message => {
+    const handleMessage = async message => {
       if (finished) return;
       const raw = typeof message.data === 'string'
-        ? message.data : new TextDecoder().decode(message.data);
+        ? message.data : new TextDecoder().decode(
+          message.data instanceof Blob ? await message.data.arrayBuffer() : message.data);
       await emit({type: 'data', data: raw});
       let root;
       try { root = JSON.parse(raw); } catch (_) { return; }
       const event = root?.event || {};
+      if (event.type === 'response.chunk' || event.type === 'response.output_text.delta'
+          || event.type === 'response.done') clearTimeout(firstFrameTimeout);
       if (event.type === 'error') {
         await emit({type: 'error', data: JSON.stringify(event.error || event)});
         done();
@@ -169,6 +183,10 @@ _STREAM_REQUEST = r"""async request => {
       }
       if (event.type === 'response.done') done();
     };
+    socket.onmessage = message => {
+      processing = processing.then(() => handleMessage(message))
+        .catch(error => fail(502, 'Grok Web gateway frame processing failed: ' + String(error)));
+    };
     socket.onerror = () => { void fail(502, 'Grok Web gateway websocket error'); };
     socket.onclose = () => {
       if (!finished) void fail(502, 'Grok Web gateway closed before response.done');
@@ -179,11 +197,10 @@ _STREAM_REQUEST = r"""async request => {
       check();
     });
   } catch (error) {
-    await emit({type: 'error', data: String(error).slice(0, 16384)});
-    done();
+    await fail(502, String(error));
   } finally {
-    clearTimeout(timeout);
-    try { socket?.close(); } catch (_) {}
+    done();
+    window.__any2apiGrokWebStreams.delete(request.requestId);
   }
 }"""
 
@@ -255,18 +272,17 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
 
             async def execute() -> None:
                 try:
-                    await session.page.evaluate(
-                        _STREAM_REQUEST,
-                        {
-                            "requestId": request_id,
-                            **request,
-                            "timeoutMs": max(
-                                30_000,
-                                plan.active.rules.canary_timeout_seconds * 1000,
-                                core_settings().registration_timeout_seconds * 1000,
-                            ),
-                        },
-                    )
+                    async with asyncio.timeout(core_settings().inference_timeout_seconds + 10):
+                        await session.page.evaluate(
+                            _STREAM_REQUEST,
+                            {
+                                "requestId": request_id,
+                                **request,
+                                "timeoutMs": core_settings().inference_timeout_seconds * 1000,
+                                "firstFrameTimeoutMs": core_settings().inference_first_frame_timeout_seconds
+                                * 1000,
+                            },
+                        )
                 except Exception as error:  # noqa: BLE001 - stream boundary
                     logger.warning(
                         "grok_web_official_browser_stream_failed error_type=%s",
@@ -285,6 +301,8 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
             pending_error: dict[str, Any] | None = None
             status = -1
             data_seen = False
+            frame_types: dict[str, int] = {}
+            channels: dict[str, int] = {}
             try:
                 while True:
                     event = await queue.get()
@@ -298,6 +316,22 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
                         status = int(event.get("status") or 502)
                     if event_type == "data" and str(event.get("data") or ""):
                         data_seen = True
+                        try:
+                            frame = json.loads(str(event["data"]))
+                        except (ValueError, TypeError):
+                            frame = {}
+                        gateway_event = frame.get("event") if isinstance(frame, dict) else None
+                        if isinstance(gateway_event, dict):
+                            frame_type = str(gateway_event.get("type") or "unknown")
+                            if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", frame_type):
+                                frame_types[frame_type] = frame_types.get(frame_type, 0) + 1
+                            chunk = gateway_event.get("chunk")
+                            text = chunk.get("text") if isinstance(chunk, dict) else None
+                            channel = (
+                                str(text.get("channel") or "") if isinstance(text, dict) else ""
+                            )
+                            if re.fullmatch(r"[A-Z0-9_]{1,80}", channel):
+                                channels[channel] = channels.get(channel, 0) + 1
                     yield event
                 if pending_error is None and data_seen and 200 <= status < 300:
                     report = successful_canary(plan, selection, session.build_id)
@@ -309,10 +343,26 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
                 if pending_error is not None:
                     yield pending_error
             finally:
+                logger.info(
+                    "grok_web_gateway_summary request_id=%s status=%s frame_types=%s channels=%s",
+                    request_id,
+                    status,
+                    frame_types,
+                    channels,
+                )
                 self._stream_queues.pop(request_id, None)
                 if not task.done():
                     task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+                try:
+                    async with asyncio.timeout(core_settings().browser_cleanup_timeout_seconds):
+                        await session.page.evaluate(
+                            "id => window.__any2apiGrokWebStreams?.get(id)?.()", request_id
+                        )
+                except Exception as error:  # noqa: BLE001 - cancellation cleanup boundary
+                    logger.warning(
+                        "grok_web_gateway_cleanup_failed error_type=%s", type(error).__name__
+                    )
 
     async def configure_context(self, context: Any, credential: dict[str, Any]) -> None:
         cookies = _credential_cookies(credential)
@@ -368,13 +418,13 @@ def build_grok_web_request(command: dict[str, Any]) -> dict[str, Any]:
         tools = []
     message = _prompt(command["messages"])
     if tools:
-        message = _tool_prompt(message, tools, choice)
+        message = _tool_prompt(message, tools, choice, controls.get("parallel_tool_calls"))
     return {
         "mode": mode,
         "message": message,
         "conversationId": str(command.get("previousConversationId") or "").strip(),
         "parentResponseId": str(command.get("previousUpstreamResponseId") or "").strip(),
-        "enableSideBySide": True,
+        "enableSideBySide": not bool(tools),
         "forceSideBySide": False,
         "enableImageGeneration": False,
         "imageGenerationCount": 2,
@@ -456,7 +506,9 @@ def _supported_tools(value: Any) -> list[dict[str, Any]]:
     return output
 
 
-def _tool_prompt(prompt: str, tools: list[dict[str, Any]], choice: Any) -> str:
+def _tool_prompt(
+    prompt: str, tools: list[dict[str, Any]], choice: Any, parallel: Any = None
+) -> str:
     definitions = []
     for tool in tools:
         value = f"Tool: {tool['name']}"
@@ -474,7 +526,7 @@ def _tool_prompt(prompt: str, tools: list[dict[str, Any]], choice: Any) -> str:
         f'MUST call the tool named "{forced}" and must not write a plain-text reply.'
         if forced
         else "MUST call at least one available tool and must not write a plain-text reply."
-        if choice in {"required", "any"}
+        if isinstance(choice, str) and choice in {"required", "any"}
         else "Call a tool when it is clearly needed. Otherwise respond in plain text."
     )
     return (
@@ -485,6 +537,7 @@ def _tool_prompt(prompt: str, tools: list[dict[str, Any]], choice: Any) -> str:
         + '    <parameters>{"key":"value"}</parameters>\n  </tool_call>\n</tool_calls>\n\n'
         + "WHEN TO CALL: "
         + instruction
+        + ("\nCall at most one tool." if parallel is False else "")
         + "\n\n"
         + prompt
     )

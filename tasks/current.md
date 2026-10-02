@@ -1,7 +1,15 @@
-# 当前任务板（源码 0.24.4）
+# 当前任务板（源码 0.25.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-03 WEB 厂商常用 OpenAI 桥接补齐（0.25.0 候选）
+
+- 执行规格：[WEB_OPENAI_BRIDGE_FOLLOWUP](../docs/requirements/WEB_OPENAI_BRIDGE_FOLLOWUP.md)。沿用用户授权，继续实现、提交、部署和真实验收。
+- DeepSeek / Qwen / GLM / MiniMax / Arena 复用 ToolEmulationEngine，补齐 function definitions、required/named choice、结果回放、SSE 和 usage；保留 native search / reasoning / media。
+- LongCat 媒体结果保留 call_id，提前拒绝历史/孤立媒体；请求与工具生成错误不计入模型熔断。Grok Web 二进制帧、帧顺序、独立推理超时和取消清理补齐。
+- 模型目录冷缓存账号查询按厂商汇总，部署前验证查询结果等价与执行计划。
+- 当前生产仍为 0.24.4；0.25.0 部署与八家厂商真实状态以本轮发布报告回写为准。Qwen 当前没有账号记录，真实请求验收待账号就绪。
 
 ## 2026-10-02 发布部署与 Read 性能核验（0.24.1 → 0.24.4）
 

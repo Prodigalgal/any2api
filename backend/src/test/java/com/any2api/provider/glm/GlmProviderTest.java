@@ -13,6 +13,7 @@ import com.any2api.account.LeasedProviderAccount;
 import com.any2api.coordination.AccountLease;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -37,7 +38,7 @@ class GlmProviderTest {
             mock(ProxyPoolService.class),
             mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
         assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
@@ -51,7 +52,7 @@ class GlmProviderTest {
         var transport = mock(OfficialBrowserTransportClient.class);
         var semanticCommands = mock(OfficialBrowserSemanticCommandFactory.class);
         var provider = new GlmProvider(
-            new GlmProperties(), mock(ProxyPoolService.class), mapper, transport, semanticCommands);
+            new GlmProperties(), mock(ProxyPoolService.class), mapper, transport, semanticCommands, new ToolEmulationEngine(new ObjectMapper()));
         var request = new CanonicalRequest(
             "glm-terminal", CanonicalRequest.Protocol.CHAT_COMPLETIONS, "glm", "glm-5.2",
             false,
@@ -89,7 +90,7 @@ class GlmProviderTest {
         var transport = mock(OfficialBrowserTransportClient.class);
         var semanticCommands = mock(OfficialBrowserSemanticCommandFactory.class);
         var provider = new GlmProvider(
-            new GlmProperties(), mock(ProxyPoolService.class), mapper, transport, semanticCommands);
+            new GlmProperties(), mock(ProxyPoolService.class), mapper, transport, semanticCommands, new ToolEmulationEngine(new ObjectMapper()));
         var request = new CanonicalRequest(
             "glm-api-frame", CanonicalRequest.Protocol.CHAT_COMPLETIONS, "glm", "glm-5.2",
             false,
@@ -137,7 +138,7 @@ class GlmProviderTest {
         var provider = new GlmProvider(
             new GlmProperties(), mock(ProxyPoolService.class), mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.modelContract(models.get(0)).multimodal().input())
             .containsExactly("text", "image");
@@ -150,7 +151,7 @@ class GlmProviderTest {
         var provider = new GlmProvider(
             new GlmProperties(), mock(ProxyPoolService.class), mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         var failure = provider.classify(
             new GlmUpstreamException(403, "aliyun captcha required"));
@@ -164,7 +165,7 @@ class GlmProviderTest {
         var provider = new GlmProvider(
             new GlmProperties(), mock(ProxyPoolService.class), mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         var failure = provider.classify(new GlmUpstreamException(
             400, "GLM upstream returned anti_bot_rejected"));
@@ -179,7 +180,7 @@ class GlmProviderTest {
         var provider = new GlmProvider(
             new GlmProperties(), mock(ProxyPoolService.class), mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.protocolContract().providerOptions())
             .containsEntry("captcha_verify_param", ProviderProtocolContract.OptionType.STRING);
@@ -190,7 +191,7 @@ class GlmProviderTest {
         var provider = new GlmProvider(
             new GlmProperties(), mock(ProxyPoolService.class), mapper,
             mock(OfficialBrowserTransportClient.class),
-            mock(OfficialBrowserSemanticCommandFactory.class));
+            mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.scheduledModelProbeEnabled()).isTrue();
     }

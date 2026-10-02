@@ -173,7 +173,9 @@ public final class ModelRuntimeGuard {
                 if (!finished.compareAndSet(false, true)) return;
                 var duration = System.nanoTime() - startedAt;
                 var error = failure.get();
-                if (cancelled.get()) {
+                if (cancelled.get() || java.util.Set.of("invalid_request_error", "invalid_request",
+                        "unsupported_parameter", "tool_call_generation_failed")
+                        .contains(error == null ? "" : error)) {
                     entry.circuit.releasePermission();
                 } else if (error == null) {
                     entry.circuit.onSuccess(duration, TimeUnit.NANOSECONDS);

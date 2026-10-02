@@ -356,7 +356,8 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
             }
         ],
     )
-    assert body["content"].endswith("describe")
+    assert "describe" in body["content"]
+    assert body["content"].endswith("[Attached image 1]")
     assert body["creation_param"] == {}
     assert body["agent_id"] == "multiModal"
     assert body["files"][0]["fileKey"] == "image-key"
@@ -365,6 +366,46 @@ def test_longcat_upload_contract_preserves_official_file_shape() -> None:
         _command([{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}])
     )
     assert text_body["agent_id"] == "1"
+
+
+def test_longcat_uploads_tool_result_images_with_their_call_identity() -> None:
+    command = _command(
+        [
+            {"role": "user", "content": "Read the capture result"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_capture", "function": {"name": "capture", "arguments": "{}"}}
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_capture",
+                "content": [{"type": "input_image", "image_url": _TINY_PNG_DATA_URL}],
+            },
+        ]
+    )
+    sources = _longcat_upload_sources(command["messages"])
+    body = build_longcat_request(
+        command,
+        uploaded_files=[
+            {
+                **sources[0],
+                "fileUrl": "https://upload.longcat.chat/image",
+                "fileKey": "capture-key",
+            }
+        ],
+    )
+    assert "[TOOL call_capture]" in body["content"]
+    assert "[Attached image 1]" in body["content"]
+    assert body["agent_id"] == "multiModal"
+    command["messages"][-1]["tool_call_id"] = "orphan"
+    with pytest.raises(ValueError, match="matching trailing tool result"):
+        _longcat_upload_sources(command["messages"])
+    command["messages"][-1]["tool_call_id"] = "call_capture"
+    command["messages"].append({"role": "user", "content": "next turn"})
+    with pytest.raises(ValueError, match="last user message"):
+        _longcat_upload_sources(command["messages"])
 
 
 def test_longcat_upload_contract_rejects_mixed_media_and_non_inline_sources() -> None:

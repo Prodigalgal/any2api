@@ -91,7 +91,9 @@ final class GrokWebToolProtocol {
         }
         return new Configuration(
             List.copyOf(functions), Set.copyOf(names), hostedWebSearch,
-            choice.mode(), choice.forcedName());
+            choice.mode(), choice.forcedName(),
+            !request.rawRequest().path("parallel_tool_calls").isBoolean()
+                || request.rawRequest().path("parallel_tool_calls").asBoolean());
     }
 
     String inject(String prompt, Configuration configuration) {
@@ -164,7 +166,11 @@ final class GrokWebToolProtocol {
 
     StreamSieve sieve(Configuration configuration) {
         return configuration.functions().isEmpty() || configuration.mode() == ChoiceMode.NONE
-            ? null : new StreamSieve(configuration.names());
+            ? null : new StreamSieve(configuration.forcedName().isBlank()
+                ? configuration.names() : Set.of(configuration.forcedName()),
+                configuration.mode() == ChoiceMode.REQUIRED
+                    && (!configuration.hostedWebSearch() || !configuration.forcedName().isBlank()),
+                configuration.parallel());
     }
 
     private Choice choice(JsonNode raw, Set<String> names) {
@@ -274,7 +280,8 @@ final class GrokWebToolProtocol {
         Set<String> names,
         boolean hostedWebSearch,
         ChoiceMode mode,
-        String forcedName
+        String forcedName,
+        boolean parallel
     ) {}
 
     record ToolCall(String id, String name, String arguments) {}
@@ -285,34 +292,43 @@ final class GrokWebToolProtocol {
 
     final class StreamSieve {
         private final Set<String> available;
+        private final boolean required;
+        private final boolean parallel;
         private String buffer = "";
         private boolean capturing;
         private boolean done;
 
-        private StreamSieve(Set<String> available) {
+        private StreamSieve(Set<String> available, boolean required, boolean parallel) {
             this.available = available;
+            this.required = required;
+            this.parallel = parallel;
         }
 
         SieveResult feed(String chunk) {
             if (done || chunk == null || chunk.isEmpty()) return new SieveResult("", List.of());
             var combined = buffer + chunk;
+            if (combined.length() > MAX_CAPTURE_BYTES) {
+                throw new GrokWebEventDecoder.GrokWebStreamException(
+                    "tool_call_generation_failed", "Grok Web tool call exceeded 1 MiB");
+            }
             buffer = "";
             var safe = "";
             if (!capturing) {
                 var index = combined.toLowerCase().indexOf(TOOL_PREFIX);
                 if (index < 0) {
+                    if (required) {
+                        buffer = combined;
+                        return new SieveResult("", List.of());
+                    }
                     var split = splitPrefix(combined);
                     buffer = split.pending();
                     return new SieveResult(split.safe(), List.of());
                 }
                 capturing = true;
-                safe = combined.substring(0, index);
+                safe = required ? "" : combined.substring(0, index);
                 buffer = combined.substring(index);
             } else {
                 buffer = combined;
-            }
-            if (buffer.length() > MAX_CAPTURE_BYTES) {
-                throw new IllegalArgumentException("Grok Web tool call exceeded 1 MiB");
             }
             var end = buffer.toLowerCase().indexOf("</tool_calls>");
             if (end < 0) return new SieveResult(safe, List.of());
@@ -322,21 +338,39 @@ final class GrokWebToolProtocol {
             buffer = "";
             capturing = false;
             var calls = parseCalls(raw, available);
+            requireCall(calls);
+            requireAllowedParallelism(calls);
             if (calls.isEmpty()) return new SieveResult(safe + raw + remainder, List.of());
             done = true;
             return new SieveResult(safe, calls);
         }
 
         SieveResult flush() {
-            if (done || buffer.isEmpty()) return new SieveResult("", List.of());
+            if (done) return new SieveResult("", List.of());
+            if (buffer.isEmpty()) {
+                requireCall(List.of());
+                return new SieveResult("", List.of());
+            }
             var raw = buffer;
             buffer = "";
             var calls = parseCalls(raw, available);
+            requireCall(calls);
+            requireAllowedParallelism(calls);
             if (!calls.isEmpty()) {
                 done = true;
                 return new SieveResult("", calls);
             }
             return new SieveResult(raw, List.of());
+        }
+
+        private void requireCall(List<ToolCall> calls) {
+            if (required && calls.isEmpty()) throw new GrokWebEventDecoder.GrokWebStreamException(
+                "tool_call_generation_failed", "Grok Web did not produce the required function call");
+        }
+
+        private void requireAllowedParallelism(List<ToolCall> calls) {
+            if (!parallel && calls.size() > 1) throw new GrokWebEventDecoder.GrokWebStreamException(
+                "tool_call_generation_failed", "Grok Web produced parallel calls while parallel_tool_calls=false");
         }
 
         private Split splitPrefix(String value) {

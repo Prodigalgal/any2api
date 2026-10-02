@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
+import com.any2api.provider.ToolEmulationEngine;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
@@ -25,7 +26,7 @@ class MinmaxProtocolTest {
         var provider = new MinmaxProvider(
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class),
-            mock(ProxyPoolService.class), new ObjectMapper());
+            mock(ProxyPoolService.class), new ObjectMapper(), new ToolEmulationEngine(new ObjectMapper()));
 
         assertThat(provider.manifest().randomModelPreferences())
             .containsKey(RandomModelRole.TOP_TEXT)

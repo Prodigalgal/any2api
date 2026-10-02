@@ -167,6 +167,73 @@ class ToolEmulationEngineTest {
             && "tool_call_generation_failed".equals(f.errorType()));
     }
 
+    @Test
+    void preparesFunctionHistoryWithoutChangingTheCallerOrNativeSearch() {
+        var raw = mapper.createObjectNode().put("tool_choice", "auto");
+        var tools = mapper.createArrayNode();
+        tools.addObject().put("type", "function").putObject("function").put("name", "inspect");
+        tools.addObject().put("type", "web_search");
+        var base = createRequest(tools, raw);
+        var assistant = mapper.createObjectNode().put("role", "assistant");
+        assistant.putArray("tool_calls").addObject().put("id", "call_inspect")
+            .putObject("function").put("name", "inspect").put("arguments", "{}");
+        var result = mapper.createObjectNode().put("role", "tool")
+            .put("tool_call_id", "call_inspect").put("content", "demo.txt");
+        var request = new CanonicalRequest(base.requestId(), base.protocol(), base.providerId(),
+            base.model(), base.stream(), List.of(base.messages().getFirst(), assistant, result),
+            base.generation(), base.reasoning(), base.tools(), base.providerOptions(), raw);
+
+        var prepared = engine.prepare(request, engine.plan(request));
+
+        assertThat(prepared.tools()).hasSize(1);
+        assertThat(prepared.tools().getFirst().path("type").asText()).isEqualTo("web_search");
+        assertThat(prepared.messages().getFirst().path("content").asText())
+            .contains("Tool calling contract", "inspect");
+        assertThat(prepared.messages().getLast().path("content").asText())
+            .contains("call_inspect", "demo.txt");
+        assertThat(prepared.messages().getLast().path("role").asText()).isEqualTo("user");
+        assertThat(assistant.has("tool_calls")).isTrue();
+        assertThat(result.path("role").asText()).isEqualTo("tool");
+        assertThat(raw.path("tool_choice").asText()).isEqualTo("auto");
+    }
+
+    @Test
+    void producesAnEnforceableCanonicalStreamWithUsageAndToolEvents() {
+        var tools = mapper.createArrayNode();
+        tools.addObject().put("type", "function").putObject("function").put("name", "inspect");
+        var request = createRequest(tools, mapper.createObjectNode().put("tool_choice", "required"));
+        var events = Flux.<CanonicalEvent>just(
+            new CanonicalEvent.ResponseStarted(1, request.requestId(), 0, "resp_test"),
+            new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1,
+                "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":{}}]}"),
+            new CanonicalEvent.Usage(1, request.requestId(), 2, 4, 6, 0),
+            new CanonicalEvent.Completed(1, request.requestId(), 3, "stop"));
+
+        var transformed = com.any2api.protocol.CanonicalEventStream.enforce(request,
+            engine.transformStream(request.requestId(), engine.plan(request), events))
+            .collectList().block();
+
+        assertThat(transformed).hasSize(6).anyMatch(CanonicalEvent.Usage.class::isInstance);
+        assertThat(transformed.getLast()).isInstanceOf(CanonicalEvent.Completed.class);
+    }
+
+    @Test
+    void failsInvalidArgumentsAndForbiddenParallelCallsWithoutLeakingJsonAsText() {
+        var tools = mapper.createArrayNode();
+        tools.addObject().put("type", "function").putObject("function").put("name", "inspect");
+        var request = createRequest(tools, mapper.createObjectNode()
+            .put("tool_choice", "required").put("parallel_tool_calls", false));
+        for (var answer : List.of(
+                "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":\"broken\"}]}",
+                "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":{}},{\"name\":\"inspect\",\"arguments\":{}}]}")) {
+            var events = engine.transformStream(request.requestId(), engine.plan(request), Flux.just(
+                new CanonicalEvent.OutputTextDelta(1, request.requestId(), 0, answer),
+                new CanonicalEvent.Completed(1, request.requestId(), 1, "stop"))).collectList().block();
+            assertThat(events).singleElement().isInstanceOfSatisfying(CanonicalEvent.Failed.class,
+                failed -> assertThat(failed.errorType()).isEqualTo("tool_call_generation_failed"));
+        }
+    }
+
     private CanonicalRequest createRequest(ArrayNode tools, ObjectNode raw) {
         var message = mapper.createObjectNode().put("role", "user").put("content", "hello");
         var toolsList = new java.util.ArrayList<tools.jackson.databind.JsonNode>();

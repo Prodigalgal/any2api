@@ -36,12 +36,15 @@ public class SmartContextWindowManager {
         if (messages.size() <= maxMessages) {
             return request;
         }
+        if ("disabled".equals(request.rawRequest().path("truncation").asText())) {
+            throw OpenAiRequestException.invalid("input", "context message limit exceeded with truncation disabled");
+        }
 
         var systemMessages = new ArrayList<JsonNode>();
         int firstNonSystemIdx = 0;
         for (int i = 0; i < messages.size(); i++) {
             var msg = messages.get(i);
-            if ("system".equalsIgnoreCase(msg.path("role").asText(""))) {
+            if (List.of("system", "developer").contains(msg.path("role").asText(""))) {
                 systemMessages.add(msg);
                 firstNonSystemIdx = i + 1;
             } else {
@@ -56,24 +59,14 @@ public class SmartContextWindowManager {
 
         int tailStart = Math.max(firstNonSystemIdx, messages.size() - budgetForTail);
 
-        // Tool call pair protection: if the tail starts on a tool message, include its preceding assistant call
-        if (tailStart > firstNonSystemIdx) {
-            var startMsg = messages.get(tailStart);
-            if ("tool".equalsIgnoreCase(startMsg.path("role").asText(""))) {
-                var prev = messages.get(tailStart - 1);
-                if ("assistant".equalsIgnoreCase(prev.path("role").asText(""))
-                    && prev.has("tool_calls")) {
-                    tailStart--;
-                }
-            }
-        }
+        tailStart = retainToolCallBoundary(messages, tailStart, firstNonSystemIdx);
 
         var trimmed = new ArrayList<JsonNode>();
         trimmed.addAll(systemMessages);
 
         var noticeNode = mapper.createObjectNode()
             .put("role", "system")
-            .put("content", "[Notice: Earlier conversation history was safely compacted by Any2API gateway]");
+            .put("content", "[Notice: Earlier conversation history was truncated by Any2API gateway]");
         trimmed.add(noticeNode);
 
         for (int i = tailStart; i < messages.size(); i++) {
@@ -81,12 +74,14 @@ public class SmartContextWindowManager {
         }
 
         log.info(
-            "context_window_compacted correlation_id={} provider={} model={} original_count={} compacted_count={}",
+            "context_window_truncated correlation_id={} provider={} model={} original_count={} retained_count={}",
             request.requestId(), request.providerId(), request.model(), messages.size(), trimmed.size());
 
         var rawCopy = request.rawRequest() instanceof ObjectNode obj ? obj.deepCopy() : mapper.createObjectNode();
-        var messagesArray = rawCopy.putArray("messages");
-        trimmed.forEach(messagesArray::add);
+        if (request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS) {
+            var messagesArray = rawCopy.putArray("messages");
+            trimmed.forEach(messagesArray::add);
+        }
 
         return new CanonicalRequest(
             request.requestId(),
@@ -110,5 +105,23 @@ public class SmartContextWindowManager {
             }
         }
         return DEFAULT_MAX_MESSAGES;
+    }
+
+    private int retainToolCallBoundary(List<JsonNode> messages, int tailStart, int firstConversationIndex) {
+        var calls = new java.util.HashMap<String, Integer>();
+        for (var index = firstConversationIndex; index < messages.size(); index++) {
+            for (var call : messages.get(index).path("tool_calls")) {
+                if (call.hasNonNull("id")) calls.putIfAbsent(call.path("id").asText(), index);
+            }
+        }
+        // Commentary can occur between parallel calls and results. Keep every referenced call,
+        // even when the complete group slightly exceeds the message-count truncation target.
+        for (var index = messages.size() - 1; index >= tailStart; index--) {
+            var message = messages.get(index);
+            if ("tool".equals(message.path("role").asText())) {
+                tailStart = Math.min(tailStart, calls.getOrDefault(message.path("tool_call_id").asText(), tailStart));
+            }
+        }
+        return tailStart;
     }
 }

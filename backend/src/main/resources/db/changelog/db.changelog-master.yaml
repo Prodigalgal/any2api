@@ -61,3 +61,11 @@ databaseChangeLog:
       file: db/changelog/releases/030-default-provider-transport-mode-auto.sql
   - include:
       file: db/changelog/releases/031-retire-legacy-grok-channels.sql
+  - include:
+      file: db/changelog/releases/032-openai-agent-responses.sql
+  - changeSet:
+      id: 032-002-tag
+      author: any2api
+      changes:
+        - tagDatabase:
+            tag: 0.24.0

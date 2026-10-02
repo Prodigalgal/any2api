@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.any2api"
-version = "0.23.4"
+version = "0.24.1"
 
 
 java {
@@ -35,9 +35,17 @@ dependencies {
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.projectreactor:reactor-test")
+    testImplementation("io.zonky.test:embedded-postgres:2.2.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+tasks.register<JavaExec>("agentInteropServer") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.any2api.provider.mimo.AgentInteropServer")
+    args(providers.gradleProperty("interopPort").orElse("18089").get())
 }

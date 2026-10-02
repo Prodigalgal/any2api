@@ -42,10 +42,13 @@ public class OpenAiResponseWriter {
             : writeCollected(request, guarded, exchange);
     }
 
-    private CanonicalEvent.Failed normalizeFailure(
+    public CanonicalEvent.Failed normalizeFailure(
         CanonicalRequest request,
         Throwable error
     ) {
+        if (error instanceof com.any2api.protocol.state.ResponseStorageLimitException) {
+            return new CanonicalEvent.Failed(1, request.requestId(), 1, "rate_limited", error.getMessage(), Map.of("retryable", false));
+        }
         if (error instanceof OpenAiRequestException requestError) {
             var detail = new LinkedHashMap<String, Object>();
             detail.put("param", requestError.parameter());
@@ -80,6 +83,17 @@ public class OpenAiResponseWriter {
         Flux<CanonicalEvent> events,
         ServerWebExchange exchange
     ) {
+        return events.switchOnFirst((signal, source) -> {
+            if (signal.hasValue() && signal.get() instanceof CanonicalEvent.Failed) {
+                return writeCollected(request, source, exchange);
+            }
+            return writeAcceptedStream(request, source, exchange);
+        }).then();
+    }
+
+    private Mono<Void> writeAcceptedStream(
+        CanonicalRequest request, Flux<CanonicalEvent> events, ServerWebExchange exchange
+    ) {
         exchange.getResponse().setStatusCode(HttpStatus.OK);
         exchange.getResponse().getHeaders().setContentType(MediaType.TEXT_EVENT_STREAM);
         exchange.getResponse().getHeaders().setCacheControl("no-store");
@@ -89,6 +103,7 @@ public class OpenAiResponseWriter {
             : new ResponsesStreamRenderer(request, objectMapper);
         var rendered = events
             .concatMapIterable(renderer::render)
+            .onErrorResume(error -> Flux.fromIterable(renderer.render(normalizeFailure(request, error))))
             .publish(shared -> Flux.concat(
                 Flux.just(": request_id=" + request.requestId() + "\n\n"),
                 Flux.merge(
@@ -112,10 +127,17 @@ public class OpenAiResponseWriter {
     ) {
         return events.collectList().flatMap(collected -> {
             var accumulator = new EventAccumulator(request, objectMapper);
-            collected.forEach(accumulator::accept);
-            var payload = request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS
-                ? accumulator.chatResponse()
-                : accumulator.responsesResponse();
+            ObjectNode payload;
+            try {
+                collected.forEach(accumulator::accept);
+                payload = request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS
+                    ? accumulator.chatResponse() : accumulator.responsesResponse();
+            } catch (RuntimeException error) {
+                accumulator = new EventAccumulator(request, objectMapper);
+                accumulator.accept(normalizeFailure(request, error));
+                payload = request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS
+                    ? accumulator.chatResponse() : accumulator.responsesResponse();
+            }
             exchange.getResponse().setStatusCode(accumulator.status());
             exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
             exchange.getResponse().getHeaders().setCacheControl("no-store");
@@ -129,10 +151,27 @@ public class OpenAiResponseWriter {
         List<String> render(CanonicalEvent event);
     }
 
+    public ObjectNode responseDocument(CanonicalRequest request, List<CanonicalEvent> events) {
+        var accumulator = new EventAccumulator(request, objectMapper);
+        events.forEach(accumulator::accept);
+        return accumulator.responseDocument();
+    }
+
+    public Capture capture(CanonicalRequest request) { return new Capture(new EventAccumulator(request, objectMapper)); }
+
+    public static final class Capture {
+        private final EventAccumulator accumulator;
+        private Capture(EventAccumulator accumulator) { this.accumulator = accumulator; }
+        public synchronized void accept(CanonicalEvent event) { accumulator.accept(event); }
+        public synchronized ObjectNode document() { return accumulator.responseDocument(); }
+    }
+
     private static final class ChatStreamRenderer implements EventRenderer {
         private final CanonicalRequest request;
         private final ObjectMapper mapper;
         private final Map<String, Integer> toolIndexes = new LinkedHashMap<>();
+        private final Map<String, StringBuilder> toolArguments = new LinkedHashMap<>();
+        private long createdAt = Instant.now().getEpochSecond();
         private final boolean includeUsage;
         private CanonicalEvent.Usage pendingUsage;
         private String responseId;
@@ -149,6 +188,7 @@ public class OpenAiResponseWriter {
         public List<String> render(CanonicalEvent event) {
             if (event instanceof CanonicalEvent.ResponseStarted started) {
                 responseId = started.responseId();
+                createdAt = started.createdAt();
                 return List.of(data(chunk(mapper.createObjectNode().put("role", "assistant"), null)));
             }
             if (event instanceof CanonicalEvent.OutputTextDelta text) {
@@ -171,10 +211,22 @@ public class OpenAiResponseWriter {
                 return List.of(data(chunk(delta, null)));
             }
             if (event instanceof CanonicalEvent.ToolArgumentsDelta arguments) {
+                toolArguments.computeIfAbsent(arguments.toolCallId(), ignored -> new StringBuilder()).append(arguments.delta());
                 var index = toolIndexes.computeIfAbsent(
                     arguments.toolCallId(), ignored -> toolIndexes.size());
                 var function = mapper.createObjectNode().put("arguments", arguments.delta());
                 var call = mapper.createObjectNode().put("index", index).set("function", function);
+                var delta = mapper.createObjectNode();
+                delta.putArray("tool_calls").add(call);
+                return List.of(data(chunk(delta, null)));
+            }
+            if (event instanceof CanonicalEvent.ToolCallCompleted completed) {
+                var received = toolArguments.computeIfAbsent(completed.toolCallId(), ignored -> new StringBuilder());
+                var remainder = argumentsRemainder(received.toString(), completed.arguments());
+                if (remainder.isEmpty()) return List.of();
+                received.append(remainder);
+                var call = mapper.createObjectNode().put("index", toolIndexes.get(completed.toolCallId()))
+                    .set("function", mapper.createObjectNode().put("arguments", remainder));
                 var delta = mapper.createObjectNode();
                 delta.putArray("tool_calls").add(call);
                 return List.of(data(chunk(delta, null)));
@@ -185,7 +237,9 @@ public class OpenAiResponseWriter {
             }
             if (event instanceof CanonicalEvent.Completed completed) {
                 var frames = new ArrayList<String>();
-                frames.add(data(chunk(mapper.createObjectNode(), completed.finishReason())));
+                frames.add(data(chunk(mapper.createObjectNode(), toolIndexes.isEmpty()
+                    || Set.of("length", "content_filter").contains(completed.finishReason())
+                    ? completed.finishReason() : "tool_calls")));
                 if (includeUsage) {
                     var payload = chunk(mapper.createObjectNode(), null);
                     payload.set("choices", mapper.createArrayNode());
@@ -213,7 +267,7 @@ public class OpenAiResponseWriter {
             var payload = mapper.createObjectNode()
                 .put("id", responseId)
                 .put("object", "chat.completion.chunk")
-                .put("created", Instant.now().getEpochSecond())
+                .put("created", createdAt)
                 .put("model", request.model());
             if (includeUsage) payload.putNull("usage");
             payload.putArray("choices").add(choice);
@@ -230,7 +284,6 @@ public class OpenAiResponseWriter {
         private final ObjectMapper mapper;
         private final Map<String, Integer> toolIndexes = new LinkedHashMap<>();
         private long sequence;
-        private int nextOutputIndex;
         private Integer textOutputIndex;
         private Integer reasoningOutputIndex;
         private String responseId;
@@ -246,6 +299,9 @@ public class OpenAiResponseWriter {
         @Override
         public List<String> render(CanonicalEvent event) {
             var frames = new ArrayList<String>();
+            var previousArguments = event instanceof CanonicalEvent.ToolCallCompleted completed
+                && accumulator.tools.containsKey(completed.toolCallId())
+                ? accumulator.tools.get(completed.toolCallId()).arguments.toString() : "";
             accumulator.accept(event);
             if (event instanceof CanonicalEvent.ResponseStarted started) {
                 responseId = started.responseId();
@@ -254,7 +310,7 @@ public class OpenAiResponseWriter {
                 frames.add(event("response.in_progress", object("response", response)));
             } else if (event instanceof CanonicalEvent.OutputTextDelta text) {
                 if (textOutputIndex == null) {
-                    textOutputIndex = nextOutputIndex++;
+                    textOutputIndex = accumulator.outputIndex("text");
                     var item = mapper.createObjectNode()
                         .put("id", "msg_" + responseId)
                         .put("type", "message")
@@ -272,13 +328,18 @@ public class OpenAiResponseWriter {
                 frames.add(event("response.output_text.delta", textDelta(text.delta())));
             } else if (event instanceof CanonicalEvent.ReasoningDelta reasoning) {
                 if (reasoningOutputIndex == null) {
-                    reasoningOutputIndex = nextOutputIndex++;
+                    if (!accumulator.includeReasoning()) return frames;
+                    reasoningOutputIndex = accumulator.outputIndex("reasoning");
                     var item = mapper.createObjectNode()
                         .put("id", "rs_" + responseId)
                         .put("type", "reasoning")
                         .put("status", "in_progress")
                         .set("summary", mapper.createArrayNode());
                     frames.add(event("response.output_item.added", indexedItem(reasoningOutputIndex, item)));
+                    frames.add(event("response.reasoning_summary_part.added", mapper.createObjectNode()
+                        .put("item_id", "rs_" + responseId).put("output_index", reasoningOutputIndex)
+                        .put("summary_index", 0).set("part", mapper.createObjectNode()
+                            .put("type", "summary_text").put("text", ""))));
                 }
                 var payload = mapper.createObjectNode()
                     .put("item_id", "rs_" + responseId)
@@ -287,37 +348,38 @@ public class OpenAiResponseWriter {
                     .put("delta", reasoning.delta());
                 frames.add(event("response.reasoning_summary_text.delta", payload));
             } else if (event instanceof CanonicalEvent.ToolCallStarted tool) {
-                var index = toolIndexes.computeIfAbsent(tool.toolCallId(), ignored -> nextOutputIndex++);
-                var item = mapper.createObjectNode()
-                    .put("id", "fc_" + tool.toolCallId())
-                    .put("type", "function_call")
-                    .put("status", "in_progress")
-                    .put("call_id", tool.toolCallId())
-                    .put("name", tool.name())
-                    .put("arguments", "");
+                var index = toolIndexes.computeIfAbsent(tool.toolCallId(), ignored -> accumulator.outputIndex("tool:" + tool.toolCallId()));
+                var item = accumulator.toolItem(accumulator.tools.get(tool.toolCallId()), "in_progress");
                 frames.add(event("response.output_item.added", indexedItem(index, item)));
             } else if (event instanceof CanonicalEvent.ToolArgumentsDelta arguments) {
-                var index = toolIndexes.computeIfAbsent(arguments.toolCallId(), ignored -> nextOutputIndex++);
+                if (accumulator.tools.get(arguments.toolCallId()).binding.custom()) return frames;
+                var index = toolIndexes.computeIfAbsent(arguments.toolCallId(), ignored -> accumulator.outputIndex("tool:" + arguments.toolCallId()));
                 var payload = mapper.createObjectNode()
                     .put("item_id", "fc_" + arguments.toolCallId())
                     .put("output_index", index)
                     .put("delta", arguments.delta());
                 frames.add(event("response.function_call_arguments.delta", payload));
             } else if (event instanceof CanonicalEvent.ToolCallCompleted completed) {
-                var index = toolIndexes.computeIfAbsent(completed.toolCallId(), ignored -> nextOutputIndex++);
+                var index = toolIndexes.computeIfAbsent(completed.toolCallId(), ignored -> accumulator.outputIndex("tool:" + completed.toolCallId()));
                 var tool = accumulator.tools.get(completed.toolCallId());
                 var arguments = tool == null ? completed.arguments() : tool.arguments.toString();
+                if (tool != null && tool.binding.custom()) {
+                    var input = OpenAiToolBridge.customInput(arguments, mapper);
+                    frames.add(event("response.custom_tool_call_input.delta", mapper.createObjectNode()
+                        .put("item_id", "fc_" + completed.toolCallId()).put("output_index", index).put("delta", input)));
+                    frames.add(event("response.custom_tool_call_input.done", mapper.createObjectNode()
+                        .put("item_id", "fc_" + completed.toolCallId()).put("output_index", index).put("input", input)));
+                    frames.add(event("response.output_item.done", indexedItem(index, accumulator.toolItem(tool, "completed"))));
+                    return frames;
+                }
+                var remainder = argumentsRemainder(previousArguments, arguments);
+                if (!remainder.isEmpty()) frames.add(event("response.function_call_arguments.delta", mapper.createObjectNode()
+                    .put("item_id", "fc_" + completed.toolCallId()).put("output_index", index).put("delta", remainder)));
                 frames.add(event("response.function_call_arguments.done", mapper.createObjectNode()
                     .put("item_id", "fc_" + completed.toolCallId())
                     .put("output_index", index)
                     .put("arguments", arguments)));
-                var item = mapper.createObjectNode()
-                    .put("id", "fc_" + completed.toolCallId())
-                    .put("type", "function_call")
-                    .put("status", "completed")
-                    .put("call_id", completed.toolCallId())
-                    .put("name", tool == null ? "" : tool.name)
-                    .put("arguments", arguments);
+                var item = accumulator.toolItem(tool, "completed");
                 frames.add(event("response.output_item.done", indexedItem(index, item)));
             } else if (event instanceof CanonicalEvent.Completed) {
                 if (reasoningOutputIndex != null) {
@@ -328,10 +390,13 @@ public class OpenAiResponseWriter {
                         .put("text", accumulator.reasoning.toString())));
                     var summary = mapper.createArrayNode().add(mapper.createObjectNode()
                         .put("type", "summary_text").put("text", accumulator.reasoning.toString()));
+                    frames.add(event("response.reasoning_summary_part.done", mapper.createObjectNode()
+                        .put("item_id", "rs_" + responseId).put("output_index", reasoningOutputIndex)
+                        .put("summary_index", 0).set("part", summary.get(0))));
                     var item = mapper.createObjectNode()
                         .put("id", "rs_" + responseId)
                         .put("type", "reasoning")
-                        .put("status", "completed")
+                        .put("status", accumulator.outputStatus())
                         .set("summary", summary);
                     frames.add(event("response.output_item.done",
                         indexedItem(reasoningOutputIndex, item)));
@@ -354,15 +419,15 @@ public class OpenAiResponseWriter {
                         .put("id", "msg_" + responseId)
                         .put("type", "message")
                         .put("role", "assistant")
-                        .put("status", "completed")
+                        .put("phase", accumulator.tools.isEmpty() ? "final_answer" : "commentary")
+                        .put("status", accumulator.outputStatus())
                         .set("content", content);
                     frames.add(event("response.output_item.done", indexedItem(textOutputIndex, item)));
                 }
-                frames.add(event("response.completed",
+                frames.add(event(accumulator.incomplete() ? "response.incomplete" : "response.completed",
                     object("response", accumulator.responsesResponse())));
             } else if (event instanceof CanonicalEvent.Failed failed) {
-                var response = baseResponse("failed");
-                response.set("error", gatewayError(mapper, request, failed));
+                var response = accumulator.responseDocument();
                 frames.add(event("response.failed", object("response", response)));
             }
             return frames;
@@ -372,7 +437,7 @@ public class OpenAiResponseWriter {
             var response = mapper.createObjectNode()
                 .put("id", responseId)
                 .put("object", "response")
-                .put("created_at", Instant.now().getEpochSecond())
+                .put("created_at", accumulator.createdAt)
                 .put("status", status)
                 .put("model", request.model())
                 .set("output", mapper.createArrayNode());
@@ -415,12 +480,15 @@ public class OpenAiResponseWriter {
         private final CanonicalRequest request;
         private final ObjectMapper mapper;
         private final Map<String, ToolState> tools = new LinkedHashMap<>();
+        private final Map<String, Integer> outputIndexes = new LinkedHashMap<>();
+        private long createdAt = Instant.now().getEpochSecond();
         private final StringBuilder text = new StringBuilder();
         private final StringBuilder reasoning = new StringBuilder();
         private String responseId;
         private String finishReason = "stop";
         private CanonicalEvent.Usage usage;
         private CanonicalEvent.Failed failure;
+        private boolean finished;
 
         private EventAccumulator(CanonicalRequest request, ObjectMapper mapper) {
             this.request = request;
@@ -431,27 +499,34 @@ public class OpenAiResponseWriter {
         private void accept(CanonicalEvent event) {
             if (event instanceof CanonicalEvent.ResponseStarted started) {
                 responseId = started.responseId();
+                createdAt = started.createdAt();
             } else if (event instanceof CanonicalEvent.OutputTextDelta delta) {
+                outputIndex("text");
                 text.append(delta.delta());
             } else if (event instanceof CanonicalEvent.ReasoningDelta delta) {
-                reasoning.append(delta.delta());
+                if (includeReasoning()) {
+                    outputIndex("reasoning");
+                    reasoning.append(delta.delta());
+                }
             } else if (event instanceof CanonicalEvent.ToolCallStarted started) {
-                tools.put(started.toolCallId(), new ToolState(started.toolCallId(), started.name()));
+                outputIndex("tool:" + started.toolCallId());
+                tools.put(started.toolCallId(), new ToolState(started.toolCallId(), started.name(), OpenAiToolBridge.resolve(request, started.name())));
             } else if (event instanceof CanonicalEvent.ToolArgumentsDelta delta) {
-                tools.computeIfAbsent(delta.toolCallId(), id -> new ToolState(id, ""))
+                tools.computeIfAbsent(delta.toolCallId(), id -> new ToolState(id, "", OpenAiToolBridge.resolve(request, "")))
                     .arguments.append(delta.delta());
             } else if (event instanceof CanonicalEvent.ToolCallCompleted completed) {
                 var tool = tools.computeIfAbsent(
-                    completed.toolCallId(), id -> new ToolState(id, ""));
-                if (tool.arguments.isEmpty()) {
-                    tool.arguments.append(completed.arguments());
-                }
+                    completed.toolCallId(), id -> new ToolState(id, "", OpenAiToolBridge.resolve(request, "")));
+                tool.arguments.append(argumentsRemainder(tool.arguments.toString(), completed.arguments()));
+                tool.completed = true;
             } else if (event instanceof CanonicalEvent.Usage totals) {
                 usage = totals;
             } else if (event instanceof CanonicalEvent.Completed completed) {
                 finishReason = completed.finishReason();
+                finished = true;
             } else if (event instanceof CanonicalEvent.Failed failed) {
                 failure = failed;
+                finished = true;
             }
         }
 
@@ -491,12 +566,12 @@ public class OpenAiResponseWriter {
             }
             var choice = mapper.createObjectNode()
                 .put("index", 0)
-                .put("finish_reason", tools.isEmpty() ? finishReason : "tool_calls")
+                .put("finish_reason", tools.isEmpty() || incomplete() ? finishReason : "tool_calls")
                 .set("message", message);
             var payload = mapper.createObjectNode()
                 .put("id", responseId.replace("resp_", "chatcmpl_"))
                 .put("object", "chat.completion")
-                .put("created", Instant.now().getEpochSecond())
+                .put("created", createdAt)
                 .put("model", request.model());
             payload.putArray("choices").add(choice);
             payload.set("usage", usage(mapper, usage));
@@ -507,6 +582,39 @@ public class OpenAiResponseWriter {
             if (failure != null) {
                 return error();
             }
+            return responseDocument();
+        }
+
+        private int outputIndex(String key) {
+            return outputIndexes.computeIfAbsent(key, ignored -> outputIndexes.size());
+        }
+
+        private boolean includeReasoning() {
+            return request.protocol() != CanonicalRequest.Protocol.RESPONSES
+                || !"none".equals(request.rawRequest().path("reasoning").path("summary").asText());
+        }
+
+        private boolean incomplete() {
+            return Set.of("length", "max_output_tokens", "content_filter").contains(finishReason);
+        }
+
+        private String outputStatus() {
+            return !finished ? "in_progress" : failed() || incomplete() ? "incomplete" : "completed";
+        }
+
+        private ObjectNode toolItem(ToolState tool, String status) {
+            var item = mapper.createObjectNode().put("id", "fc_" + tool.id)
+                .put("type", tool.binding.custom() ? "custom_tool_call" : "function_call")
+                .put("status", status).put("call_id", tool.id).put("name", tool.binding.name());
+            if (!tool.binding.namespace().isEmpty()) item.put("namespace", tool.binding.namespace());
+            var arguments = tool.arguments.toString();
+            item.put(tool.binding.custom() ? "input" : "arguments",
+                tool.binding.custom() ? tool.completed && !arguments.isEmpty()
+                    ? OpenAiToolBridge.customInput(arguments, mapper) : "" : arguments);
+            return item;
+        }
+
+        private ObjectNode responseDocument() {
             var output = mapper.createArrayNode();
             if (!reasoning.isEmpty()) {
                 var summary = mapper.createArrayNode().add(
@@ -514,10 +622,10 @@ public class OpenAiResponseWriter {
                 output.add(mapper.createObjectNode()
                     .put("id", "rs_" + responseId)
                     .put("type", "reasoning")
-                    .put("status", "completed")
+                    .put("status", outputStatus())
                     .set("summary", summary));
             }
-            if (!text.isEmpty() || tools.isEmpty()) {
+            if (!text.isEmpty() || finished && tools.isEmpty()) {
                 var content = mapper.createArrayNode().add(mapper.createObjectNode()
                     .put("type", "output_text")
                     .put("text", text.toString())
@@ -527,25 +635,33 @@ public class OpenAiResponseWriter {
                     .put("id", "msg_" + responseId)
                     .put("type", "message")
                     .put("role", "assistant")
-                    .put("status", "completed")
+                    .put("phase", tools.isEmpty() ? "final_answer" : "commentary")
+                    .put("status", outputStatus())
                     .set("content", content));
             }
-            tools.values().forEach(tool -> output.add(mapper.createObjectNode()
-                .put("id", "fc_" + tool.id)
-                .put("type", "function_call")
-                .put("status", "completed")
-                .put("call_id", tool.id)
-                .put("name", tool.name)
-                .put("arguments", tool.arguments.toString())));
+            tools.values().forEach(tool -> output.add(toolItem(tool, tool.completed ? "completed" : outputStatus())));
+            var ordered = new ArrayList<tools.jackson.databind.JsonNode>();
+            output.forEach(ordered::add);
+            ordered.sort(java.util.Comparator.comparingInt(item -> outputIndexes.getOrDefault(
+                switch (item.path("type").asText()) {
+                    case "reasoning" -> "reasoning";
+                    case "message" -> "text";
+                    default -> "tool:" + item.path("call_id").asText();
+                }, Integer.MAX_VALUE)));
+            output.removeAll();
+            ordered.forEach(output::add);
             var response = mapper.createObjectNode()
                 .put("id", responseId)
                 .put("object", "response")
-                .put("created_at", Instant.now().getEpochSecond())
-                .put("status", "completed")
+                .put("created_at", createdAt)
+                .put("status", !finished ? "in_progress" : failed() ? "failed" : incomplete() ? "incomplete" : "completed")
                 .put("model", request.model())
                 .set("output", output)
                 .set("usage", responsesUsage(mapper, usage));
             applyResponsesConfiguration(response, request, mapper);
+            if (failed()) response.set("error", gatewayError(mapper, request, failure));
+            if (incomplete()) response.set("incomplete_details", mapper.createObjectNode()
+                .put("reason", "content_filter".equals(finishReason) ? "content_filter" : "max_output_tokens"));
             return response;
         }
 
@@ -562,6 +678,13 @@ public class OpenAiResponseWriter {
                     .put("name", tool.name)
                     .put("arguments", tool.arguments.toString()));
         }
+    }
+
+    private static String argumentsRemainder(String received, String complete) {
+        if (complete == null) throw new CanonicalProtocolException("null_tool_arguments");
+        if (complete.isEmpty()) return "";
+        if (!complete.startsWith(received)) throw new CanonicalProtocolException("tool_arguments_mismatch");
+        return complete.substring(received.length());
     }
 
     private static ObjectNode gatewayError(
@@ -598,11 +721,14 @@ public class OpenAiResponseWriter {
     private static final class ToolState {
         private final String id;
         private final String name;
+        private final OpenAiToolBridge.Binding binding;
         private final StringBuilder arguments = new StringBuilder();
+        private boolean completed;
 
-        private ToolState(String id, String name) {
+        private ToolState(String id, String name, OpenAiToolBridge.Binding binding) {
             this.id = id;
             this.name = name;
+            this.binding = binding;
         }
     }
 

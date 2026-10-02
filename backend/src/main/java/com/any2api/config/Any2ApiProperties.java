@@ -17,6 +17,7 @@ public class Any2ApiProperties {
     private final Lifecycle lifecycle = new Lifecycle();
     private final ModelRuntime modelRuntime = new ModelRuntime();
     private final TempMail tempMail = new TempMail();
+    private final Responses responses = new Responses();
 
     public Security getSecurity() {
         return security;
@@ -33,6 +34,30 @@ public class Any2ApiProperties {
     public Lifecycle getLifecycle() { return lifecycle; }
     public ModelRuntime getModelRuntime() { return modelRuntime; }
     public TempMail getTempMail() { return tempMail; }
+    public Responses getResponses() { return responses; }
+
+    public static class Responses {
+        private Duration retention = Duration.ofHours(24);
+        private int maxStateBytes = 2 << 20;
+        private int maxStoredPerKey = 1000;
+        public Duration getRetention() { return retention; }
+        public void setRetention(Duration retention) {
+            if (retention == null || retention.isZero() || retention.isNegative()) {
+                throw new IllegalArgumentException("responses retention must be positive");
+            }
+            this.retention = retention;
+        }
+        public int getMaxStateBytes() { return maxStateBytes; }
+        public void setMaxStateBytes(int maxStateBytes) {
+            if (maxStateBytes < 1) throw new IllegalArgumentException("responses max state bytes must be positive");
+            this.maxStateBytes = maxStateBytes;
+        }
+        public int getMaxStoredPerKey() { return maxStoredPerKey; }
+        public void setMaxStoredPerKey(int maxStoredPerKey) {
+            if (maxStoredPerKey < 1) throw new IllegalArgumentException("responses max stored per key must be positive");
+            this.maxStoredPerKey = maxStoredPerKey;
+        }
+    }
 
 
     public static class Security {

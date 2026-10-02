@@ -178,7 +178,7 @@ class ProviderRequestValidationTest {
     }
 
     @Test
-    void rejectsStoredAndStructuredResponsesWhenCapabilitiesAreAbsent() {
+    void rejectsStructuredResponsesWhenNativeCapabilityIsAbsent() {
         var raw = mapper.createObjectNode().put("store", true);
         raw.putObject("text").putObject("format").put("type", "json_schema");
         var request = new CanonicalRequest("guard", CanonicalRequest.Protocol.RESPONSES,
@@ -189,7 +189,7 @@ class ProviderRequestValidationTest {
         assertThatThrownBy(() -> ProviderRequestValidation.requireSupportedRequest(
             request, manifest))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("does not support stored Responses state");
+            .hasMessageContaining("does not support structured output");
     }
 
     @Test

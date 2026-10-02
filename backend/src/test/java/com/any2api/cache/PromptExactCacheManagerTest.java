@@ -53,12 +53,13 @@ class PromptExactCacheManagerTest {
         // Read back
         var cached = cacheManager.get(request).block();
         assertThat(cached).isNotNull();
-        assertThat(cached).hasSize(3);
+        assertThat(cached).hasSize(4);
+        assertThat(cached.get(0)).isInstanceOf(CanonicalEvent.ResponseStarted.class);
 
-        var content = (CanonicalEvent.OutputTextDelta) cached.get(0);
+        var content = (CanonicalEvent.OutputTextDelta) cached.get(1);
         assertThat(content.delta()).isEqualTo("4");
 
-        var usage = (CanonicalEvent.Usage) cached.get(1);
+        var usage = (CanonicalEvent.Usage) cached.get(2);
         assertThat(usage.outputTokens()).isEqualTo(5);
         assertThat(usage.cacheReadTokens()).isEqualTo(10);
     }
@@ -106,5 +107,40 @@ class PromptExactCacheManagerTest {
 
         cacheManager.put(request, failedEvents).block();
         assertThat(cacheManager.get(request).block()).isNull();
+    }
+
+    @Test
+    void isolatesApiKeysAndRehydratesFreshResponseIdentifiers() {
+        var request = request("{\"input\":\"hello\"}");
+        var owner = java.util.UUID.randomUUID();
+        cacheManager.put(request, owner, List.of(new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1, "hello"),
+            new CanonicalEvent.Completed(1, request.requestId(), 2, "stop"))).block();
+        assertThat(cacheManager.get(request, java.util.UUID.randomUUID()).block()).isNull();
+        var first = (CanonicalEvent.ResponseStarted) cacheManager.get(request, owner).block().getFirst();
+        var next = (CanonicalEvent.ResponseStarted) cacheManager.get(request, owner).block().getFirst();
+        assertThat(first.responseId()).isNotEqualTo(next.responseId());
+        assertThat(first.sequenceNumber()).isZero();
+    }
+
+    @Test
+    void excludesToolHistoryAndResponsesWithNonTextEvents() {
+        assertThat(cacheManager.isEligibleForCache(request("""
+            {"input":[{"type":"function_call","name":"inspect","call_id":"one","arguments":"{}"},
+              {"type":"function_call_output","call_id":"one","output":"result"}]}
+            """))).isFalse();
+        assertThat(cacheManager.isEligibleForCache(request("{\"input\":\"hello\",\"store\":true}"))).isFalse();
+        var request = request("{\"input\":\"hello\"}");
+        cacheManager.put(request, List.of(new CanonicalEvent.ReasoningDelta(1, request.requestId(), 1, "reason"),
+            new CanonicalEvent.Completed(1, request.requestId(), 2, "stop"))).block();
+        assertThat(cacheManager.get(request).block()).isNull();
+        cacheManager.put(request, List.of(new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1, "partial"),
+            new CanonicalEvent.Completed(1, request.requestId(), 2, "length"))).block();
+        assertThat(cacheManager.get(request).block()).isNull();
+    }
+
+    private CanonicalRequest request(String json) {
+        return new com.any2api.protocol.CanonicalRequestParser(mapper).parse(CanonicalRequest.Protocol.RESPONSES,
+            new com.any2api.routing.ResolvedRoute("mimo", "fixture"),
+            (tools.jackson.databind.node.ObjectNode) mapper.readTree(json));
     }
 }

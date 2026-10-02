@@ -53,6 +53,10 @@ final class GrokWebToolProtocol {
                     "Grok Web does not support tools.type=" + type);
             }
             var source = tool.path("function").isObject() ? tool.path("function") : tool;
+            if (source.path("strict").asBoolean(false)) {
+                throw com.any2api.protocol.OpenAiRequestException.unsupported(
+                    "tools.strict", "Grok Web emulated tools do not support strict=true");
+            }
             var name = source.path("name").asText("").trim();
             if (!NAME.matcher(name).matches()) {
                 throw new IllegalArgumentException(

@@ -97,7 +97,7 @@ public class InferenceCoordinator {
             : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
-            var safeRequest = contextManager.guard(request, modelCapabilities);
+            var safeRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(contextManager.guard(request, modelCapabilities));
             validateRequest(safeRequest, provider, modelCapabilities);
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
                 safeRequest, entry.capabilities()));
@@ -111,10 +111,10 @@ public class InferenceCoordinator {
             if (promptCache == null || !promptCache.isEligibleForCache(safeRequest) || "PROBE".equals(requestKind)) {
                 return liveEvents;
             }
-            return promptCache.get(safeRequest)
+            return promptCache.get(safeRequest, apiKeyId)
                 .flatMapMany(Flux::fromIterable)
                 .switchIfEmpty(Flux.defer(() -> liveEvents.collectList().flatMapMany(events ->
-                    promptCache.put(safeRequest, events).thenReturn(events).flatMapMany(Flux::fromIterable))));
+                    promptCache.put(safeRequest, apiKeyId, events).thenReturn(events).flatMapMany(Flux::fromIterable))));
         });
     }
 
@@ -167,7 +167,7 @@ public class InferenceCoordinator {
             : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
-            var safeRequest = contextManager.guard(request, modelCapabilities);
+            var safeRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(contextManager.guard(request, modelCapabilities));
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
                 safeRequest, entry.capabilities()));
             var execution = runtime.execute(safeRequest, admission ->
@@ -184,10 +184,10 @@ public class InferenceCoordinator {
             if (promptCache == null || !promptCache.isEligibleForCache(safeRequest) || "PROBE".equals(requestKind)) {
                 return liveEvents;
             }
-            return promptCache.get(safeRequest)
+            return promptCache.get(safeRequest, apiKeyId)
                 .flatMapMany(Flux::fromIterable)
                 .switchIfEmpty(Flux.defer(() -> liveEvents.collectList().flatMapMany(events ->
-                    promptCache.put(safeRequest, events).thenReturn(events).flatMapMany(Flux::fromIterable))));
+                    promptCache.put(safeRequest, apiKeyId, events).thenReturn(events).flatMapMany(Flux::fromIterable))));
         });
     }
 
@@ -267,7 +267,7 @@ public class InferenceCoordinator {
             return usage.normalize(request,
                     executeWithLease(
                         request, provider, wrappedLease, validateInsideLease, observed, transportMode,
-                        modelCapabilities))
+                        modelCapabilities, apiKeyId))
                 .doOnNext(event -> recordTelemetry(observed, event))
                 .doOnError(observed::recordError)
                 .doFinally(observed::finish);
@@ -349,7 +349,8 @@ public class InferenceCoordinator {
         boolean validateInsideLease,
         InferenceTelemetryService.Started observed,
         ProviderTransportMode transportMode,
-        JsonNode modelCapabilities
+        JsonNode modelCapabilities,
+        UUID apiKeyId
     ) {
         return Flux.usingWhen(
             lease.map(account -> new ExecutionLease(account, new ProviderExecutionContext(
@@ -358,7 +359,7 @@ public class InferenceCoordinator {
                 Long.toString(account.credentialVersion()),
                 account.lease().ownerToken(),
                 account.lease().fencingToken(),
-                Instant.now().plus(REQUEST_DEADLINE), transportMode))),
+                Instant.now().plus(REQUEST_DEADLINE), transportMode, apiKeyId))),
             execution -> {
                 var account = execution.account();
                 var context = execution.context();

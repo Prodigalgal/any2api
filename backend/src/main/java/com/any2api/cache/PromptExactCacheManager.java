@@ -53,10 +53,14 @@ public class PromptExactCacheManager {
     }
 
     public Mono<List<CanonicalEvent>> get(CanonicalRequest request) {
+        return get(request, null);
+    }
+
+    public Mono<List<CanonicalEvent>> get(CanonicalRequest request, java.util.UUID apiKeyId) {
         if (!isEligibleForCache(request)) {
             return Mono.empty();
         }
-        var key = cacheKey(request);
+        var key = cacheKey(request, apiKeyId);
         var readMono = layeredCache != null
             ? layeredCache.get(key, () -> Mono.just(Optional.empty()))
             : Mono.just(Optional.ofNullable(localCache.getIfPresent(key)));
@@ -69,6 +73,8 @@ public class PromptExactCacheManager {
                     List<StoredEvent> stored = mapper.readValue(
                         optional.get(), new TypeReference<List<StoredEvent>>() {});
                     var reconstructed = new ArrayList<CanonicalEvent>();
+                    reconstructed.add(new CanonicalEvent.ResponseStarted(
+                        1, request.requestId(), 0, "resp_" + java.util.UUID.randomUUID().toString().replace("-", "")));
                     for (var item : stored) {
                         if ("content".equals(item.type())) {
                             reconstructed.add(new CanonicalEvent.OutputTextDelta(
@@ -94,6 +100,10 @@ public class PromptExactCacheManager {
     }
 
     public Mono<Void> put(CanonicalRequest request, List<CanonicalEvent> events) {
+        return put(request, null, events);
+    }
+
+    public Mono<Void> put(CanonicalRequest request, java.util.UUID apiKeyId, List<CanonicalEvent> events) {
         if (!isEligibleForCache(request) || events == null || events.isEmpty()) {
             return Mono.empty();
         }
@@ -102,8 +112,13 @@ public class PromptExactCacheManager {
         if (hasFailed || !hasCompleted) {
             return Mono.empty();
         }
+        if (events.stream().anyMatch(event -> !(event instanceof CanonicalEvent.ResponseStarted
+            || event instanceof CanonicalEvent.OutputTextDelta || event instanceof CanonicalEvent.Usage
+            || event instanceof CanonicalEvent.Completed))) return Mono.empty();
+        if (events.stream().anyMatch(event -> event instanceof CanonicalEvent.Completed completed
+            && !"stop".equals(completed.finishReason()))) return Mono.empty();
 
-        var key = cacheKey(request);
+        var key = cacheKey(request, apiKeyId);
         var stored = new ArrayList<StoredEvent>();
         for (var event : events) {
             if (event instanceof CanonicalEvent.OutputTextDelta delta) {
@@ -134,6 +149,15 @@ public class PromptExactCacheManager {
         if (request == null || request.stream()) {
             return false;
         }
+        if (!request.tools().isEmpty() || !request.reasoning().isEmpty()
+            || !request.providerOptions().isEmpty()) return false;
+        var raw = request.rawRequest();
+        if (raw.path("store").asBoolean(false) || raw.hasNonNull("previous_response_id")
+            || raw.hasNonNull("conversation") || raw.hasNonNull("response_format")
+            || raw.hasNonNull("text") || raw.hasNonNull("include")
+            || raw.hasNonNull("reasoning_effort")) return false;
+        if (request.messages().stream().anyMatch(message -> message.has("tool_calls")
+            || message.has("tool_call_id") || message.path("content").isArray())) return false;
         // If high temperature is explicitly requested (e.g. creative/random generation > 1.2), skip cache
         var temp = request.generation().get("temperature");
         if (temp instanceof Number num && num.doubleValue() > 1.2) {
@@ -142,11 +166,11 @@ public class PromptExactCacheManager {
         return true;
     }
 
-    private String cacheKey(CanonicalRequest request) {
+    private String cacheKey(CanonicalRequest request, java.util.UUID apiKeyId) {
         try {
             var digest = MessageDigest.getInstance("SHA-256");
             var sb = new StringBuilder();
-            sb.append(request.protocol()).append("|")
+            sb.append("v2|").append(apiKeyId).append("|").append(request.protocol()).append("|")
               .append(request.providerId()).append("|")
               .append(request.model()).append("|");
             for (var msg : request.messages()) {

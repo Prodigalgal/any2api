@@ -4,7 +4,6 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ObjectNode;
 
 @Component
 public final class ApiKeyRequestFeatureDetector {
@@ -13,13 +12,14 @@ public final class ApiKeyRequestFeatureDetector {
     private static final Set<String> FILE_TYPES = Set.of(
         "file", "input_file", "file_url", "attachment");
 
-    public Set<ApiKeyFeature> requiredFeatures(ObjectNode request) {
+    public Set<ApiKeyFeature> requiredFeatures(JsonNode request) {
         var required = new LinkedHashSet<ApiKeyFeature>();
         if (request.path("tools").isArray() && !request.path("tools").isEmpty()) {
             required.add(ApiKeyFeature.TOOL_CALLING);
         }
         inspect(request.path("messages"), required);
         inspect(request.path("input"), required);
+        inspect(request.path("output"), required);
         var attachments = request.path("attachments");
         if (attachments.isArray() && !attachments.isEmpty()) {
             required.add(ApiKeyFeature.FILE_UPLOADS);
@@ -37,6 +37,10 @@ public final class ApiKeyRequestFeatureDetector {
         if (!node.isObject()) return;
 
         var type = node.path("type").asText("").trim().toLowerCase();
+        if (Set.of("function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output")
+            .contains(type) || node.has("tool_calls") || node.has("tool_call_id")) {
+            required.add(ApiKeyFeature.TOOL_CALLING);
+        }
         if (MULTIMODAL_TYPES.contains(type)) {
             required.add(ApiKeyFeature.MULTIMODAL_INPUT);
         }

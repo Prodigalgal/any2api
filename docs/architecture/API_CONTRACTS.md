@@ -8,6 +8,9 @@ Public endpoints expose OpenAI-compatible behavior:
 GET  /v1/models
 POST /v1/chat/completions
 POST /v1/responses
+GET  /v1/responses/{id}
+DELETE /v1/responses/{id}
+GET  /v1/responses/{id}/input_items
 POST /random/v1/chat/completions
 POST /random/v1/responses
 POST /multimodal-random/v1/chat/completions
@@ -23,6 +26,65 @@ declare that role. Each endpoint selects an enabled, installed provider with at 
 account, then selects one of that provider's role-qualified enabled models. Concrete model IDs are
 rejected on these endpoints. Responses expose the selected route through
 `X-Any2API-Provider` and `X-Any2API-Model`.
+
+### Responses agent contract (0.24.0)
+
+HTTP JSON and SSE support stateless history replay and optional gateway-owned state. Message
+`phase`, reasoning summaries, `function_call`/`function_call_output`, and
+`custom_tool_call`/`custom_tool_call_output` are accepted in history. Parallel call items form
+one canonical assistant tool group; multimodal results retain their content blocks. Refusal
+history is preserved publicly and replayed to providers as text. Unsupported `item_reference`
+or hosted-tool history remains an explicit error.
+
+Existing function providers can serve namespace functions and text custom tools through the
+function bridge. Responses restore the original name, namespace and item type. Tool choice can
+force a qualified function/custom tool or filter an `allowed_tools` set. Emulated tools reject
+`strict:true`, custom grammar and deferred loading. The bridge does not imply native tool support.
+
+`client_metadata`, `metadata`, `prompt_cache_key`, `safety_identifier`, `user`, default `service_tier`
+and `background:false` are accepted gateway fields. `text.verbosity` adds an answer-detail hint.
+`reasoning.summary` controls public summary output; requesting `include:["reasoning.encrypted_content"]`
+does not produce fabricated encrypted data. Opaque encrypted-only history is unsupported.
+Providers retain their individual generation, media, schema and token-budget restrictions.
+
+`store` defaults to **false**. `store:true` creates a public `resp_gw_*` resource in PostgreSQL,
+owned by the distribution API Key UUID or the configured full-access system principal. It stores
+input, output, metadata and usage. Retrieve/delete/input_items are available under the unified,
+provider, random and multimodal-random prefixes. Provider resource paths must match the saved
+provider. Each operation rechecks current protocol, provider/model and feature permissions;
+foreign owners, missing IDs and expired IDs return `404 response_not_found`.
+
+`previous_response_id` replays the saved input and output before new input. Current `instructions`
+replace the prior request's instructions. The same provider and model are required; random
+continuation pins that route. Existing Grok native state keeps account affinity, now checks API Key
+ownership/model, and retains its existing provider-state lifetime. Pre-upgrade ownerless native
+state cannot be used by distribution keys. Public `store:false` creates no gateway resource;
+it does not remove conversation/history kept by a provider or its existing native state adapter.
+
+Resource retention defaults to 24 hours (`ANY2API_RESPONSES_RETENTION`), size to 2 MiB
+(`ANY2API_RESPONSES_MAX_STATE_BYTES`) and quota to 1000 active records per owner
+(`ANY2API_RESPONSES_MAX_STORED_PER_KEY`). Quota admission is serialized using the existing
+PostgreSQL lock adapter. Expiry is enforced on reads and updates, with bounded cleanup batches.
+Deletion during streaming cannot be recreated by completion or cancellation. Disconnection
+persists `cancelled` when the database is available; failures persist `failed`, with oversized
+output omitted when needed to retain the terminal error within the configured bound.
+
+`input_items` supports `limit=1..100`, `order=asc|desc`, and one of `after`/`before`, using stable
+item IDs. Resource responses use `Cache-Control: no-store`. Retrieval with `stream:true`, stream
+resumption, WebSocket, background execution, Conversations and `/responses/compact` are unsupported.
+
+SSE and final documents use matching item indexes/IDs and a stable `created_at`. Function argument
+completion emits any missing suffix; inconsistent argument streams fail. Token exhaustion emits
+`response.incomplete`; failures preserve partial output. Pre-stream failures return the relevant
+HTTP status and JSON error before SSE begins. Ordinary text caching remains available with fresh
+response IDs and API Key isolation; tool, reasoning, structured and stored requests bypass it.
+
+The context manager preserves system/developer instructions and complete tool groups. Its default
+32-message truncation target is not semantic compaction; a complete tool group can exceed that
+target. `truncation:disabled` rejects excessive history instead of trimming it.
+
+See [client setup and verification](../integrations/OPENAI_AGENTS.md) for the tested Codex profile
+and the distinction between controlled upstream interoperability and live provider acceptance.
 
 ### Distribution-key transport policy
 
@@ -105,7 +167,8 @@ Each model publishes a machine-readable contract and runtime snapshot:
     "confidence": "HIGH"
   },
   "reasoning": {"supported": true, "levels": ["low", "medium", "high"]},
-  "tools": {"supported": true, "types": ["function"], "parallel": true},
+  "tools": {"supported": true, "types": ["custom", "function", "namespace"], "function_calling": true, "parallel": true, "bridge": "emulated_function_bridge", "strict": false, "custom_grammar": false, "deferred_loading": false},
+  "responses": {"store": true, "default_store": false, "previous_response_id": true, "resources": ["retrieve", "delete", "input_items"], "websockets": false, "background": false, "encrypted_reasoning": false},
   "streaming": true,
   "multimodal": {"input": ["text", "image"], "output": ["text"]},
   "runtime": {

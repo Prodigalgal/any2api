@@ -46,7 +46,7 @@ class SmartContextWindowManagerTest {
             .isEqualTo("Core system prompt");
         // Compaction notice inserted
         assertThat(guarded.messages().get(1).path("content").asText())
-            .contains("compacted by Any2API");
+            .contains("truncated by Any2API");
         // Latest messages preserved
         assertThat(guarded.messages().get(guarded.messages().size() - 1).path("content").asText())
             .isEqualTo("Turn 40");
@@ -80,6 +80,28 @@ class SmartContextWindowManagerTest {
             int toolIdx = roles.indexOf("tool");
             assertThat(roles.get(toolIdx - 1)).isEqualTo("assistant");
         }
+    }
+
+    @Test
+    void keepsParallelCallsAcrossCommentaryAtTheTruncationBoundary() {
+        var messages = new ArrayList<JsonNode>();
+        messages.add(msg("developer", "keep instructions"));
+        for (var index = 0; index < 6; index++) messages.add(msg("user", "old " + index));
+        var first = mapper.createObjectNode().put("role", "assistant");
+        first.putArray("tool_calls").addObject().put("id", "one");
+        messages.add(first);
+        messages.add(msg("assistant", "commentary"));
+        var second = mapper.createObjectNode().put("role", "assistant");
+        second.putArray("tool_calls").addObject().put("id", "two");
+        messages.add(second);
+        messages.add(mapper.createObjectNode().put("role", "tool").put("tool_call_id", "one").put("content", "first result"));
+        messages.add(mapper.createObjectNode().put("role", "tool").put("tool_call_id", "two").put("content", "second result"));
+        messages.add(msg("user", "continue"));
+        var guarded = manager.guard(createRequest(messages), mapper.createObjectNode().put("max_context_messages", 6));
+        assertThat(guarded.messages()).contains(first, second);
+        assertThat(guarded.messages().getFirst().path("role").asText()).isEqualTo("developer");
+        assertThat(guarded.messages().getLast().path("content").asText()).isEqualTo("continue");
+        assertThat(guarded.messages()).doesNotContain(messages.get(6));
     }
 
     private JsonNode msg(String role, String content) {

@@ -27,14 +27,14 @@ public class CanonicalRequestParser {
         "parallel_tool_calls", "presence_penalty", "provider_options", "reasoning",
         "reasoning_effort", "response_format", "seed", "stop", "stream",
         "stream_options", "temperature", "tool_choice", "tools", "top_logprobs",
-        "top_p", "user");
+        "top_p", "user", "store", "prompt_cache_key", "safety_identifier", "service_tier");
     private static final List<String> RESPONSES_ACCEPTED_PARAMETERS = List.of(
         "background", "include", "input", "instructions", "max_output_tokens",
         "max_tool_calls", "metadata", "model", "parallel_tool_calls",
         "previous_response_id", "prompt_cache_key", "provider_options", "reasoning",
         "reasoning_effort", "safety_identifier", "service_tier", "store", "stream",
         "stream_options", "temperature", "text", "tool_choice", "tools", "top_p",
-        "truncation", "user");
+        "truncation", "user", "client_metadata");
 
     private final ObjectMapper objectMapper;
 
@@ -115,7 +115,18 @@ public class CanonicalRequestParser {
         var reasoning = raw.path("reasoning").isObject()
             ? objectMapper.convertValue(raw.path("reasoning"), new TypeReference<Map<String, Object>>() {})
             : Map.<String, Object>of();
-        var tools = elements(raw.path("tools"));
+        var tools = OpenAiToolBridge.functions(raw.path("tools"));
+        if (protocol == CanonicalRequest.Protocol.RESPONSES && raw.path("text").hasNonNull("verbosity")) {
+            var verbosity = raw.path("text").path("verbosity").asText();
+            if (!Set.of("low", "medium", "high").contains(verbosity)) {
+                throw OpenAiRequestException.invalid("text.verbosity", "verbosity must be low, medium or high");
+            }
+            var steered = new ArrayList<JsonNode>();
+            steered.add(message("system", objectMapper.getNodeFactory().textNode(
+                "Requested answer detail level: " + verbosity + ".")));
+            steered.addAll(messages);
+            messages = List.copyOf(steered);
+        }
         var providerOptions = providerOptions(
             raw, route.providerId(), allowForeignProviderOptions);
         return new CanonicalRequest(
@@ -164,24 +175,37 @@ public class CanonicalRequestParser {
                     throw OpenAiRequestException.invalid(
                         "input.content", "Responses message input requires content");
                 }
-                messages.add(message(role, item.path("content").deepCopy()));
+                var normalized = message(role, responseContent(item.path("content")));
+                for (var field : List.of("id", "status", "phase")) {
+                    if (item.has(field)) normalized.set(field, item.path(field).deepCopy());
+                }
+                messages.add(normalized);
                 continue;
             }
-            if ("function_call_output".equals(type)) {
+            if ("reasoning".equals(type)) {
+                if (item.hasNonNull("encrypted_content") && !item.path("encrypted_content").asText().isBlank()
+                    && item.path("summary").isEmpty()) {
+                    throw OpenAiRequestException.unsupported("input.encrypted_content", "opaque encrypted reasoning is not supported by these providers");
+                }
+                // Reasoning items remain in raw input for round trips and stored history;
+                // they are not converted into user-visible prompt instructions.
+                continue;
+            }
+            if (Set.of("function_call_output", "custom_tool_call_output").contains(type)) {
                 var callId = item.path("call_id").asText(item.path("id").asText(""));
                 if (callId.isBlank() || !item.has("output")) {
                     throw OpenAiRequestException.invalid(
                         "input", "Responses function_call_output requires call_id and output");
                 }
                 var output = item.path("output");
-                var content = output.isTextual()
+                var content = output.isTextual() || output.isArray()
                     ? output.deepCopy() : objectMapper.getNodeFactory().textNode(output.toString());
                 var message = message("tool", content);
                 message.put("tool_call_id", callId);
                 messages.add(message);
                 continue;
             }
-            if ("function_call".equals(type)) {
+            if (Set.of("function_call", "custom_tool_call").contains(type)) {
                 var name = item.path("name").asText("");
                 if (name.isBlank()) {
                     throw OpenAiRequestException.invalid(
@@ -196,20 +220,45 @@ public class CanonicalRequestParser {
                     throw OpenAiRequestException.invalid(
                         "input.arguments", "Responses function_call arguments must be a string");
                 }
-                var message = message("assistant", objectMapper.getNodeFactory().textNode(""));
-                var call = message.putArray("tool_calls").addObject()
+                var custom = "custom_tool_call".equals(type);
+                if (custom && !item.path("input").isTextual()) {
+                    throw OpenAiRequestException.invalid("input.input", "custom tool call requires string input");
+                }
+                var namespace = item.path("namespace").asText("");
+                var upstreamName = OpenAiToolBridge.upstreamName(name, namespace, custom);
+                var arguments = custom ? objectMapper.writeValueAsString(
+                    objectMapper.createObjectNode().put("input", item.path("input").asText()))
+                    : item.path("arguments").asText("{}");
+                var message = !messages.isEmpty() && messages.getLast().has("tool_calls")
+                    ? (ObjectNode) messages.getLast() : message("assistant", objectMapper.getNodeFactory().textNode(""));
+                if (!message.has("tool_calls")) message.putArray("tool_calls");
+                var call = ((ArrayNode) message.path("tool_calls")).addObject()
                     .put("id", callId)
                     .put("type", "function");
                 call.putObject("function")
-                    .put("name", name)
-                    .put("arguments", item.path("arguments").asText("{}"));
-                messages.add(message);
+                    .put("name", upstreamName)
+                    .put("arguments", arguments);
+                if (messages.isEmpty() || messages.getLast() != message) messages.add(message);
                 continue;
             }
             throw OpenAiRequestException.unsupported(
                 "input.type", "unsupported Responses input item type: " + type);
         }
         return List.copyOf(messages);
+    }
+
+    private JsonNode responseContent(JsonNode content) {
+        if (!content.isArray()) return content.deepCopy();
+        var normalized = objectMapper.createArrayNode();
+        for (var part : content) {
+            if ("refusal".equals(part.path("type").asText())) {
+                if (!part.path("refusal").isTextual()) {
+                    throw OpenAiRequestException.invalid("input.content.refusal", "refusal must be a string");
+                }
+                normalized.addObject().put("type", "output_text").put("text", part.path("refusal").asText());
+            } else normalized.add(part.deepCopy());
+        }
+        return normalized;
     }
 
     private ObjectNode message(String role, JsonNode content) {
@@ -270,7 +319,7 @@ public class CanonicalRequestParser {
             "safety_identifier", "service_tier", "truncation", "user"),
             JsonNode::isTextual, "must be a string");
         requireTypes(raw, List.of(
-            "metadata", "reasoning", "response_format", "stream_options", "text"),
+            "metadata", "reasoning", "response_format", "stream_options", "text", "client_metadata"),
             JsonNode::isObject, "must be an object");
         requireTypes(raw, List.of("include", "modalities", "tools"),
             JsonNode::isArray, "must be an array");

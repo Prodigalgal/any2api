@@ -10,10 +10,11 @@ import tools.jackson.databind.JsonNode;
 public final class ProviderRequestValidation {
     private static final Set<String> CHAT_PLATFORM_PARAMETERS = Set.of(
         "model", "messages", "stream", "provider_options", "response_format",
-        "stream_options");
+        "stream_options", "metadata", "store", "prompt_cache_key", "safety_identifier", "user", "service_tier");
     private static final Set<String> RESPONSES_PLATFORM_PARAMETERS = Set.of(
         "model", "input", "instructions", "stream", "provider_options", "text",
-        "metadata", "stream_options");
+        "metadata", "stream_options", "store", "include", "prompt_cache_key", "safety_identifier",
+        "service_tier", "truncation", "background", "user", "client_metadata", "previous_response_id");
     private static final Set<String> TEXT_CONTENT_TYPES = Set.of(
         "text", "input_text", "output_text");
 
@@ -411,6 +412,7 @@ public final class ProviderRequestValidation {
         requireSupportedParameters(request, manifest, contract);
         requireSupportedTools(request, manifest, contract);
         requireSupportedReasoning(request, contract);
+        validateGatewayParameters(request);
         requireSupportedCapabilities(request, manifest, modelCapabilities);
     }
 
@@ -447,8 +449,7 @@ public final class ProviderRequestValidation {
         }
         if (request.protocol() == CanonicalRequest.Protocol.RESPONSES) {
             var raw = request.rawRequest();
-            if (raw.path("store").asBoolean(false)
-                || !raw.path("previous_response_id").asText("").isBlank()
+            if (!raw.path("previous_response_id").asText("").isBlank()
                 || raw.hasNonNull("conversation")) {
                 requireCapability(manifest, ProviderCapability.STORED_RESPONSES,
                     "stored Responses state");
@@ -527,7 +528,8 @@ public final class ProviderRequestValidation {
         var reasoning = request.rawRequest().path("reasoning");
         if (!reasoning.isObject()) return;
         reasoning.propertyNames().forEach(field -> {
-            if (!contract.reasoningParameters().contains(field)) {
+            if (!contract.reasoningParameters().contains(field)
+                && !(request.protocol() == CanonicalRequest.Protocol.RESPONSES && "summary".equals(field))) {
                 throw OpenAiRequestException.unsupported(
                     "reasoning." + field,
                     "reasoning field is not translated by provider "
@@ -539,6 +541,33 @@ public final class ProviderRequestValidation {
                     "reasoning." + field, "reasoning." + field + " must be a string");
             }
         });
+        if (reasoning.hasNonNull("summary") && !Set.of("auto", "concise", "detailed", "none")
+            .contains(reasoning.path("summary").asText())) {
+            throw OpenAiRequestException.invalid("reasoning.summary", "unsupported reasoning summary mode");
+        }
+    }
+
+    private static void validateGatewayParameters(CanonicalRequest request) {
+        var raw = request.rawRequest();
+        if (raw.path("background").asBoolean(false)) {
+            throw OpenAiRequestException.unsupported("background", "background execution is not supported");
+        }
+        if (request.protocol() == CanonicalRequest.Protocol.CHAT_COMPLETIONS && raw.path("store").asBoolean(false)) {
+            throw OpenAiRequestException.unsupported("store", "stored Chat Completions are not supported");
+        }
+        if (raw.hasNonNull("service_tier") && !Set.of("auto", "default").contains(raw.path("service_tier").asText())) {
+            throw OpenAiRequestException.unsupported("service_tier", "only the default provider service tier is supported");
+        }
+        if (raw.hasNonNull("truncation") && !Set.of("auto", "disabled").contains(raw.path("truncation").asText())) {
+            throw OpenAiRequestException.invalid("truncation", "truncation must be auto or disabled");
+        }
+        if (raw.hasNonNull("include")) {
+            for (var include : raw.path("include")) {
+                if (!include.isTextual() || !"reasoning.encrypted_content".equals(include.asText())) {
+                    throw OpenAiRequestException.unsupported("include", "unsupported response enrichment");
+                }
+            }
+        }
     }
 
     private static void requireSupportedTools(
@@ -562,6 +591,11 @@ public final class ProviderRequestValidation {
             if ("function".equals(type)) {
                 var definition = tool.path("function").isObject()
                     ? tool.path("function") : tool;
+                if (definition.path("strict").asBoolean(false)
+                    && manifest.capabilities().getOrDefault(ProviderCapability.FUNCTION_TOOLS, SupportLevel.UNSUPPORTED)
+                        == SupportLevel.EMULATED) {
+                    throw OpenAiRequestException.unsupported("tools.strict", "emulated function tools do not support strict=true");
+                }
                 if (definition.path("name").asText("").isBlank()) {
                     throw OpenAiRequestException.invalid(
                         "tools", "function tools require a name");
@@ -606,7 +640,7 @@ public final class ProviderRequestValidation {
     private static void validateResponsesText(JsonNode text) {
         if (text.isMissingNode() || text.isNull()) return;
         text.propertyNames().forEach(field -> {
-            if (!"format".equals(field)) {
+            if (!Set.of("format", "verbosity").contains(field)) {
                 throw OpenAiRequestException.unsupported(
                     "text." + field, "Responses text option is not translated: " + field);
             }

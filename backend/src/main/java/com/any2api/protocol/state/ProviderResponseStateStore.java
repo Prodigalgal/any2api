@@ -27,7 +27,7 @@ public class ProviderResponseStateStore {
     public Optional<ResponseState> find(String providerId, String responseId) {
         if (responseId == null || responseId.isBlank()) return Optional.empty();
         return jdbc.sql("""
-            SELECT response_id, provider_id, account_id, state, expires_at
+            SELECT response_id, provider_id, account_id, state, expires_at, api_key_id
             FROM provider_response_states
             WHERE response_id = :responseId AND provider_id = :providerId
               AND expires_at > CURRENT_TIMESTAMP
@@ -46,22 +46,30 @@ public class ProviderResponseStateStore {
         JsonNode state,
         Duration ttl
     ) {
+        save(responseId, providerId, accountId, state, ttl, null);
+    }
+
+    @Transactional
+    public void save(String responseId, String providerId, UUID accountId, JsonNode state, Duration ttl, UUID apiKeyId) {
         var now = Instant.now();
         jdbc.sql("""
             INSERT INTO provider_response_states(
-                response_id, provider_id, account_id, state, expires_at, created_at, updated_at)
+                response_id, provider_id, account_id, state, expires_at, created_at, updated_at, api_key_id)
             VALUES (:responseId, :providerId, :accountId, CAST(:state AS JSONB),
-                    :expiresAt, :now, :now)
+                    :expiresAt, :now, :now, :apiKeyId)
             ON CONFLICT (response_id) DO UPDATE SET
                 provider_id = EXCLUDED.provider_id,
                 account_id = EXCLUDED.account_id,
                 state = EXCLUDED.state,
                 expires_at = EXCLUDED.expires_at,
-                updated_at = EXCLUDED.updated_at
+                updated_at = EXCLUDED.updated_at,
+                api_key_id = EXCLUDED.api_key_id
+            WHERE provider_response_states.api_key_id IS NOT DISTINCT FROM EXCLUDED.api_key_id
             """)
             .param("responseId", responseId)
             .param("providerId", providerId)
             .param("accountId", accountId)
+            .param("apiKeyId", apiKeyId)
             .param("state", mapper.writeValueAsString(state))
             .param("expiresAt", PostgresResultValues.timestamp(now.plus(ttl)))
             .param("now", PostgresResultValues.timestamp(now))
@@ -85,7 +93,7 @@ public class ProviderResponseStateStore {
             row.getString("provider_id"),
             row.getObject("account_id", UUID.class),
             mapper.readTree(row.getString("state")),
-            PostgresResultValues.instant(row, "expires_at"));
+            PostgresResultValues.instant(row, "expires_at"), row.getObject("api_key_id", UUID.class));
     }
 
     public record ResponseState(
@@ -93,6 +101,11 @@ public class ProviderResponseStateStore {
         String providerId,
         UUID accountId,
         JsonNode state,
-        Instant expiresAt
-    ) {}
+        Instant expiresAt,
+        UUID apiKeyId
+    ) {
+        public ResponseState(String responseId, String providerId, UUID accountId, JsonNode state, Instant expiresAt) {
+            this(responseId, providerId, accountId, state, expiresAt, null);
+        }
+    }
 }

@@ -134,9 +134,10 @@ public class RandomInferenceRouter {
             var canonical = parser.parseCandidate(
                 protocol, new ResolvedRoute(route.providerId(), route.modelId()), raw, requestId);
             try {
+                var validationRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(canonical);
                 ProviderRequestValidation.requireSupportedRequest(
-                    canonical, provider.manifest(), provider.protocolContract());
-                provider.validate(canonical);
+                    validationRequest, provider.manifest(), provider.protocolContract());
+                provider.validate(validationRequest);
             } catch (IllegalArgumentException ignored) {
                 continue;
             }
@@ -207,7 +208,7 @@ public class RandomInferenceRouter {
         return requests.stream().allMatch(r -> healthTracker.isCooling(r.providerId(), r.model()));
     }
 
-    private void requireRandomModel(ObjectNode request) {
+    public static void requireRandomModel(ObjectNode request) {
         var value = request.path("model").asText("").trim();
         if (!value.isBlank() && !"random".equalsIgnoreCase(value)) {
             throw OpenAiRequestException.invalid(

@@ -19,8 +19,11 @@ public sealed interface CanonicalEvent permits
 
     long sequenceNumber();
 
-    record ResponseStarted(int schemaVersion, String requestId, long sequenceNumber, String responseId)
+    record ResponseStarted(int schemaVersion, String requestId, long sequenceNumber, String responseId, long createdAt)
         implements CanonicalEvent {
+        public ResponseStarted(int schemaVersion, String requestId, long sequenceNumber, String responseId) {
+            this(schemaVersion, requestId, sequenceNumber, responseId, java.time.Instant.now().getEpochSecond());
+        }
     }
 
     record ReasoningDelta(int schemaVersion, String requestId, long sequenceNumber, String delta)

@@ -52,6 +52,10 @@ management:
       show-details: when_authorized
 
 any2api:
+  responses:
+    retention: ${ANY2API_RESPONSES_RETENTION:24h}
+    max-state-bytes: ${ANY2API_RESPONSES_MAX_STATE_BYTES:2097152}
+    max-stored-per-key: ${ANY2API_RESPONSES_MAX_STORED_PER_KEY:1000}
   model-runtime:
     max-concurrent-requests: ${ANY2API_MODEL_MAX_CONCURRENCY:32}
     max-queue-wait: ${ANY2API_MODEL_MAX_QUEUE_WAIT:2s}

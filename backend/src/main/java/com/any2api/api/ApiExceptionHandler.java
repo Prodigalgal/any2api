@@ -18,6 +18,13 @@ import org.springframework.web.server.ServerWebExchange;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(com.any2api.protocol.state.ResponseNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> responseNotFound(
+        com.any2api.protocol.state.ResponseNotFoundException error, ServerWebExchange exchange
+    ) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response(
+            "invalid_request_error", "response_not_found", error.getMessage(), "response_id", false, exchange, Map.of()));
+    }
 
     @ExceptionHandler(ApiKeyScopeException.class)
     public ResponseEntity<Map<String, Object>> apiKeyScope(
@@ -44,7 +51,8 @@ public class ApiExceptionHandler {
     }
 
     private CanonicalRequest.Protocol protocol(ServerWebExchange exchange) {
-        return exchange.getRequest().getPath().value().endsWith("/responses")
+        var path = exchange.getRequest().getPath().value();
+        return path.endsWith("/responses") || path.contains("/v1/responses/")
             ? CanonicalRequest.Protocol.RESPONSES
             : CanonicalRequest.Protocol.CHAT_COMPLETIONS;
     }

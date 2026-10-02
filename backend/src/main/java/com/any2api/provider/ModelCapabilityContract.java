@@ -90,10 +90,21 @@ public record ModelCapabilityContract(
         value.put("reasoning", Map.of(
             "supported", reasoning,
             "levels", reasoningLevels));
+        var functionCalling = tools.types().contains("function");
+        var toolTypes = new java.util.TreeSet<>(tools.types());
+        if (functionCalling) toolTypes.addAll(List.of("custom", "namespace"));
         value.put("tools", Map.of(
             "supported", tools.supported(),
-            "types", tools.types(),
-            "parallel", tools.parallel()));
+            "types", List.copyOf(toolTypes),
+            "function_calling", functionCalling,
+            "parallel", tools.parallel(),
+            "bridge", functionCalling ? "emulated_function_bridge" : "unsupported",
+            "strict", false,
+            "custom_grammar", false,
+            "deferred_loading", false));
+        value.put("responses", Map.of("store", true, "default_store", false, "previous_response_id", true,
+            "resources", List.of("retrieve", "delete", "input_items"), "websockets", false, "background", false,
+            "encrypted_reasoning", false));
         value.put("streaming", streaming);
         value.put("multimodal", Map.of(
             "input", multimodal.input(),

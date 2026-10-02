@@ -173,7 +173,9 @@ public final class GrokWebProvider implements InferenceProvider {
                 ? Flux.error(new GrokWebEventDecoder.GrokWebStreamException(
                     "http_" + status.get(), "Grok Web upstream returned HTTP " + status.get()))
                 : Flux.fromIterable(decoder.finish())))
-            .concatWith(Flux.defer(() -> saveResponseState(decoder, account)));
+            .concatMap(event -> event instanceof CanonicalEvent.Completed
+                ? saveResponseState(decoder, account, context.apiKeyId(), request.model()).thenMany(Flux.just(event))
+                : Flux.just(event));
     }
 
     @Override
@@ -245,12 +247,14 @@ public final class GrokWebProvider implements InferenceProvider {
 
     private Flux<CanonicalEvent> saveResponseState(
         GrokWebEventDecoder decoder,
-        LeasedProviderAccount account
+        LeasedProviderAccount account,
+        java.util.UUID apiKeyId,
+        String model
     ) {
         return decoder.responseState()
             .map(state -> Mono.fromRunnable(() -> responseStates.save(
                     decoder.responseId(), manifest().id(), account.accountId(),
-                    state, RESPONSE_STATE_TTL))
+                    ((tools.jackson.databind.node.ObjectNode) state.deepCopy()).put("model", model), RESPONSE_STATE_TTL, apiKeyId))
                 .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
                 .thenMany(Flux.<CanonicalEvent>empty()))
             .orElseGet(Flux::empty);

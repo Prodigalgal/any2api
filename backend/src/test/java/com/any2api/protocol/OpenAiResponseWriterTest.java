@@ -169,7 +169,7 @@ class OpenAiResponseWriterTest {
 
     private CanonicalRequest request(CanonicalRequest.Protocol protocol, boolean stream) {
         var raw = mapper.createObjectNode().put("model", "alpha/model").put("stream", stream);
-        raw.putArray("tools").add(mapper.createObjectNode().put("type", "function"));
+        raw.putArray("tools").add(mapper.createObjectNode().put("type", "function").put("name", "lookup"));
         return new CanonicalRequest("request-id", protocol, "alpha", "model", stream,
             List.of(), Map.of(), Map.of(), List.of(), Map.of(), raw);
     }

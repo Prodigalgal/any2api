@@ -34,4 +34,16 @@ class ApiKeyRequestFeatureDetectorTest {
         assertThat(detector.requiredFeatures(request))
             .containsExactly(ApiKeyFeature.MULTIMODAL_INPUT);
     }
+
+    @Test
+    void toolHistoryRequiresPermissionWithoutNewToolDefinitions() {
+        for (var type : Set.of("function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output")) {
+            var request = mapper.createObjectNode();
+            request.putArray("input").addObject().put("type", type).put("call_id", "one");
+            assertThat(detector.requiredFeatures(request)).containsExactly(ApiKeyFeature.TOOL_CALLING);
+        }
+        var chat = mapper.createObjectNode();
+        chat.putArray("messages").addObject().put("role", "tool").put("tool_call_id", "one").put("content", "result");
+        assertThat(detector.requiredFeatures(chat)).containsExactly(ApiKeyFeature.TOOL_CALLING);
+    }
 }

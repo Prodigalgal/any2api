@@ -1,7 +1,19 @@
-# 当前任务板（源码 0.22.10）
+# 当前任务板（源码 0.24.1）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-02 发布部署与 Read 性能核验（0.24.1）
+
+- 用户已授权提交、部署和测试。0.24.0 本地候选验收后补齐日期/版本/用途镜像标签，正式候选升为 0.24.1；流水线忽略纯 docs/tasks 变动，避免验收记录触发同版本重新发布。
+- 发布与性能范围：[执行规格](../docs/requirements/RELEASE_AND_READ_PERFORMANCE.md)。先测旧生产 Read 基线，再跟踪 CI、GitOps、Pod 和真实厂商工具闭环。
+
+## 2026-10-02 OpenAI Chat/Responses agent 协议升级（0.24.0）
+
+- 阶段 1–3 已实现：历史回放、function/custom/namespace、流式终态、缓存隔离、网关 Responses 状态、所有权与资源接口。
+- 阶段 4 本地候选验收：官方 SDK、真实 Codex CLI 图片工具闭环、真实 PostgreSQL 迁移和回滚；结果见 [验收记录](../docs/reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)。
+- 真实厂商推理/测试环境部署需环境与凭据授权；当前未部署、未发布镜像。
+- [任务记录](in-progress/OPENAI_AGENT_COMPATIBILITY.md)、[需求契约](../docs/requirements/OPENAI_AGENT_COMPATIBILITY.md)、[客户端接入](../docs/integrations/OPENAI_AGENTS.md)。
 
 ## 2026-09-30 Grok Web 双域SSO Cookie双向复制、注册跨域会话导航与多端版本升级（0.22.10）
 

@@ -14,6 +14,7 @@ public final class ProviderExecutionContext {
     private final long fencingToken;
     private final Instant deadline;
     private final ProviderTransportMode transportMode;
+    private final UUID apiKeyId;
     private final AtomicReference<JsonNode> credentialPatch =
         new AtomicReference<>(MissingNode.getInstance());
 
@@ -38,6 +39,13 @@ public final class ProviderExecutionContext {
         Instant deadline,
         ProviderTransportMode transportMode
     ) {
+        this(requestId, accountId, credentialVersion, leaseOwnerToken, fencingToken, deadline, transportMode, null);
+    }
+
+    public ProviderExecutionContext(
+        String requestId, UUID accountId, String credentialVersion, String leaseOwnerToken,
+        long fencingToken, Instant deadline, ProviderTransportMode transportMode, UUID apiKeyId
+    ) {
         this.requestId = requestId;
         this.accountId = accountId;
         this.credentialVersion = credentialVersion;
@@ -46,6 +54,7 @@ public final class ProviderExecutionContext {
         this.deadline = deadline;
         this.transportMode = transportMode == null
             ? ProviderTransportMode.RUNTIME : transportMode;
+        this.apiKeyId = apiKeyId;
     }
 
     public String requestId() { return requestId; }
@@ -55,6 +64,7 @@ public final class ProviderExecutionContext {
     public long fencingToken() { return fencingToken; }
     public Instant deadline() { return deadline; }
     public ProviderTransportMode transportMode() { return transportMode; }
+    public UUID apiKeyId() { return apiKeyId; }
 
     public void acceptCredentialPatch(JsonNode patch) {
         if (patch != null && patch.isObject() && !patch.isEmpty()) {

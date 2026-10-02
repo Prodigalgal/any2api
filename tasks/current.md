@@ -1,20 +1,21 @@
-# 当前任务板（源码 0.24.3）
+# 当前任务板（源码 0.24.4）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-02 发布部署与 Read 性能核验（0.24.1 → 0.24.3）
+## 2026-10-02 发布部署与 Read 性能核验（0.24.1 → 0.24.4）
 
 - 用户已授权提交、部署和测试。0.24.0 本地候选验收后补齐日期/版本/用途镜像标签，正式候选升为 0.24.1；流水线忽略纯 docs/tasks 变动，避免验收记录触发同版本重新发布。
 - 发布与性能范围：[执行规格](../docs/requirements/RELEASE_AND_READ_PERFORMANCE.md)。先测旧生产 Read 基线，再跟踪 CI、GitOps、Pod 和真实厂商工具闭环。
 - 0.24.1 / 0.24.2 已部署，CI `37011929616` / `37016567168`，GitOps `39a59fb` / `3043e12`，四个应用 Ready，迁移 032 完成。0.24.2 修复对象 tool_choice、列表 N+1 和同步 Controller 线程阻塞，Key/规则/厂商列表耗时实测下降。
-- 0.24.2 LongCat 真实 SDK 7 组验收通过；MiMo Responses 6 组通过、Chat null assistant content 翻译失败。0.24.3 在 canonical 边界修复 null/missing content，补充 3 项回归与可配置 smoke 超时，继续真实验收。
+- 0.24.2 LongCat 真实 SDK 7 组验收通过；MiMo Responses 6 组通过、Chat null assistant content 翻译失败。0.24.3 在 canonical 边界修复 null/missing content，补充 3 项回归与可配置 smoke 超时，CI `37019554190` / GitOps `116df49` 已部署。
+- 0.24.4 补齐 Automation 两个镜像的当前包安装与 artifact version 门禁，纠正固定 browser-runtime 内旧的 `0.1.0` distribution metadata；不更新 browser-runtime/运行依赖。正在核验最终候选。
 
 ## 2026-10-02 OpenAI Chat/Responses agent 协议升级（0.24.0）
 
 - 阶段 1–3 已实现：历史回放、function/custom/namespace、流式终态、缓存隔离、网关 Responses 状态、所有权与资源接口。
 - 阶段 4 本地候选验收：官方 SDK、真实 Codex CLI 图片工具闭环、真实 PostgreSQL 迁移和回滚；结果见 [验收记录](../docs/reports/OPENAI_AGENT_ACCEPTANCE_2026-10-02.md)。
-- 用户已授权真实厂商和生产部署；当前已发布至 0.24.2，0.24.3 候选正在验证。SDK/Codex 与 Read 结果见 [发布与性能记录](../docs/reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)，阶段 4 仍按厂商逐项核验。
+- 用户已授权真实厂商和生产部署；当前已发布至 0.24.3，0.24.4 候选正在验证。SDK/Codex 与 Read 结果见 [发布与性能记录](../docs/reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)，阶段 4 仍按厂商逐项核验。
 - [任务记录](in-progress/OPENAI_AGENT_COMPATIBILITY.md)、[需求契约](../docs/requirements/OPENAI_AGENT_COMPATIBILITY.md)、[客户端接入](../docs/integrations/OPENAI_AGENTS.md)。
 
 ## 2026-09-30 Grok Web 双域SSO Cookie双向复制、注册跨域会话导航与多端版本升级（0.22.10）

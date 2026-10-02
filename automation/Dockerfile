@@ -4,6 +4,10 @@ FROM ${BROWSER_RUNTIME_IMAGE}
 WORKDIR /app
 
 COPY --chown=10001:10001 any2api_automation ./any2api_automation
+COPY --chown=10001:10001 pyproject.toml check_runtime_version.py ./
+
+RUN uv pip install --python /app/.venv/bin/python --no-deps --reinstall-package any2api-automation . \
+    && /app/.venv/bin/python check_runtime_version.py
 
 EXPOSE 8090
 ENTRYPOINT ["/usr/bin/tini", "--"]

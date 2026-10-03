@@ -89,11 +89,15 @@ final class ApiKeyGrantStore {
     }
 
     Map<UUID, ApiKeyGrant> readAll(List<ApiKeyEntity> keys) {
+        return readSummaries(keys.stream().map(ApiKeySummary::from).toList());
+    }
+
+    Map<UUID, ApiKeyGrant> readSummaries(List<ApiKeySummary> keys) {
         if (keys.isEmpty()) return Map.of();
         var rows = new LinkedHashMap<UUID, List<GrantRow>>();
         for (var offset = 0; offset < keys.size(); offset += READ_BATCH_SIZE) {
             var ids = keys.subList(offset, Math.min(offset + READ_BATCH_SIZE, keys.size()))
-                .stream().map(ApiKeyEntity::getId).toList();
+                .stream().map(ApiKeySummary::id).toList();
             jdbc.sql(GRANT_QUERY).param("apiKeyIds", ids)
                 .query((result, rowNumber) -> new GrantRow(
                     result.getObject("api_key_id", UUID.class), result.getInt("kind"),
@@ -103,12 +107,12 @@ final class ApiKeyGrantStore {
                     ignored -> new java.util.ArrayList<>()).add(row));
         }
         var grants = new LinkedHashMap<UUID, ApiKeyGrant>();
-        keys.forEach(key -> grants.put(key.getId(),
-            grant(key, rows.getOrDefault(key.getId(), List.of()))));
+        keys.forEach(key -> grants.put(key.id(),
+            grant(key, rows.getOrDefault(key.id(), List.of()))));
         return Map.copyOf(grants);
     }
 
-    private ApiKeyGrant grant(ApiKeyEntity key, List<GrantRow> rows) {
+    private ApiKeyGrant grant(ApiKeySummary key, List<GrantRow> rows) {
         var providers = new LinkedHashMap<String, MutableProviderScope>();
         var protocols = new LinkedHashSet<ApiKeyProtocol>();
         var features = new LinkedHashSet<ApiKeyFeature>();
@@ -144,8 +148,8 @@ final class ApiKeyGrantStore {
             }
         });
         return new ApiKeyGrant(
-            key.getId(), key.getName(), immutable, protocols, features,
-            key.getExpiresAt(), false, key.getTransportMode());
+            key.id(), key.name(), immutable, protocols, features,
+            key.expiresAt(), false, key.transportMode());
     }
 
     private record GrantRow(UUID apiKeyId, int kind, String providerId, String value, boolean allModels) {}

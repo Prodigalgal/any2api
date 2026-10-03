@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import com.any2api.account.AccountUnavailableException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import reactor.core.publisher.Flux;
@@ -14,6 +16,71 @@ import tools.jackson.databind.ObjectMapper;
 class OpenAiResponseWriterTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final OpenAiResponseWriter writer = new OpenAiResponseWriter(mapper);
+
+    @ParameterizedTest
+    @EnumSource(value = CanonicalRequest.Protocol.class, names = {"CHAT_COMPLETIONS", "RESPONSES"})
+    void preservesUpstreamTimeoutStatusAndJsonBeforeSseStarts(CanonicalRequest.Protocol protocol) {
+        for (boolean stream : List.of(false, true)) {
+            var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses").build());
+            writer.write(request(protocol, stream), Flux.just(new CanonicalEvent.Failed(
+                1, "request-id", 0, "provider_upstream_error", "upstream timed out",
+                Map.of("status", 504, "retryable", true))), exchange).block();
+            assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(504);
+            assertThat(exchange.getResponse().getHeaders().getContentType())
+                .isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+            assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"error\"", "\"request_id\":\"request-id\"", "provider_upstream_error");
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = CanonicalRequest.Protocol.class, names = {"CHAT_COMPLETIONS", "RESPONSES"})
+    void flushesAnEarlySsePreludeAndReportsDelayedFailuresAsSse(CanonicalRequest.Protocol protocol) {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses").build());
+        reactor.test.StepVerifier.withVirtualTime(() -> writer.write(request(protocol, true),
+                reactor.core.publisher.Mono.delay(java.time.Duration.ofSeconds(5))
+                    .map(ignored -> (CanonicalEvent) new CanonicalEvent.Failed(
+                        1, "request-id", 0, "provider_upstream_error", "upstream timed out", Map.of("status", 504)))
+                    .flux(), exchange))
+            .thenAwait(java.time.Duration.ofSeconds(3))
+            .then(() -> {
+                assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
+                assertThat(exchange.getResponse().getHeaders().getContentType())
+                    .isEqualTo(org.springframework.http.MediaType.TEXT_EVENT_STREAM);
+            })
+            .thenAwait(java.time.Duration.ofSeconds(2))
+            .verifyComplete();
+        assertThat(exchange.getResponse().getBodyAsString().block())
+            .startsWith(": request_id=request-id\n\n").contains("provider_upstream_error", "upstream timed out");
+        if (protocol == CanonicalRequest.Protocol.RESPONSES) {
+            var body = exchange.getResponse().getBodyAsString().block();
+            assertThat(body.indexOf("event: response.created"))
+                .isLessThan(body.indexOf("event: response.failed"));
+        }
+    }
+
+    @Test
+    void cancelsThePendingUpstreamWhenAClientDisconnectsBeforeOutput() {
+        var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses").build());
+        reactor.test.StepVerifier.withVirtualTime(() -> writer.write(
+                request(CanonicalRequest.Protocol.RESPONSES, true),
+                Flux.<CanonicalEvent>never().doOnCancel(() -> cancelled.set(true)), exchange))
+            .thenAwait(java.time.Duration.ofSeconds(3))
+            .thenCancel().verify();
+        assertThat(cancelled.get()).isTrue();
+    }
+
+    @Test
+    void mapsWrappedTransportTimeoutsTo504WithoutExposingTheInternalMessage() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses").build());
+        writer.write(request(CanonicalRequest.Protocol.RESPONSES, false), Flux.error(
+            new IllegalStateException("internal transport details", new java.net.SocketTimeoutException("private host"))),
+            exchange).block();
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(504);
+        assertThat(exchange.getResponse().getBodyAsString().block())
+            .contains("upstream_timeout").doesNotContain("private host", "internal transport details");
+    }
 
     @Test
     void rendersCompleteChatStreamingContract() {

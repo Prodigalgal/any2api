@@ -23,7 +23,7 @@ public final class CanonicalResponseGuard {
                     return Flux.just(event);
                 }
                 buffered.add(event);
-                if (meaningful(event)) {
+                if (isMeaningfulOutput(event)) {
                     released.set(true);
                     var ready = java.util.List.copyOf(buffered);
                     buffered.clear();
@@ -42,7 +42,7 @@ public final class CanonicalResponseGuard {
         });
     }
 
-    private static boolean meaningful(CanonicalEvent event) {
+    public static boolean isMeaningfulOutput(CanonicalEvent event) {
         return event instanceof CanonicalEvent.OutputTextDelta text && !text.delta().isBlank()
             || event instanceof CanonicalEvent.ReasoningDelta reasoning
                 && !reasoning.delta().isBlank()

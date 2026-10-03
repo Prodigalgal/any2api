@@ -3,8 +3,20 @@ package com.any2api.provider;
 import java.util.Locale;
 import java.util.Set;
 
-/** Shared, conservative classification for provider verification challenges. */
+/** Shared, conservative classification for transport and verification failures. */
 public final class ProviderFailureSignals {
+    public static boolean isTimeout(Throwable error) {
+        var seen = java.util.Collections.newSetFromMap(
+            new java.util.IdentityHashMap<Throwable, Boolean>());
+        for (var cause = error; cause != null && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof java.util.concurrent.TimeoutException
+                || cause instanceof java.net.SocketTimeoutException
+                || cause instanceof java.net.http.HttpTimeoutException
+                || cause instanceof io.netty.handler.timeout.TimeoutException) return true;
+        }
+        return false;
+    }
+
     private static final Set<String> ANTI_BOT_MARKERS = Set.of(
         "captcha", "recaptcha", "hcaptcha", "turnstile", "waf challenge", "x-amzn-waf",
         "bot challenge", "human verification", "verify you are human",

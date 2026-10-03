@@ -122,6 +122,7 @@ public final class LongcatProvider implements InferenceProvider {
         ProviderRequestValidation.requireInlineMediaUploads(
             request, "LongCat", Set.of(ProviderCapability.IMAGE_INPUT, ProviderCapability.FILE_INPUT));
         validateMediaPlacement(request);
+        LongcatMediaValidation.validate(request);
         ProviderRequestValidation.requireReasoningBooleanConsistency(
             request, "reason_enabled", Set.of("none", "minimal"), "reason_enabled");
         toolProtocol.plan(request);

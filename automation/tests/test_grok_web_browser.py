@@ -1,7 +1,10 @@
+import asyncio
 import json
 import shutil
 import subprocess
-from unittest.mock import MagicMock
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,9 +13,110 @@ from any2api_automation.lifecycle.registration import RegistrationStage, Registr
 from any2api_automation.providers.grok_web_browser import (
     _SESSION_REQUEST,
     _STREAM_REQUEST,
+    GrokWebOfficialBrowserTransport,
     build_grok_web_request,
     register_grok_web,
 )
+
+
+@pytest.mark.asyncio
+async def test_runtime_selection_has_a_deadline_and_releases_account_operation(monkeypatch):
+    runtime = GrokWebOfficialBrowserTransport("https://grok.com")
+    released = False
+
+    @asynccontextmanager
+    async def operation(_credential):
+        nonlocal released
+        try:
+            yield
+        finally:
+            released = True
+
+    async def stalled_selection(*_args):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(runtime, "account_operation", operation)
+    monkeypatch.setattr(runtime, "_select_session", stalled_selection)
+    monkeypatch.setattr(
+        "any2api_automation.providers.grok_web_browser.core_settings",
+        lambda: SimpleNamespace(inference_first_frame_timeout_seconds=0.02),
+    )
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [{"role": "user", "content": "hi"}],
+        "providerOptions": {},
+        "controls": {},
+        "tools": [],
+    }
+    events = [event async for event in runtime.stream({}, command, "", SimpleNamespace())]
+    assert events == [
+        {"type": "status", "status": 504},
+        {"type": "error", "data": "Grok Web runtime selection timed out"},
+    ]
+    assert released
+    assert not runtime._stream_queues
+
+
+@pytest.mark.asyncio
+async def test_browser_preparation_consumes_first_frame_budget_and_timing_stays_internal(
+    monkeypatch,
+):
+    runtime = GrokWebOfficialBrowserTransport("https://grok.com")
+    captured = {}
+
+    @asynccontextmanager
+    async def operation(_credential):
+        yield
+
+    async def evaluate(script, argument):
+        if script == _STREAM_REQUEST:
+            captured.update(argument)
+            runtime._emit(
+                {
+                    "requestId": argument["requestId"],
+                    "type": "timing",
+                    "phase": "websocket_open",
+                    "elapsed_ms": 5,
+                }
+            )
+            runtime._emit({"requestId": argument["requestId"], "type": "status", "status": 504})
+            runtime._emit(
+                {"requestId": argument["requestId"], "type": "error", "data": "timed out"}
+            )
+
+    session = SimpleNamespace(page=SimpleNamespace(evaluate=evaluate), build_id="test")
+
+    async def select(*_args):
+        await asyncio.sleep(0.03)
+        return session, None, []
+
+    monkeypatch.setattr(runtime, "account_operation", operation)
+    monkeypatch.setattr(runtime, "_select_session", select)
+    monkeypatch.setattr(runtime, "credential_patch", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        "any2api_automation.providers.grok_web_browser.core_settings",
+        lambda: SimpleNamespace(
+            inference_first_frame_timeout_seconds=0.2,
+            inference_timeout_seconds=1,
+            browser_cleanup_timeout_seconds=0.2,
+        ),
+    )
+    command = {
+        "schemaVersion": 1,
+        "requestId": "gateway-request-id",
+        "model": "grok-3",
+        "messages": [{"role": "user", "content": "hi"}],
+        "providerOptions": {},
+        "controls": {},
+        "tools": [],
+    }
+    events = [event async for event in runtime.stream({}, command, "", SimpleNamespace())]
+    assert 0 < captured["firstFrameTimeoutMs"] < 180
+    assert captured["timeoutMs"] < 980
+    assert captured["requestId"] == "gateway-request-id"
+    assert all(event["type"] != "timing" for event in events)
+    assert not runtime._stream_queues
 
 
 def test_grok_web_builds_gateway_command_from_semantic_request() -> None:

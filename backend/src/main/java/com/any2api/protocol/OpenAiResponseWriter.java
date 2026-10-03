@@ -46,6 +46,10 @@ public class OpenAiResponseWriter {
         CanonicalRequest request,
         Throwable error
     ) {
+        if (com.any2api.provider.ProviderFailureSignals.isTimeout(error)) {
+            return new CanonicalEvent.Failed(1, request.requestId(), 1, "upstream_timeout",
+                "upstream request timed out", Map.of("status", 504, "retryable", true));
+        }
         if (error instanceof com.any2api.protocol.state.ResponseStorageLimitException) {
             return new CanonicalEvent.Failed(1, request.requestId(), 1, "rate_limited", error.getMessage(), Map.of("retryable", false));
         }
@@ -83,11 +87,20 @@ public class OpenAiResponseWriter {
         Flux<CanonicalEvent> events,
         ServerWebExchange exchange
     ) {
-        return events.switchOnFirst((signal, source) -> {
-            if (signal.hasValue() && signal.get() instanceof CanonicalEvent.Failed) {
-                return writeCollected(request, source, exchange);
+        // Keep fast preflight errors as HTTP JSON. A delayed upstream must commit
+        // SSE before an edge idle timeout, while account retries remain internal.
+        var pending = Flux.merge(
+            events.map(java.util.Optional::of),
+            Mono.delay(Duration.ofSeconds(3))
+                .map(ignored -> java.util.Optional.<CanonicalEvent>empty()))
+            .takeUntil(event -> event.filter(value -> value instanceof CanonicalEvent.Completed
+                || value instanceof CanonicalEvent.Failed).isPresent());
+        return pending.switchOnFirst((signal, source) -> {
+            var canonical = source.filter(java.util.Optional::isPresent).map(java.util.Optional::get);
+            if (signal.hasValue() && signal.get().orElse(null) instanceof CanonicalEvent.Failed) {
+                return writeCollected(request, canonical, exchange);
             }
-            return writeAcceptedStream(request, source, exchange);
+            return writeAcceptedStream(request, canonical, exchange);
         }).then();
     }
 
@@ -117,7 +130,7 @@ public class OpenAiResponseWriter {
         Flux<DataBuffer> body = rendered
             .map(frame -> exchange.getResponse().bufferFactory().wrap(
                 frame.getBytes(StandardCharsets.UTF_8)));
-        return exchange.getResponse().writeWith(body);
+        return exchange.getResponse().writeAndFlushWith(body.map(Mono::just));
     }
 
     private Mono<Void> writeCollected(
@@ -283,6 +296,7 @@ public class OpenAiResponseWriter {
         private final CanonicalRequest request;
         private final ObjectMapper mapper;
         private final Map<String, Integer> toolIndexes = new LinkedHashMap<>();
+        private boolean started;
         private long sequence;
         private Integer textOutputIndex;
         private Integer reasoningOutputIndex;
@@ -304,6 +318,7 @@ public class OpenAiResponseWriter {
                 ? accumulator.tools.get(completed.toolCallId()).arguments.toString() : "";
             accumulator.accept(event);
             if (event instanceof CanonicalEvent.ResponseStarted started) {
+                this.started = true;
                 responseId = started.responseId();
                 var response = baseResponse("in_progress");
                 frames.add(event("response.created", object("response", response)));
@@ -428,6 +443,12 @@ public class OpenAiResponseWriter {
                     object("response", accumulator.responsesResponse())));
             } else if (event instanceof CanonicalEvent.Failed failed) {
                 var response = accumulator.responseDocument();
+                if (!started) {
+                    var pending = baseResponse("in_progress");
+                    frames.add(event("response.created", object("response", pending)));
+                    frames.add(event("response.in_progress", object("response", pending)));
+                    started = true;
+                }
                 frames.add(event("response.failed", object("response", response)));
             }
             return frames;
@@ -536,6 +557,11 @@ public class OpenAiResponseWriter {
 
         private HttpStatus status() {
             if (!failed()) return HttpStatus.OK;
+            if (failure.errorType().equals("upstream_timeout")
+                || failure.detail() != null && failure.detail().get("status") instanceof Number upstreamStatus
+                    && (upstreamStatus.intValue() == 504 || upstreamStatus.intValue() == 408)) {
+                return HttpStatus.GATEWAY_TIMEOUT;
+            }
             return Set.of("rate_limited", "quota_exhausted").contains(failure.errorType())
                 ? HttpStatus.TOO_MANY_REQUESTS
                 : Set.of("account_unavailable", "model_unavailable")

@@ -1,5 +1,6 @@
 package com.any2api.provider;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -25,12 +26,97 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 class InferenceCoordinatorTest {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void replacesRejectedCredentialsBeforeOutputAndExcludesEveryPreviousAccount(boolean stream) {
+        var accounts = mock(AccountSelectionService.class);
+        var leasedAccounts = List.of(leased("alpha"), leased("alpha"), leased("alpha"));
+        var acquisitions = new AtomicInteger();
+        when(accounts.acquire(eq("alpha"), eq("model"), any())).thenAnswer(invocation -> {
+            int attempt = acquisitions.getAndIncrement();
+            java.util.function.Predicate<ProviderAccountProfile> eligibility = invocation.getArgument(2);
+            for (int previous = 0; previous < attempt; previous++) {
+                assertThat(eligibility.test(new ProviderAccountProfile(
+                    leasedAccounts.get(previous).accountId(), Map.of()))).isFalse();
+            }
+            assertThat(eligibility.test(new ProviderAccountProfile(
+                leasedAccounts.get(attempt).accountId(), Map.of()))).isTrue();
+            return Mono.just(leasedAccounts.get(attempt));
+        });
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportAuthenticationFailure(any(), eq("empty"))).thenReturn(Mono.empty());
+        when(accounts.reportSuccess(leasedAccounts.get(2), "model")).thenReturn(Mono.empty());
+        var provider = new RetryingProvider("credential_rejected", 2, false);
+
+        StepVerifier.create(coordinator(provider, accounts).execute(request("alpha", stream)))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Usage.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
+            .verifyComplete();
+
+        verify(accounts, times(3)).acquire(eq("alpha"), eq("model"), any());
+        verify(accounts).reportAuthenticationFailure(leasedAccounts.get(0), "empty");
+        verify(accounts).reportAuthenticationFailure(leasedAccounts.get(1), "empty");
+        leasedAccounts.forEach(account -> verify(accounts).release(account));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void stopsCredentialReplacementAtThreeAttempts(boolean stream) {
+        var accounts = mock(AccountSelectionService.class);
+        var leasedAccounts = List.of(leased("alpha"), leased("alpha"), leased("alpha"));
+        when(accounts.acquire(eq("alpha"), eq("model"), any())).thenReturn(
+            Mono.just(leasedAccounts.get(0)), Mono.just(leasedAccounts.get(1)),
+            Mono.just(leasedAccounts.get(2)));
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportAuthenticationFailure(any(), eq("empty"))).thenReturn(Mono.empty());
+
+        StepVerifier.create(coordinator(new RetryingProvider("credential_rejected", 3, false), accounts)
+                .execute(request("alpha", stream)))
+            .expectNextMatches(event -> event instanceof CanonicalEvent.Failed failed
+                && failed.errorType().equals("credential_rejected"))
+            .verifyComplete();
+
+        verify(accounts, times(3)).acquire(eq("alpha"), eq("model"), any());
+        leasedAccounts.forEach(account -> {
+            verify(accounts).reportAuthenticationFailure(account, "empty");
+            verify(accounts).release(account);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void doesNotReplaceRejectedCredentialsAfterMeaningfulOutput(boolean stream) {
+        var accounts = mock(AccountSelectionService.class);
+        var account = leased("alpha");
+        when(accounts.acquire(eq("alpha"), eq("model"), any())).thenReturn(Mono.just(account));
+        when(accounts.release(account)).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(eq(account), any())).thenReturn(Mono.just(false));
+        when(accounts.reportAuthenticationFailure(account, "empty")).thenReturn(Mono.empty());
+
+        StepVerifier.create(coordinator(new RetryingProvider("credential_rejected", 2, true), accounts)
+                .execute(request("alpha", stream)))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(event -> event instanceof CanonicalEvent.Failed failed
+                && failed.errorType().equals("credential_rejected"))
+            .verifyComplete();
+
+        verify(accounts).acquire(eq("alpha"), eq("model"), any());
+        verify(accounts).release(account);
+    }
 
     @Test
     void appliesApiKeyTransportModeToTheInferencePlan() {
@@ -390,6 +476,8 @@ class InferenceCoordinatorTest {
         private final AtomicInteger attempts = new AtomicInteger();
         private final boolean exposeResponseBeforeFailure;
         private final boolean exposeOutputBeforeFailure;
+        private final String failureType;
+        private final int failedAttempts;
 
         private RetryingProvider() {
             this(false, false);
@@ -405,6 +493,15 @@ class InferenceCoordinatorTest {
         ) {
             this.exposeResponseBeforeFailure = exposeResponseBeforeFailure;
             this.exposeOutputBeforeFailure = exposeOutputBeforeFailure;
+            this.failureType = "empty_model_response";
+            this.failedAttempts = 1;
+        }
+
+        private RetryingProvider(String failureType, int failedAttempts, boolean exposeOutputBeforeFailure) {
+            this.exposeResponseBeforeFailure = true;
+            this.exposeOutputBeforeFailure = exposeOutputBeforeFailure;
+            this.failureType = failureType;
+            this.failedAttempts = failedAttempts;
         }
 
         @Override
@@ -420,7 +517,8 @@ class InferenceCoordinatorTest {
 
         @Override
         public ProviderRetryPolicy retryPolicy() {
-            return new ProviderRetryPolicy(2, java.util.Set.of("empty_model_response"));
+            return ProviderRetryPolicy.standardWith(
+                failureType.equals("credential_rejected") ? 3 : 2, failureType);
         }
 
         @Override
@@ -429,7 +527,7 @@ class InferenceCoordinatorTest {
             ProviderExecutionContext context,
             LeasedProviderAccount account
         ) {
-            if (attempts.getAndIncrement() == 0) {
+            if (attempts.getAndIncrement() < failedAttempts) {
                 if (exposeResponseBeforeFailure) {
                     var events = new java.util.ArrayList<CanonicalEvent>();
                     events.add(new CanonicalEvent.ResponseStarted(
@@ -440,12 +538,12 @@ class InferenceCoordinatorTest {
                     }
                     events.add(new CanonicalEvent.Failed(
                         1, request.requestId(), exposeOutputBeforeFailure ? 2 : 1,
-                        "empty_model_response", "empty", Map.of()));
+                        failureType, "empty", Map.of()));
                     return Flux.fromIterable(events);
                 }
                 return Flux.just(new CanonicalEvent.Failed(
                     1, request.requestId(), 0,
-                    "empty_model_response", "empty", Map.of()));
+                    failureType, "empty", Map.of()));
             }
             return Flux.just(
                 new CanonicalEvent.ResponseStarted(

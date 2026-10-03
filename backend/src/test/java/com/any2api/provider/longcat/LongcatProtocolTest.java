@@ -205,7 +205,7 @@ class LongcatProtocolTest {
             .putObject("function").put("name", "capture").put("arguments", "{}");
         var result = mapper.createObjectNode().put("role", "tool").put("tool_call_id", "call_image");
         result.putArray("content").addObject().put("type", "input_image")
-            .put("image_url", "data:image/png;base64,YQ==");
+            .put("image_url", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFMsAAAAASUVORK5CYII=");
         var request = new CanonicalRequest("media-tool", CanonicalRequest.Protocol.RESPONSES,
             "longcat", "longcat-flash", false, List.of(user, assistant, result),
             Map.of(), Map.of(), List.of(), Map.of(), mapper.createObjectNode());

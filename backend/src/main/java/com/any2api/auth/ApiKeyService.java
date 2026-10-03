@@ -20,6 +20,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @Service
 public class ApiKeyService {
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final String SUMMARY_QUERY = """
+        SELECT id, name, prefix, enabled, transport_mode, last_used_at,
+               expires_at, created_at, updated_at FROM api_keys
+        """;
     private final ApiKeyRepository keys;
     private final ApiKeyGrantStore grantStore;
     private final ApiKeyAuthenticator authenticator;
@@ -40,16 +44,18 @@ public class ApiKeyService {
         this.jdbc = jdbc;
     }
 
-    @Transactional(readOnly = true)
     public List<View> list() {
-        var entities = keys.findAllByOrderByCreatedAtDesc();
-        var grants = grantStore.readAll(entities);
-        return entities.stream().map(key -> View.from(key, grants.get(key.getId()))).toList();
+        var summaries = jdbc.sql(SUMMARY_QUERY + " ORDER BY created_at DESC, id")
+            .query(ApiKeySummary::map).list();
+        var grants = grantStore.readSummaries(summaries);
+        return summaries.stream().map(key -> View.from(key, grants.get(key.id()))).toList();
     }
 
-    @Transactional(readOnly = true)
     public View get(UUID id) {
-        return view(require(id));
+        var key = jdbc.sql(SUMMARY_QUERY + " WHERE id = :id").param("id", id)
+            .query(ApiKeySummary::map).optional()
+            .orElseThrow(() -> new IllegalArgumentException("unknown API key: " + id));
+        return View.from(key, grantStore.readSummaries(List.of(key)).get(id));
     }
 
     @Transactional
@@ -206,11 +212,14 @@ public class ApiKeyService {
         Instant updatedAt
     ) {
         static View from(ApiKeyEntity key, ApiKeyGrant grant) {
+            return from(ApiKeySummary.from(key), grant);
+        }
+
+        static View from(ApiKeySummary key, ApiKeyGrant grant) {
             return new View(
-                key.getId(), key.getName(), key.getPrefix(), key.isEnabled(),
-                grant.providerModels(), grant.protocols(), grant.features(), key.getTransportMode(),
-                key.getLastUsedAt(),
-                key.getExpiresAt(), key.getCreatedAt(), key.getUpdatedAt());
+                key.id(), key.name(), key.prefix(), key.enabled(),
+                grant.providerModels(), grant.protocols(), grant.features(), key.transportMode(),
+                key.lastUsedAt(), key.expiresAt(), key.createdAt(), key.updatedAt());
         }
     }
 }

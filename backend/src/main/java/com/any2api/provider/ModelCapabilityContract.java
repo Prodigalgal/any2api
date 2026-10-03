@@ -72,7 +72,8 @@ public record ModelCapabilityContract(
                 java.util.stream.Collectors.toUnmodifiableMap(
                     Map.Entry::getKey, entry -> entry.getValue().name().toLowerCase())),
             context, inputLimit, outputLimit, reasoning,
-            reasoning ? STANDARD_REASONING_LEVELS : List.of(),
+            reasoning && protocol.reasoningParameters().contains("effort")
+                ? STANDARD_REASONING_LEVELS : List.of(),
             new ToolSupport(!toolTypes.isEmpty(), toolTypes,
                 protocol.chatParameters().contains("parallel_tool_calls")
                     || protocol.responsesParameters().contains("parallel_tool_calls")),

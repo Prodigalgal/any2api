@@ -89,7 +89,6 @@ public class RegistrationScheduleService {
         return get(id);
     }
 
-    @Transactional(readOnly = true)
     public RegistrationSchedulePageView page(
         String providerId,
         Boolean enabled,
@@ -124,7 +123,6 @@ public class RegistrationScheduleService {
         return RegistrationSchedulePageView.of(items, total, page, size);
     }
 
-    @Transactional(readOnly = true)
     public RegistrationScheduleView get(UUID id) {
         return jdbc.sql("SELECT * FROM registration_schedules WHERE id = :id")
             .param("id", id).query(this::map).optional()

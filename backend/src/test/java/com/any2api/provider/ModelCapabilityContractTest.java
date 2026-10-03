@@ -9,6 +9,16 @@ import org.junit.jupiter.api.Test;
 
 class ModelCapabilityContractTest {
     @Test
+    void outputOnlyReasoningDoesNotAdvertiseUnsupportedEffortControls() {
+        var manifest = new ProviderManifest("alpha", "Alpha", "test", "1", List.of(),
+            Map.of(ProviderCapability.REASONING, SupportLevel.NATIVE), true);
+        var contract = ModelCapabilityContract.from(manifest, ProviderProtocolContract.strict(),
+            new DiscoveredModel("alpha-model", "Alpha Model", Map.of()));
+        assertThat(contract.reasoning()).isTrue();
+        assertThat(contract.reasoningLevels()).isEmpty();
+        assertThat(contract.supportedParameters().get("responses")).doesNotContain("reasoning");
+    }
+    @Test
     void combinesProviderProtocolAndOfficialModelMetadata() {
         var manifest = new ProviderManifest(
             "alpha", "Alpha", "test", "1", List.of("alpha-model"),

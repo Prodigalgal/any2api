@@ -1,10 +1,13 @@
 package com.any2api.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.any2api.interop.InteropDatabase;
 import com.any2api.provider.ProviderTransportMode;
@@ -15,6 +18,38 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class ApiKeyGrantBatchIntegrationTest {
+    @Test
+    void projectedKeyListPreservesStatusExpiryAndIsolatedPermissionsWithoutLoadingHashes() throws Exception {
+        try (var database = new InteropDatabase()) {
+            var selected = key(database, "projected", ProviderTransportMode.API);
+            var expiry = Instant.parse("2030-01-01T00:00:00Z");
+            database.jdbc.sql("UPDATE api_keys SET enabled=FALSE, expires_at=:expiry, transport_mode='API' WHERE id=:id")
+                .param("expiry", java.sql.Timestamp.from(expiry)).param("id", selected.getId()).update();
+            var setup = new ApiKeyGrantStore(database.jdbc);
+            setup.replace(selected.getId(), Map.of("mimo", ApiKeyProviderScope.allModels("mimo")),
+                Set.of(ApiKeyProtocol.RESPONSES), Set.of(ApiKeyFeature.TOOL_CALLING));
+            var jdbc = spy(database.jdbc);
+            var repository = mock(ApiKeyRepository.class);
+            var service = new ApiKeyService(repository, new ApiKeyGrantStore(jdbc),
+                mock(ApiKeyAuthenticator.class), mock(com.any2api.provider.ProviderRegistry.class), jdbc);
+
+            var listed = service.list();
+            var view = listed.stream().filter(key -> key.id().equals(selected.getId())).findFirst().orElseThrow();
+            assertThat(view.enabled()).isFalse();
+            assertThat(view.expiresAt()).isEqualTo(expiry);
+            assertThat(view.transportMode()).isEqualTo(ProviderTransportMode.API);
+            assertThat(view.providerModels()).containsOnlyKeys("mimo");
+            assertThat(view.protocols()).containsExactly(ApiKeyProtocol.RESPONSES);
+            assertThat(listed.stream().filter(key -> !key.id().equals(selected.getId())))
+                .allSatisfy(key -> assertThat(key.providerModels()).isEmpty());
+            assertThat(service.get(selected.getId())).isEqualTo(view);
+            verify(jdbc, times(4)).sql(anyString());
+            verifyNoInteractions(repository);
+            assertThatThrownBy(() -> service.get(java.util.UUID.randomUUID()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("unknown API key");
+        }
+    }
+
     @Test
     void batchPermissionsRemainIsolatedAndMissingPermissionsFailClosed() throws Exception {
         try (var database = new InteropDatabase()) {

@@ -13,6 +13,7 @@ import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
 import com.any2api.provider.ProviderRequestValidation;
+import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -100,6 +101,11 @@ public final class ArenaProvider implements InferenceProvider {
     }
 
     @Override public ProviderManifest manifest() { return MANIFEST; }
+
+    @Override
+    public ProviderRetryPolicy retryPolicy() {
+        return ProviderRetryPolicy.standardWith(3, "credential_rejected");
+    }
 
     @Override
     public java.util.Optional<String> scheduledProbeModel() {

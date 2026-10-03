@@ -60,6 +60,9 @@ _SESSION_REQUEST = r"""async request => {
 
 _STREAM_REQUEST = r"""async request => {
   const emit = event => window.__any2apiGrokWebEmit({requestId: request.requestId, ...event});
+  const startedAt = performance.now();
+  const phase = name => emit({type: 'timing', phase: name,
+    elapsed_ms: Math.round(performance.now() - startedAt)});
   let socket;
   let finished = false;
   let failing = false;
@@ -97,6 +100,7 @@ _STREAM_REQUEST = r"""async request => {
       signal: controller.signal
     });
     const sessionText = await sessionResponse.text();
+    await phase('session_authenticated');
     let session;
     try { session = JSON.parse(sessionText); } catch (_) { session = {}; }
     const userId = String(session?.session?.userId || '').trim();
@@ -110,6 +114,7 @@ _STREAM_REQUEST = r"""async request => {
     socket = new WebSocket(websocketUrl.toString());
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
+      void phase('websocket_open');
       socket.send(JSON.stringify({event: {
         type: 'session.create',
         event_id: 'evt_session_' + crypto.randomUUID().replaceAll('-', ''),
@@ -146,6 +151,8 @@ _STREAM_REQUEST = r"""async request => {
       let root;
       try { root = JSON.parse(raw); } catch (_) { return; }
       const event = root?.event || {};
+      if (event.type === 'conversation.attached') await phase('conversation_attached');
+      if (event.type === 'response.done') await phase('generation_completed');
       if (event.type === 'response.chunk' || event.type === 'response.output_text.delta'
           || event.type === 'response.done') clearTimeout(firstFrameTimeout);
       if (event.type === 'error') {
@@ -219,7 +226,9 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
             allowed_domain_suffixes=("grok.com", "x.ai"),
             identity_fields=("sso", "sso-rw", "sso_rw", "cookies", "cookie", "email"),
             require_build_assets=False,
-            page_url=base_url,
+            # Chat uses same-origin fetch and WebSocket; the full UI adds unrelated
+            # assets and hydration to every cold account session.
+            page_url=base_url.rstrip("/") + "/api/auth/session",
         )
         self._stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 
@@ -266,11 +275,34 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
         plan: RuntimePlan,
     ) -> AsyncIterator[dict[str, Any]]:
         request = build_grok_web_request(command)
+        started_at = time.monotonic()
         async with self.account_operation(credential):
-            session, selection, reports = await self._select_session(credential, proxy_url, plan)
+            first_frame_budget = core_settings().inference_first_frame_timeout_seconds
+            try:
+                remaining = first_frame_budget - (time.monotonic() - started_at)
+                if remaining <= 0:
+                    raise TimeoutError
+                async with asyncio.timeout(remaining):
+                    session, selection, reports = await self._select_session(
+                        credential, proxy_url, plan
+                    )
+            except TimeoutError:
+                logger.warning(
+                    "grok_web_gateway_timeout phase=runtime_selection elapsed_ms=%s",
+                    round((time.monotonic() - started_at) * 1000),
+                )
+                yield {"type": "status", "status": 504}
+                yield {"type": "error", "data": "Grok Web runtime selection timed out"}
+                return
+            selection_ms = round((time.monotonic() - started_at) * 1000)
             for report in reports:
                 yield {"type": "runtime_canary", **report}
-            request_id = uuid4().hex
+            correlation_id = str(command.get("requestId") or "")
+            request_id = (
+                correlation_id
+                if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", correlation_id)
+                else uuid4().hex
+            )
             queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
             self._stream_queues[request_id] = queue
 
@@ -282,15 +314,25 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
                             {
                                 "requestId": request_id,
                                 **request,
-                                "timeoutMs": core_settings().inference_timeout_seconds * 1000,
-                                "firstFrameTimeoutMs": core_settings().inference_first_frame_timeout_seconds
-                                * 1000,
+                                "timeoutMs": max(
+                                    1,
+                                    core_settings().inference_timeout_seconds * 1000 - selection_ms,
+                                ),
+                                "firstFrameTimeoutMs": max(
+                                    1, first_frame_budget * 1000 - selection_ms
+                                ),
                             },
                         )
                 except Exception as error:  # noqa: BLE001 - stream boundary
                     logger.warning(
                         "grok_web_official_browser_stream_failed error_type=%s",
                         type(error).__name__,
+                    )
+                    await queue.put(
+                        {
+                            "type": "status",
+                            "status": 504 if isinstance(error, TimeoutError) else 502,
+                        }
                     )
                     await queue.put(
                         {
@@ -307,12 +349,29 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
             data_seen = False
             frame_types: dict[str, int] = {}
             channels: dict[str, int] = {}
+            phase_ms: dict[str, int] = {"runtime_selection": selection_ms}
             try:
                 while True:
                     event = await queue.get()
                     event_type = str(event.get("type") or "error")
                     if event_type == "done":
                         break
+                    if event_type == "timing":
+                        phase = str(event.get("phase") or "")
+                        elapsed = event.get("elapsed_ms")
+                        if (
+                            phase
+                            in {
+                                "session_authenticated",
+                                "websocket_open",
+                                "conversation_attached",
+                                "generation_completed",
+                            }
+                            and isinstance(elapsed, (int, float))
+                            and elapsed >= 0
+                        ):
+                            phase_ms.setdefault(phase, selection_ms + round(elapsed))
+                        continue
                     if event_type == "error":
                         pending_error = event
                         continue
@@ -336,6 +395,11 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
                             )
                             if re.fullmatch(r"[A-Z0-9_]{1,80}", channel):
                                 channels[channel] = channels.get(channel, 0) + 1
+                            if frame_type in {"response.chunk", "response.output_text.delta"}:
+                                phase_ms.setdefault(
+                                    "first_generation_frame",
+                                    round((time.monotonic() - started_at) * 1000),
+                                )
                     yield event
                 if pending_error is None and data_seen and 200 <= status < 300:
                     report = successful_canary(plan, selection, session.build_id)
@@ -348,11 +412,12 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
                     yield pending_error
             finally:
                 logger.info(
-                    "grok_web_gateway_summary request_id=%s status=%s frame_types=%s channels=%s",
+                    "grok_web_gateway_summary request_id=%s status=%s frame_types=%s channels=%s phase_ms=%s",
                     request_id,
                     status,
                     frame_types,
                     channels,
+                    phase_ms,
                 )
                 self._stream_queues.pop(request_id, None)
                 if not task.done():

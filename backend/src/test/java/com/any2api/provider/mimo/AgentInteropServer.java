@@ -148,6 +148,15 @@ public final class AgentInteropServer {
             var text = safe.messages().stream().map(message->contentText(message.path("content")))
                 .collect(java.util.stream.Collectors.joining("\n"));
             if(text.contains("fixture:rate-limit")) return Flux.just(new CanonicalEvent.Failed(1,id,0,"rate_limited","fixture rate limit",Map.of()));
+            if(text.contains("fixture:upstream-error") || text.contains("fixture:gateway-timeout")) {
+                var status = text.contains("fixture:gateway-timeout") ? 504 : 502;
+                return Flux.just(new CanonicalEvent.Failed(1,id,0,"provider_upstream_error",
+                    "fixture upstream failure",Map.of("status",status)));
+            }
+            if(text.contains("fixture:delayed-error")) {
+                return Mono.delay(Duration.ofSeconds(5)).map(ignored -> (CanonicalEvent)
+                    new CanonicalEvent.Failed(1,id,0,"provider_upstream_error","fixture delayed failure",Map.of("status",504))).flux();
+            }
             events.add(new CanonicalEvent.ResponseStarted(1,id,0,"resp_fixture_"+UUID.randomUUID().toString().replace("-","")));
             var last = safe.messages().isEmpty()?null:safe.messages().getLast();
             var hasResult = last!=null && "tool".equals(last.path("role").asText());

@@ -48,7 +48,6 @@ public class ProviderRuntimeService {
         this.transportModes = transportModes;
     }
 
-    @Transactional(readOnly = true)
     public List<ProviderRuntimeView> list() {
         var plugins = providers.plugins();
         if (plugins.isEmpty()) return List.of();

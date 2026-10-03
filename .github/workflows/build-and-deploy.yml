@@ -170,6 +170,7 @@ jobs:
     needs: [build-images, release-metadata]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Configure GitOps deploy key
         env:
           DEPLOY_KEY: ${{ secrets.ANY2API_GITOPS_DEPLOY_KEY }}
@@ -178,7 +179,7 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-      - name: Update immutable image tags
+      - name: Update immutable image tags, namespace and server placement
         env:
           IMAGE_SUFFIX: ${{ needs.release-metadata.outputs.image_suffix }}
         run: |
@@ -187,21 +188,41 @@ jobs:
           python3 - <<'PY'
           import os
           import re
+          import shutil
           from pathlib import Path
 
           path = Path("any2api/oracle/kustomization.yaml")
           content = path.read_text(encoding="utf-8")
+          namespace = re.search(r"^namespace:\s*(\S+)\s*$", content, re.MULTILINE)
+          if namespace is not None and namespace.group(1) != "any2api":
+              raise SystemExit("unexpected Any2API GitOps namespace")
+          if namespace is None:
+              content, count = re.subn(r"^kind: Kustomization$",
+                  "kind: Kustomization\nnamespace: any2api", content, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit("expected one GitOps Kustomization")
           suffix = os.environ["IMAGE_SUFFIX"]
           for component in ("server", "automation", "automation-arena", "web"):
               pattern = rf"(name: any2api-{component}\n\s+newName: .*\n\s+newTag: ).*"
               content, count = re.subn(pattern, rf"\g<1>{component}-{suffix}", content)
               if count != 1:
                   raise SystemExit(f"expected one image entry for {component}, found {count}")
+          patch_name = "server-database-affinity.yaml"
+          patch_source = Path(os.environ["GITHUB_WORKSPACE"]) / "deploy/gitops" / patch_name
+          shutil.copyfile(patch_source, path.parent / patch_name)
+          if patch_name not in content:
+              if re.search(r"^patches:\s*$", content, re.MULTILINE):
+                  content = re.sub(r"^patches:\s*$", f"patches:\n  - path: {patch_name}",
+                                   content, count=1, flags=re.MULTILINE)
+              elif re.search(r"^patches:", content, re.MULTILINE):
+                  raise SystemExit("unsupported existing GitOps patches format")
+              else:
+                  content = content.rstrip() + f"\npatches:\n  - path: {patch_name}\n"
           path.write_text(content, encoding="utf-8")
           PY
           git config user.name any2api-ci
           git config user.email any2api-ci@users.noreply.github.com
-          git add any2api/oracle/kustomization.yaml
+          git add any2api/oracle/kustomization.yaml any2api/oracle/server-database-affinity.yaml
           if git diff --cached --quiet; then
             exit 0
           fi

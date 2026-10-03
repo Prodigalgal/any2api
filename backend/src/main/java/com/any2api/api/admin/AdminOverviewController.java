@@ -1,7 +1,6 @@
 package com.any2api.api.admin;
 
 import com.any2api.account.AccountRepository;
-import com.any2api.account.AccountStatus;
 import com.any2api.config.Any2ApiProperties;
 import com.any2api.provider.ProviderRegistry;
 import java.time.Instant;
@@ -37,13 +36,14 @@ public class AdminOverviewController {
     @GetMapping("/overview")
     public Mono<Map<String, Object>> overview() {
         return Mono.fromCallable(() -> {
+            var counts = accounts.countSummary();
             var result = new LinkedHashMap<String, Object>();
             result.put("service", "any2api-server");
             result.put("time", Instant.now());
             result.put("providers", providers.list());
             result.put("accounts", Map.of(
-                "total", accounts.count(),
-                "active", accounts.countByStatus(AccountStatus.ACTIVE)));
+                "total", counts.getTotal(),
+                "active", counts.getActive()));
             result.put("automationUrl", properties.getAutomation().getBaseUrl());
             return Map.copyOf(result);
         }).subscribeOn(reactor.core.scheduler.Schedulers.fromExecutor(databaseExecutor));

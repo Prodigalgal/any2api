@@ -282,6 +282,9 @@ public class InferenceCoordinator {
                     .filter(CanonicalEvent.Failed.class::isInstance)
                     .map(CanonicalEvent.Failed.class::cast)
                     .findFirst();
+                if (events.stream().anyMatch(CanonicalResponseGuard::isMeaningfulOutput)) {
+                    return Flux.fromIterable(events);
+                }
                 var nextExcluded = new java.util.HashSet<UUID>(attemptedAccountIds);
                 if (currentAccountId.get() != null) {
                     nextExcluded.add(currentAccountId.get());
@@ -407,7 +410,10 @@ public class InferenceCoordinator {
                                 "provider emitted an invalid canonical event stream",
                                 false,
                                 Map.of("violation", protocolError.violation()))
-                            : provider.classify(error);
+                            : ProviderFailureSignals.isTimeout(error)
+                                ? new ProviderFailure("upstream_timeout", "upstream request timed out",
+                                    true, Map.of("status", 504, "retryable", true))
+                                : provider.classify(error);
                         var event = new CanonicalEvent.Failed(
                             1,
                             request.requestId(),

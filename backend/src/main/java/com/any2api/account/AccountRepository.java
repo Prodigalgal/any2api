@@ -16,6 +16,15 @@ public interface AccountRepository extends JpaRepository<AccountEntity, UUID>,
 
     long countByStatus(AccountStatus status);
 
+    @Query(value = "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'ACTIVE') AS active FROM accounts",
+        nativeQuery = true)
+    CountSummary countSummary();
+
+    interface CountSummary {
+        long getTotal();
+        long getActive();
+    }
+
     Optional<AccountEntity> findByProviderIdAndExternalId(String providerId, String externalId);
 
     @Query(value = """

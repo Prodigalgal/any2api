@@ -20,6 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ModelCatalogCache {
+    private volatile DecodedCatalog decodedCatalog;
     private static final String MODEL_QUERY = """
         WITH eligible_accounts AS MATERIALIZED (
             SELECT id, provider_id FROM accounts
@@ -166,7 +167,7 @@ public class ModelCatalogCache {
         return cache.get("enabled", () -> Mono.fromCallable(() -> Optional.of(
                 mapper.writeValueAsString(load())))
             .subscribeOn(Schedulers.boundedElastic()))
-            .map(value -> value.map(this::decode).orElseGet(List::of));
+            .flatMap(value -> value.map(this::decode).orElseGet(() -> Mono.just(List.of())));
     }
 
     public Mono<Optional<Entry>> find(String providerId, String modelId) {
@@ -176,6 +177,7 @@ public class ModelCatalogCache {
     }
 
     public Mono<Void> invalidate() {
+        decodedCatalog = null;
         return cache.evict("enabled");
     }
 
@@ -205,10 +207,21 @@ public class ModelCatalogCache {
             .query(this::row).list();
     }
 
-    private List<Entry> decode(String value) {
-        var type = mapper.getTypeFactory().constructCollectionType(List.class, Entry.class);
-        return mapper.readValue(value, type);
+    private synchronized Mono<List<Entry>> decode(String value) {
+        if (decodedCatalog != null && decodedCatalog.serialized().equals(value)) {
+            return decodedCatalog.entries();
+        }
+        // Reuse only the currently returned L1/L2 snapshot; cache TTL and eviction
+        // remain authoritative. Parsing runs once per snapshot off the event loop.
+        var entries = Mono.<List<Entry>>fromCallable(() -> {
+            var type = mapper.getTypeFactory().constructCollectionType(List.class, Entry.class);
+            return List.copyOf(mapper.readValue(value, type));
+        }).subscribeOn(Schedulers.boundedElastic()).cache();
+        decodedCatalog = new DecodedCatalog(value, entries);
+        return entries;
     }
+
+    private record DecodedCatalog(String serialized, Mono<List<Entry>> entries) {}
 
     private Entry row(ResultSet result, int rowNumber) throws SQLException {
         var fetchedAt = result.getObject("fetched_at", java.time.OffsetDateTime.class);

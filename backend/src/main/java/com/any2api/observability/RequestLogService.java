@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -22,7 +21,6 @@ public class RequestLogService {
         this.mapper = mapper;
     }
 
-    @Transactional(readOnly = true)
     public Page list(Query query) {
         var normalized = query.normalized();
         var total = baseQuery("SELECT COUNT(*) FROM usage_events WHERE ", normalized)
@@ -41,7 +39,6 @@ public class RequestLogService {
             total == 0 ? 0 : (int) ((total + normalized.size() - 1) / normalized.size()));
     }
 
-    @Transactional(readOnly = true)
     public Detail get(String requestId, int attempt) {
         return jdbc.sql("""
             SELECT request_id, api_key_id, provider_id, account_id, model_id, protocol,

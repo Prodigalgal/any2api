@@ -40,7 +40,6 @@ public class ProviderRuntimeRuleService {
         this.mapper = mapper;
     }
 
-    @Transactional(readOnly = true)
     public List<RuleStateView> list() {
         var states = jdbc.sql(STATE_QUERY + " ORDER BY provider_id").query(this::mapState).list();
         if (states.isEmpty()) return List.of();
@@ -72,7 +71,6 @@ public class ProviderRuntimeRuleService {
         }).toList();
     }
 
-    @Transactional(readOnly = true)
     public RuleStateView get(String providerId) {
         var normalizedId = normalizeProviderId(providerId);
         var state = state(normalizedId, false);
@@ -85,13 +83,11 @@ public class ProviderRuntimeRuleService {
         return view(state, revisions);
     }
 
-    @Transactional(readOnly = true)
     public RuntimePlan plan(String providerId) {
         return findPlan(providerId).orElseThrow(() -> new IllegalArgumentException(
             "provider does not support declarative runtime rules: " + providerId));
     }
 
-    @Transactional(readOnly = true)
     public Optional<RuntimePlan> findPlan(String providerId) {
         var normalizedId = normalizeProviderId(providerId);
         return jdbc.sql("""

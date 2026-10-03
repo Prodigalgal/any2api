@@ -365,6 +365,28 @@ def main() -> None:
             pass
         passed("long history/incomplete/prestream errors")
 
+        for protocol in ("chat", "responses"):
+            for stream in (False, True):
+                for marker, expected_status in (("fixture:upstream-error", 502), ("fixture:gateway-timeout", 504)):
+                    try:
+                        if protocol == "responses":
+                            client.responses.create(model=args.model, input=marker, store=False, stream=stream)
+                        else:
+                            client.chat.completions.create(model=args.model,
+                                messages=[{"role": "user", "content": marker}], stream=stream)
+                        raise AssertionError(f"{protocol} error was accepted as HTTP 200")
+                    except openai.APIStatusError as error:
+                        assert error.status_code == expected_status
+                        assert error.response.headers["content-type"].startswith("application/json")
+                        assert error.response.json()["error"]["request_id"]
+        passed("Chat/Responses 502/504 JSON and prestream status fidelity")
+
+        with client.responses.stream(model=args.model, input="fixture:delayed-error", store=False) as stream:
+            failed = next(event for event in stream if event.type == "response.failed")
+            delayed = failed.response
+        assert delayed.status == "failed" and delayed.error
+        passed("delayed SSE failure/SDK terminal state")
+
     report = {
         "sdk_version": openai.__version__,
         "client_timeout_seconds": args.timeout,

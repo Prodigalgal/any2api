@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class OperationLogService {
@@ -17,7 +16,6 @@ public class OperationLogService {
         this.jdbc = jdbc;
     }
 
-    @Transactional(readOnly = true)
     public Page list(Query query) {
         var normalized = query.normalized();
         var total = statement("SELECT COUNT(*) FROM operation_events WHERE ", normalized)

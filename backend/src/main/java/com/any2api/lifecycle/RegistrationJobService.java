@@ -164,7 +164,6 @@ public class RegistrationJobService {
         };
     }
 
-    @Transactional(readOnly = true)
     public List<RegistrationJobView> list(String providerId) {
         if (providerId != null && !providerId.isBlank()) {
             providers.requirePlugin(providerId);
@@ -177,7 +176,6 @@ public class RegistrationJobService {
             .query(this::map).list();
     }
 
-    @Transactional(readOnly = true)
     public RegistrationJobPageView page(
         String providerId,
         String status,
@@ -217,7 +215,6 @@ public class RegistrationJobService {
         return RegistrationJobPageView.of(items, total, page, size);
     }
 
-    @Transactional(readOnly = true)
     public RegistrationJobView get(UUID id) {
         return jdbc.sql("SELECT * FROM registration_jobs WHERE id = :id")
             .param("id", id).query(this::map).optional()

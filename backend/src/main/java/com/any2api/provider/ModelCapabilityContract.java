@@ -100,7 +100,8 @@ public record ModelCapabilityContract(
             "function_calling", functionCalling,
             "parallel", tools.parallel(),
             "bridge", functionCalling ? "emulated_function_bridge" : "unsupported",
-            "strict", false,
+            "strict", functionCalling,
+            "strict_validation", functionCalling ? "gateway_schema_validation" : "unsupported",
             "custom_grammar", false,
             "deferred_loading", false));
         value.put("responses", Map.of("store", true, "default_store", false, "previous_response_id", true,

@@ -591,11 +591,7 @@ public final class ProviderRequestValidation {
             if ("function".equals(type)) {
                 var definition = tool.path("function").isObject()
                     ? tool.path("function") : tool;
-                if (definition.path("strict").asBoolean(false)
-                    && manifest.capabilities().getOrDefault(ProviderCapability.FUNCTION_TOOLS, SupportLevel.UNSUPPORTED)
-                        == SupportLevel.EMULATED) {
-                    throw OpenAiRequestException.unsupported("tools.strict", "emulated function tools do not support strict=true");
-                }
+                com.any2api.protocol.StrictFunctionSchema.compile(definition);
                 if (definition.path("name").asText("").isBlank()) {
                     throw OpenAiRequestException.invalid(
                         "tools", "function tools require a name");

@@ -6,6 +6,7 @@ Public endpoints expose OpenAI-compatible behavior:
 
 ```text
 GET  /v1/models
+GET  /v1/models/{model}
 POST /v1/chat/completions
 POST /v1/responses
 GET  /v1/responses/{id}
@@ -19,6 +20,11 @@ POST /multimodal-random/v1/responses
 
 Provider-specific equivalents exist under `/{provider}/v1`. Unified requests route with a `provider/model` identifier.
 
+Model retrieval accepts the same IDs returned by the matching model list, including IDs with
+slashes or URL-encoded slashes. It returns the same model metadata, capabilities and runtime snapshot.
+Unknown, disabled-provider and unauthorized model IDs return OpenAI JSON `404 model_not_found`.
+Cataloged but unavailable models remain describable, with `available:false`.
+
 Random endpoints accept an omitted model or `model=random`. `/random/v1` selects only models carrying
 the provider-owned `top_text` role. `/multimodal-random/v1` selects only models carrying the
 `top_multimodal` role; a provider must implement image input without dropping content before it may
@@ -27,7 +33,7 @@ account, then selects one of that provider's role-qualified enabled models. Conc
 rejected on these endpoints. Responses expose the selected route through
 `X-Any2API-Provider` and `X-Any2API-Model`.
 
-### Responses agent contract (0.24.0)
+### Responses agent contract (0.26.0)
 
 HTTP JSON and SSE support stateless history replay and optional gateway-owned state. Message
 `phase`, reasoning summaries, `function_call`/`function_call_output`, and
@@ -38,8 +44,22 @@ or hosted-tool history remains an explicit error.
 
 Existing function providers can serve namespace functions and text custom tools through the
 function bridge. Responses restore the original name, namespace and item type. Tool choice can
-force a qualified function/custom tool or filter an `allowed_tools` set. Emulated tools reject
-`strict:true`, custom grammar and deferred loading. The bridge does not imply native tool support.
+force a qualified function/custom tool or filter an `allowed_tools` set. Function tools support
+explicit `strict:true` through gateway schema validation; custom grammar and deferred loading
+remain unsupported. The bridge does not imply native constrained decoding.
+
+Strict function schemas require object parameters, `additionalProperties:false`, and all object
+properties in `required`. Supported constraints include basic types, nullable types, enum/const,
+objects, arrays, bounded anyOf, numeric and length constraints, and local non-cyclic `$ref`/`$defs`.
+External references, cyclic references, pattern/format and other unsupported keywords are explicit
+400 errors before account admission. Limits are 64 KiB per schema, 32 schema levels, 2048 expanded
+schema nodes, 16 branches per anyOf and 1 MiB arguments. Compiled schemas use a bounded cache.
+When strict is enabled, function events are withheld until complete JSON arguments validate;
+bad JSON, duplicate keys, conflicting argument deltas, extra fields and schema mismatches fail
+with `tool_call_generation_failed`, without exposing the invalid tool events. No repair is applied.
+The gateway cannot guarantee upstream generation success or native strict decoding performance.
+Omitted strict and `strict:false` retain existing best-effort behavior; there is no implicit strict
+normalization for Responses tools in this gateway.
 
 `client_metadata`, `metadata`, `prompt_cache_key`, `safety_identifier`, `user`, default `service_tier`
 and `background:false` are accepted gateway fields. `text.verbosity` adds an answer-detail hint.

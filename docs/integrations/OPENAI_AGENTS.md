@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.25.7）
+# OpenAI API 到厂商 WEB 的桥接（0.26.0）
 
 ## 范围
 
@@ -13,17 +13,21 @@
 | 能力 | 支持范围 |
 |---|---|
 | JSON / SSE | Chat 与 Responses；SDK 可重建最终输出和工具参数 |
+| 模型详情 | `models.retrieve()` 使用目录返回的 model ID；缺失或无权限返回 OpenAI JSON 404 |
+| 严格函数参数 | 显式 `strict:true`，由公共网关检查完整参数，再输出工具事件；上游生成不合格会失败 |
 | function tools | 八家现有 WEB Provider 均有模拟工具桥接；auto/none/required/指定 function 按模型校验。Qwen 缺账号，真实验收与其他模型限制见发布报告 |
 | namespace / custom（可选扩展） | namespace 函数与 text custom 转 function，再还原输出身份；并行调用与 allowed_tools；不保证每个 WEB 上游稳定支持 |
 | 历史回放 | 多轮文本、function call/output；保留已有 reasoning、phase、custom、refusal；图片结果需模型和 Key 的媒体权限，适配情况见真实验收 |
 | 状态 | `store:true`、`previous_response_id`、retrieve/delete/input_items，按 Key 隔离 |
 | 上下文 | 默认和 `truncation:disabled` 保留完整历史；仅显式 `truncation:auto` 使用 32 条裁剪目标，保留首部规则和完整工具组。厂家明确的消息上限、既有 token/request-size 限制仍校验 |
 
-`strict:true`、custom grammar、defer_loading/tool search、原生 hosted tools、opaque encrypted-only reasoning、item_reference、WebSocket、background、Conversations、`/responses/compact`、流式续传均未形成通用实现保证。请求会按具体 Provider 契约明确拒绝。请求 `include:["reasoning.encrypted_content"]` 不会获得伪造的加密内容。
+custom grammar、defer_loading/tool search、原生 hosted tools、opaque encrypted-only reasoning、item_reference、WebSocket、background、Conversations、`/responses/compact`、流式续传均未形成通用实现保证。请求会按具体 Provider 契约明确拒绝。请求 `include:["reasoning.encrypted_content"]` 不会获得伪造的加密内容。
+
+严格 function 参数支持基础类型、nullable、嵌套 object/array、enum、anyOf、数值/长度约束和局部非循环引用。object 必须设置 `additionalProperties:false` 并声明全部必填字段；pattern/format、循环或外部引用及其他未支持关键词明确返回 400。严格模式缓冲工具事件到参数完成并通过校验，失败返回 `tool_call_generation_failed`；它不承诺厂家原生受限解码或一定生成成功。Responses 未声明 strict 时仍保持既有非严格行为。完整边界见 [API 契约](../architecture/API_CONTRACTS.md)。
 
 工具上限、schema、媒体、generation 参数和 token 预算仍由当前 Provider 校验。MiMo/LongCat 现有工具上限是 128。能力声明与真实厂商验收、模型可调用状态是不同证据。
 
-0.25.0 为 DeepSeek / Qwen / GLM / MiniMax / Arena 补齐 emulated function 桥接，保留原生搜索、推理、媒体和通道逻辑；0.25.1/0.25.2 修复实际 user turn 的工具契约和网关工具控制的 WEB 转译边界。使用 `openai_agent_smoke.py --core` 验收常用 Chat/Responses、function 回传和普通 function SSE，默认完整脚本仍保留 namespace/custom 扩展测试。真实厂商验收、部署、Read 性能及遗留事项见 [2026-10-03 发布报告](../reports/WEB_OPENAI_BRIDGE_2026-10-03.md)。Qwen 无账号时只具备代码与离线契约证据；LongCat 媒体上传可完成，但图片识别准确性尚未通过。
+0.25.0–0.25.2 为现有厂家补齐 emulated function 桥接，0.25.3–0.25.7 的真实验收见 [后续修复与验证](../reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)：七家所选模型完成 SDK、完整历史和有限并发检查，LongCat 用户/工具 OCR、TXT/PDF 已通过，厂家原生纯色误判仍保留。Qwen 仅有代码与离线契约证据。本轮模型详情和 strict 的逐厂商结果见 [0.26.0 客户端契约验收](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
 
 ### 历史验收（0.24.4，后续修复见当前发布报告）
 
@@ -39,7 +43,7 @@ from openai import OpenAI
 
 with OpenAI(
     base_url="https://any2api-direct.mnnu.eu.org/v1",
-    api_key=os.environ["ANY2API_E2E_API_KEY"],
+    api_key=os.environ["ANY2API_MIMO_API_KEY"],
     timeout=120,
 ) as client:
     chat = client.chat.completions.create(
@@ -74,7 +78,7 @@ supports_websockets = false
 
 通过环境变量提供已授权的测试 Key。分发 Key 需允许 Responses、对应 provider/model，以及 `TOOL_CALLING`；读取并回传本地图片还需 `MULTIMODAL_INPUT` 和 `FILE_UPLOADS`。全权限静态入口使用共享 `system` 状态归属，需独立归属时使用分发 Key。
 
-本次验收使用 Codex CLI 0.159.2，关闭 apps/plugins/multi_agent，使用 HTTP/SSE、函数工具和 `read-only` sandbox。自定义路由名可能触发 CLI model metadata fallback 提示；已有 OpenAI 原生模型的 metadata 不应被用来承诺本桥接不支持的 grammar/strict/encryption 能力。
+历史验收使用 Codex CLI 0.159.2；0.25.5 的只读图片工具闭环使用 0.160.0。实验关闭 apps/plugins/multi_agent，使用 HTTP/SSE、函数工具和 `read-only` sandbox。自定义路由名可能触发 CLI model metadata fallback 提示；已有 OpenAI 原生模型的 metadata 不应被用来承诺本桥接不支持的 grammar/encryption 或完整原生 strict 解码能力。
 
 0.24.0 的受控上游实验完成 `view_image` 工具闭环；本机 PowerShell 命令工具被 CLI policy 拒绝，未绕过。0.24.4 真实 MiMo 图片实验返回正确颜色，但 CLI JSON 没有显式 image_view completion item，不能仅凭最终标记认定该工具执行轨迹。标准 API 的工具图片回放已单独验证。Shell/patch 权限和 metadata fallback 不属于本项目后端缺口。
 
@@ -101,7 +105,8 @@ Set-Location backend
 $env:ANY2API_E2E_API_KEY = 'fixture-primary'
 python tools/compatibility/openai_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --fixture --sdk-path backend/build/agent-interop-python --report backend/build/agent-sdk-report.json
 python tools/compatibility/codex_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture-codex-image --fixture --tool image --report backend/build/agent-codex-report.json
-python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.25.2.jar
+python tools/compatibility/openai_strict_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --provider mimo --fixture --sdk-path backend/build/agent-interop-python --report backend/build/strict-sdk-report.json
+python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.26.0.jar
 ```
 
 关闭本地服务：

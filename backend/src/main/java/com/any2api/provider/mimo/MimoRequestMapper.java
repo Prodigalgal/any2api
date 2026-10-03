@@ -55,10 +55,7 @@ final class MimoRequestMapper {
             if (!names.add(name)) {
                 throw new IllegalArgumentException("duplicate function tool: " + name);
             }
-            if (definition.path("strict").asBoolean(false)) {
-                throw new IllegalArgumentException(
-                    "MiMo emulated tools do not support strict=true");
-            }
+            com.any2api.protocol.StrictFunctionSchema.compile(definition);
             var parameters = definition.has("parameters")
                 ? definition.path("parameters").deepCopy()
                 : mapper.createObjectNode().put("type", "object")

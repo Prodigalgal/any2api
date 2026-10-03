@@ -68,6 +68,34 @@ public class ModelsController {
                 .toList()));
     }
 
+    @GetMapping("/v1/models/{*model}")
+    public Mono<Map<String, Object>> model(@PathVariable String model, ServerWebExchange exchange) {
+        return findModel(null, model, exchange);
+    }
+
+    @GetMapping("/{providerId:[a-z][a-z0-9_-]{1,31}}/v1/models/{*model}")
+    public Mono<Map<String, Object>> providerModel(
+        @PathVariable String providerId, @PathVariable String model, ServerWebExchange exchange
+    ) {
+        return findModel(providerId, model, exchange);
+    }
+
+    private Mono<Map<String, Object>> findModel(String providerId, String capturedModel, ServerWebExchange exchange) {
+        var modelId = capturedModel.startsWith("/") ? capturedModel.substring(1) : capturedModel;
+        var grant = authorization.grant(exchange);
+        var enabledProviders = registry.list().stream()
+            .map(provider -> provider.id()).collect(Collectors.toUnmodifiableSet());
+        return catalog.list().flatMap(models -> Mono.justOrEmpty(models.stream()
+            .filter(model -> enabledProviders.contains(model.providerId()))
+            .filter(model -> grant.allowsModel(model.providerId(), model.id()))
+            .filter(model -> providerId == null
+                ? modelId.equals(model.providerId() + "/" + model.id())
+                : providerId.equals(model.providerId()) && modelId.equals(model.id()))
+            .findFirst())
+            .map(model -> response(model, providerId == null))
+            .switchIfEmpty(Mono.error(new com.any2api.protocol.ModelNotFoundException())));
+    }
+
     private Map<String, Object> response(ModelCatalogCache.Entry model, boolean namespaced) {
         var result = new LinkedHashMap<String, Object>();
         result.put("id", namespaced ? model.providerId() + "/" + model.id() : model.id());

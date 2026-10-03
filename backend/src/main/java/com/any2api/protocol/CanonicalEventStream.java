@@ -14,12 +14,13 @@ public final class CanonicalEventStream {
     ) {
         return Flux.defer(() -> {
             var state = new State(request.requestId());
-            return source.<CanonicalEvent>handle((event, sink) -> {
+            var ordered = source.<CanonicalEvent>handle((event, sink) -> {
                 state.accept(event);
                 sink.next(event);
             }).concatWith(Flux.defer(() -> state.terminal
                 ? Flux.<CanonicalEvent>empty()
                 : Flux.error(new CanonicalProtocolException("missing_terminal_event"))));
+            return StrictToolArgumentsGuard.enforce(request, ordered);
         });
     }
 

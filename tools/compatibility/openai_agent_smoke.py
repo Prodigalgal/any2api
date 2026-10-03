@@ -324,15 +324,28 @@ def main() -> None:
         )
         assert follow.output_text
         passed("parallel tool streams/multiple results")
+        strict_response = client.responses.create(
+            model=args.model,
+            input="Use inspect_workspace to inspect the directory.",
+            store=False,
+            tools=[{**function, "strict": True}],
+            tool_choice="required",
+        )
+        assert any(item.type == "function_call" for item in strict_response.output)
+        passed("strict function contract")
         try:
             client.responses.create(
                 model=args.model,
                 input="Hello",
                 stream=True,
                 store=False,
-                tools=[{**function, "strict": True}],
+                tools=[{
+                    **function,
+                    "strict": True,
+                    "parameters": {"type": "object", "additionalProperties": True},
+                }],
             )
-            raise AssertionError("emulated strict tools were accepted")
+            raise AssertionError("invalid strict schema was accepted")
         except openai.BadRequestError:
             pass
         history = [{"role": "developer", "content": "Keep this rule."}] + [

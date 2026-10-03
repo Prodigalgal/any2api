@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.any2api.api.ApiExceptionHandler;
 import com.any2api.api.openai.OpenAiGatewayController;
 import com.any2api.api.openai.ResponsesResourceController;
+import com.any2api.api.openai.ModelsController;
 import com.any2api.auth.ApiKeyAuthenticator;
 import com.any2api.auth.ApiKeyAuthorization;
 import com.any2api.auth.ApiKeyGrant;
@@ -28,6 +29,9 @@ import com.any2api.protocol.SmartContextWindowManager;
 import com.any2api.protocol.state.ProviderResponseStateStore;
 import com.any2api.protocol.state.ResponsesService;
 import com.any2api.provider.InferenceCoordinator;
+import com.any2api.provider.ModelCatalogCache;
+import com.any2api.provider.ModelRuntimeGuard;
+import com.any2api.provider.DiscoveredModel;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
@@ -94,6 +98,17 @@ public final class AgentInteropServer {
             var provider = new MimoProvider(mock(OfficialBrowserTransportClient.class),new OfficialBrowserSemanticCommandFactory(mapper),
                 mock(ProxyPoolService.class),new MimoProperties(),mimoMapper,mapper);
             var registry = ProviderRegistry.allEnabled(List.of(provider));
+            var catalog = mock(ModelCatalogCache.class);
+            var models = List.of("fixture", "fixture-codex", "fixture-codex-image").stream().map(model -> {
+                var capabilities = mapper.valueToTree(provider.modelContract(new DiscoveredModel(model, model, Map.of())).asMap());
+                return new ModelCatalogCache.Entry(model, model, "mimo", "MiMo", capabilities, capabilities,
+                    null, null, null, "fixture", mapper.createObjectNode(), List.of(), 1, true, "READY",
+                    1, 1, 0, 0, 0, 1.0, 0, 0, null, null, "PASSED", null, null);
+            }).toList();
+            when(catalog.list()).thenReturn(Mono.just(models));
+            var runtimeGuard = mock(ModelRuntimeGuard.class);
+            when(runtimeGuard.callable(any(), any())).thenReturn(true);
+            when(runtimeGuard.snapshot(any(), any())).thenReturn(new ModelRuntimeGuard.Snapshot(0, 0, "CLOSED", 0, 0));
             var coordinator = mock(InferenceCoordinator.class);
             when(coordinator.execute(any(CanonicalRequest.class),any(UUID.class),any(ProviderTransportMode.class)))
                 .thenAnswer(call -> fixture(call.getArgument(0),provider,mimoMapper,mapper));
@@ -108,6 +123,7 @@ public final class AgentInteropServer {
             context.registerBean(OpenAiGatewayController.class,()->new OpenAiGatewayController(new ProviderRouteResolver(registry),
                 parser,coordinator,writer,mock(RandomInferenceRouter.class),authorization,features,responses));
             context.registerBean(ResponsesResourceController.class,()->new ResponsesResourceController(responses,authorization));
+            context.registerBean(ModelsController.class,()->new ModelsController(registry,catalog,authorization,runtimeGuard));
             context.registerBean(ApiExceptionHandler.class,ApiExceptionHandler::new);
             context.registerBean(RequestIdWebFilter.class,RequestIdWebFilter::new);
             context.registerBean(PublicApiKeyWebFilter.class,()->new PublicApiKeyWebFilter(properties,authenticator,new ApiKeyRateLimiter(20,1000)));
@@ -171,7 +187,9 @@ public final class AgentInteropServer {
                     var tool=tools.get(index);
                     var callId="call_"+UUID.randomUUID().toString().replace("-","");
                     var path = java.util.regex.Pattern.compile("fixture_image_path=([^\\r\\n]+)").matcher(text);
-                    var arguments="view_image".equals(tool.name()) && path.find()
+                    var arguments=text.contains("fixture:strict-invalid") ? "{\"a\":\"wrong\",\"b\":30}"
+                        : text.contains("fixture:strict-valid") ? "{\"a\":12,\"b\":30}"
+                        : "view_image".equals(tool.name()) && path.find()
                         ? mapper.writeValueAsString(mapper.createObjectNode().put("path", path.group(1)))
                         : "exec_command".equals(tool.name())?"{\"cmd\":\"Get-ChildItem -Name\",\"max_output_tokens\":1000,\"yield_time_ms\":1000}"
                         : tool.parameters().path("properties").has("input")?"{\"input\":\"hello fixture\"}":"{}";

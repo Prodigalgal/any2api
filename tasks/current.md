@@ -1,7 +1,12 @@
-# 当前任务板（源码 0.25.7）
+# 当前任务板（源码 0.26.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-03 统一 OpenAI 客户端契约补齐（0.26.0）
+
+- 范围：[模型详情与严格函数参数](../docs/requirements/OPENAI_CLIENT_CONTRACT_FOLLOWUP.md)。保留 Chat/Responses → 厂家 WEB、调用方执行工具、既有默认存储/权限/媒体边界。
+- 新增 `models.retrieve()`、统一 strict schema/工具事件检查、能力与 v5 缓存一致性；正在执行本地门禁、官方 SDK 与候选部署验证，逐厂商结果见 [验收报告](../docs/reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
 
 ## 2026-10-03 分发 API Key 清理与按厂商重建
 

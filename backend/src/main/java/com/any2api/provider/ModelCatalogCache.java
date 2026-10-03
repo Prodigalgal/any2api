@@ -156,7 +156,7 @@ public class ModelCatalogCache {
         var policy = properties.getCache().getModelCatalog();
         // Isolate compressed snapshots from older processes during rolling releases.
         this.cache = new LayeredJsonCache(
-            redis, "any2api:cache:model-catalog:v4", policy.getLocalTtl(),
+            redis, "any2api:cache:model-catalog:v5", policy.getLocalTtl(),
             policy.getRedisTtl(), policy.getMaximumEntries());
         this.healthWindow = properties.getModelRuntime().getHealthWindow();
         this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
@@ -285,6 +285,11 @@ public class ModelCatalogCache {
         var effective = discovered != null && discovered.isObject()
             ? (tools.jackson.databind.node.ObjectNode) discovered.deepCopy()
             : tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        if (effective.path("tools").path("function_calling").asBoolean(false)) {
+            // Strict validation belongs to the running gateway, independently of discovery age.
+            ((tools.jackson.databind.node.ObjectNode) effective.path("tools"))
+                .put("strict", true).put("strict_validation", "gateway_schema_validation");
+        }
         putOverride(effective, "max_context_tokens", maxContextTokens);
         putOverride(effective, "max_input_tokens", maxInputTokens);
         putOverride(effective, "max_output_tokens", maxOutputTokens);

@@ -124,10 +124,7 @@ final class LongcatToolProtocol {
             if (!names.add(name)) {
                 throw new IllegalArgumentException("duplicate function tool: " + name);
             }
-            if (definition.path("strict").asBoolean(false)) {
-                throw new IllegalArgumentException(
-                    "LongCat emulated tools do not support strict=true");
-            }
+            com.any2api.protocol.StrictFunctionSchema.compile(definition);
             var parameters = definition.path("parameters").isObject()
                 ? definition.path("parameters").deepCopy()
                 : mapper.createObjectNode().put("type", "object")

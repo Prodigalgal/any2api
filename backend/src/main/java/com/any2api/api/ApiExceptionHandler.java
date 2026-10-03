@@ -18,6 +18,14 @@ import org.springframework.web.server.ServerWebExchange;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(com.any2api.protocol.ModelNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> modelNotFound(
+        com.any2api.protocol.ModelNotFoundException error, ServerWebExchange exchange
+    ) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response(
+            "invalid_request_error", "model_not_found", error.getMessage(), "model", false, exchange, Map.of()));
+    }
+
     @ExceptionHandler(com.any2api.protocol.state.ResponseNotFoundException.class)
     public ResponseEntity<Map<String, Object>> responseNotFound(
         com.any2api.protocol.state.ResponseNotFoundException error, ServerWebExchange exchange

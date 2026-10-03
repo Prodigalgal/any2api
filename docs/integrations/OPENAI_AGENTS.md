@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.26.1）
+# OpenAI API 到厂商 WEB 的桥接（0.26.2）
 
 ## 范围
 
@@ -37,6 +37,8 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 ## 常用 API
 
 主要入口为 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`。`messages` / `input` 和多轮历史由调用方提供；工具输出按 call_id 回传。Responses 也可使用已实现的 `store:true` / `previous_response_id` 续接，无需厂商 WEB 提供同名资源接口。
+
+调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环均已实测通过；结果范围与剩余默认值差异见验收报告。
 
 ```python
 import os
@@ -85,7 +87,7 @@ supports_websockets = false
 
 ## 可复现的本地验收
 
-测试服务只监听 `127.0.0.1`，使用真实 PostgreSQL 与完整 Liquibase 链，以及生产 parser/controller/writer/state/auth filter。账号认证、InferenceCoordinator 和上游生成使用 fixture；MiMo request mapper/Provider 校验仍执行。它证明客户端和协议互操作，不能替代真实厂商或部署验收。
+测试服务只监听 `127.0.0.1`，使用真实 PostgreSQL 与完整 Liquibase 链，以及生产 parser/controller/writer/state/auth filter 和 SecurityConfiguration。账号认证、InferenceCoordinator 和上游生成使用 fixture；MiMo request mapper/Provider 校验仍执行。它证明客户端和协议互操作，不能替代真实厂商或部署验收。
 
 从仓库根目录安装隔离的测试 SDK：
 
@@ -107,7 +109,7 @@ $env:ANY2API_E2E_API_KEY = 'fixture-primary'
 python tools/compatibility/openai_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --fixture --sdk-path backend/build/agent-interop-python --report backend/build/agent-sdk-report.json
 python tools/compatibility/codex_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture-codex-image --fixture --tool image --report backend/build/agent-codex-report.json
 python tools/compatibility/openai_strict_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --provider mimo --fixture --sdk-path backend/build/agent-interop-python --report backend/build/strict-sdk-report.json
-python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.26.1.jar
+python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.26.2.jar
 ```
 
 关闭本地服务：

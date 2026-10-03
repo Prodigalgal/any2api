@@ -36,7 +36,11 @@ account, then selects one of that provider's role-qualified enabled models. Conc
 rejected on these endpoints. Responses expose the selected route through
 `X-Any2API-Provider` and `X-Any2API-Model`.
 
-### Responses agent contract (0.26.1)
+### Responses agent contract (0.26.2)
+
+Missing or null function `parameters` means an empty parameter list. Since 0.26.2,
+explicit strict functions normalize this default to a closed empty object; explicit caller schemas
+are preserved and validated. Non-strict functions retain the existing open-object default.
 
 HTTP JSON and SSE support stateless history replay and optional gateway-owned state. Message
 `phase`, reasoning summaries, `function_call`/`function_call_output`, and

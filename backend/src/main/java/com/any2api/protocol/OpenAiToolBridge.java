@@ -100,8 +100,8 @@ public final class OpenAiToolBridge {
                 schema.putArray("required").add("input");
                 tool.set("parameters", schema);
             } else {
-                tool.set("parameters", binding.tool().has("parameters") ? binding.tool().path("parameters").deepCopy()
-                    : JSON.objectNode().put("type", "object").set("properties", JSON.objectNode()));
+                tool.set("parameters", binding.tool().hasNonNull("parameters") ? binding.tool().path("parameters").deepCopy()
+                    : emptyFunctionParameters(binding.tool().path("strict").asBoolean(false)));
             }
             if (binding.tool().has("strict")) tool.set("strict", binding.tool().path("strict").deepCopy());
             result.add(tool);
@@ -112,6 +112,13 @@ public final class OpenAiToolBridge {
             }
         }
         return List.copyOf(result);
+    }
+
+    static ObjectNode emptyFunctionParameters(boolean strict) {
+        var parameters = JSON.objectNode().put("type", "object");
+        parameters.set("properties", JSON.objectNode());
+        if (strict) parameters.put("additionalProperties", false);
+        return parameters;
     }
 
     public static Binding resolve(CanonicalRequest request, String upstreamName) {

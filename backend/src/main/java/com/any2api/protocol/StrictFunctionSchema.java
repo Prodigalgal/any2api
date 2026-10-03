@@ -29,19 +29,22 @@ public final class StrictFunctionSchema {
     private static final JsonMapper MAPPER = JsonMapper.builder()
         .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
-    private static final SchemaRegistry REGISTRY = SchemaRegistry.withDialect(Dialects.getDraft202012());
-    private static final Schema META_SCHEMA = REGISTRY.getSchema(
-        SchemaLocation.of(Dialects.getDraft202012().getId()));
     private static final Cache<String, Schema> SCHEMAS = Caffeine.newBuilder()
         .maximumSize(128).expireAfterAccess(Duration.ofMinutes(10)).build();
 
     private StrictFunctionSchema() {}
 
+    private static final class SchemaResources {
+        // Non-strict requests and invalid preflight schemas do not need the bundled schema registry.
+        private static final SchemaRegistry REGISTRY = SchemaRegistry.withDialect(Dialects.getDraft202012());
+        private static final Schema META_SCHEMA = REGISTRY.getSchema(
+            SchemaLocation.of(Dialects.getDraft202012().getId()));
+    }
+
     public static Schema compile(JsonNode definition) {
         if (!definition.path("strict").asBoolean(false)) return null;
         var parameters = definition.hasNonNull("parameters") ? definition.path("parameters")
-            : MAPPER.createObjectNode().put("type", "object").put("additionalProperties", false)
-                .set("properties", MAPPER.createObjectNode());
+            : OpenAiToolBridge.emptyFunctionParameters(true);
         var encoded = parameters.toString();
         if (encoded.getBytes(StandardCharsets.UTF_8).length > MAX_SCHEMA_BYTES) {
             throw OpenAiRequestException.invalid("tools.parameters", "strict function schema exceeds 64 KiB");
@@ -54,11 +57,11 @@ public final class StrictFunctionSchema {
             throw OpenAiRequestException.invalid("tools.parameters", "strict function parameters must have type object");
         }
         inspect(parameters, parameters, 0, new int[1], new HashSet<>());
-        if (!META_SCHEMA.validate(parameters, OutputFormat.BOOLEAN)) {
+        if (!SchemaResources.META_SCHEMA.validate(parameters, OutputFormat.BOOLEAN)) {
             throw OpenAiRequestException.invalid("tools.parameters", "invalid strict function JSON schema");
         }
         try {
-            return REGISTRY.getSchema(parameters);
+            return SchemaResources.REGISTRY.getSchema(parameters);
         } catch (RuntimeException cause) {
             var error = OpenAiRequestException.invalid("tools.parameters", "invalid strict function JSON schema");
             error.initCause(cause);

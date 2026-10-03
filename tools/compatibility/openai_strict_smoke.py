@@ -16,6 +16,8 @@ def main() -> None:
     parser.add_argument("--key-manifest", type=Path)
     parser.add_argument("--sdk-path", type=Path)
     parser.add_argument("--fixture", action="store_true")
+    parser.add_argument("--parameterless-only", action="store_true",
+                        help="Verify empty-function defaults without repeating previously verified parameterized roundtrips.")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
@@ -95,6 +97,28 @@ def main() -> None:
 
         check("invalid strict schema/preflight", invalid_schema)
 
+        def parameterless_contract():
+            empty_function = {"name": "ping_probe", "strict": True}
+            chat = client.chat.completions.create(
+                model=args.model, messages=[{"role": "user", "content": "Call ping_probe without arguments."}],
+                tools=[{"type": "function", "function": empty_function}], tool_choice="required",
+                parallel_tool_calls=False,
+            )
+            calls = chat.choices[0].message.tool_calls or []
+            assert len(calls) == 1 and calls[0].function.name == "ping_probe"
+            assert json.loads(calls[0].function.arguments) == {}
+            response = client.responses.create(
+                model=args.model, input="Call ping_probe without arguments.",
+                tools=[{"type": "function", **empty_function, "parameters": None}],
+                tool_choice="required", parallel_tool_calls=False, store=False,
+            )
+            calls = [item for item in response.output if item.type == "function_call"]
+            assert response.status == "completed" and len(calls) == 1 and calls[0].name == "ping_probe"
+            assert json.loads(calls[0].arguments) == {}
+            return {"Chat_parameters_omitted": True, "Responses_parameters_null": True, "empty_arguments": True}
+
+        check("parameterless strict function/defaults", parameterless_contract)
+
         def chat_roundtrip():
             response = client.chat.completions.parse(
                 model=args.model, messages=[{"role": "user", "content": prompt}],
@@ -121,7 +145,8 @@ def main() -> None:
             assert "42" in (follow.choices[0].message.content or "")
             return {"calls": 1, "pydantic_parsed": True, "result_replayed": True}
 
-        check("Chat strict/Pydantic/function result", chat_roundtrip)
+        if not args.parameterless_only:
+            check("Chat strict/Pydantic/function result", chat_roundtrip)
 
         def responses_roundtrip():
             with client.responses.stream(model=args.model, input=prompt, tools=[response_function],
@@ -145,7 +170,8 @@ def main() -> None:
             assert follow.status == "completed" and "42" in follow.output_text
             return {"calls": 1, "SSE_arguments_done": True, "result_replayed": True}
 
-        check("Responses strict/SSE/function result", responses_roundtrip)
+        if not args.parameterless_only:
+            check("Responses strict/SSE/function result", responses_roundtrip)
 
         if args.fixture:
             def encoded_model_id():

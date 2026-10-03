@@ -148,10 +148,12 @@ class AgentProtocolContractTest {
         input.addObject().put("role","developer").put("content","keep rule");
         for (var i=0;i<45;i++) input.addObject().put("role",i%2==0?"user":"assistant").put("content","turn "+i);
         var guarded = new SmartContextWindowManager(mapper).guard(parse(raw), null);
+        assertThat(guarded.messages()).hasSize(46);
         assertThat(guarded.messages().getFirst().path("role").asText()).isEqualTo("developer");
         assertThat(guarded.rawRequest().has("messages")).isFalse();
         raw.put("truncation","disabled");
-        assertThatThrownBy(() -> new SmartContextWindowManager(mapper).guard(parse(raw),null))
+        assertThatThrownBy(() -> new SmartContextWindowManager(mapper).guard(parse(raw),
+            mapper.createObjectNode().put("max_context_messages",32)))
             .isInstanceOf(OpenAiRequestException.class).hasMessageContaining("truncation disabled");
     }
 

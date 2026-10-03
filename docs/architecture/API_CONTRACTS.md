@@ -79,9 +79,11 @@ completion emits any missing suffix; inconsistent argument streams fail. Token e
 HTTP status and JSON error before SSE begins. Ordinary text caching remains available with fresh
 response IDs and API Key isolation; tool, reasoning, structured and stored requests bypass it.
 
-The context manager preserves system/developer instructions and complete tool groups. Its default
-32-message truncation target is not semantic compaction; a complete tool group can exceed that
-target. `truncation:disabled` rejects excessive history instead of trimming it.
+The context manager preserves full history by default and with `truncation:disabled`.
+Only explicit `truncation:auto` applies the existing 32-message truncation target while retaining
+system/developer instructions and complete tool groups; a complete group can exceed that target.
+Declared upstream message limits are rejected with truncation disabled. Existing input token and
+request-size limits still apply; message count alone is not a model token budget.
 
 See [client setup and verification](../integrations/OPENAI_AGENTS.md) for the tested Codex profile
 and the distinction between controlled upstream interoperability and live provider acceptance.

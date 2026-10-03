@@ -2,7 +2,7 @@
 
 ## 范围与版本
 
-用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，0.25.3–0.25.5 实测后继续修正，当前候选为 **0.25.6**；本记录将补齐最终部署和七家实测证据。
+用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，0.25.3–0.25.6 实测后继续修正，当前候选为 **0.25.7**；本记录将补齐最终部署和七家实测证据。
 
 ## 0.25.3 变更清单
 
@@ -87,6 +87,30 @@
 | MinMax/MiniMax-M3.1-Flash-Preview | 7.925 | 9/9 PASS |
 
 LongCat 的 0.25.5 native 9 项也通过：46 条历史、reasoning/math、真实 search URL、用户和工具图片 OCR、TXT/PDF reference、两函数调用及全部结果回放。纯色识别错误仍能在厂家原生接口复现，改变尺寸的白框实验未加入生产。
+
+### Arena 恢复和换号生产证据
+
+2026-10-03 04:35 UTC：Arena ACTIVE=124、DEGRADED=1。过去 24 小时 INFERENCE 涉及 54 个账号，其中 47 个有成功证据、6 个遇到 credential_rejected，二者在该窗口无交集；这是被调用账号样本，不能推定全部 125 个账号的实时凭据有效率。
+
+限定测试 Key 的请求 `b3effdb8-90b9-4a27-88f5-1badc2f954bb`：attempt 1/2 分别对不同账号凭据拒绝，attempt 3 对第三个账号成功，三个耗时为 14.203/15.281/25.311s；九组 SDK 总验收成功。证明实际最多三账号换号路径生效，失败账号没有复用。单元回归另外锁定输出后禁止重放及释放/恢复。
+
+同窗口 reauthenticate 成功 14 次、失败 1 次，成功平均 40.350s、最大 66.850s；keepalive 成功 417、失败 50、运行中 2。保留失败与运行中状态，不把操作失败掩盖为恢复完成。
+
+### 0.25.6 生产结果与 0.25.7 缺陷修复
+
+- 0.25.6 Source `3a69dd2390be19349ab23cc11e01b9f6daf48994`、CI `37096960484` 成功、GitOps `fdd107a09e781164300e699afe4d13bfe9804d71`、四组件 Ready/restart=0、Argo Synced/Healthy，两类 Worker 的源码/安装包/API 版本一致。GLM SDK 9/9 再次通过，native 两函数结果均成功，早期 developer reference 成功。
+- user-first 46 条历史仍失败：Java `SmartContextWindowManager` 预先按默认 32 条裁剪，GLM 收到的是裁剪提示和尾部。0.25.7 默认与 disabled 保留完整历史，仅显式 auto 使用原裁剪策略，明确厂家消息上限仍在 disabled 时拒绝，token/request-size 校验保持。这与 [OpenAI Responses truncation 默认 disabled](https://developers.openai.com/api/reference/cli/resources/responses/methods/create) 的语义对齐。
+- 0.25.6 native 验收：MiMo 的七项全部通过；Arena、DeepSeek、GLM 的所支持项通过，未支持项明确 400。MinMax 历史/reasoning/两函数及回放通过，但图片先被 UI 发送生成，重放同一 session 遇到 HTTP 409 `session_not_idle`，工具图片尝试也遇到 transport 502，保留失败记录。
+- 0.25.7 MinMax：media capture 阻断 fetch/XHR 上的实际生成，结束与异常均恢复 hook，每次清空旧捕获；通过文件 buffer 保留全部图片，避免临时路径和只取第一张；最终 replay 使用完整 context 和所选模型，保留原生附件身份。相关日志仅记录路径、数量、字段名，不记录正文、附件内容或 URL query。
+- 新增真实 JavaScript hook 行为、失败清理、多图片及完整 replay 回归。Backend **433 tests，428 passed，5 skipped，0 failures/errors**；Automation **506 passed**；ruff check/format 与源码/JAR 0.25.7 版本契约通过，无新 migration。
+
+### 取消与 Read 分项证据
+
+- 公网 SSE 首输出前/后取消均通过：`dd5a2933-8933-40bd-bbd6-ffbe1b422685` 在 5.104s 关闭，`4d5256eb-bf02-4e4c-9898-8bee93785635` 在 136.631s 首增量后关闭；遥测分别记 downstream_cancelled，账号 Redis lease 均为 0，临时 Key 删除 204。现有 3s 首注释及 15s 心跳已让该长流通过 Cloudflare，不需要重复新增心跳。
+- 同主节点调用方对 18 个 Read 的 0.25.2 → 0.25.5 对比：overview 236.40→85.84ms、accounts 239.88→95.77ms、api-keys 238.32→99.84ms。Server 移到 PostgreSQL 节点后，主节点调用方的基础 HTTP RTT 约 80ms，health/session 的增加属于节点距离；数据库读减少跨节点往返。
+- 全量目录仍有回退：集群 `/v1/models` 50.23→149.54ms，direct 531.20→703.89ms（各 n=5，目录 wire 均约 109KB，不能归因于变大）；目录字段、权限和动态运行态全部保留。0.25.3 的 Redis 大快照 2690.54ms 回退已由 0.25.4 压缩修复，但不能称最终全量目录已更快。
+- Server 本机 HTTP 验证为 200：全目录 gzip 46–133ms、约 109KB，identity 25–133ms、约 1.50MB；此测量包含 bash/date/wc 的进程成本，只用于与网络开销分离，不能作为精确方法级 profile。两个 runtimeGuard 查询只是内存 map 查找，不据此增加缓存层。
+- 0.25.5 四并发、28 次 Read 全部 200，elapsed=1.255s（基线 1.772s），Hikari pending=0；全目录 load p50=333.38ms、max=368.71ms。最终部署后样本另记，保留已知全目录成本。
 
 ## 回滚
 

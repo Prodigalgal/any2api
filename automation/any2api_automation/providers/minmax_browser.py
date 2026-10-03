@@ -6,16 +6,13 @@ import hashlib
 import json
 import logging
 import os
-import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-from uuid import uuid4
 
 from patchright.async_api import async_playwright
 
@@ -422,41 +419,59 @@ _UPLOAD_MEDIA = r"""async input => {
 }"""
 
 _INSTALL_MESSAGE_HOOK = r"""() => {
-  if (window.__any2apiMinmaxCaptured) return true;
+  window.__any2apiMinmaxRestoreCapture?.();
   window.__any2apiMinmaxCaptured = [];
   const remember = (url, body) => {
     const text = typeof body === 'string' ? body : '';
-    if (!String(url).includes('/message') || !text) return;
+    let path;
+    try { path = new URL(String(url), location.origin).pathname; } catch (_) { return false; }
+    if (!/^\/(archon|minimax-cloud)\/api\/v1\/session\/[^/]+\/message$/.test(path) || !text) return false;
     try {
       const parsed = JSON.parse(text);
       if (parsed && typeof parsed === 'object') {
         window.__any2apiMinmaxCaptured.push({url: String(url), body: parsed});
+        return true;
       }
     } catch (_) {}
+    return false;
   };
   const originalFetch = window.fetch;
   if (typeof originalFetch === 'function') {
     window.fetch = function(...args) {
       const inputUrl = args[0];
       const url = typeof inputUrl === 'string' ? inputUrl : inputUrl?.url || '';
-      remember(url, args[1]?.body);
+      if (remember(url, args[1]?.body)) {
+        return Promise.reject(new DOMException('Captured media request before generation', 'AbortError'));
+      }
       return originalFetch.apply(this, args);
     };
   }
   const xhrPrototype = window.XMLHttpRequest?.prototype;
+  const originalOpen = xhrPrototype?.open;
+  const originalSend = xhrPrototype?.send;
   if (xhrPrototype && typeof xhrPrototype.open === 'function' &&
       typeof xhrPrototype.send === 'function') {
-    const originalOpen = xhrPrototype.open;
-    const originalSend = xhrPrototype.send;
     xhrPrototype.open = function(method, url, ...args) {
       this.__any2apiMinmaxCaptureUrl = String(url || '');
       return originalOpen.call(this, method, url, ...args);
     };
     xhrPrototype.send = function(body) {
-      remember(this.__any2apiMinmaxCaptureUrl, body);
+      if (remember(this.__any2apiMinmaxCaptureUrl, body)) {
+        this.abort();
+        return;
+      }
       return originalSend.call(this, body);
     };
   }
+  window.__any2apiMinmaxRestoreCapture = () => {
+    window.fetch = originalFetch;
+    if (xhrPrototype) {
+      xhrPrototype.open = originalOpen;
+      xhrPrototype.send = originalSend;
+    }
+    delete window.__any2apiMinmaxCaptured;
+    delete window.__any2apiMinmaxRestoreCapture;
+  };
   return true;
 }"""
 
@@ -464,8 +479,11 @@ _READ_CAPTURED_MESSAGES = r"""() => {
   const captured = Array.isArray(window.__any2apiMinmaxCaptured)
     ? window.__any2apiMinmaxCaptured
     : [];
+  window.__any2apiMinmaxRestoreCapture?.();
   return {captured};
 }"""
+
+_RESTORE_MESSAGE_HOOK = r"""() => { window.__any2apiMinmaxRestoreCapture?.(); }"""
 
 _UI_COMPOSER_SNAPSHOT = r"""() => {
   const pick = (selector, limit) => Array.from(document.querySelectorAll(selector))
@@ -637,33 +655,39 @@ class MinmaxOfficialBrowserTransport:
         async with self._account_operation(credential):
             session = await self._session_for(credential, proxy_url)
             await self._inject_context(session, credential)
+            files = []
+            for source in images:
+                data_url = str(source.get("data_url") or "")
+                payload_b64 = data_url.split(",", 1)[-1] if "," in data_url else ""
+                if not payload_b64:
+                    raise ValueError("MinMax capture image must be an inline base64 data URL")
+                files.append(
+                    {
+                        "name": str(source.get("file_name") or "upload.png"),
+                        "mimeType": str(source.get("mime_type") or "image/png"),
+                        "buffer": base64.b64decode(payload_b64, validate=True),
+                    }
+                )
+            if not files:
+                raise ValueError("MinMax capture requires image content")
             await session.page.evaluate(_INSTALL_MESSAGE_HOOK)
-            source = images[0] if images else {}
-            data_url = str(source.get("data_url") or "")
-            filename = str(source.get("file_name") or "upload.png")
-            payload_b64 = data_url.split(",", 1)[-1] if "," in data_url else ""
-            if not payload_b64:
-                raise ValueError("MinMax capture image must be an inline base64 data URL")
-            raw = base64.b64decode(payload_b64)
-            temp_path = Path(tempfile.gettempdir()) / f"minmax-capture-{uuid4().hex}-{filename}"
-            temp_path.write_bytes(raw)
             try:
                 file_input = session.page.locator('[data-testid="file-input"]').first
                 try:
                     await file_input.wait_for(state="attached", timeout=5000)
                 except Exception:  # noqa: BLE001
                     file_input = session.page.locator('input[type="file"]').first
-                await file_input.set_input_files(str(temp_path))
+                await file_input.set_input_files(files)
                 await session.page.wait_for_timeout(2500)
                 snapshot = await session.page.evaluate(_UI_COMPOSER_SNAPSHOT)
                 logger.info(
                     "minmax_capture_ui_snapshot url=%s textareas=%s editables=%s "
                     "buttons=%s file_inputs=%s",
-                    snapshot.get("url"),
-                    snapshot.get("textareas"),
-                    snapshot.get("editables"),
-                    snapshot.get("buttons"),
-                    snapshot.get("file_inputs"),
+                    urlparse(str(snapshot.get("url") or "")).path,
+                    len(snapshot.get("textareas") or []),
+                    len(snapshot.get("editables") or []),
+                    len(snapshot.get("buttons") or []),
+                    len(snapshot.get("file_inputs") or []),
                 )
                 editor = session.page.locator('[data-testid="message-textarea"]').first
                 try:
@@ -712,12 +736,9 @@ class MinmaxOfficialBrowserTransport:
                         str(click_error)[:160],
                     )
                 await session.page.wait_for_timeout(3000)
+                result = await session.page.evaluate(_READ_CAPTURED_MESSAGES)
             finally:
-                try:
-                    temp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-            result = await session.page.evaluate(_READ_CAPTURED_MESSAGES)
+                await session.page.evaluate(_RESTORE_MESSAGE_HOOK)
             if not isinstance(result, dict):
                 raise TypeError("MinMax official message capture returned an invalid result")
             logger.info(
@@ -726,7 +747,7 @@ class MinmaxOfficialBrowserTransport:
                 sorted((result.get("captured") or [{}])[0].keys())
                 if result.get("captured")
                 else [],
-                str((result.get("captured") or [{}])[0].get("url") or "")[:120]
+                urlparse(str((result.get("captured") or [{}])[0].get("url") or "")).path
                 if result.get("captured")
                 else "",
             )
@@ -737,14 +758,12 @@ class MinmaxOfficialBrowserTransport:
                     body = first["body"]
                     attachments = body.get("attachments")
                     logger.info(
-                        "minmax_captured_official_body keys=%s attachment_count=%s "
-                        "attachment0=%s model=%s",
+                        "minmax_captured_official_body keys=%s attachment_count=%s model_keys=%s",
                         sorted(body.keys())[:20],
                         len(attachments) if isinstance(attachments, list) else -1,
-                        json.dumps(
-                            attachments[0] if isinstance(attachments, list) and attachments else {}
-                        )[:800],
-                        json.dumps(body.get("model"))[:200],
+                        sorted(body.get("model") or {})
+                        if isinstance(body.get("model"), dict)
+                        else [],
                     )
                     return {
                         "body": body,

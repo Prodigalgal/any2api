@@ -326,8 +326,8 @@ async def _semantic_chat_input(
         if isinstance(official_body, dict) and official_body.get("attachments"):
             replay = dict(official_body)
             replay["turn_id"] = str(uuid.uuid4())
-            if "model" not in replay:
-                replay["model"] = prepared["model"]
+            replay["content"] = prepared["content"]
+            replay["model"] = prepared["model"]
             captured_url = str(captured.get("url") or "")
             parsed = urlparse(captured_url) if captured_url else None
             official_path = (
@@ -336,8 +336,7 @@ async def _semantic_chat_input(
                 else f"/archon/api/v1/session/{session_id}/message"
             )
             logger.info(
-                "minmax_using_captured_official_message url=%s path=%s keys=%s",
-                captured_url[:120],
+                "minmax_using_captured_official_message path=%s keys=%s",
                 official_path,
                 sorted(replay.keys())[:20],
             )

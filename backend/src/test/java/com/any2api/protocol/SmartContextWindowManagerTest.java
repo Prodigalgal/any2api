@@ -1,6 +1,7 @@
 package com.any2api.protocol;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,7 @@ class SmartContextWindowManagerTest {
         }
 
         var request = createRequest(messages);
+        ((tools.jackson.databind.node.ObjectNode) request.rawRequest()).put("truncation", "auto");
         var guarded = manager.guard(request, null);
 
         assertThat(guarded.messages().size()).isLessThanOrEqualTo(32);
@@ -73,6 +75,7 @@ class SmartContextWindowManagerTest {
         messages.add(msg("assistant", "Final response based on tool"));
 
         var request = createRequest(messages);
+        ((tools.jackson.databind.node.ObjectNode) request.rawRequest()).put("truncation", "auto");
         var guarded = manager.guard(request, null);
 
         var roles = guarded.messages().stream().map(m -> m.path("role").asText()).toList();
@@ -97,11 +100,36 @@ class SmartContextWindowManagerTest {
         messages.add(mapper.createObjectNode().put("role", "tool").put("tool_call_id", "one").put("content", "first result"));
         messages.add(mapper.createObjectNode().put("role", "tool").put("tool_call_id", "two").put("content", "second result"));
         messages.add(msg("user", "continue"));
-        var guarded = manager.guard(createRequest(messages), mapper.createObjectNode().put("max_context_messages", 6));
+        var request = createRequest(messages);
+        ((tools.jackson.databind.node.ObjectNode) request.rawRequest()).put("truncation", "auto");
+        var guarded = manager.guard(request, mapper.createObjectNode().put("max_context_messages", 6));
         assertThat(guarded.messages()).contains(first, second);
         assertThat(guarded.messages().getFirst().path("role").asText()).isEqualTo("developer");
         assertThat(guarded.messages().getLast().path("content").asText()).isEqualTo("continue");
         assertThat(guarded.messages()).doesNotContain(messages.get(6));
+    }
+
+    @Test
+    void preservesEarlyUserHistoryByDefaultAndWhenTruncationIsDisabled() {
+        var messages = new ArrayList<JsonNode>();
+        messages.add(msg("user", "Remember reference birch_728164"));
+        for (var index = 0; index < 45; index++) messages.add(msg("user", "round " + index));
+        var request = createRequest(messages);
+        assertThat(manager.guard(request, null)).isSameAs(request);
+        ((tools.jackson.databind.node.ObjectNode) request.rawRequest()).put("truncation", "disabled");
+        assertThat(manager.guard(request, null)).isSameAs(request);
+        assertThat(request.messages()).containsExactlyElementsOf(messages);
+    }
+
+    @Test
+    void rejectsDeclaredUpstreamLimitWithoutSilentlyTruncating() {
+        var messages = new ArrayList<JsonNode>();
+        for (var index = 0; index < 10; index++) messages.add(msg("user", "round " + index));
+        var request = createRequest(messages);
+        assertThatThrownBy(() -> manager.guard(request,
+            mapper.createObjectNode().put("max_context_messages", 6)))
+            .isInstanceOf(OpenAiRequestException.class).hasMessageContaining("truncation disabled");
+        assertThat(request.messages()).containsExactlyElementsOf(messages);
     }
 
     private JsonNode msg(String role, String content) {

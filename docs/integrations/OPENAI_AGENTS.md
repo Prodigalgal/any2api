@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.25.2）
+# OpenAI API 到厂商 WEB 的桥接（0.25.7）
 
 ## 范围
 
@@ -17,7 +17,7 @@
 | namespace / custom（可选扩展） | namespace 函数与 text custom 转 function，再还原输出身份；并行调用与 allowed_tools；不保证每个 WEB 上游稳定支持 |
 | 历史回放 | 多轮文本、function call/output；保留已有 reasoning、phase、custom、refusal；图片结果需模型和 Key 的媒体权限，适配情况见真实验收 |
 | 状态 | `store:true`、`previous_response_id`、retrieve/delete/input_items，按 Key 隔离 |
-| 上下文 | 默认 32 条消息裁剪目标，保留首部规则和完整工具组；`truncation:disabled` 超限报错 |
+| 上下文 | 默认和 `truncation:disabled` 保留完整历史；仅显式 `truncation:auto` 使用 32 条裁剪目标，保留首部规则和完整工具组。厂家明确的消息上限、既有 token/request-size 限制仍校验 |
 
 `strict:true`、custom grammar、defer_loading/tool search、原生 hosted tools、opaque encrypted-only reasoning、item_reference、WebSocket、background、Conversations、`/responses/compact`、流式续传均未形成通用实现保证。请求会按具体 Provider 契约明确拒绝。请求 `include:["reasoning.encrypted_content"]` 不会获得伪造的加密内容。
 

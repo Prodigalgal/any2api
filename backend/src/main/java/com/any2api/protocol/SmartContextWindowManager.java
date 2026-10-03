@@ -10,10 +10,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Automatically guards upstream reverse-engineered web interfaces against
- * context window blowup and turn limit rejections (e.g. 40-turn limits).
- * Preserves the initial system instructions and recent conversation turns,
- * ensuring tool call message pairs remain intact.
+ * Applies caller-requested truncation without silently dropping agent history.
+ * Declared upstream message limits are rejected when truncation is disabled.
+ * Explicit auto truncation preserves instructions and complete tool call pairs.
  */
 @Component
 public class SmartContextWindowManager {
@@ -36,7 +35,7 @@ public class SmartContextWindowManager {
         if (messages.size() <= maxMessages) {
             return request;
         }
-        if ("disabled".equals(request.rawRequest().path("truncation").asText())) {
+        if (!"auto".equals(request.rawRequest().path("truncation").asText())) {
             throw OpenAiRequestException.invalid("input", "context message limit exceeded with truncation disabled");
         }
 
@@ -104,7 +103,8 @@ public class SmartContextWindowManager {
                 return custom;
             }
         }
-        return DEFAULT_MAX_MESSAGES;
+        return "auto".equals(request.rawRequest().path("truncation").asText())
+            ? DEFAULT_MAX_MESSAGES : Integer.MAX_VALUE;
     }
 
     private int retainToolCallBoundary(List<JsonNode> messages, int tailStart, int firstConversationIndex) {

@@ -36,3 +36,9 @@
 - 全量 `/v1/models` 继续区分服务端处理、跨节点 RTT 与响应体传输成本，依据实际测量处理，保留全部字段和权限过滤。
 - Cloudflare Worker 为未发布候选；当前不修改其路由。公网 Cloudflare 502/524 错误格式列为入口遗留限制，SSE 心跳和取消在现有入口验收。
 - 本候选无数据库/API/权限变更，回滚点为已验证的 0.25.5 四组件不可变镜像。
+
+## 0.25.7 复测发现的缺陷
+
+- `SmartContextWindowManager` 的默认 32 条裁剪导致早期 user 内容丢失。按 Responses 既有 `truncation` 契约，默认和 disabled 保留完整输入；仅显式 auto 采用既有裁剪策略；厂商明确声明的 message 上限在 disabled 时继续返回明确错误，现有 token/request-size 校验保持。验证早期 user、developer、工具调用/结果边界及真实 46 条历史。
+- MinMax 原生图片 UI capture 先发送生成再重放，复现 session_not_idle。捕获阶段阻断 fetch/XHR 生成，结束或失败恢复 hook，禁止复用旧捕获；保留全部图片、完整调用方 context 与所选模型。删除相关正文/附件/URL query 诊断日志，维持上传和流式路径。验证捕获无发送、正常请求不受影响、失败清理、完整 replay，部署后复测用户/工具 OCR 和工具循环。
+- 修复使用新 patch 候选 0.25.7；无 schema 变更。已通过的 0.25.6 SDK/native 和已失败尝试分开保留，滚动前等待本任务活动请求完成；部署后只重测改动涉及的契约及运行态。

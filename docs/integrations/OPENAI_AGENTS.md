@@ -26,9 +26,11 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 严格 function 参数支持基础类型、nullable、嵌套 object/array、enum、anyOf、数值/长度约束和局部非循环引用。object 必须设置 `additionalProperties:false` 并声明全部必填字段；pattern/format、循环或外部引用及其他未支持关键词明确返回 400。严格模式缓冲工具事件到参数完成并通过校验，失败返回 `tool_call_generation_failed`；它不承诺厂家原生受限解码或一定生成成功。Responses 未声明 strict 时仍保持既有非严格行为。完整边界见 [API 契约](../architecture/API_CONTRACTS.md)。
 
+无参数 function 可省略 `parameters` 或传 `null`；显式 `strict:true` 时归一化为严格空参数 schema，只允许 `{}`。调用方显式提供的 schema 保留并按上述边界校验；非严格 function 的既有默认行为保留。
+
 工具上限、schema、媒体、generation 参数和 token 预算仍由当前 Provider 校验。MiMo/LongCat 现有工具上限是 128。能力声明与真实厂商验收、模型可调用状态是不同证据。
 
-0.25.0–0.25.2 为现有厂家补齐 emulated function 桥接，0.25.3–0.25.7 的真实验收见 [后续修复与验证](../reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)：七家所选模型完成 SDK、完整历史和有限并发检查，LongCat 用户/工具 OCR、TXT/PDF 已通过，厂家原生纯色误判仍保留。Qwen 仅有代码与离线契约证据。本轮模型详情和 strict 的逐厂商结果见 [0.26.0–0.26.1 客户端契约验收](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
+0.25.0–0.25.2 为现有厂家补齐 emulated function 桥接，0.25.3–0.25.7 的真实验收见 [后续修复与验证](../reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)：七家所选模型完成 SDK、完整历史和有限并发检查，LongCat 用户/工具 OCR、TXT/PDF 已通过，厂家原生纯色误判仍保留。Qwen 仅有代码与离线契约证据。本轮模型详情和 strict 的逐厂商结果见 [0.26.0–0.26.2 客户端契约验收](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
 
 ### 历史验收（0.24.4，后续修复见当前发布报告）
 
@@ -38,7 +40,7 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 主要入口为 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`。`messages` / `input` 和多轮历史由调用方提供；工具输出按 call_id 回传。Responses 也可使用已实现的 `store:true` / `previous_response_id` 续接，无需厂商 WEB 提供同名资源接口。
 
-调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环均已实测通过；结果范围与剩余默认值差异见验收报告。
+调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环均已实测通过；0.26.2 无参数差量六家各 4/4，Arena 认证拒绝仍失败。结果范围、运行态与剩余默认值差异见验收报告。
 
 ```python
 import os
@@ -82,6 +84,8 @@ supports_websockets = false
 通过环境变量提供已授权的测试 Key。分发 Key 需允许 Responses、对应 provider/model，以及 `TOOL_CALLING`；读取并回传本地图片还需 `MULTIMODAL_INPUT` 和 `FILE_UPLOADS`。全权限静态入口使用共享 `system` 状态归属，需独立归属时使用分发 Key。
 
 历史验收使用 Codex CLI 0.159.2；0.25.5 的只读图片工具闭环使用 0.160.0。实验关闭 apps/plugins/multi_agent，使用 HTTP/SSE、函数工具和 `read-only` sandbox。自定义路由名可能触发 CLI model metadata fallback 提示；已有 OpenAI 原生模型的 metadata 不应被用来承诺本桥接不支持的 grammar/encryption 或完整原生 strict 解码能力。
+
+当前 0.26.2 也已使用 Codex CLI 0.160.0 和现有 MiMo Key 完成真实 `view_image → function_call_output(input_image)` 闭环，HTTP 内容类型记录确认图片工具结果确实回传；metadata fallback 提示保留。诊断补查有两次 Redis 超时后客户端重试成功，中间失败单独记载；详见当前验收报告。此项不替代其他厂商、strict 或 Shell/patch 权限的独立验收。
 
 0.24.0 的受控上游实验完成 `view_image` 工具闭环；本机 PowerShell 命令工具被 CLI policy 拒绝，未绕过。0.24.4 真实 MiMo 图片实验返回正确颜色，但 CLI JSON 没有显式 image_view completion item，不能仅凭最终标记认定该工具执行轨迹。标准 API 的工具图片回放已单独验证。Shell/patch 权限和 metadata fallback 不属于本项目后端缺口。
 

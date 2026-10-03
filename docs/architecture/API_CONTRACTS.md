@@ -196,7 +196,7 @@ Each model publishes a machine-readable contract and runtime snapshot:
     "confidence": "HIGH"
   },
   "reasoning": {"supported": true, "levels": ["low", "medium", "high"]},
-  "tools": {"supported": true, "types": ["custom", "function", "namespace"], "function_calling": true, "parallel": true, "bridge": "emulated_function_bridge", "strict": false, "custom_grammar": false, "deferred_loading": false},
+  "tools": {"supported": true, "types": ["custom", "function", "namespace"], "function_calling": true, "parallel": true, "bridge": "emulated_function_bridge", "strict": true, "strict_validation": "gateway_schema_validation", "custom_grammar": false, "deferred_loading": false},
   "responses": {"store": true, "default_store": false, "previous_response_id": true, "resources": ["retrieve", "delete", "input_items"], "websockets": false, "background": false, "encrypted_reasoning": false},
   "streaming": true,
   "multimodal": {"input": ["text", "image"], "output": ["text"]},

@@ -87,7 +87,58 @@ Source `77abc11b05361dcf2c58f585b2d029b315be545e`，[CI 37119721839](https://git
 
 - 0.26.2 本地门禁：Backend 469 tests / 464 passed / 5 条件 skipped / 0 failure/error、bootJar；Automation 508 passed / ruff format/check；Web lint/build；源码七处与 JAR 版本契约全部通过。没有数据库新迁移。
 - 实际 HTTP + PostgreSQL + SecurityConfiguration 的官方 SDK 2.54.0 fixture：原 12 组与新增 8 组全部通过。新组覆盖 Chat 省略 parameters、Responses 显式 null、空参数结果、strict/Pydantic、SSE 续接、编码 ID/认证、非法 schema 和不合格上游参数的失败终态。本地 fixture 已关闭。
-- 门禁证据：`contract-v0262-backend-full.log`、`contract-v0262-local-summary.json`、`contract-v0262-automation.log`、`contract-v0262-web-*.log`、`strict-v0262-fixture.json`、`common-v0262-fixture.json`。当前准备部署和七家差量真实验收；差量仅重测模型能力/404/非法 schema 与两协议无参数调用，不重复已通过的完整参数化闭环。
+- 门禁证据：`contract-v0262-backend-full.log`、`contract-v0262-local-summary.json`、`contract-v0262-automation.log`、`contract-v0262-web-*.log`、`strict-v0262-fixture.json`、`common-v0262-fixture.json`。差量仅重测模型能力/404/非法 schema 与两协议无参数调用，0.26.1 完整参数化闭环结果保留独立记录。
+
+### 0.26.2 部署
+
+制品源码 `3c925237abb68de50d3af99d30a6e9f80c9cb67d`；[CI 37124714703](https://github.com/Prodigalgal/any2api/actions/runs/37124714703) success，全部质量门禁、四镜像与 GitOps 更新通过。GitOps `ddb7e6824ba5aa14cae9c61c2f2d7c1d049c5575` 已 Synced/Healthy；四组件 1/1 Ready、restart=0，两类 Automation project/installed/API 0.26.2 PASS。镜像后缀统一为 `20261003-v0.26.2-release-3c925237abb68de50d3af99d30a6e9f80c9cb67d`。
+
+| 组件 | 0.26.2 Pod | Ready / restart |
+|---|---|---|
+| Server | any2api-server-7dd6b86c6b-vnmz4 | 1/1 / 0 |
+| Web | any2api-web-7d8c447ffb-xt794 | 1/1 / 0 |
+| Automation | any2api-automation-778f587b6b-hf6kh | 1/1 / 0 |
+| Arena Automation | any2api-automation-arena-67c7c79c9f-s4wf7 | 1/1 / 0 |
+
+Server 仍位于 PostgreSQL 同节点 `instance-20251229-0833`。CI 与镜像 digest 证据为 `backend/build/release-0.26.2-ci.json`、`release-0.26.2-runtime.json`。未新增 Key、人工变更账号或数据库结构；既有账号失败计数和自动恢复按正常运行逻辑推进，Worker 未发布。
+
+### 0.26.2 七家差量验收
+
+官方 SDK 2.54.0、现有分发 Key、direct HTTPS、推理并发 2。每家四组：模型详情/strict 能力、缺失模型 404、非法 schema 400、Chat 省略 parameters + Responses 显式 null 的无参数 strict 调用。首轮 **27/28 组通过，六家各 4/4；Arena 3/4**，不是七家全通过。
+
+| 厂商/所选模型 | 差量结果 | 无参数两请求合计秒数 |
+|---|---|---:|
+| Arena / Max | 3/4，credential_rejected | 首轮 123.49；有限复测 63.10，仍失败 |
+| DeepSeek / default | 4/4 PASS | 159.75 |
+| GLM / glm-5.2 | 4/4 PASS | 87.36 |
+| Grok Web / grok-3 | 4/4 PASS | 30.69 |
+| LongCat / longcat-flash | 4/4 PASS | 18.69 |
+| MiMo / mimo-v2.6-flash | 4/4 PASS | 61.74 |
+| MiniMax / MiniMax-M3.1-Flash-Preview | 4/4 PASS | 15.27 |
+
+首轮包含 14 次客户端推理请求。Arena 首轮 Chat 已通过，Responses 返回 `502 credential_rejected`，request_id `cf011824-4c6a-42b4-9fa0-65e4f42190b3`；一次有限复测在 Chat 阶段同样失败，request_id `d16627d0-beff-406a-9680-b004baf818e7`，未继续执行 Responses。两次失败各已换用三个账号，共六个不同账号，queue_ms=0、有效输出前失败；保持既有重试上限，未通过无限重试凑成功。
+
+只读账号页当时为 125 个 Arena 账号，122 ACTIVE/启用、3 EXPIRED。首轮三个失败账号随后被既有恢复流程重新标记 ACTIVE；这不能证明该时点真实生成可用，Arena 认证链路仍需处理。0.26.1 的完整 35/35 工具闭环为此前独立记录，不替代本轮结果。
+
+证据：`backend/build/strict-v0262-suite.json`、`strict-v0262-*.json`、`strict-v0262-arena-retry1.json`、`strict-v0262-arena-account-status.json`。首轮和复测失败均保留。
+
+### 当前部署的真实 Codex 工具闭环
+
+Codex CLI 0.160.0、MiMo `mimo-v2.6-flash`、现有分发 Key、read-only sandbox，关闭 apps/plugins/multi_agent。读取既有合成图片，实测 `view_image → function_call_output(input_image) → 最终正确数字` 通过。临时本地 HTTP 转发器只记录方法、状态、工具名和内容类型，不保存 Key、请求正文或图片数据，结束时已关闭。
+
+首次闭环两次 `/v1/responses` 均为 HTTP 200，记录到 `view_image` 和一次带 `input_image` 的工具结果；最终正确读出图片数字。第二次生成内部发生一次 `tool_call_generation_failed`，换账号尝试成功，未伪造工具成功。CLI 未显式启用 strict，严格模式的独立证据为上述 SDK/JUnit 验收。
+
+CLI JSON 的 error item 为 `Model metadata ... not found ... fallback metadata`；为确认此条提示而作一次诊断补查，图片语义和工具回传仍通过。补查记录四次 HTTP 200，其中两次后端在生成前失败后由客户端重试，详情见下节；不能把 HTTP 200 或最终完成解释为所有中间尝试成功。Shell/patch 策略、model metadata fallback 仍为客户端边界，未绕过。
+
+证据：`backend/build/codex-v0262-image-live.json`、`codex-v0262-image-live-diagnostics.json`。结束后 Argo Synced/Healthy、四 Pod Ready/restart=0，七个所选模型 guard `concurrent=0 / queue_depth=0 / circuit_state=CLOSED`，见 `release-0.26.2-final-runtime.json`。
+
+### 新发现的 Redis 超时与 Read 性能边界
+
+Codex 诊断补查期间，MiMo 两次生成前失败：`a564276b-e3e8-4830-a7e4-66e26b20eb98` 3109ms、`7cda5ba3-490c-4ad1-8055-40aa0d0461ae` 3057ms，均为 `QueryTimeoutException`、account_id=null、account_acquire_ms=0。同一窗口 API Key/catalog L2 读写/失效均出现 QueryTimeoutException，模型探针日志明确记录底层 `RedisCommandTimeoutException`；Redis 配置超时为 3s。客户端重试后完成，不将此现象记为性能问题已解决。
+
+只读排查未发现 PostgreSQL 当前等待或阻塞；accounts 有 eligible 索引，约 388 个存活行。Redis 当前持久化状态正常，累计 slowlog 最慢命令约 28.93ms，RDB 保存正常；收尾资源快照 Server 3m CPU/727Mi、Redis 5m/6Mi，Server limit 为 1 CPU/1536Mi。这些是排查时点数据，不能排除故障窗口的网络、回调线程或瞬时资源问题。
+
+已定位 Redis 超时窗口，具体触发链路尚未确定，未盲目放宽 timeout、改 PostgreSQL 索引、重启服务或迁移 Redis。后续优先采集故障窗口的 Server→Redis 往返/连接与响应回调耗时，再评估缓存与关键租约/guard 的隔离。全量模型目录和普通 Read 本轮没有新的分位数基准。
 
 ## 保留边界与回滚
 
@@ -96,3 +147,5 @@ Source `77abc11b05361dcf2c58f585b2d029b315be545e`，[CI 37119721839](https://git
 显式 strict 需要等完整工具参数校验完成再释放工具事件，增加工具参数的缓冲等待；普通文本/推理和非严格工具路径保持原有行为。本轮未重新进行 Read 性能基准，全量目录缓存、WAN/公网成本、厂商 WEB 推理时间仍需单独优化。Cloudflare Worker 仍未发布；当前入口的编码斜线同源 307 归一化保留，客户端应交给 SDK 编码并跟随重定向，避免手动重复编码。
 
 回滚为 0.25.7 四组件不可变镜像，后缀 `20261003-v0.25.7-release-378475fe2fe201d53e4f8da6408cecf1909df346`。无需恢复数据库或 Key；回滚后模型详情/严格函数能力撤回，原有普通调用继续按旧契约运行。
+
+若仅需撤回 0.26.2 默认值修复，可恢复已保留的 0.26.1 四镜像，后缀 `20261003-v0.26.1-release-74028a7bb212105e4a3d7c89832e11b1184b6e54`；模型详情和显式 schema strict 仍在，但无参数 strict 默认值误拒绝会恢复。回滚不承诺解决 Arena 凭据或 Redis 链路超时。

@@ -9,7 +9,9 @@
 - 新增 `models.retrieve()`、统一 strict schema/工具事件检查、能力与 v5 缓存一致性；0.26.1 修复首轮遗漏的 Grok Java / LongCat Automation strict 拒绝，生产安全链限定 GET 模型详情 ID 放行编码斜线。Backend 459 passed / 5 skipped、Automation 508 passed、Web lint/build 与版本契约通过；实际安全链 SDK fixture 12+7 组通过。
 - **0.26.1 已部署并验收**：Source `74028a7`，[CI 37121551123](https://github.com/Prodigalgal/any2api/actions/runs/37121551123) success，GitOps `2162a82` Synced/Healthy；四组件 1/1 Ready、restart=0，Automation project/installed/API 0.26.1。既有分发 Key、官方 SDK 2.54.0，七家所选模型各 5/5 strict 工具闭环通过；模型路由/权限 31/31、应用安全链 8/8，通过后模型 guard 并发/队列均 0、熔断 CLOSED。[完整结果、首轮失败、性能与回滚](../docs/reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
 - 保留边界：严格参数由网关检查，工具事件等校验完成才释放，未启用严格的路径保持原有行为；不承诺原生 constrained decoding 或其他未测模型。默认 store/strict、共享入口 307、公网 Cloudflare 错误与全量目录性能未在本轮统一。Qwen 仅目录只读，账号/推理不处理；Key 无新增/替换，无新数据库迁移，回滚点 0.25.7。
-- 收尾确认无参数 strict function 省略 parameters 被错误拒绝；0.26.2 修复 missing/null 的严格空 schema 默认值，保留显式 schema 与非严格行为；schema 注册表延迟初始化。Backend 464 passed / 5 条件 skipped、Automation 508 passed、Web lint/build、版本契约和 SDK fixture 12+8 组通过。正在准备部署与七家无参数调用差量验收，保留 0.26.1 的完整闭环记录。
+- **0.26.2 已部署**：Source `3c92523`，[CI 37124714703](https://github.com/Prodigalgal/any2api/actions/runs/37124714703) success、GitOps `ddb7e68` Synced/Healthy、四组件 Ready/restart=0。修复 strict missing/null 空参数默认值，显式 schema/非严格行为保留，注册表延迟初始化；Backend 464 passed / 5 条件 skipped、Automation 508 passed、Web/版本门禁和 SDK fixture 12+8 组通过。
+- 0.26.2 七家无参数差量首轮 **27/28**：六家各 4/4，Arena 3/4；一次有限复测仍 credential_rejected，两次失败各已换用三个不同账号，失败记录保留。当前 MiMo 真实 Codex 0.160.0 图片工具闭环通过，确认 `view_image → function_call_output(input_image)`；CLI metadata fallback 保留。七个所选模型 guard 并发/队列均 0、熔断 CLOSED。
+- 待收敛：Arena 认证拒绝（列表 ACTIVE 不能替代真实可调用性）；Codex 补查期间两次生成前 QueryTimeoutException，与 Redis L2 读写和 RedisCommandTimeoutException 同窗口，具体触发链路尚未确定。PostgreSQL 只读未见阻塞、Redis 当前持久化正常；未盲目改 timeout/索引。下一步优先采集 Server→Redis 故障窗口与响应回调，再优化全量目录/Read；不标注七家全通过或性能已全部解决。Qwen 仍不处理。
 
 ## 2026-10-03 分发 API Key 清理与按厂商重建
 

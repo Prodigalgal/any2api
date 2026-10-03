@@ -32,4 +32,6 @@
 
 ## 完成状态
 
-0.26.1 已提交并部署，七家所选模型 strict/结果续接 35/35、模型路由/权限 31/31、应用安全链 8/8。收尾确认无参数 strict function 省略 parameters 会被桥接误补为开放 schema，修复占用 0.26.2；missing/null 按严格空参数归一化，非严格仍按原规则，显式 schema 原样保留。schema 注册表延迟到有效严格 schema 校验时才初始化。验收 parser → canonical schema/事件链、SDK 两协议，以及七家无参数实际调用；0.26.1 已验证的完整工具闭环记录保留。详见 [验收报告](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。不扩大为全部模型、全部 OpenAI 协议或性能验收。
+0.26.1 已提交并部署，七家所选模型 strict/结果续接 35/35、模型路由/权限 31/31、应用安全链 8/8。收尾无参数 strict 默认值修复已占用并部署 0.26.2；missing/null 归一化为严格空 schema，显式 schema 保留，注册表延迟初始化。Backend 464 passed / 5 条件 skipped、Automation 508 passed、Web/版本门禁和 SDK fixture 12+8 组通过。
+
+0.26.2 七家无参数差量首轮 27/28：六家各 4/4，Arena 3/4，认证拒绝经一次有限复测仍未恢复。当前 MiMo 的 Codex 0.160.0 图片工具闭环实测通过；诊断补查另暴露 Redis 超时，根因仍待确认。四组件 Ready、Argo Synced/Healthy，历史 0.26.1 完整矩阵保持独立记录。代码和部署已交付，Arena 认证与 Redis 性能作为未解决事项保留，不标注七家全通过或性能全部解决。详见 [验收报告](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。不扩大为全部模型或全部 OpenAI 协议保证。

@@ -17,6 +17,10 @@ def main() -> None:
     )
     parser.add_argument("--fixture", action="store_true")
     parser.add_argument(
+        "--common", action="store_true",
+        help="Test common tool formats without optional model controls.",
+    )
+    parser.add_argument(
         "--core",
         action="store_true",
         help="Test common Chat/Responses function APIs only.",
@@ -48,7 +52,7 @@ def main() -> None:
         checks.append(name)
         print("PASS", name, flush=True)
 
-    if args.core:
+    if args.core or args.common:
         assert client.models.list().data
         passed("models discovery")
 
@@ -58,7 +62,7 @@ def main() -> None:
         store=False,
         **(
             {}
-            if args.core
+            if args.core or args.common
             else {
                 "include": ["reasoning.encrypted_content"],
                 "text": {"verbosity": "low"},
@@ -118,7 +122,7 @@ def main() -> None:
         store=True,
     )
     assert second.status == "completed" and second.output_text
-    if args.core:
+    if args.core or args.common:
         assert "demo.txt" in second.output_text
     assert client.responses.retrieve(first.id).id == first.id
     page = client.responses.input_items.list(second.id, limit=1, order="asc")
@@ -273,7 +277,7 @@ def main() -> None:
     )
     passed("chat function loop/stream/usage")
 
-    if args.core:
+    if args.core or args.common:
         with client.responses.stream(
             model=args.model,
             input="Call inspect_workspace.",
@@ -393,7 +397,8 @@ def main() -> None:
         "upstream": "fixture" if args.fixture else "authorized-provider",
         "model": args.model,
         "core_only": args.core,
-        "reasoning_requested": not (args.no_reasoning or args.core),
+        "common_only": args.common,
+        "reasoning_requested": not (args.no_reasoning or args.core or args.common),
         "cross_key_checked": bool(other_key),
         "checks": checks,
         "first_delta_seconds": first_delta,

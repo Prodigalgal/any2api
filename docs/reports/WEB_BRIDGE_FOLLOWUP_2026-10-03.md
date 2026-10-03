@@ -2,7 +2,7 @@
 
 ## 范围与版本
 
-用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，当前候选为 **0.25.3**；本记录将补齐部署和七家实测证据。
+用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，0.25.3 实测后继续修正，当前候选为 **0.25.4**；本记录将补齐最终部署和七家实测证据。
 
 ## 0.25.3 变更清单
 
@@ -39,7 +39,22 @@
 
 ## 部署与生产验收
 
-待补齐 CI、镜像 digest、GitOps revision、Argo/Pod、七家真实 SDK、native 能力、断连/有限并发、公网错误及 Read 前后数据。
+### 0.25.3 首轮生产反馈
+
+- Source `b54bc7c06476e7cd5ae92749011c39dd9f191f8f`；CI `37088713358` 成功；GitOps `8ee51edede82d266b5b579cc5f071f5649f5ae7e`；四 Pod Ready、restart=0，Argo Synced/Healthy，Automation 代码、已安装包与 API 均为 0.25.3。
+- Server 调度到 PostgreSQL 节点后，集群管理 Read 中 overview 236.40 → 88.28ms，providers 160.88 → 90.38ms，api-keys 238.32 → 90.37ms（n=3）。但 Redis 留在另一节点，未压缩的目录 L2 读写发生 QueryTimeoutException，`/v1/models` 升到 2690.54ms，首轮不算最终性能验收。
+- 发现 GitOps 原顺序 Server wave=0、Automation wave=1；新 Server 探针与旧 Worker 终止窗口重叠，DeepSeek/Grok/LongCat 等记下暂态 FAILED，公开推理随后被 model_unavailable 503 拦截。保留所有首次失败记录；待 Worker Ready 后使用现有 admin probe 重新实测，未直接改数据库为 READY。
+- direct/public 无效图片均为 HTTP 400、application/json、相同 error code 和 267 字节正文；request_id 分别为 `6dd6aaf4-302b-46eb-80ed-f2b450eccc21` / `78298214-56c6-4db8-9549-14cbd3c82f88`，Key 删除 204。
+- 备份并清理 default namespace 的三个无后端重复 HTTPRoute；三个 any2api 主路由 Accepted/ResolvedRefs 保持 True。备份 `backend/build/default-routes-rollback-v0253.json` 可恢复。
+
+### 0.25.4 增量修正
+
+- `ModelCatalogSnapshotCodec` 对大型目录快照进行 gzip/base64 压缩，保持全部 JSON 字段和既有 TTL，后台线程只解码当前快照一次；内部 namespace 升为 v4，隔离旧实例，公开响应不变。小快照保持原 JSON；损坏压缩和超过 32 MiB 的解压数据明确失败。
+- GitOps 的 Server wave=2，等待两类 Automation wave=1 就绪后更新。PostgreSQL/PV 与 Redis 布局保持原状。
+- SDK 验收新增 `--common`：覆盖 namespace/custom/普通 function SSE，同时独立记录模型不支持的可选 verbosity 等控制；不把 optional model controls 强加给不支持的模型。
+- 本地五个目录缓存/压缩测试、bootJar、ruff check/format、版本契约通过；实际 workflow 渲染验证 Automation=1、Server=2。
+
+待补齐最终 CI、镜像 digest、GitOps revision、Argo/Pod、七家真实 SDK、native 能力、断连/有限并发、公网错误及 Read 前后数据。
 
 ## 回滚
 

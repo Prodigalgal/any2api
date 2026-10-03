@@ -154,8 +154,9 @@ public class ModelCatalogCache {
         this.jdbc = jdbc;
         this.mapper = mapper;
         var policy = properties.getCache().getModelCatalog();
+        // Isolate compressed snapshots from older processes during rolling releases.
         this.cache = new LayeredJsonCache(
-            redis, "any2api:cache:model-catalog:v3", policy.getLocalTtl(),
+            redis, "any2api:cache:model-catalog:v4", policy.getLocalTtl(),
             policy.getRedisTtl(), policy.getMaximumEntries());
         this.healthWindow = properties.getModelRuntime().getHealthWindow();
         this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
@@ -165,7 +166,7 @@ public class ModelCatalogCache {
 
     public Mono<List<Entry>> list() {
         return cache.get("enabled", () -> Mono.fromCallable(() -> Optional.of(
-                mapper.writeValueAsString(load())))
+                ModelCatalogSnapshotCodec.encode(mapper.writeValueAsString(load()))))
             .subscribeOn(Schedulers.boundedElastic()))
             .flatMap(value -> value.map(this::decode).orElseGet(() -> Mono.just(List.of())));
     }
@@ -215,7 +216,7 @@ public class ModelCatalogCache {
         // remain authoritative. Parsing runs once per snapshot off the event loop.
         var entries = Mono.<List<Entry>>fromCallable(() -> {
             var type = mapper.getTypeFactory().constructCollectionType(List.class, Entry.class);
-            return List.copyOf(mapper.readValue(value, type));
+            return List.copyOf(mapper.readValue(ModelCatalogSnapshotCodec.decode(value), type));
         }).subscribeOn(Schedulers.boundedElastic()).cache();
         decodedCatalog = new DecodedCatalog(value, entries);
         return entries;

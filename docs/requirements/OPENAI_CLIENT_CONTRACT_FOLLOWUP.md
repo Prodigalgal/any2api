@@ -4,6 +4,8 @@
 
 以已部署的 0.25.7 为基线，让现有厂商 WEB 在同一 OpenAI Chat/Responses 契约下支持标准模型详情和可校验的严格函数参数。本轮为新增向后兼容能力，候选占用 0.26.0。
 
+0.26.0 真实验收发现 Grok Java 和 LongCat Automation 仍有旧 strict 拒绝，修复候选占用 0.26.1。生产安全链还会拒绝模型 ID 的编码斜线，限定只在 GET 模型详情的 ID 部分允许 `%2F`，其余路径/方法、编码前缀、双斜线、遍历和控制字符沿用原防火墙。SDK fixture 纳入实际安全链，验收 encoded ID/未认证/越权和危险路径。共享 Envoy 入口的同源 307 归一化行为记录为运维边界。
+
 - 新增统一和厂商前缀的 `GET models/{model}`，返回与目录一致的模型对象、能力和运行态；支持带斜线的模型 ID，Key 权限过滤后不存在的模型返回 OpenAI JSON 404。
 - `strict:true` 的 function schema 在账号租约之前校验；厂商仍使用已有 WEB 函数桥接。所有厂商产生的严格工具参数经过同一网关检查，合格后才向客户端输出工具事件，不合格返回 `tool_call_generation_failed`，不得发送不合格工具参数、补造字段或伪造成功。
 - 第一轮严格 schema 支持 object、array、基础类型、nullable、enum、anyOf、局部非循环引用、数值/长度约束。必须声明 object 的 `additionalProperties:false` 和全部必填字段。复杂关键词、正则、format、外部引用、循环引用明确拒绝；schema/参数大小、深度、分支和缓存均有界，校验器不访问外部资源。

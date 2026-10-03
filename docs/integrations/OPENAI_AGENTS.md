@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.26.0）
+# OpenAI API 到厂商 WEB 的桥接（0.26.1）
 
 ## 范围
 
@@ -14,6 +14,7 @@
 |---|---|
 | JSON / SSE | Chat 与 Responses；SDK 可重建最终输出和工具参数 |
 | 模型详情 | `models.retrieve()` 使用目录返回的 model ID；缺失或无权限返回 OpenAI JSON 404 |
+| 编码模型 ID | 应用安全链仅对 GET 模型详情 ID 放行 `%2F`；当前共享 Envoy 入口先同源 307 归一化，普通 SDK 自动跟随 |
 | 严格函数参数 | 显式 `strict:true`，由公共网关检查完整参数，再输出工具事件；上游生成不合格会失败 |
 | function tools | 八家现有 WEB Provider 均有模拟工具桥接；auto/none/required/指定 function 按模型校验。Qwen 缺账号，真实验收与其他模型限制见发布报告 |
 | namespace / custom（可选扩展） | namespace 函数与 text custom 转 function，再还原输出身份；并行调用与 allowed_tools；不保证每个 WEB 上游稳定支持 |
@@ -27,7 +28,7 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 工具上限、schema、媒体、generation 参数和 token 预算仍由当前 Provider 校验。MiMo/LongCat 现有工具上限是 128。能力声明与真实厂商验收、模型可调用状态是不同证据。
 
-0.25.0–0.25.2 为现有厂家补齐 emulated function 桥接，0.25.3–0.25.7 的真实验收见 [后续修复与验证](../reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)：七家所选模型完成 SDK、完整历史和有限并发检查，LongCat 用户/工具 OCR、TXT/PDF 已通过，厂家原生纯色误判仍保留。Qwen 仅有代码与离线契约证据。本轮模型详情和 strict 的逐厂商结果见 [0.26.0 客户端契约验收](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
+0.25.0–0.25.2 为现有厂家补齐 emulated function 桥接，0.25.3–0.25.7 的真实验收见 [后续修复与验证](../reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)：七家所选模型完成 SDK、完整历史和有限并发检查，LongCat 用户/工具 OCR、TXT/PDF 已通过，厂家原生纯色误判仍保留。Qwen 仅有代码与离线契约证据。本轮模型详情和 strict 的逐厂商结果见 [0.26.0–0.26.1 客户端契约验收](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
 
 ### 历史验收（0.24.4，后续修复见当前发布报告）
 
@@ -106,7 +107,7 @@ $env:ANY2API_E2E_API_KEY = 'fixture-primary'
 python tools/compatibility/openai_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --fixture --sdk-path backend/build/agent-interop-python --report backend/build/agent-sdk-report.json
 python tools/compatibility/codex_agent_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture-codex-image --fixture --tool image --report backend/build/agent-codex-report.json
 python tools/compatibility/openai_strict_smoke.py --base-url http://127.0.0.1:18089/v1 --model mimo/fixture --provider mimo --fixture --sdk-path backend/build/agent-interop-python --report backend/build/strict-sdk-report.json
-python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.26.0.jar
+python tools/compatibility/check_versions.py --jar backend/build/libs/any2api-backend-0.26.1.jar
 ```
 
 关闭本地服务：

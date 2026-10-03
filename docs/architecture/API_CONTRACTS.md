@@ -22,6 +22,9 @@ Provider-specific equivalents exist under `/{provider}/v1`. Unified requests rou
 
 Model retrieval accepts the same IDs returned by the matching model list, including IDs with
 slashes or URL-encoded slashes. It returns the same model metadata, capabilities and runtime snapshot.
+Since 0.26.1, the production firewall permits encoded slashes only within GET model detail IDs;
+encoded route prefixes and other unsafe paths retain the default rejection. The shared Envoy
+entrypoint currently normalizes `%2F` with a same-origin 307 redirect; clients must follow it or use raw slashes.
 Unknown, disabled-provider and unauthorized model IDs return OpenAI JSON `404 model_not_found`.
 Cataloged but unavailable models remain describable, with `available:false`.
 
@@ -33,7 +36,7 @@ account, then selects one of that provider's role-qualified enabled models. Conc
 rejected on these endpoints. Responses expose the selected route through
 `X-Any2API-Provider` and `X-Any2API-Model`.
 
-### Responses agent contract (0.26.0)
+### Responses agent contract (0.26.1)
 
 HTTP JSON and SSE support stateless history replay and optional gateway-owned state. Message
 `phase`, reasoning summaries, `function_call`/`function_call_output`, and

@@ -148,6 +148,21 @@ def main() -> None:
         check("Responses strict/SSE/function result", responses_roundtrip)
 
         if args.fixture:
+            def encoded_model_id():
+                raw = client.models.with_raw_response.retrieve(args.model)
+                assert b"%2f" in raw.http_request.url.raw_path.lower()
+                assert raw.parse().id == args.model
+                try:
+                    with openai.OpenAI(base_url=args.base_url, api_key="invalid-fixture-key",
+                                       timeout=args.timeout, max_retries=0) as unauthenticated:
+                        unauthenticated.models.retrieve(args.model)
+                    raise AssertionError("encoded model ID bypassed authentication")
+                except openai.AuthenticationError:
+                    pass
+                return {"encoded_id": True, "unauthenticated_status": 401}
+
+            check("encoded model ID/production security/authentication", encoded_model_id)
+
             def invalid_upstream():
                 with client.responses.stream(model=args.model, input="fixture:strict-invalid",
                                              tools=[response_function], tool_choice="required", store=False) as stream:

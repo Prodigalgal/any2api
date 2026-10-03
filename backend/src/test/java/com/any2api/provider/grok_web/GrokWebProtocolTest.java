@@ -233,6 +233,29 @@ class GrokWebProtocolTest {
     }
 
     @Test
+    void strictSchemasReachGrokWebContractAndInvalidSchemasFailBeforeTransport() {
+        var tool = mapper.readTree("""
+            {"type":"function","name":"calculate_sum","strict":true,"parameters":{
+              "type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},
+              "required":["a","b"],"additionalProperties":false}}
+            """);
+        var raw = mapper.createObjectNode().put("tool_choice", "required");
+        var chatDefinition = mapper.createObjectNode().put("type", "function");
+        chatDefinition.set("function", tool);
+        for (var definition : List.of(tool, chatDefinition)) {
+            var request = request(CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+                raw, List.of(definition), List.of(message("user", "calculate_sum")));
+            assertThat(requestMapper().prepare(request).body().path("message").asText())
+                .contains("calculate_sum").contains("additionalProperties").contains("integer");
+        }
+        ((tools.jackson.databind.node.ObjectNode) tool.path("parameters")).put("additionalProperties", true);
+        assertThatThrownBy(() -> requestMapper().prepare(request(CanonicalRequest.Protocol.RESPONSES,
+            raw, List.of(tool), List.of(message("user", "calculate_sum")))))
+            .isInstanceOf(com.any2api.protocol.OpenAiRequestException.class)
+            .hasMessageContaining("additionalProperties=false");
+    }
+
+    @Test
     void responseToolHistoryIsRenderedIntoContinuationPrompt() {
         var call = mapper.createObjectNode().put("type", "function_call")
             .put("name", "lookup").put("arguments", "{\"id\":1}");

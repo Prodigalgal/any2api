@@ -435,8 +435,7 @@ def _normalize_tools(value: Any) -> list[dict[str, Any]]:
             if name:
                 raise ValueError(f"duplicate LongCat function tool: {name}")
             raise ValueError("LongCat function tool name is invalid")
-        if definition.get("strict") is True:
-            raise ValueError("LongCat emulated tools do not support strict=true")
+        # The gateway validates strict schemas and arguments before exposing tool events.
         names.add(name)
         output.append(
             {

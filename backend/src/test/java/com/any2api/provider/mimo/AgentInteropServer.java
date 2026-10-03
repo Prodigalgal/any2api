@@ -16,6 +16,7 @@ import com.any2api.auth.ApiKeyRateLimiter;
 import com.any2api.auth.ApiKeyRequestFeatureDetector;
 import com.any2api.auth.PublicApiKeyWebFilter;
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.config.SecurityConfiguration;
 import com.any2api.interop.InteropDatabase;
 import com.any2api.observability.RequestIdWebFilter;
 import com.any2api.protocol.CanonicalEvent;
@@ -57,6 +58,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.config.EnableWebFlux;
+import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.web.server.adapter.WebHttpHandlerBuilder;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -68,11 +70,11 @@ public final class AgentInteropServer {
     private static final List<Map<String,Object>> REQUESTS = new java.util.concurrent.CopyOnWriteArrayList<>();
     private static reactor.netty.DisposableServer server;
 
-    @Configuration @EnableWebFlux static class WebConfiguration {}
+    @Configuration @EnableWebFlux @EnableWebFluxSecurity static class WebConfiguration {}
 
     @RestController static class FixtureControl {
         @GetMapping("/__fixture/health") public Map<String,Object> health() {
-            return Map.of("status","ready","upstream","fixture","version","0.24.0");
+            return Map.of("status","ready","upstream","fixture","version","0.26.1");
         }
         @GetMapping("/__fixture/requests") public List<Map<String,Object>> requests() { return List.copyOf(REQUESTS); }
         @PostMapping("/__fixture/shutdown") public Map<String,Boolean> shutdown() {
@@ -118,7 +120,12 @@ public final class AgentInteropServer {
                 case "fixture-other" -> Optional.of(other);
                 default -> Optional.empty();
             }));
-            context.register(WebConfiguration.class);
+            context.register(WebConfiguration.class, SecurityConfiguration.class);
+            context.registerBean(Any2ApiProperties.class,()->properties);
+            var sessions = mock(com.any2api.auth.AdminSessionService.class);
+            when(sessions.verify(org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(Optional.empty());
+            context.registerBean(com.any2api.auth.AdminSessionWebFilter.class,
+                ()->new com.any2api.auth.AdminSessionWebFilter(sessions));
             context.registerBean(ObjectMapper.class,()->mapper);
             context.registerBean(OpenAiGatewayController.class,()->new OpenAiGatewayController(new ProviderRouteResolver(registry),
                 parser,coordinator,writer,mock(RandomInferenceRouter.class),authorization,features,responses));

@@ -10,6 +10,7 @@ public record ProviderRetryPolicy(
     private static final ProviderRetryPolicy NONE = new ProviderRetryPolicy(1, Set.of());
     private static final Set<String> STANDARD_FAILURES = Set.of(
         "empty_model_response",
+        "tool_call_generation_failed",
         "rate_limited",
         "upstream_unavailable",
         "network_error",

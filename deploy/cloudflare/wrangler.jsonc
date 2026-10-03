@@ -1,0 +1,10 @@
+{
+  "name": "any2api-openai-gateway",
+  "main": "openai-gateway.mjs",
+  "compatibility_date": "2026-10-03",
+  "workers_dev": false,
+  "routes": [
+    "any2api.mnnu.eu.org/v1*",
+    "any2api.mnnu.eu.org/*/v1*"
+  ]
+}

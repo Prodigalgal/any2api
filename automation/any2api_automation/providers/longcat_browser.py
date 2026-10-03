@@ -308,6 +308,7 @@ def build_longcat_request(
     if choice == "none":
         tools = []
     content = _prompt(command.get("messages"), allow_media=bool(media_blocks))
+    content += _text_file_context(media_blocks)
     if tools:
         content = _append_tool_contract(content, tools, choice, controls.get("parallel_tool_calls"))
     return {
@@ -521,6 +522,34 @@ def _longcat_media_blocks(messages: Any) -> list[tuple[int, str, dict[str, Any]]
     if image_count and file_count:
         raise ValueError("LongCat chat accepts images or one document, not both")
     return media_blocks
+
+
+_LONGCAT_TEXT_FILE_EXTENSIONS = frozenset({"txt"})
+
+
+def _text_file_context(media_blocks: list[tuple[int, str, dict[str, Any]]]) -> str:
+    documents: list[str] = []
+    for _, kind, part in media_blocks:
+        if kind != "file":
+            continue
+        source = media_source(part)
+        if not source.startswith("data:"):
+            continue
+        mime = source[5:].partition(";")[0].lower()
+        filename, extension = _longcat_filename(part, mime, kind)
+        if extension not in _LONGCAT_TEXT_FILE_EXTENSIONS:
+            continue
+        _, content = decode_inline_data_url(
+            source, "LongCat file", max_bytes=_LONGCAT_MAX_UPLOAD_BYTES
+        )
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError("LongCat text attachments must be UTF-8") from error
+        documents.append(
+            f"\n\n[Attached UTF-8 document: {filename}]\n{text}\n[End attached document]"
+        )
+    return "".join(documents)
 
 
 def _longcat_upload_sources(messages: Any) -> list[dict[str, Any]]:

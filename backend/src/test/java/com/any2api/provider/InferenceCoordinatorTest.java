@@ -37,6 +37,29 @@ class InferenceCoordinatorTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void retriesMissingRequiredToolCallsBeforeOutput(boolean stream) {
+        var accounts = mock(AccountSelectionService.class);
+        var leasedAccounts = List.of(leased("alpha"), leased("alpha"), leased("alpha"));
+        when(accounts.acquire(eq("alpha"), eq("model"), any())).thenReturn(
+            Mono.just(leasedAccounts.get(0)), Mono.just(leasedAccounts.get(1)), Mono.just(leasedAccounts.get(2)));
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportSuccess(leasedAccounts.get(2), "model")).thenReturn(Mono.empty());
+        StepVerifier.create(coordinator(new RetryingProvider("tool_call_generation_failed", 2, false), accounts)
+                .execute(request("alpha", stream)))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Usage.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
+            .verifyComplete();
+        verify(accounts, times(3)).acquire(eq("alpha"), eq("model"), any());
+        leasedAccounts.forEach(account -> verify(accounts).release(account));
+        assertThat(ProviderRetryPolicy.standard().shouldRetry("tool_call_generation_failed", 1)).isTrue();
+        assertThat(ProviderRetryPolicy.standard().shouldRetry("tool_call_generation_failed", 3)).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void replacesRejectedCredentialsBeforeOutputAndExcludesEveryPreviousAccount(boolean stream) {
         var accounts = mock(AccountSelectionService.class);
         var leasedAccounts = List.of(leased("alpha"), leased("alpha"), leased("alpha"));
@@ -173,7 +196,7 @@ class InferenceCoordinatorTest {
         when(accounts.mergeCredentialPatch(eq(leased), any(tools.jackson.databind.JsonNode.class)))
             .thenReturn(Mono.just(true));
         var provider = new TestProvider(false, new CanonicalEvent.Failed(
-            1, "request-id", 1, "tool_call_generation_failed", "missing tool", Map.of()));
+            1, "request-id", 1, "upstream_timeout", "timeout", Map.of()));
         var coordinator = coordinator(provider, accounts);
 
         StepVerifier.create(coordinator.execute(request("alpha"), leased))
@@ -518,7 +541,8 @@ class InferenceCoordinatorTest {
         @Override
         public ProviderRetryPolicy retryPolicy() {
             return ProviderRetryPolicy.standardWith(
-                failureType.equals("credential_rejected") ? 3 : 2, failureType);
+                List.of("credential_rejected", "tool_call_generation_failed").contains(failureType) ? 3 : 2,
+                failureType);
         }
 
         @Override

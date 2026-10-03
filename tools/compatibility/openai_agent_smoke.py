@@ -52,7 +52,7 @@ def main() -> None:
         checks.append(name)
         print("PASS", name, flush=True)
 
-    if args.core or args.common:
+    if (args.core or args.common) and not args.fixture:
         assert client.models.list().data
         passed("models discovery")
 

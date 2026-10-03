@@ -48,8 +48,24 @@ final class LongcatMediaValidation {
                 if (content.length == 0 || content.length > MAX_UPLOAD_BYTES) {
                     throw new IllegalArgumentException("LongCat media must contain between 1 byte and 10 MiB");
                 }
-                if (image) validateImage(source.substring(5, separator).toLowerCase(Locale.ROOT), content);
+                var mime = source.substring(5, separator).toLowerCase(Locale.ROOT);
+                if (image) validateImage(mime, content);
+                else validateTextFile(part, mime, content);
             }
+        }
+    }
+
+    private static void validateTextFile(JsonNode part, String mime, byte[] content) {
+        var filename = part.path("filename").asText(part.path("file").path("filename").asText(""))
+            .toLowerCase(Locale.ROOT);
+        if (!"text/plain".equals(mime) && !filename.endsWith(".txt")) return;
+        try {
+            java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(content));
+        } catch (java.nio.charset.CharacterCodingException error) {
+            throw new IllegalArgumentException("LongCat text attachments must be UTF-8", error);
         }
     }
 

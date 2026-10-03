@@ -49,7 +49,16 @@ public final class ModelProbeService {
             coordinator.executeProbe(request)
                 .collectList()
                 .timeout(provider.modelProbeTimeout())
-                .map(events -> result(normalizedProvider, normalizedModel, events, startedAt))
+                .flatMap(events -> {
+                    var result = result(normalizedProvider, normalizedModel, events, startedAt);
+                    if (java.util.Set.of("credential_rejected", "anti_bot_rejected")
+                        .contains(result.errorClass())) {
+                        log.info("model_probe_deferred provider={} model={} reason={}",
+                            normalizedProvider, normalizedModel, result.errorClass());
+                        return Mono.empty();
+                    }
+                    return Mono.just(result);
+                })
                 .onErrorResume(error -> {
                     var root = error;
                     while (root.getCause() != null && root.getCause() != root) {
@@ -61,9 +70,17 @@ public final class ModelProbeService {
                             normalizedProvider, normalizedModel, root.getClass().getSimpleName());
                         return Mono.empty();
                     }
-                    return Mono.just(new Result(
-                        normalizedProvider, normalizedModel, "FAILED",
-                        error.getClass().getSimpleName(), null, elapsed(startedAt), Instant.now()));
+                    if (ProviderFailureSignals.isTimeout(error)) {
+                        return Mono.just(new Result(
+                            normalizedProvider, normalizedModel, "FAILED", "upstream_timeout",
+                            null, elapsed(startedAt), Instant.now()));
+                    }
+                    // A local preparation/transport exception is not evidence that
+                    // the upstream model failed. Preserve the last measured state.
+                    log.warn("model_probe_infrastructure_failed provider={} model={} error_type={} cause_type={}",
+                        normalizedProvider, normalizedModel, error.getClass().getSimpleName(),
+                        root.getClass().getSimpleName());
+                    return Mono.error(error);
                 })
                 .flatMap(this::persist)));
     }

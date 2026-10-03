@@ -2,7 +2,7 @@
 
 ## 范围与版本
 
-用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，0.25.3 实测后继续修正，当前候选为 **0.25.4**；本记录将补齐最终部署和七家实测证据。
+用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，0.25.3/0.25.4 实测后继续修正，当前候选为 **0.25.5**；本记录将补齐最终部署和七家实测证据。
 
 ## 0.25.3 变更清单
 
@@ -53,6 +53,13 @@
 - GitOps 的 Server wave=2，等待两类 Automation wave=1 就绪后更新。PostgreSQL/PV 与 Redis 布局保持原状。
 - SDK 验收新增 `--common`：覆盖 namespace/custom/普通 function SSE，同时独立记录模型不支持的可选 verbosity 等控制；不把 optional model controls 强加给不支持的模型。
 - 本地五个目录缓存/压缩测试、bootJar、ruff check/format、版本契约通过；实际 workflow 渲染验证 Automation=1、Server=2。
+
+### 0.25.5 增量修正
+
+- `ModelProbeService`：账号级 credential/anti-bot 拒绝不覆盖整个模型的可用状态；本地准备/传输异常保留已有证据并向上报告。真实厂家 canonical 失败及明确超时仍保存 FAILED。避免部署窗口中的本地异常产生持久 model_unavailable；不直接改库为 READY。
+- `ProviderRetryPolicy`：已声明 required 工具未生成且尚无有效输出时，最多三个不同账号重试。有效 reasoning/text/tool 输出后仍禁止重放，保留清理和失败遥测。
+- LongCat：原生 TXT 上传成功但模型不能读取的失败已实测复现；在已有文件上传基础上把完整、严格 UTF-8 正文加入原生输入，原文件字节不变，保留 10 MiB 限制。未扩展厂家已有文件格式，不把 PDF/Office 解析能力推定为已验。
+- Cloudflare：准备固定域名/路径的 Worker 转发候选，直接传递原生 status/headers/body stream，六项 Node 测试和 Wrangler dry-run 通过。Wrangler 未登录；按 AGENTS.md 外部 SaaS 写入规则已请求授权，当前未发布，不宣称公网 502/524 已解决。
 
 待补齐最终 CI、镜像 digest、GitOps revision、Argo/Pod、七家真实 SDK、native 能力、断连/有限并发、公网错误及 Read 前后数据。
 

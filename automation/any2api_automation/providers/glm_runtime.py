@@ -566,7 +566,8 @@ def build_glm_command(
     )
     current_message_id = user_message_id or str(uuid4())
     normalized_files = _normalize_uploaded_files(uploaded_files)
-    prompt = _last_user_prompt(command["messages"])
+    native_messages = _canonical_messages(command, normalized_files)
+    prompt = _conversation_prompt(native_messages)
     model = str(command["model"])
     effort = _reasoning_effort(command)
     thinking = _thinking_enabled(command, effort)
@@ -611,7 +612,7 @@ def build_glm_command(
     completion = {
         "stream": True,
         "model": model,
-        "messages": _canonical_messages(command, normalized_files),
+        "messages": native_messages,
         "signature_prompt": prompt,
         "params": _generation_params(command),
         "extra": {},
@@ -689,6 +690,25 @@ def _canonical_messages(
         else:
             output.append({"role": role, "content": content})
     return output
+
+
+def _conversation_prompt(messages: list[dict[str, Any]]) -> str:
+    current_prompt = _last_user_prompt(messages)
+    if len(messages) == 1:
+        return current_prompt
+    # The WEB completion consumes the signed current prompt instead of prior native messages.
+    prompt = "Conversation history (preserve role boundaries):\n\n" + "\n\n".join(
+        f"[{message['role']}]\n{_content(message.get('content'), allow_media=True)}"
+        for message in messages
+    )
+    current_message = messages[_last_user_message_index(messages)]
+    content = current_message["content"]
+    if isinstance(content, list):
+        attachments = [block for block in content if block.get("type") != "text"]
+        current_message["content"] = [{"type": "text", "text": prompt}, *attachments]
+    else:
+        current_message["content"] = prompt
+    return prompt
 
 
 def _generation_params(command: dict[str, Any]) -> dict[str, float | int]:

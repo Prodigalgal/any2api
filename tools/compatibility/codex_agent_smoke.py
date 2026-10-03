@@ -34,9 +34,12 @@ def main() -> None:
     parser.add_argument("--fixture", action="store_true")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--codex", default="codex")
+    parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--sandbox", choices=["read-only", "workspace-write"], default="read-only")
     parser.add_argument("--tool", choices=["command", "image"], default="command")
     args = parser.parse_args()
+    if args.timeout <= 0:
+        parser.error("--timeout must be positive.")
     if args.tool == "image" and not args.fixture:
         parser.error(
             "--tool image is reserved for the controlled fixture; use --tool command for a real provider."
@@ -102,16 +105,41 @@ def main() -> None:
             'web_search="disabled"',
             prompt,
         ]
-        result = subprocess.run(
-            command,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=args.timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            result = subprocess.CompletedProcess(
+                command, 124, decoded_output(error.stdout), decoded_output(error.stderr)
+            )
+    if result.returncode != 0:
+        diagnostic = {
+            "codex_version": version,
+            "upstream": "fixture" if args.fixture else "authorized-provider",
+            "model": args.model,
+            "exit_code": result.returncode,
+            "process_timeout_seconds": args.timeout,
+            "tool_output_verified": False,
+            "final_answer_verified": False,
+            "stdout": result.stdout[-6000:],
+            "stderr": result.stderr[-2000:],
+        }
+        serialized = json.dumps(diagnostic, ensure_ascii=False, indent=2).replace(
+            os.environ["ANY2API_E2E_API_KEY"], "[REDACTED]"
         )
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(serialized, encoding="utf-8")
+        print(serialized, flush=True)
+        raise SystemExit(result.returncode)
     events = []
     for line in result.stdout.splitlines():
         try:
@@ -175,6 +203,10 @@ def main() -> None:
         flush=True,
     )
     print(json.dumps(report, ensure_ascii=False), flush=True)
+
+
+def decoded_output(value: str | bytes | None) -> str:
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value or ""
 
 
 if __name__ == "__main__":

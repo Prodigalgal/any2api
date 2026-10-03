@@ -2,7 +2,7 @@
 
 ## 范围与版本
 
-用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，0.25.3/0.25.4 实测后继续修正，当前候选为 **0.25.5**；本记录将补齐最终部署和七家实测证据。
+用户要求处理上一轮报告中 Qwen 以外的全部遗留事项。延续 OpenAI Chat/Responses → 厂家 Web 的边界，调用方执行工具。原生产基线为 0.25.2，0.25.3–0.25.5 实测后继续修正，当前候选为 **0.25.6**；本记录将补齐最终部署和七家实测证据。
 
 ## 0.25.3 变更清单
 
@@ -62,6 +62,31 @@
 - Cloudflare：准备固定域名/路径的 Worker 转发候选，直接传递原生 status/headers/body stream，六项 Node 测试和 Wrangler dry-run 通过。Wrangler 未登录；按 AGENTS.md 外部 SaaS 写入规则已请求授权，当前未发布，不宣称公网 502/524 已解决。
 
 待补齐最终 CI、镜像 digest、GitOps revision、Argo/Pod、七家真实 SDK、native 能力、断连/有限并发、公网错误及 Read 前后数据。
+
+### 0.25.6 GLM 历史与 agent 诊断修正
+
+- GLM：真实 46 条历史分别以 developer/user 开始时，0.25.5 均未读到首条 reference；补完整 native history tree 仍失败。官方 WEB runtime 使用包含相同原始历史的当前签名 prompt 后成功。`build_glm_command` 现在将多轮角色、文本、已有工具调用/结果放入有效 prompt，单轮保持原文字，typed 附件保持原有 file identity；不修改调用方对象，也不补预期答案。
+- 更新跨厂家工具契约回归：除完整保留最后的工具结果，还要求 GLM 实际签名 prompt 包含早期 developer 指令和 assistant call id。
+- Automation **502 passed**，ruff check/format 通过；Backend bootJar 和源码/JAR **0.25.6** 版本契约通过，最新迁移 tag 仍为 0.24.0。Web build 通过；Backend 生产源码未改，完整门禁在 CI 再验。
+- `codex_agent_smoke.py` 保留超时/非零退出时的部分 stdout/stderr、CLI/model/deadline 信息和明确未通过状态，报告脱敏，保持默认 120 秒及原 sandbox，不绕过命令策略。
+- 真实 installed Codex 对 MiMo 完成 `view_image → function_call_output(input_image) → 6248`。网关请求 `a057897d-3056-4037-8e03-4d6aea19fc7e` 输出 view_image，`809fd067-1fce-4564-8b03-1d8de8a21e61` 接收一个工具输出和其中的图片，两次均成功；CLI exit=0，预期数字只在本地产物/断言中，未写入 prompt。Key `ba9017f4-fb2a-4dcb-9710-8fa4e43e1033` 删除 204。此前 command 测试的本地 CreateProcess 被客户端自动策略拒绝，仍记录为失败，不算后端命令执行成功。
+- Worker 已获用户授权但 OAuth 登录超时；后续讨论确认其仅为可选候选，当前未发布、未绑定路由。直接 HTTPS 能用于 agent，现有公网 SSE 已实测持续 136.631 秒后正常取消；公网长非流式 Cloudflare 524/502 格式问题继续单列。
+
+### 0.25.5 七家 SDK 真实验收
+
+官方 Python SDK 2.54.0，对 `any2api-direct.mnnu.eu.org` 的临时限定 Key、AUTO WEB 路径，七家均 **9/9 PASS**。每家覆盖 models、Responses 非流式/流式、存储/跨 Key 所有权、namespace、custom/result、Chat function、普通 function SSE/named choice。客户端 timeout=240s，首次失败记录未删除。下表是一次实际请求的首 text delta，不能当成 SLA。
+
+| 模型 | 首 text delta(s) | 核心结果 |
+|---|---:|---|
+| Arena/Max | 18.789 | 9/9 PASS |
+| DeepSeek/default | 70.805 | 9/9 PASS |
+| GLM/glm-5.2 | 44.736 | 9/9 PASS；独立长历史缺陷由 0.25.6 修复复测 |
+| Grok Web/grok-3 | 10.516 | 9/9 PASS |
+| LongCat/longcat-flash | 5.861 | 9/9 PASS |
+| MiMo/mimo-v2.6-flash | 5.147 | 9/9 PASS |
+| MinMax/MiniMax-M3.1-Flash-Preview | 7.925 | 9/9 PASS |
+
+LongCat 的 0.25.5 native 9 项也通过：46 条历史、reasoning/math、真实 search URL、用户和工具图片 OCR、TXT/PDF reference、两函数调用及全部结果回放。纯色识别错误仍能在厂家原生接口复现，改变尺寸的白框实验未加入生产。
 
 ## 回滚
 

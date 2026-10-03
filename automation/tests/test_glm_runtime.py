@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from copy import deepcopy
 
 import pytest
 
@@ -76,6 +77,73 @@ def test_glm_builds_current_chat_envelopes_in_automation() -> None:
     assert command["completion"]["features"]["auto_web_search"] is True
     assert command["completion"]["features"]["preview_mode"] is False
     assert command["completion"]["features"]["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize("initial_role", ("developer", "user"))
+def test_glm_signed_prompt_retains_long_history_without_mutating_the_caller(
+    initial_role: str,
+) -> None:
+    semantic = _semantic_command()
+    messages = [{"role": initial_role, "content": "Remember reference birch_728164."}]
+    messages.extend(
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"Round {index}."}
+        for index in range(44)
+    )
+    messages.append({"role": "user", "content": "What was the reference at the beginning?"})
+    semantic["messages"] = messages
+    original = deepcopy(semantic)
+
+    result = build_glm_command(semantic, "user@example.test", user_message_id="message-1")
+
+    prompt = result["prompt"]
+    assert "birch_728164" in prompt
+    assert "[system]" in prompt if initial_role == "developer" else "[user]" in prompt
+    assert "[assistant]" in prompt
+    assert all(message["content"] in prompt for message in messages)
+    assert result["completion"]["signature_prompt"] == prompt
+    assert result["completion"]["messages"][-1]["content"] == prompt
+    assert result["chat"]["history"]["messages"]["message-1"]["content"] == prompt
+    assert len(result["completion"]["messages"]) == 46
+    assert result["completion"]["params"] == {"temperature": 0.3}
+    assert result["completion"]["features"]["auto_web_search"] is True
+    assert semantic == original
+
+
+def test_glm_history_prompt_preserves_tool_calls_results_and_uploaded_image() -> None:
+    semantic = _semantic_command()
+    semantic["messages"] = [
+        {"role": "user", "content": "Inspect the previous tool result."},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "call-1", "function": {"name": "lookup", "arguments": "{}"}}],
+        },
+        {"role": "tool", "content": "reference_cedar_17", "tool_call_id": "call-1"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Now describe the image."},
+                {"type": "input_image", "image_url": "data:image/png;base64,YQ=="},
+            ],
+        },
+    ]
+    original = deepcopy(semantic)
+    uploaded = [{"message_index": 3, "file": {"type": "image", "id": "file-1", "media": "image"}}]
+    result = build_glm_command(
+        semantic, "user@example.test", uploaded_files=uploaded, user_message_id="message-1"
+    )
+
+    assert "[assistant]" in result["prompt"]
+    assert '"id":"call-1"' in result["prompt"]
+    assert "[tool]\nreference_cedar_17" in result["prompt"]
+    assert "data:image" not in result["prompt"]
+    assert result["completion"]["messages"][-1]["content"] == [
+        {"type": "text", "text": result["prompt"]},
+        {"type": "image_url", "image_url": {"url": "file-1"}},
+    ]
+    assert result["chat"]["history"]["messages"]["message-1"]["files"][0]["id"] == "file-1"
+    assert result["completion"]["files"][0]["id"] == "file-1"
+    assert semantic == original
 
 
 def test_glm_attaches_uploaded_images_to_the_official_vlm_message_shape() -> None:

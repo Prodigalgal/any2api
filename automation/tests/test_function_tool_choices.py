@@ -69,8 +69,11 @@ def test_web_agents_preserve_caller_function_contract_and_result_in_the_actual_u
         "controls": {},
     }
     glm = build_glm_command(command, "user@example.test", 1_785_337_442_000)
-    assert glm["completion"]["signature_prompt"] == prompt
-    assert glm["completion"]["messages"][-1]["content"] == prompt
+    assert glm["completion"]["signature_prompt"].endswith(prompt)
+    assert glm["completion"]["messages"][-1]["content"] == glm["prompt"]
+    assert "Follow the caller's function protocol" in glm["prompt"]
+    assert '"id":"call_inspect","name":"inspect"' in glm["prompt"]
+    assert command["messages"][-1]["content"] == prompt
     minmax = build_minmax_request({**command, "model": "MiniMax-M3.1-Flash-Preview"})
     assert prompt in minmax["content"]
     assert "Previous assistant function calls" in minmax["content"]

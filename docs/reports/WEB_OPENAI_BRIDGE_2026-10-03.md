@@ -6,6 +6,8 @@
 
 本轮依次发布 0.25.0、0.25.1、0.25.2，每次修改源码占用新的 SemVer 和不可变制品。代码支持、离线回归、真实模型验收和部署健康分别记录；一款模型通过不能外推到该厂家所有模型。
 
+**后续状态：0.25.7 已部署并验收。** 本文保留 0.25.0–0.25.2 的历史证据；用户要求处理 Qwen 以外的遗留事项，后续代码、生产验证、性能回退及外部限制见 [遗留处理记录](WEB_BRIDGE_FOLLOWUP_2026-10-03.md)。下列历史失败与待办不代表最新运行态。
+
 ## 发布记录
 
 | 版本 | 源码 | CI | GitOps | 结果 |
@@ -163,7 +165,7 @@ Qwen 最终候选无账号请求 ID `18881a18-0b15-4192-9fcf-e015031c290f`，503
 
 0.25.1 真实 Responses SSE 请求 `6eed65d9-93da-4a81-a797-ec9db50cae94`：`duration_ms=128465`、`queue_ms=0`、`account_acquire_ms=739`、`ttfb_ms=125278`、`generation_ms=2443`。SDK 首增量 126.62s。主要等待发生在 WEB/runtime 首输出前，账号排队不是该样本的主要耗时，也与管理 Read SQL 无直接关系；尚未细分页面初始化、连接建立和厂家生成时间。
 
-## 遗留事项与下一步
+## 0.25.2 遗留事项与下一步（历史）
 
 1. Qwen 缺少可用账号；完成代码/契约桥接，真实 E2E 等现有账号就绪后再验，不新建外部账号。
 2. Arena 偶发 LOGIN_GATE；需继续量化有效凭据比例、恢复耗时与首输出前换账号策略，不能把 ACTIVE 数量作为可调用账号数。现有重试不包含 credential_rejected。
@@ -172,6 +174,20 @@ Qwen 最终候选无账号请求 ID `18881a18-0b15-4192-9fcf-e015031c290f`，503
 5. DB 网络往返、剩余多 SQL Read 和目录体积还有优化空间；应基于具体接口 query count、同拓扑延迟和负载测试继续，当前未改变 PostgreSQL/PV 布局。
 6. public 入口本轮 400 JSON 已验证；Cloudflare 对真实上游 502/504 的 body 是否完整透传仍未完成新的专门验收。无边缘配置写入。
 7. 验收范围是每家上述一个模型的常用 function/text；真实模型的原生 search/reasoning、其他媒体、长历史、并发压力和可选 namespace/custom 未在本轮全量 E2E。
+
+### 0.25.3–0.25.7 对应处理结果
+
+| 原事项 | 当前证据与剩余边界 |
+|---|---|
+| 1. Qwen | 按用户要求不处理 |
+| 2. Arena | 三个不同账号的 credential_rejected → 成功已实测；保留认证恢复/释放/输出后不重试，统计凭据样本及恢复耗时；厂家凭据波动仍存在 |
+| 3. LongCat | 原图字节/附件身份核验，用户与工具 OCR、TXT/PDF 通过；纯色原生误判仍可复现，尺寸变化的白框方案未进入生产 |
+| 4. Grok | 同域轻量会话与阶段日志完成；首增量新样本 10.516s，runtime selection 仍约 9–10s，不作固定 SLA 承诺 |
+| 5. Read | 查询/事务/目录缓存压缩及 Server 调度优化已部署；overview/accounts/Key 明显改善，Read 28 次有限并发全部 200；全量目录对比基线仍回退，进一步成本单列 |
+| 6. public 错误 | 两入口各六项 JSON 错误通过，429/502/504 有受控 HTTP/SDK 证据，公网长 SSE 与取消通过；Cloudflare 自身 502/524 正文尚有入口限制，Worker 未发布 |
+| 7. 七家验收 | 所选模型 common SDK 各 9/9，namespace/custom、支持的 native 能力、双工具回放、七家 46 条早期 user 历史及 14 次推理并发已验；不支持项明确 400，Grok native reasoning 本次未观察到，不外推所有模型 |
+
+最新部署 Source `378475f` / [CI 37098598658](https://github.com/Prodigalgal/any2api/actions/runs/37098598658) / GitOps `0f7ce4d`，Argo Synced/Healthy、四组件 Ready/restart=0。完整 digest、每厂商样本、版本范围、失败记录和当前回滚点见 [后续报告](WEB_BRIDGE_FOLLOWUP_2026-10-03.md)。
 
 ## 兼容性与回滚
 

@@ -1,7 +1,19 @@
-# 当前任务板（源码 0.25.2）
+# 当前任务板（源码 0.25.7）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-03 WEB 桥接遗留处理（Qwen 除外，0.25.3 → 0.25.7）
+
+- [执行规格](../docs/requirements/WEB_BRIDGE_RELIABILITY_FOLLOWUP.md)；[最终验收与遗留限制](../docs/reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)。沿用实现、提交、现有 GitOps 部署和现有账号测试授权；范围为 OpenAI Chat/Responses → 厂家 WEB，调用方执行工具。
+- 修复 Arena 首输出前最多三个不同账号换号、有效输出后禁止重试、统一超时/上游错误和延迟 SSE 终态；优化 Grok 同域会话初始化并记录阶段耗时。LongCat 预租约图片校验与 TXT 完整正文补齐，GLM 保留完整签名历史，MinMax 图片 capture 禁止重复生成并保留全部附件/完整 context。
+- 0.25.7 纠正共享历史默认 32 条裁剪：默认/disabled 保留全文，显式 auto 保留原有裁剪策略；厂家硬上限、token/request-size 约束保留。没有新增 API/权限/数据库结构，六个版本文件和 JAR 一致。
+- Read：Key DTO projection 与批量授权、overview 合并 COUNT、去除纯 JDBC 读取多余事务、目录只解码一次及大型 Redis 快照压缩；Server 优先与 PostgreSQL 同节点，Automation wave=1 / Server wave=2，Oracle routes 明确 namespace。未移动 PostgreSQL/PV。
+- **0.25.7 已部署**：Source `378475f`，[CI 37098598658](https://github.com/Prodigalgal/any2api/actions/runs/37098598658) success，GitOps `0f7ce4d` Synced/Healthy；四组件 1/1 Ready、restart=0，两类 Automation 源码/installed/API 均 0.25.7。Backend 428 passed / 5 skipped（433 tests）、Automation 506 passed、Web lint/build、版本门禁通过。
+- 真实官方 SDK 2.54.0：七家所选模型各 9/9 common PASS（0.25.5，GLM 0.25.6 再验）；0.25.7 七家 user-first 46 条历史全部 PASS，GLM developer-first 同样 PASS；MinMax 用户/工具 OCR、reasoning、两函数及全部结果 PASS；七家各两请求有限并发 14/14 PASS、两不同账号、queue_ms=0。临时测试 Key 删除均 204。
+- MiMo 真实 Codex `view_image → function_call_output(input_image)` 图片闭环 PASS；客户端 command 策略拒绝单列。现有公网 SSE 首输出前/后取消通过、账号 lease=0；direct/public 常见 JSON 错误 12 项通过，429/502/504 由真实 HTTP fixture 验证，未对生产故障注入。
+- 普通管理 Read p50：overview 236.40→86.30ms、accounts 239.88→99.25ms、api-keys 238.32→104.91ms（基线集群 n=3 / 0.25.6 n=5）；四并发 Read 28/28 200、Hikari pending=0。全目录仍回退：集群 50.23→178.36ms，0.25.7 direct 五组 p50=724.54ms、health=396.67ms，保留全部字段与动态运行态，不能称所有 Read 已解决。
+- 仍有限制：LongCat 厂家纯色误判、Arena 凭据波动、Grok runtime selection 耗时及本次未观察到的 native reasoning、全量目录/公网成本、Cloudflare 自身 502/524 错误正文。Worker 仅保留已验证候选，当前未发布/未绑定；白框实验未改变生产图片语义。Qwen 不处理，已发布不可变候选不覆盖；详细回滚点与影响见报告。
 
 ## 2026-10-03 WEB 厂商常用 OpenAI 桥接补齐（0.25.0 → 0.25.2）
 

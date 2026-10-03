@@ -3,6 +3,12 @@
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
+## 2026-10-03 分发 API Key 清理与按厂商重建
+
+- 用户明确授权清理全部分发 Key并保存到服务器管理。[规格与执行结果](../docs/requirements/DISTRIBUTION_API_KEY_RESET.md)：33 个旧 Key 删除，8 个厂商各一个长期 Key；限定单厂商全部模型、Chat/Responses、工具/媒体/文件、AUTO。
+- 八个新 Key direct/public 认证均 200、跨厂商均 403；六个可核验旧 Key 两入口均 401，旧 Key/关联授权/认证缓存残留为 0，868 条历史用量保留。源码及运行版本仍为 0.25.7，四组件健康，无新部署或 schema 变更。
+- 明文在服务器管理 `private/any2api/distribution/api-keys.env` / `api-keys.json`，受限 ACL，仅当前用户/SYSTEM/Administrators；操作报告不含明文，未提交任何秘密。FinBot 本地分厂商文件同步新值，实际旧调用端仍须更新配置；Qwen 账号状态未改变。
+
 ## 2026-10-03 WEB 桥接遗留处理（Qwen 除外，0.25.3 → 0.25.7）
 
 - [执行规格](../docs/requirements/WEB_BRIDGE_RELIABILITY_FOLLOWUP.md)；[最终验收与遗留限制](../docs/reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)。沿用实现、提交、现有 GitOps 部署和现有账号测试授权；范围为 OpenAI Chat/Responses → 厂家 WEB，调用方执行工具。

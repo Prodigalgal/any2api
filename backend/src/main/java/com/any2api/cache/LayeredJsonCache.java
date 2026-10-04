@@ -18,6 +18,7 @@ public final class LayeredJsonCache {
     private final ReactiveStringRedisTemplate redis;
     private final String namespace;
     private final Duration redisTtl;
+    private final Duration redisAccessTimeout;
     private final ConcurrentHashMap<String, Mono<Optional<String>>> inFlight =
         new ConcurrentHashMap<>();
 
@@ -26,11 +27,16 @@ public final class LayeredJsonCache {
         String namespace,
         Duration localTtl,
         Duration redisTtl,
-        long maximumSize
+        long maximumSize,
+        Duration redisAccessTimeout
     ) {
+        if (redisAccessTimeout == null || redisAccessTimeout.isZero() || redisAccessTimeout.isNegative()) {
+            throw new IllegalArgumentException("cache Redis access timeout must be positive");
+        }
         this.redis = redis;
         this.namespace = namespace.endsWith(":") ? namespace : namespace + ":";
         this.redisTtl = redisTtl;
+        this.redisAccessTimeout = redisAccessTimeout;
         this.local = Caffeine.newBuilder()
             .maximumSize(maximumSize)
             .expireAfterWrite(localTtl)
@@ -65,6 +71,7 @@ public final class LayeredJsonCache {
             return Mono.just(encoded);
         });
         return redis.opsForValue().get(redisKey(key))
+            .timeout(redisAccessTimeout)
             .doOnNext(value -> local.put(key, value))
             .onErrorResume(error -> {
                 logger.warn("L2 cache read failed namespace={} error_type={}",
@@ -79,6 +86,7 @@ public final class LayeredJsonCache {
     public Mono<Void> evict(String key) {
         local.invalidate(key);
         return redis.delete(redisKey(key))
+            .timeout(redisAccessTimeout)
             .onErrorResume(error -> {
                 logger.warn("L2 cache eviction failed namespace={} error_type={}",
                     namespace, error.getClass().getSimpleName());
@@ -93,6 +101,7 @@ public final class LayeredJsonCache {
 
     private void writeRedis(String key, String encoded) {
         redis.opsForValue().set(redisKey(key), encoded, redisTtl)
+            .timeout(redisAccessTimeout)
             .retryWhen(Retry.backoff(1, Duration.ofMillis(50))
                 .maxBackoff(Duration.ofMillis(250))
                 .jitter(0.5)

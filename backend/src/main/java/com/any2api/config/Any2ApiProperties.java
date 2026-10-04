@@ -215,6 +215,7 @@ public class Any2ApiProperties {
     }
 
     public static class CacheSettings {
+        private Duration redisAccessTimeout = Duration.ofMillis(250);
         private final Tier apiKey = new Tier(
             Duration.ofSeconds(30), Duration.ofMinutes(5), 10_000);
         private final Tier modelCatalog = new Tier(
@@ -222,6 +223,13 @@ public class Any2ApiProperties {
 
         public Tier getApiKey() { return apiKey; }
         public Tier getModelCatalog() { return modelCatalog; }
+        public Duration getRedisAccessTimeout() { return redisAccessTimeout; }
+        public void setRedisAccessTimeout(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("cache Redis access timeout must be positive");
+            }
+            redisAccessTimeout = value;
+        }
     }
 
     public static class Observability {

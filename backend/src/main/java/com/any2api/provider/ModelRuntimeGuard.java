@@ -1,6 +1,7 @@
 package com.any2api.provider;
 
 import com.any2api.config.Any2ApiProperties;
+import com.any2api.coordination.CoordinationUnavailableException;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import io.github.resilience4j.bulkhead.Bulkhead;
@@ -159,7 +160,8 @@ public final class ModelRuntimeGuard {
         }
 
         private Admission error(Throwable error) {
-            failure.compareAndSet(null, error.getClass().getSimpleName());
+            failure.compareAndSet(null, CoordinationUnavailableException.isCausedBy(error)
+                ? CoordinationUnavailableException.CODE : error.getClass().getSimpleName());
             return this;
         }
 
@@ -174,7 +176,7 @@ public final class ModelRuntimeGuard {
                 var duration = System.nanoTime() - startedAt;
                 var error = failure.get();
                 if (cancelled.get() || java.util.Set.of("invalid_request_error", "invalid_request",
-                        "unsupported_parameter", "tool_call_generation_failed")
+                        "unsupported_parameter", "tool_call_generation_failed", CoordinationUnavailableException.CODE)
                         .contains(error == null ? "" : error)) {
                     entry.circuit.releasePermission();
                 } else if (error == null) {

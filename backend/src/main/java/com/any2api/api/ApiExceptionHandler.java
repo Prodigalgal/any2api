@@ -18,6 +18,16 @@ import org.springframework.web.server.ServerWebExchange;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(com.any2api.coordination.CoordinationUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> coordinationUnavailable(
+        com.any2api.coordination.CoordinationUnavailableException error, ServerWebExchange exchange
+    ) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response(
+            com.any2api.coordination.CoordinationUnavailableException.CODE,
+            com.any2api.coordination.CoordinationUnavailableException.CODE, error.getMessage(), null,
+            true, exchange, Map.of()));
+    }
+
     @ExceptionHandler(com.any2api.protocol.ModelNotFoundException.class)
     public ResponseEntity<Map<String, Object>> modelNotFound(
         com.any2api.protocol.ModelNotFoundException error, ServerWebExchange exchange

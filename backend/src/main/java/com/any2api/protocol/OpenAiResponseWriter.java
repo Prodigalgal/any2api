@@ -1,6 +1,7 @@
 package com.any2api.protocol;
 
 import com.any2api.account.AccountUnavailableException;
+import com.any2api.coordination.CoordinationUnavailableException;
 import com.any2api.provider.ModelRuntimeGuard;
 import com.any2api.provider.ModelAvailabilityGuard;
 import java.nio.charset.StandardCharsets;
@@ -46,6 +47,10 @@ public class OpenAiResponseWriter {
         CanonicalRequest request,
         Throwable error
     ) {
+        if (CoordinationUnavailableException.isCausedBy(error)) {
+            return new CanonicalEvent.Failed(1, request.requestId(), 1, CoordinationUnavailableException.CODE,
+                CoordinationUnavailableException.MESSAGE, Map.of("status", 503, "retryable", true));
+        }
         if (com.any2api.provider.ProviderFailureSignals.isTimeout(error)) {
             return new CanonicalEvent.Failed(1, request.requestId(), 1, "upstream_timeout",
                 "upstream request timed out", Map.of("status", 504, "retryable", true));
@@ -564,7 +569,7 @@ public class OpenAiResponseWriter {
             }
             return Set.of("rate_limited", "quota_exhausted").contains(failure.errorType())
                 ? HttpStatus.TOO_MANY_REQUESTS
-                : Set.of("account_unavailable", "model_unavailable")
+                : Set.of("account_unavailable", "model_unavailable", CoordinationUnavailableException.CODE)
                     .contains(failure.errorType())
                     ? HttpStatus.SERVICE_UNAVAILABLE
                     : Set.of("invalid_request_error", "invalid_request", "unsupported_parameter",

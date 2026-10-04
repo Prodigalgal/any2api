@@ -17,7 +17,7 @@ class PromptExactCacheManagerTest {
     private final StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();
     private final PromptExactCacheManager cacheManager = new PromptExactCacheManager(
         beanFactory.getBeanProvider(org.springframework.data.redis.core.ReactiveStringRedisTemplate.class),
-        mapper
+        mapper, new com.any2api.config.Any2ApiProperties()
     );
 
     @Test

@@ -35,7 +35,8 @@ public class PromptExactCacheManager {
 
     public PromptExactCacheManager(
         org.springframework.beans.factory.ObjectProvider<ReactiveStringRedisTemplate> redisProvider,
-        ObjectMapper mapper
+        ObjectMapper mapper,
+        com.any2api.config.Any2ApiProperties properties
     ) {
         this.mapper = mapper;
         this.localCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
@@ -48,7 +49,8 @@ public class PromptExactCacheManager {
             "any2api:cache:prompt",
             DEFAULT_TTL,
             DEFAULT_TTL,
-            10_000
+            10_000,
+            properties.getCache().getRedisAccessTimeout()
         );
     }
 

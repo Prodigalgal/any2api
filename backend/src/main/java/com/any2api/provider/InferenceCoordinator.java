@@ -21,6 +21,7 @@ import tools.jackson.databind.JsonNode;
 @Service
 public class InferenceCoordinator {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InferenceCoordinator.class);
     private static final Duration REQUEST_DEADLINE = Duration.ofHours(2);
     private static final Duration LEASE_RENEW_INTERVAL = Duration.ofMinutes(2);
 
@@ -404,6 +405,9 @@ public class InferenceCoordinator {
                         return reactor.core.publisher.Mono.just(event);
                     })
                     .onErrorResume(error -> {
+                        if (com.any2api.coordination.CoordinationUnavailableException.isCausedBy(error)) {
+                            return Flux.error(error);
+                        }
                         var failure = error instanceof CanonicalProtocolException protocolError
                             ? new ProviderFailure(
                                 "provider_protocol_violation",
@@ -440,7 +444,14 @@ public class InferenceCoordinator {
             : reactor.core.publisher.Mono.just(false);
         return persistence
             .then(accounts.release(execution.account()))
-            .then();
+            .then()
+            .onErrorResume(com.any2api.coordination.CoordinationUnavailableException::isCausedBy, error -> {
+                // Cleanup cannot replace a committed generation terminal; the existing lease expires by TTL.
+                log.warn("account_lease_release_failed request_id={} provider={} account_id={} error_type={}",
+                    execution.context().requestId(), execution.account().providerId(),
+                    execution.account().accountId(), com.any2api.coordination.CoordinationUnavailableException.CODE);
+                return reactor.core.publisher.Mono.empty();
+            });
     }
 
     private Flux<CanonicalEvent> withLeaseRenewal(

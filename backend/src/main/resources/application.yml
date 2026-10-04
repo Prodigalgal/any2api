@@ -80,6 +80,7 @@ any2api:
     cleanup-interval: ${ANY2API_OBSERVABILITY_CLEANUP_INTERVAL:1h}
     cleanup-initial-delay: ${ANY2API_OBSERVABILITY_CLEANUP_INITIAL_DELAY:10m}
   cache:
+    redis-access-timeout: ${ANY2API_CACHE_REDIS_ACCESS_TIMEOUT:250ms}
     api-key:
       local-ttl: ${ANY2API_CACHE_API_KEY_L1_TTL:30s}
       redis-ttl: ${ANY2API_CACHE_API_KEY_L2_TTL:5m}

@@ -13,6 +13,18 @@ class ApiExceptionHandlerTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void coordinationErrorsDoNotExposeConnectionDetails() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/v1/models"));
+        var response = handler.coordinationUnavailable(new com.any2api.coordination.CoordinationUnavailableException(
+            new IllegalStateException("private Redis endpoint")), exchange);
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        var error = (Map<String, Object>) response.getBody().get("error");
+        assertThat(error).containsEntry("code", "coordination_unavailable").containsEntry("retryable", true);
+        assertThat(error.get("message")).isEqualTo("coordination service is temporarily unavailable");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void keepsTypedAndFallbackErrorsOnTheSameOpenAiShape() {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/v1/models"));
         var typed = handler.openAiRequest(OpenAiRequestException.unsupported(

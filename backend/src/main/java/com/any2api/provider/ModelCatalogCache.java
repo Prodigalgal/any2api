@@ -157,7 +157,7 @@ public class ModelCatalogCache {
         // Isolate compressed snapshots from older processes during rolling releases.
         this.cache = new LayeredJsonCache(
             redis, "any2api:cache:model-catalog:v5", policy.getLocalTtl(),
-            policy.getRedisTtl(), policy.getMaximumEntries());
+            policy.getRedisTtl(), policy.getMaximumEntries(), properties.getCache().getRedisAccessTimeout());
         this.healthWindow = properties.getModelRuntime().getHealthWindow();
         this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
         this.readySuccessRate = properties.getModelRuntime().getReadySuccessRateThreshold() / 100.0;

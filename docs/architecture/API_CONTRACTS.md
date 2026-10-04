@@ -36,7 +36,7 @@ account, then selects one of that provider's role-qualified enabled models. Conc
 rejected on these endpoints. Responses expose the selected route through
 `X-Any2API-Provider` and `X-Any2API-Model`.
 
-### Responses agent contract (0.26.2)
+### Responses agent contract (0.26.3)
 
 Missing or null function `parameters` means an empty parameter list. Since 0.26.2,
 explicit strict functions normalize this default to a closed empty object; explicit caller schemas
@@ -114,6 +114,21 @@ request-size limits still apply; message count alone is not a model token budget
 
 See [client setup and verification](../integrations/OPENAI_AGENTS.md) for the tested Codex profile
 and the distinction between controlled upstream interoperability and live provider acceptance.
+
+### Cache latency and coordination failures (0.26.3)
+
+API Key, model catalog and ordinary prompt caches limit each Redis access to 250ms by default
+(`ANY2API_CACHE_REDIS_ACCESS_TIMEOUT`, positive duration). Slow or failed cache reads use the existing
+database/empty-cache fallback; single-flight loading, permissions and TTLs remain unchanged.
+Best-effort cache writes retain one bounded retry. This budget does not bound database work,
+network transfer or the entire HTTP request; critical Redis coordination retains its 3s timeout.
+
+Account lease acquisition/renewal resource failures use OpenAI `503 coordination_unavailable`
+with `retryable:true` and a safe message before SSE commits. Once SSE commits, Responses emits
+`response.failed`; Chat emits its error and `[DONE]`. Coordination failures do not grant capacity,
+enter provider credential-error handling or open the model circuit. Failed lease release during
+generation cleanup is logged with request/account context and left to the existing lease TTL;
+it cannot replace an already committed generation terminal. The release service itself still fails.
 
 ### Distribution-key transport policy
 

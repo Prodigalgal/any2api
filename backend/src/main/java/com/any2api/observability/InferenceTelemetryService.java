@@ -111,7 +111,8 @@ public final class InferenceTelemetryService {
         }
 
         public void recordError(Throwable error) {
-            errorCode.compareAndSet(null, error.getClass().getSimpleName());
+            errorCode.compareAndSet(null, com.any2api.coordination.CoordinationUnavailableException.isCausedBy(error)
+                ? com.any2api.coordination.CoordinationUnavailableException.CODE : error.getClass().getSimpleName());
         }
 
         public void record(Object event) {

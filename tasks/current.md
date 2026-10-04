@@ -1,7 +1,14 @@
-# 当前任务板（源码 0.26.2）
+# 当前任务板（源码 0.26.3）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-04 Redis 缓存等待与协调错误收敛（0.26.3）
+
+- 范围：[执行规格](../docs/requirements/REDIS_CACHE_LATENCY_FOLLOWUP.md)。缓存 Redis 每次访问默认 250ms、有界回源/写入/失效；关键协调维持 3s 及既有 fencing/TTL。
+- 获取/续租故障统一可重试 `coordination_unavailable`，JSON/首帧前 503、已提交 SSE failed/error；内部协调故障不进入厂商凭据处置或模型熔断。生成收尾释放失败记录上下文并依赖原 TTL，不覆盖生成终态。
+- 本地门禁：Backend 482 passed / 5 条件 skipped，Automation 508 passed，Web lint/build、版本及 JAR 0.26.3 一致；实际 Security/PG HTTP fixture 官方 SDK 12+8 组通过。将提交、部署后按原有授权验证四组件、七家差量与 Read。
+- 0.26.2 今日 Arena 有限复测 4/4 PASS，昨日失败记录保留；不承诺凭据波动根治。部署前 Read cluster/direct 各 6×5 全部 200：cluster full catalog p50 147.73ms、direct 1028.28ms，direct health 440.85ms。n=5 仅时点对照，Redis/网络根因仍待确认，不迁移 Redis/PV、不新增/更换 Key，Qwen 排除。
 
 ## 2026-10-03 统一 OpenAI 客户端契约补齐（0.26.0 → 0.26.2）
 

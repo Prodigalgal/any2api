@@ -42,7 +42,7 @@ public class ApiKeyAuthenticator {
         var cache = properties.getCache().getApiKey();
         this.grants = new LayeredJsonCache(
             redis, "any2api:cache:api-key:v3", cache.getLocalTtl(),
-            cache.getRedisTtl(), cache.getMaximumEntries());
+            cache.getRedisTtl(), cache.getMaximumEntries(), properties.getCache().getRedisAccessTimeout());
     }
 
     public Mono<Optional<ApiKeyGrant>> authenticate(String presentedKey) {

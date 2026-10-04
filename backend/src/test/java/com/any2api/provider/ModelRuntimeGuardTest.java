@@ -16,6 +16,23 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 class ModelRuntimeGuardTest {
     @Test
+    void wrappedCoordinationFailuresReleaseAdmissionWithoutOpeningTheModelCircuit() {
+        var properties = new Any2ApiProperties();
+        properties.getModelRuntime().setCircuitMinimumCalls(2);
+        properties.getModelRuntime().setCircuitSlidingWindow(2);
+        var guard = new ModelRuntimeGuard(properties, new SimpleMeterRegistry());
+        var failure = new RuntimeException("cleanup wrapper",
+            new com.any2api.coordination.CoordinationUnavailableException(new IllegalStateException()));
+
+        for (var attempt = 0; attempt < 3; attempt++) {
+            StepVerifier.create(guard.execute(request(), ignored -> Flux.error(failure)))
+                .expectErrorSatisfies(error -> assertThat(error).isSameAs(failure)).verify();
+        }
+        assertThat(guard.snapshot("alpha", "model").circuitState()).isEqualTo("CLOSED");
+        assertThat(guard.snapshot("alpha", "model").concurrent()).isZero();
+    }
+
+    @Test
     void opensThePerModelCircuitAfterTheConfiguredRollingFailures() {
         var properties = new Any2ApiProperties();
         properties.getModelRuntime().setCircuitMinimumCalls(2);

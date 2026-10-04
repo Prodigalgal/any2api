@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -34,6 +35,48 @@ import reactor.test.StepVerifier;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 class InferenceCoordinatorTest {
+
+    @Test
+    void renewalFailureReachesTheGatewayWithoutBeingClassifiedAsAProviderFailure() {
+        var accounts = mock(AccountSelectionService.class);
+        var leased = leased("alpha");
+        var failure = new com.any2api.coordination.CoordinationUnavailableException(
+            new org.springframework.dao.QueryTimeoutException("private Redis endpoint"));
+        when(accounts.renew(leased)).thenReturn(Mono.error(failure));
+        when(accounts.release(leased)).thenReturn(Mono.just(true));
+        var provider = spy(new CancellingProvider(JsonNodeFactory.instance.objectNode()));
+
+        StepVerifier.withVirtualTime(() -> coordinator(provider, accounts).execute(request("alpha", true), leased))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .thenAwait(java.time.Duration.ofMinutes(2))
+            .expectErrorSatisfies(error -> assertThat(error).isSameAs(failure))
+            .verify(java.time.Duration.ofSeconds(5));
+        verify(provider, never()).classify(any());
+        verify(accounts, never()).reportSuccess(any(), anyString());
+        verify(accounts, never()).reportAuthenticationFailure(any(), anyString());
+        verify(accounts).release(leased);
+    }
+
+    @Test
+    void releaseTimeoutDoesNotReplaceTheCommittedGenerationTerminal() {
+        var accounts = mock(AccountSelectionService.class);
+        var leased = leased("alpha");
+        when(accounts.release(leased)).thenReturn(Mono.error(
+            new com.any2api.coordination.CoordinationUnavailableException(
+                new org.springframework.dao.QueryTimeoutException("private Redis endpoint"))));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportSuccess(leased, "model")).thenReturn(Mono.empty());
+        var provider = new RetryingProvider("tool_call_generation_failed", 0, false);
+
+        StepVerifier.create(coordinator(provider, accounts).execute(request("alpha", true), leased))
+            .expectNextMatches(CanonicalEvent.ResponseStarted.class::isInstance)
+            .expectNextMatches(CanonicalEvent.OutputTextDelta.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Usage.class::isInstance)
+            .expectNextMatches(CanonicalEvent.Completed.class::isInstance)
+            .verifyComplete();
+        verify(accounts).release(leased);
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})

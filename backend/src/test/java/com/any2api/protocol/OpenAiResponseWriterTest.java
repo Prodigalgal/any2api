@@ -203,6 +203,42 @@ class OpenAiResponseWriterTest {
     }
 
     @Test
+    void coordinationFailuresUse503BeforeSseAndFailedEventsAfterSseForBothProtocols() {
+        var failure = new com.any2api.coordination.CoordinationUnavailableException(
+            new java.util.concurrent.TimeoutException("private Redis endpoint"));
+        for (var protocol : CanonicalRequest.Protocol.values()) {
+            for (var stream : new boolean[] {false, true}) {
+                var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses"));
+                writer.write(request(protocol, stream), Flux.error(failure), exchange).block();
+                assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(503);
+                assertThat(exchange.getResponse().getBodyAsString().block())
+                    .contains("coordination_unavailable", "\"retryable\":true", "request-id")
+                    .doesNotContain("private Redis endpoint", "TimeoutException", "upstream_timeout");
+            }
+            var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses"));
+            var events = Flux.<CanonicalEvent>just(new CanonicalEvent.ResponseStarted(1, "request-id", 0, "resp"))
+                .concatWith(Flux.error(failure));
+            writer.write(request(protocol, true), events, exchange).block();
+            assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
+            var body = exchange.getResponse().getBodyAsString().block();
+            assertThat(body).contains("coordination_unavailable").doesNotContain("private Redis endpoint");
+            if (protocol == CanonicalRequest.Protocol.RESPONSES) assertThat(body).contains("event: response.failed");
+            else assertThat(body).contains("data: [DONE]");
+        }
+    }
+
+    @Test
+    void wrappedCoordinationFailuresPreserveTheirSafeContract() {
+        var error = new RuntimeException("private cleanup details",
+            new com.any2api.coordination.CoordinationUnavailableException(
+                new java.util.concurrent.TimeoutException("private Redis endpoint")));
+        var failure = writer.normalizeFailure(request(CanonicalRequest.Protocol.RESPONSES, false), error);
+        assertThat(failure.errorType()).isEqualTo("coordination_unavailable");
+        assertThat(failure.message()).isEqualTo("coordination service is temporarily unavailable");
+        assertThat(failure.detail()).containsEntry("status", 503).containsEntry("retryable", true);
+    }
+
+    @Test
     void mapsReactiveRequestValidationFailuresToBadRequest() {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
             "/alpha/v1/chat/completions").build());

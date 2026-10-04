@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.26.3）
+# OpenAI API 到厂商 WEB 的桥接（源码 0.27.1）
 
 ## 范围
 
@@ -41,7 +41,7 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 ## 常用 API
 
-0.27.0 候选的逐厂商参数映射、真实 WEB 输入边界和 Xiaomi 桌面端大请求排查见
+0.27.0 的逐厂商参数映射、真实 WEB 输入边界、tools/skills 字段探测和 Xiaomi 桌面端大请求排查，以及 0.27.1 可空字段修复进度见
 [本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。选定模型后读取
 `models.retrieve(model).parameter_adaptation`，不要把 1M/128K 的客户端配置或官方付费 API
 规格当作 WEB 限制。WEB 没有等价控制的显式参数仍会拒绝；null 可选 generation 字段视为缺省。

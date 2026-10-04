@@ -2,7 +2,7 @@
 
 ## 范围与当前状态
 
-基线为生产 0.26.3 / `2388687`；本轮兼容能力扩展候选为 0.27.0。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 沿用用户此前排除范围，只有代码证据。本报告的上线状态与最终差量结果将在候选发布后补充，不把本地测试当作已部署。
+基线为生产 0.26.3 / `2388687`；本轮兼容能力扩展 0.27.0 已部署，上线差量发现可空字段边界，修复候选另占 0.27.1。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 沿用用户此前排除范围，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
 ## 参数含义与实际 WEB 目标
 
@@ -101,7 +101,14 @@ Xiaomi 客户端的 skills 已作为 system 文本发送，网关收到的并非
 - 兼容性：不改变常用 Chat/Responses 工具、历史、媒体、权限与默认存储规则。MiMo 长输入原先是 HTTP 200 completed 的拒绝文本，现改为失败；调用方须处理正确的错误。Arena max_* 仍不支持，不能承诺通过重命名就能实现。
 - 本地：Backend 492 passed / 5 条件 skipped，Automation 509 passed，Web lint/build，0.27.0 版本与 JAR 契约通过。保留首轮 whitespace 测试失败、后端 Provider 隔离失败及修正记录，未弱化测试门禁。
 - 复现入口：`tools/compatibility/openai_parameter_smoke.py` 与 `web_context_probe.py`。Key 仅从保护文件或既有配置读取，报告保存结果/大小/request_id，不包含 Key 或用户全文。
-- 生产发布、GitOps、Pod/API 与逐厂商上线后验收：待补充。
+- 0.27.0 发布：Source `cb9b6582c06de2c29ba0a03985002b842dfd4954`、[CI 37202879629](https://github.com/Prodigalgal/any2api/actions/runs/37202879629) success；GitOps `31af2f5d37e1afaa9107d1e9280794e13c13c83a` Synced/Healthy，四组件 Ready/restart=0，两个 Automation project/installed/API 0.27.0 PASS，Web package 与 Server 启动日志均 0.27.0。一次 kubectl 读取 Arena 版本瞬时失败，独立重读通过，保留初次退出状态。
+
+### 0.27.0 上线差量与 0.27.1 修复
+
+- 七家 41 项检查首轮 31 passed / 10 failed。8 项为真实缺陷：七家 Responses 的 `reasoning:null` 被 Parser 冗余 shape 校验拒绝，Arena Chat 的 `reasoning_effort:null` 又穿过 semantic controls allowlist，触发 Automation 422。0.27.1 去除重复检查，保留非 null 类型校验，并让语义控制边界只复制非 null 值、保留显式 false。
+- 另外 2 项是探测器误判：MiMo 的流式长输入在首事件/提交 SSE 前已经被拒绝，正确返回 HTTP 400 JSON；原脚本强制 HTTP 200。修正脚本同时接受首帧前 JSON 400 与已提交 SSE 的单一失败终态，补充两协议首事件失败回归。不为通过脚本改变既有错误交付契约。
+- 初次窗口（DB time `2026-10-04 12:50:12.933619+00`）含 24 个逻辑推理、26 次后台尝试；DeepSeek 一次 provider_upstream_error、LongCat 一次 empty_model_response 后换号成功，Arena 一次 credential_rejected 后成功。所有 MiMo 长输入拒绝均是 attempt=1 / success=false / output_tokens=0 / context_length_exceeded；网关预校验拒绝没有租用账号，不伪造 usage。窗口包含额外合成诊断请求，不能与 SDK 41 项简单相减。
+- 0.27.1 本地 Backend 497 passed / 5 条件 skipped、bootJar、统一版本/JAR 契约和探测脚本 ruff 通过；Automation/Web 无业务源码变化，发布 CI 仍完整执行各门禁。发布与修复后真实验收待补充；0.27.0 失败报告及后台尝试保留，不覆盖原记录。
 
 ## 遗留与回滚
 

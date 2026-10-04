@@ -341,13 +341,6 @@ public class CanonicalRequestParser {
         if (raw.has("tools") && !raw.path("tools").isArray()) {
             throw OpenAiRequestException.invalid("tools", "tools must be an array");
         }
-        if (raw.has("reasoning") && !raw.path("reasoning").isObject()) {
-            throw OpenAiRequestException.invalid("reasoning", "reasoning must be an object");
-        }
-        if (raw.has("stream_options") && !raw.path("stream_options").isObject()) {
-            throw OpenAiRequestException.invalid(
-                "stream_options", "stream_options must be an object");
-        }
         var toolChoice = raw.path("tool_choice");
         if (!toolChoice.isMissingNode() && !toolChoice.isNull()
             && !toolChoice.isTextual() && !toolChoice.isObject()) {

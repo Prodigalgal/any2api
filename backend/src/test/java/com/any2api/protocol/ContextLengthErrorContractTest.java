@@ -43,6 +43,21 @@ class ContextLengthErrorContractTest {
         }
     }
 
+    @Test
+    void returnsJson400WhenStreamingIsRequestedButTheFirstEventIsARejection() {
+        for (var protocol : CanonicalRequest.Protocol.values()) {
+            var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses"));
+            new OpenAiResponseWriter(mapper).write(request(protocol, true), Flux.just(failure(protocol)), exchange).block();
+
+            assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(400);
+            assertThat(exchange.getResponse().getHeaders().getContentType())
+                .isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+            var body = exchange.getResponse().getBodyAsString().block();
+            assertThat(mapper.readTree(body).path("error").path("code").asText()).isEqualTo("context_length_exceeded");
+            assertThat(body).doesNotContain("response.completed", "[DONE]", "event:");
+        }
+    }
+
     private CanonicalRequest request(CanonicalRequest.Protocol protocol, boolean stream) {
         return new CanonicalRequest("context", protocol, "mimo", "mimo-v2.6-pro", stream,
             List.of(mapper.createObjectNode().put("role", "user").put("content", "hello")),

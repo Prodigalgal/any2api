@@ -180,6 +180,7 @@ def main() -> None:
                         "top_p": None,
                         "max_output_tokens": None,
                         "reasoning": None,
+                        "stream_options": None,
                     },
                 ),
             )
@@ -252,8 +253,21 @@ def main() -> None:
                                 json=payload,
                             ) as response,
                         ):
-                            assert response.status_code == 200
                             request_id = response.headers.get("x-request-id")
+                            if response.status_code == 400:
+                                assert "application/json" in response.headers.get("content-type", "")
+                                detail = json.loads(response.read())["error"]
+                                assert detail["code"] == "context_length_exceeded"
+                                assert detail["type"] == "invalid_request_error"
+                                assert detail["param"] == ("messages" if protocol == "chat" else "input")
+                                assert detail["retryable"] is False and detail["request_id"] == request_id
+                                return {
+                                    "http_status": 400,
+                                    "request_id": request_id,
+                                    "error_code": "context_length_exceeded",
+                                    "error_delivery": "json_before_stream",
+                                }
+                            assert response.status_code == 200
                             for line in response.iter_lines():
                                 failures += line == "event: response.failed"
                                 completed += line == "event: response.completed"
@@ -267,6 +281,7 @@ def main() -> None:
                             "failed_terminals": failures,
                             "done_markers": done,
                             "error_code": "context_length_exceeded",
+                            "error_delivery": "sse_after_stream_start",
                         }
 
                     check(protocol + "/context-length-error-sse", stream_error)

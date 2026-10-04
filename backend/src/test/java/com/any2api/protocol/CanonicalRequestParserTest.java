@@ -101,6 +101,34 @@ class CanonicalRequestParserTest {
     }
 
     @Test
+    void treatsNullableResponsesControlsAsOmittedWithoutChangingRawRequest() {
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus").put("input", "hello");
+        for (var field : new String[] {"instructions", "reasoning", "stream_options", "temperature", "top_p", "max_output_tokens"}) {
+            raw.putNull(field);
+        }
+        var original = raw.deepCopy();
+
+        var request = parser.parse(CanonicalRequest.Protocol.RESPONSES, route, raw);
+
+        assertThat(request.messages()).hasSize(1);
+        assertThat(request.messages().getFirst().path("content").asText()).isEqualTo("hello");
+        assertThat(request.generation()).isEmpty();
+        assertThat(request.reasoning()).isEmpty();
+        assertThat(raw).isEqualTo(original);
+        assertThat(request.rawRequest()).isEqualTo(original);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"reasoning", "stream_options"})
+    void stillRejectsNonObjectNullableControls(String field) {
+        var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus").put("input", "hello");
+        raw.put(field, "invalid");
+
+        assertThatThrownBy(() -> parser.parse(CanonicalRequest.Protocol.RESPONSES, route, raw))
+            .isInstanceOf(OpenAiRequestException.class).hasMessageContaining(field + " must be an object");
+    }
+
+    @Test
     void normalizesResponsesFunctionOutputIntoToolMessage() {
         var output = mapper.createObjectNode()
             .put("type", "function_call_output")

@@ -50,7 +50,7 @@ public final class OfficialBrowserSemanticCommandFactory {
     }
 
     private static void copy(CanonicalRequest request, ObjectNode target, String field) {
-        if (request.rawRequest() != null && request.rawRequest().has(field)) {
+        if (request.rawRequest() != null && request.rawRequest().hasNonNull(field)) {
             target.set(field, request.rawRequest().path(field).deepCopy());
         }
     }

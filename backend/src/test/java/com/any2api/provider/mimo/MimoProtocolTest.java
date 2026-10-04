@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 import com.any2api.protocol.CanonicalEvent;
+import com.any2api.protocol.CanonicalEventStream;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.proxy.ProxyPoolService;
@@ -14,6 +15,7 @@ import com.any2api.transport.OfficialBrowserSemanticCommandFactory;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 
 class MimoProtocolTest {
@@ -155,6 +157,105 @@ class MimoProtocolTest {
             && call.arguments().equals("{\"city\":\"Tokyo\"}"))
             .anyMatch(event -> event instanceof CanonicalEvent.Completed completed
                 && completed.finishReason().equals("tool_calls"));
+    }
+
+    @Test
+    void preservesSchemaStringTypesInUntypedWebParameters() {
+        for (var raw : List.of("11733", "true", "null", "00123", "\" 交付资料 \"")) {
+            var expected = raw.startsWith("\"") ? " 交付资料 " : raw;
+            for (var source : parameterSources("batch_number", raw)) {
+                var events = strictToolEvents(source, "{\"type\":\"string\"}");
+                assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
+                var arguments = completedArguments(events);
+                assertThat(arguments.path("batch_number").isTextual()).isTrue();
+                assertThat(arguments.path("batch_number").asText()).isEqualTo(expected);
+            }
+        }
+    }
+
+    @Test
+    void preservesDeclaredJsonTypesAndNullableStringsInWebParameters() {
+        var cases = List.of(
+            List.of("{\"type\":\"integer\"}", "11733"),
+            List.of("{\"type\":\"boolean\"}", "true"),
+            List.of("{\"type\":[\"string\",\"null\"]}", "null"),
+            List.of("{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]}", "null"),
+            List.of("{\"type\":[\"string\",\"integer\"]}", "11733"));
+        for (var entry : cases) {
+            for (var source : parameterSources("batch_number", entry.get(1))) {
+                var events = strictToolEvents(source, entry.get(0));
+                assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
+                assertThat(completedArguments(events).path("batch_number"))
+                    .isEqualTo(mapper.readTree(entry.get(1)));
+            }
+        }
+        for (var schema : List.of("{\"type\":[\"string\",\"null\"]}",
+            "{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]}")) {
+            var events = strictToolEvents(parameterSources("batch_number", "11733").getFirst(), schema);
+            assertThat(completedArguments(events).path("batch_number").asText()).isEqualTo("11733");
+            assertThat(completedArguments(events).path("batch_number").isTextual()).isTrue();
+        }
+    }
+
+    @Test
+    void resolvesLocalReferencedStringParameterTypes() {
+        var events = strictToolEvents(parameterSources("batch_number", "11733").getFirst(),
+            "{\"$ref\":\"#/$defs/batch\"}");
+        assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
+        assertThat(completedArguments(events).path("batch_number").isTextual()).isTrue();
+    }
+
+    @Test
+    void rejectsExplicitJsonTypeMismatchesWithoutLeakingToolArguments() {
+        for (var source : List.of(
+            "{\"name\":\"review_document\",\"arguments\":{\"batch_number\":11733}}",
+            "<function_call>{\"name\":\"review_document\",\"arguments\":{\"batch_number\":11733}}</function_call>",
+            "TOOL_CALL: review_document({\"batch_number\":11733})")) {
+            var events = strictToolEvents(source, "{\"type\":\"string\"}");
+            assertThat(events).anyMatch(event -> event instanceof CanonicalEvent.Failed failed
+                && failed.errorType().equals("tool_call_generation_failed"));
+            assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.ToolCallStarted
+                || event instanceof CanonicalEvent.ToolArgumentsDelta
+                || event instanceof CanonicalEvent.ToolCallCompleted
+                || event instanceof CanonicalEvent.Completed);
+        }
+    }
+
+    private List<String> parameterSources(String name, String value) {
+        return List.of(
+            "<|MiMoML|tool_calls><|MiMoML|invoke name='review_document'>"
+                + "<|MiMoML|parameter name='" + name + "'>" + value
+                + "</|MiMoML|parameter></|MiMoML|invoke></|MiMoML|tool_calls>",
+            "<tool_call><function=review_document><parameter=" + name + ">"
+                + value + "</parameter></function></tool_call>",
+            "TOOL_CALL: review_document(" + name + "=" + value + ")");
+    }
+
+    private List<CanonicalEvent> strictToolEvents(String source, String parameterSchema) {
+        var raw = mapper.createObjectNode().put("tool_choice", "required");
+        var function = raw.putArray("tools").addObject().put("type", "function").putObject("function");
+        function.put("name", "review_document").put("strict", true);
+        var parameters = function.putObject("parameters").put("type", "object")
+            .put("additionalProperties", false);
+        parameters.putObject("properties").set("batch_number", mapper.readTree(parameterSchema));
+        parameters.putArray("required").add("batch_number");
+        parameters.putObject("$defs").putObject("batch").put("type", "string");
+        var request = new CanonicalRequest("typed-web", CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            "mimo", "mimo-v2.6-pro", true, List.of(), Map.of(), Map.of(),
+            List.of(raw.path("tools").get(0)), Map.of(), raw);
+        var prepared = new MimoRequestMapper(mapper).prepare(request);
+        var decoder = new MimoEventDecoder(request.requestId(), prepared.tools(), true, false);
+        var events = new java.util.ArrayList<>(decoder.decode(mapper.writeValueAsString(
+            Map.of("type", "text", "content", source))));
+        events.addAll(decoder.finish());
+        return CanonicalEventStream.enforce(request, Flux.fromIterable(events)).collectList().block();
+    }
+
+    private tools.jackson.databind.JsonNode completedArguments(List<CanonicalEvent> events) {
+        var calls = events.stream().filter(CanonicalEvent.ToolCallCompleted.class::isInstance)
+            .map(CanonicalEvent.ToolCallCompleted.class::cast).toList();
+        assertThat(calls).hasSize(1);
+        return mapper.readTree(calls.getFirst().arguments());
     }
 
     @Test

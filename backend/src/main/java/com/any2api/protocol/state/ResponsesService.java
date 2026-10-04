@@ -243,12 +243,37 @@ public class ResponsesService {
             }
             var data = mapper.createArrayNode();
             var pageEnd = Math.min(end, start + limit);
-            for (var index = start; index < pageEnd; index++) data.add(items.get(index).deepCopy());
+            for (var index = start; index < pageEnd; index++) data.add(resourceInputItem(items.get(index)));
             var page = mapper.createObjectNode().put("object", "list").put("has_more", pageEnd < end).set("data", data);
             if (data.isEmpty()) page.putNull("first_id").putNull("last_id");
             else page.put("first_id", data.get(0).path("id").asText()).put("last_id", data.get(data.size()-1).path("id").asText());
             return page;
         });
+    }
+
+    private JsonNode resourceInputItem(JsonNode source) {
+        // Project legacy easy-message input for the SDK without rewriting continuation state.
+        var item = source.deepCopy();
+        if (!(item instanceof ObjectNode message)) return item;
+        var type = message.path("type").asText();
+        if (java.util.Set.of("message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output").contains(type)
+            && !message.hasNonNull("status")) message.put("status", "completed");
+        if (!"message".equals(type)) return message;
+        var assistant = "assistant".equals(message.path("role").asText());
+        var content = message.path("content");
+        var blocks = content.isArray() ? (ArrayNode) content : mapper.createArrayNode();
+        if (content.isTextual()) blocks.add(mapper.createObjectNode().put("text", content.asText()));
+        if (content.isTextual() || content.isArray() || content.isNull() || content.isMissingNode()) {
+            for (var block : blocks) {
+                if (block instanceof ObjectNode text && text.has("text")
+                    && java.util.Set.of("", "text", "input_text", "output_text").contains(text.path("type").asText())) {
+                    text.put("type", assistant ? "output_text" : "input_text");
+                    if (assistant && !text.hasNonNull("annotations")) text.putArray("annotations");
+                }
+            }
+            message.set("content", blocks);
+        }
+        return message;
     }
 
     private Mono<GatewayResponseStore.StoredResponse> owned(String id, String providerHint, ApiKeyGrant grant) {

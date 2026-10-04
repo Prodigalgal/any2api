@@ -11,6 +11,8 @@ import java.util.regex.Pattern;
 import tools.jackson.databind.ObjectMapper;
 
 final class MimoEventDecoder {
+    private static final int MAX_PARAMETER_TYPE_DEPTH = 32;
+    private static final int MAX_PARAMETER_TYPE_NODES = 2048;
     private static final String LENGTH_REJECTION = "Sorry, the text you sent is too long! "
         + "I suggest you simplify the content appropriately or send it in parts. "
         + "Thank you for your understanding.";
@@ -204,9 +206,7 @@ final class MimoEventDecoder {
             var arguments = mapper.createObjectNode();
             var parameter = PARAMETER.matcher(matcher.group(2));
             while (parameter.find()) {
-                var raw = parameter.group(2).trim();
-                try { arguments.set(parameter.group(1), mapper.readTree(raw)); }
-                catch (Exception ignored) { arguments.put(parameter.group(1), raw); }
+                putAuto(arguments, name, parameter.group(1), parameter.group(2));
             }
             calls.add(new ParsedCall(name, arguments));
         }
@@ -218,7 +218,7 @@ final class MimoEventDecoder {
             if (name == null) continue;
             var arguments = mapper.createObjectNode();
             var parameter = XML_PARAMETER.matcher(function.group(2));
-            while (parameter.find()) putAuto(arguments, parameter.group(1), parameter.group(2));
+            while (parameter.find()) putAuto(arguments, name, parameter.group(1), parameter.group(2));
             calls.add(new ParsedCall(name, arguments));
         }
         var tagged = TAGGED_FUNCTION.matcher(source);
@@ -238,7 +238,7 @@ final class MimoEventDecoder {
             } catch (RuntimeException ignored) {
                 for (var pair : raw.split(",")) {
                     var parts = pair.split("=", 2);
-                    if (parts.length == 2) putAuto(arguments, parts[0], parts[1]);
+                    if (parts.length == 2) putAuto(arguments, name, parts[0], parts[1]);
                 }
             }
             calls.add(new ParsedCall(name, arguments));
@@ -327,13 +327,61 @@ final class MimoEventDecoder {
 
     private void putAuto(
         tools.jackson.databind.node.ObjectNode target,
+        String toolName,
         String name,
         String raw
     ) {
+        var parameterName = name.trim();
         var value = raw == null ? "" : raw.trim()
             .replaceFirst("^<!\\[CDATA\\[", "").replaceFirst("]]>$", "").trim();
-        try { target.set(name.trim(), mapper.readTree(value)); }
-        catch (RuntimeException ignored) { target.put(name.trim(), value); }
+        tools.jackson.databind.JsonNode parsed;
+        try { parsed = mapper.readTree(value); }
+        catch (RuntimeException ignored) {
+            target.put(parameterName, value);
+            return;
+        }
+        var types = parameterTypes(toolName, parameterName);
+        // MiMoML/XML parameters are untyped text; JSON argument objects keep their explicit types.
+        if (types.contains("string") && types.stream().allMatch(type -> type.equals("string") || type.equals("null"))
+            && (parsed == null || !parsed.isTextual())
+            && !(parsed != null && parsed.isNull() && types.contains("null"))) {
+            target.put(parameterName, value);
+        } else {
+            target.set(parameterName, parsed);
+        }
+    }
+
+    private Set<String> parameterTypes(String toolName, String parameterName) {
+        for (var tool : tools) {
+            if (tool.name().equals(toolName)) {
+                return declaredTypes(tool.parameters().path("properties").path(parameterName), tool.parameters(), 0, new int[1]);
+            }
+        }
+        return Set.of();
+    }
+
+    private Set<String> declaredTypes(tools.jackson.databind.JsonNode schema,
+        tools.jackson.databind.JsonNode root, int depth, int[] nodes) {
+        if (depth > MAX_PARAMETER_TYPE_DEPTH || ++nodes[0] > MAX_PARAMETER_TYPE_NODES || !schema.isObject()) return Set.of();
+        if (schema.has("$ref")) {
+            var reference = schema.path("$ref").asText("");
+            if (!reference.startsWith("#/")) return Set.of();
+            return declaredTypes(root.at(reference.substring(1)), root, depth + 1, nodes);
+        }
+        if (schema.path("anyOf").isArray()) {
+            var types = new HashSet<String>();
+            for (var branch : schema.path("anyOf")) {
+                var branchTypes = declaredTypes(branch, root, depth + 1, nodes);
+                if (branchTypes.isEmpty()) return Set.of();
+                types.addAll(branchTypes);
+            }
+            return types;
+        }
+        var type = schema.path("type");
+        if (type.isTextual()) return Set.of(type.asText());
+        var types = new HashSet<String>();
+        if (type.isArray()) for (var entry : type) types.add(entry.asText());
+        return types;
     }
 
     private boolean looksLikeToolSyntax(String source) {

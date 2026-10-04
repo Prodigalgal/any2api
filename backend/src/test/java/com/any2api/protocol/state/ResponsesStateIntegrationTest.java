@@ -110,6 +110,80 @@ class ResponsesStateIntegrationTest {
         assertThat(store.find(id,ResponsesService.owner(grant)).orElseThrow().response().path("status").asText()).isEqualTo("completed");
     }
 
+    @Test void inputResourcesNormalizeLegacyEasyMessagesWithoutChangingStateOrCursors() {
+        var input = mapper.createArrayNode();
+        for (var role : java.util.List.of("system", "developer", "user", "assistant")) {
+            input.addObject().put("id", "in_" + role).put("type", "message")
+                .put("role", role).put("content", "正文-" + role);
+        }
+        ((tools.jackson.databind.node.ObjectNode) input.get(3)).put("phase", "commentary");
+        var response = mapper.createObjectNode().put("id", "resp_resource").put("status", "completed");
+        store.save(ResponsesService.owner(grant), grant.keyId(), "mimo", "fixture", input, response,
+            Instant.now().plusSeconds(60), 10);
+
+        var first = service.listInput("resp_resource", null, grant, 2, "asc", null, null).block();
+        assertThat(first.path("has_more").asBoolean()).isTrue();
+        assertThat(first.path("data").get(0).path("content").get(0).path("type").asText()).isEqualTo("input_text");
+        assertThat(first.path("data").get(0).path("content").get(0).path("text").asText()).isEqualTo("正文-system");
+        var next = service.listInput("resp_resource", null, grant, 2, "asc", first.path("last_id").asText(), null).block();
+        var assistant = next.path("data").get(1);
+        assertThat(assistant.path("id").asText()).isEqualTo("in_assistant");
+        assertThat(assistant.path("status").asText()).isEqualTo("completed");
+        assertThat(assistant.path("phase").asText()).isEqualTo("commentary");
+        assertThat(assistant.path("content").get(0).path("type").asText()).isEqualTo("output_text");
+        assertThat(assistant.path("content").get(0).path("annotations").isArray()).isTrue();
+        assertThat(store.find("resp_resource", ResponsesService.owner(grant)).orElseThrow().input()).isEqualTo(input);
+        var reverse = service.listInput("resp_resource", null, grant, 1, "desc", null, null).block();
+        assertThat(reverse.path("first_id").asText()).isEqualTo("in_assistant");
+    }
+
+    @Test void inputResourcesPreserveStructuredMediaAnnotationsAndFunctionResults() {
+        var input = mapper.createArrayNode();
+        var user = input.addObject().put("id", "in_user").put("type", "message").put("role", "user");
+        user.putArray("content").addObject().put("type", "input_text").put("text", "核对图片");
+        ((tools.jackson.databind.node.ArrayNode) user.path("content")).addObject().put("type", "input_image")
+            .put("image_url", "data:image/png;base64,aW1hZ2U=").put("detail", "high");
+        var assistant = input.addObject().put("id", "in_assistant").put("type", "message")
+            .put("role", "assistant").put("status", "incomplete");
+        var text = assistant.putArray("content").addObject().put("type", "output_text").put("text", "已核对");
+        text.putArray("annotations").addObject().put("type", "file_citation").put("file_id", "file_one")
+            .put("filename", "资料.txt").put("index", 0);
+        var result = input.addObject().put("id", "in_result").put("type", "function_call_output")
+            .put("call_id", "call_document").put("output", "已核验");
+        var response = mapper.createObjectNode().put("id", "resp_structured").put("status", "completed");
+        store.save(ResponsesService.owner(grant), grant.keyId(), "mimo", "fixture", input, response,
+            Instant.now().plusSeconds(60), 10);
+
+        var page = service.listInput("resp_structured", null, grant, 100, "asc", null, null).block();
+
+        assertThat(page.path("data").get(0).path("content")).isEqualTo(user.path("content"));
+        assertThat(page.path("data").get(1)).isEqualTo(assistant);
+        assertThat(page.path("data").get(2)).isEqualTo(result.deepCopy().put("status", "completed"));
+        assertThat(store.find("resp_structured", ResponsesService.owner(grant)).orElseThrow().input()).isEqualTo(input);
+    }
+
+    @Test void inputResourcesSupplyMissingToolStatusesAndPreserveExplicitOnes() {
+        var input = mapper.createArrayNode();
+        for (var type : java.util.List.of("function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output")) {
+            input.addObject().put("id", "in_" + type).put("type", type).put("call_id", "call_" + type)
+                .put("name", "review_document").put("arguments", "{}").put("input", "资料").put("output", "已核验");
+        }
+        input.addObject().put("id", "in_incomplete").put("type", "function_call_output")
+            .put("call_id", "call_partial").put("output", "部分完成").put("status", "incomplete");
+        var response = mapper.createObjectNode().put("id", "resp_tool_resource").put("status", "completed");
+        store.save(ResponsesService.owner(grant), grant.keyId(), "mimo", "fixture", input, response,
+            Instant.now().plusSeconds(60), 10);
+
+        var page = service.listInput("resp_tool_resource", null, grant, 100, "asc", null, null).block();
+
+        for (var index = 0; index < 4; index++) {
+            assertThat(page.path("data").get(index)).isEqualTo(
+                ((tools.jackson.databind.node.ObjectNode) input.get(index)).deepCopy().put("status", "completed"));
+        }
+        assertThat(page.path("data").get(4)).isEqualTo(input.get(4));
+        assertThat(store.find("resp_tool_resource", ResponsesService.owner(grant)).orElseThrow().input()).isEqualTo(input);
+    }
+
     @Test void persistsCancellationAfterResponseStarted() throws Exception {
         var raw=mapper.createObjectNode().put("store",true).put("stream",true).put("input","hello");
         var request=service.prepare(raw,new ResolvedRoute("mimo","fixture"),grant,"cancel-test").block().responseRequest();

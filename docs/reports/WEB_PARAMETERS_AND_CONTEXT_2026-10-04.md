@@ -2,7 +2,7 @@
 
 ## 范围与当前状态
 
-基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2 候选。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 沿用用户此前排除范围，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
+基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
 ## 参数含义与实际 WEB 目标
 
@@ -147,7 +147,34 @@ Source `cdf32963909d73b426aa337beed3fb6dc1fe29b8`；[CI 37204392918](https://git
 - LongCat 构造实际上由内部 `reason_enabled` / `search_enabled` 映射为 WEB `reasonEnabled` / `searchEnabled` 的 0/1。修正公开参数说明目标，catalog namespace v7 隔离旧 v6 声明；实际推理字段构造没有改变。
 - `PromptExactCacheManager` 原 cache key 仅包含 canonical messages/generation，raw WEB controls 未参与。0.27.1 的 Arena mapped-controls 缓存命中直接暴露了这一边界：开关变化也可能命中 plain 结果。现在只允许明确的原始协议字段和已在 generation key 中的字段使用精确缓存，其余非 null 控制绕过缓存读写；null 缺省和普通缓存保留。prompt key v3 隔离旧条目，代价是受控请求减少缓存命中、更多真实上游生成。
 - 更新旧文档中 function=Unsupported / state=Unsupported 的过期表述，明确现有 emulated function 与 Gateway state，并区分 skill 说明、调用方执行及 WEB 扁平 prompt 的优先级边界。
-- 新增普通缓存不会被 search/thinking 控制读取/污染、显式 false、nullable 和不同 canonical sampling key 的回归。0.27.2 本地 Backend 499 passed / 5 条件 skipped、bootJar、版本/JAR、探测脚本 format/lint 通过；CI、部署和有界差量待补充。
+- 新增普通缓存不会被 search/thinking 控制读取/污染、显式 false、nullable 和不同 canonical sampling key 的回归。0.27.2 本地 Backend 499 passed / 5 条件 skipped、bootJar、版本/JAR、探测脚本 format/lint 通过。Source `76202aa` 的 [CI 37206740522](https://github.com/Prodigalgal/any2api/actions/runs/37206740522) 在新增发布门禁后取消：三项质量门禁成功、镜像 job cancelled、update-gitops 未执行；不复用可能已经部分构建的候选镜像。
+
+### 0.27.3 七家完整 Agent 桥接门禁
+
+探测使用 `tools/compatibility/openai_web_bridge_smoke.py`。每家七项：模型详情、Chat JSON strict 工具提取、Chat SSE 客户端结果、Responses SSE 指定 strict function、Responses JSON 完整回放、store/previous_response_id/retrieve/input_items、测试资源删除。参数必须来自不同角色的合成信息：system 的文档名、developer 的 SKILL.md 规则、超过 32 条消息历史中最早的批次号；工具结果由客户端提供真实合成业务字段。不能通过将期望答案写入 enum 或最后一条消息来替代历史验证。
+
+| 厂商 / 本轮模型 | 当前已证实结果 | 证据环境 |
+| --- | --- | --- |
+| Arena / claude-sonnet-5 | 七项全部通过 | 生产 0.27.1 |
+| DeepSeek / default | 前五项通过；原执行中断后，保存状态续接和清理两项补验通过 | 生产 0.27.1 |
+| GLM / glm-5.2 | 前五项通过；原执行中断后，保存状态续接和清理两项补验通过 | 生产 0.27.1 |
+| Grok Web / grok-3 | 七项全部通过 | 生产 0.27.1 |
+| LongCat / longcat-flash | 七项全部通过 | 生产 0.27.1 |
+| MiniMax / MiniMax-M3.1-Flash-Preview | 七项全部通过 | 生产 0.27.1 |
+| MiMo / mimo-v2.6-pro | 候选真实 WEB Chat 往返、Responses 调用/完整回放/状态续接、严格资源 schema 和清理全部通过 | 本地 0.27.3 协议/PG/认证，真实现有 WEB 账号及候选 Python 构造器；不含生产协调器 |
+
+关键请求：Arena `ab7c780d-38d3-4752-bd26-823fd8c79584` / `7246b2ff-88f7-4899-a76e-067493b2af0e` / `a9c58193-1dc9-4a21-b379-4029a6f56aa8`；DeepSeek 补验 `9301bc2d-5675-4014-9dff-46f98f1d8a58`；GLM 补验 `91b62815-6494-4455-807b-8e8df09f40f7`；Grok state `3aac084f-3324-4730-9794-01cf64ec57a8`；LongCat state `9bbbc447-2890-4a81-9d0b-b7f3f80ca2ab`；MiniMax state `6d8637c7-082b-4876-aad7-d832d6c5b1ff`。前六家完成的功能续接不代表其旧 `input_items` 符合 SDK 所有类型：该项格式修复须通过新候选的 schema 验收。
+
+本轮修复与验证：
+
+- **MiMo 无类型参数**：生产 Chat `4de9d4a4-b63d-421b-9eb2-2aa788eab6fc` 三次后台尝试和 Responses `8a91102e-3df3-4b05-ac5b-626463e99764` 均失败于严格类型。独立合成 native canary HTTP 200，原文为 `<|MiMoML|parameter name="batch_number">11733</|MiMoML|parameter>`，其 schema 明确 string。旧解码器 `readTree` 误转数字；按声明类型映射 MiMoML/XML/key=value 文本，处理 nullable、anyOf、局部 ref，限制 32 层/2048 节点；显式 JSON 对象保持原类型并继续严格拒绝错误。新增回归修复前 3 failed，修复后 13 项 MiMo 协议测试全部通过。候选真实 Chat `cfa4a321-0a9d-46db-a7d3-edca6b4733bf` / `d3e5a606-773b-448a-9043-0ffe3b7861c7`，Responses `06859ebd-9a0f-4dc0-bc1a-f46c4e427361` / `551787da-45e7-4ba5-9f4b-ac1a1cd978fe` 均通过合成上下文和结果语义检查。
+- **MiMo 完整历史**：修正带 `tool_calls` 的 assistant 正文被丢弃以及调用 ID 未进入 WEB 文本；空调用列表同样保留正文。4 个 string/text-block × 有/无调用回归、七家 builder 的完整角色/超过 32 条历史/调用结果保留测试通过。不得变更客户端输入对象。
+- **Responses 资源格式**：读取时将存储的 easy message 字符串投影为 SDK 内容块；assistant 使用 output_text/annotations，其他角色使用 input_text，消息与 function/custom 调用及结果缺省状态 completed。实际续接先完成生成后，SDK 曾揭示工具结果缺必填 status；完整工具资源测试复现失败并补齐读取投影。原有媒体、annotations、phase、显式状态、ID/分页及存储内容保留，不做 DB 重写。真实 PG 回归和官方 SDK 2.54.0 的 `TypeAdapter(ResponseItem)`、严格 serialization、四角色及四种工具资源、asc/desc/cursor 与资源重新提交均通过，本地资源两组 2/2；新增 `openai_response_resource_smoke.py` 可复现。
+- **MiMo 最终候选**：真实 WEB Responses 调用 `356ab22c-09d0-49a8-9eac-1ce5b8665bba`、完整回放 `5d027a95-cff5-4a43-b451-fdb8b5cb2f52`、state `c5a299cb-f327-45dd-b86a-e01b7731e0c4` 全部通过；state 的官方 SDK resource schema 校验通过，两个测试资源均删除后 404。与此前已通过的 Chat 两项合并，七项功能覆盖齐全。共享协议及状态候选门禁已完成，进入发布后七家同版本复测。
+- **质量门禁**：Backend 全量 511 tests：506 passed、5 条件 skipped，bootJar 与八处源码/JAR 版本 0.27.3 PASS；Automation 全量 520 passed，Web lint/build 与 Python ruff 检查通过。无 DB、凭据、账号或 Key 变更。
+- **保留失败**：首轮 Arena/GLM/部分 DeepSeek 在租约前返回 `coordination_unavailable`，不是 WEB 拒绝；恢复后重测。DeepSeek/GLM 第一次执行被用户消息中断，未执行项经原保存状态补验并清理。MiMo 候选 isolated native 测试曾出现探测辅助进程失败，Responses 后续项未执行/未通过，原报告保留，不能用 Chat 成功替代 state 验收。
+
+故障窗口内 Server 到跨节点 Redis 的只读检查：PING 76.866–77.186ms，159,576-byte catalog GET 387.905/173.909ms，Server 本地 health 25.654ms、ready 88.556ms。Redis 无 blocked client/eviction，Pod 无重启；缓存 250ms 预算确实可能被大 value 的一次 GET 超过，但这不证明租约 3s 超时根因。没有修改 Redis timeout、连接、部署位置或 PV，可靠性和全目录性能根因仍未关闭。
 
 ### 目录 Read 的有界检查
 
@@ -165,4 +192,4 @@ Source `cdf32963909d73b426aa337beed3fb6dc1fe29b8`；[CI 37204392918](https://git
 
 未知精确 token 上下文、全部模型/账号/mode、采样统计、多模态 token 成本、GLM 截断终帧，以及 Xiaomi 默认 Agent 引导的长期控制仍需独立证据。当前不将完整 Agent 输入拆成 WEB 上传文件，不自动压缩/截断历史来掩盖边界；上传/RAG 是否保留 system 与工具语义需要另做实现和验收。
 
-没有数据库/凭据迁移。回滚四组件至 0.26.3 不可变镜像 suffix `20261004-v0.26.3-release-2388687ea3675e14a24dead88bb91f37b4663ceb`，旧 catalog v5 与新 v6 隔离；回滚会恢复 MiMo 原先把拒绝计成功的缺陷，历史 usage 不原地改写。
+没有数据库/凭据迁移。0.27.3 后续发布的直接回滚点为 0.27.1 四组件不可变镜像 suffix `20261004-v0.27.1-release-cdf32963909d73b426aa337beed3fb6dc1fe29b8`；会恢复已记录的缓存、MiMo 参数/历史、资源格式缺陷，历史 usage 不原地改写。整轮之前的 0.26.3 基线 suffix `20261004-v0.26.3-release-2388687ea3675e14a24dead88bb91f37b4663ceb` 为历史回滚点，其旧 catalog v5 与本轮 v6/v7 隔离。

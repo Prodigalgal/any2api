@@ -1,6 +1,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -92,6 +93,63 @@ def test_mimo_tool_contract_keeps_unicode_and_full_schema_without_escape_expansi
         {"name": "city_lookup", "description": description, "parameters": parameters}
     ]
     assert "\\u57ce" not in query
+
+
+@pytest.mark.parametrize("content", ["已核对第一页", [{"type": "text", "text": "已核对第一页"}]])
+@pytest.mark.parametrize("with_calls", [True, False])
+def test_mimo_assistant_history_retains_content_and_all_function_identities(
+    content, with_calls
+) -> None:
+    command = _semantic_command()
+    command["messages"] = [
+        {"role": "system", "content": "保留完整的文档说明"},
+        {"role": "developer", "content": "SKILL.md：核对后汇总"},
+        {"role": "user", "content": "核对两份文档"},
+        {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": [
+                {
+                    "id": "call_document_a",
+                    "type": "function",
+                    "function": {
+                        "name": "review_document",
+                        "arguments": '{"document":"甲.txt"}',
+                    },
+                },
+                {
+                    "id": "call_document_b",
+                    "type": "function",
+                    "function": {
+                        "name": "review_document",
+                        "arguments": '{"document":"乙.txt"}',
+                    },
+                },
+            ]
+            if with_calls
+            else [],
+        },
+    ]
+    if with_calls:
+        command["messages"].extend(
+            [
+                {"role": "tool", "tool_call_id": "call_document_a", "content": "甲文档已核验"},
+                {"role": "tool", "tool_call_id": "call_document_b", "content": "乙文档已核验"},
+            ]
+        )
+    original = deepcopy(command)
+
+    query = build_mimo_chat_request(command)["query"]
+
+    assert "已核对第一页" in query
+    assert "保留完整的文档说明" in query and "SKILL.md：核对后汇总" in query
+    if with_calls:
+        assert "[TOOL call_document_a]\n甲文档已核验" in query
+        assert "[TOOL call_document_b]\n乙文档已核验" in query
+        assert "[call_id=call_document_a] TOOL_CALL: review_document" in query
+        assert "[call_id=call_document_b] TOOL_CALL: review_document" in query
+        assert '{"document":"甲.txt"}' in query and '{"document":"乙.txt"}' in query
+    assert command == original
 
 
 def test_mimo_media_is_validated_before_browser_upload() -> None:

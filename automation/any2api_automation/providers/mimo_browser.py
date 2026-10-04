@@ -514,10 +514,13 @@ def build_mimo_chat_request(
             for call in message["tool_calls"]:
                 function = call.get("function") if isinstance(call, dict) else {}
                 function = function if isinstance(function, dict) else {}
+                call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
+                identity = f"[call_id={call_id}] " if call_id else ""
                 calls.append(
-                    f"TOOL_CALL: {function.get('name', '')}({function.get('arguments', '{}')})"
+                    f"{identity}TOOL_CALL: {function.get('name', '')}({function.get('arguments', '{}')})"
                 )
-            conversation.append("[ASSISTANT]\n" + "\n".join(calls))
+            parts = [content] if content else []
+            conversation.append("[ASSISTANT]\n" + "\n".join([*parts, *calls]))
         else:
             conversation.append(f"[{role.upper()}]\n{content}")
     if system:

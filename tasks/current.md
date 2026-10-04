@@ -1,9 +1,9 @@
-# 当前任务板（源码 0.27.2）
+# 当前任务板（源码 0.27.3）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-04 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.2）
+## 2026-10-04 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.3）
 
 - 范围：[执行规格](../docs/requirements/WEB_PROVIDER_PARAMETER_ADAPTATION.md)。按用户批准逐厂商核对 native 字段、单参数探测、WEB 输入限制及 Xiaomi 桌面端自动引导；Qwen 仍只有代码证据。
 - 参数声明回归各 Provider 的 `ProviderProtocolContract.parameterMappings`，模型详情提供 `parameter_adaptation`；目录不重复大表，v6 cache 使用当前 adapter 能力并保留 discovery / overrides。
@@ -11,7 +11,9 @@
 - tools/skills 原生字段追加探测：MiMo 6 个候选位置未见生效，query 两个正向对照有效；DeepSeek/LongCat/Grok/MiniMax 当前通道未见独立字段生效，GLM tools 流内 INTERNAL_ERROR，Arena 修正临时解析器后 429 停止、语义未验证。厂商 Agent/MCP 安装配置与调用方 function 执行边界分别核对，不把 HTTP 200 或前端渲染字段当作原生支持。
 - 0.27.0 上线 SDK 首轮 31/41：8 个 nullable 缺陷、2 个首帧前 JSON 400 的探测误判；修复 0.27.1 Source `cdf3296`、CI `37204392918` success，GitOps `c59c7eb` Synced/Healthy、四组件 Ready/restart=0。本地 Backend 497 passed / 5 skipped，Automation 509 passed，Web lint/build/版本/JAR 通过。七家参数 41/41、MiMo 无参 strict 4/4、中文 enum/SSE 与普通结果回放 2/2 通过；两次 REPLAY nonce 回显拒绝保留。
 - 0.27.1 后台 34 个真实推理/35 次尝试（Grok 首次空响应换号成功）；Arena 一个 mapped-control 命中精确缓存、不算该次原生验证。MiMo 四个长度拒绝均一次、账号无冷却、模型无熔断；七家 queue/concurrent=0/circuit CLOSED，但滚动目录仅 GLM READY，其余 DEGRADED。
-- 收尾候选 0.27.2 修正 LongCat 说明到实际 WEB camelCase、catalog v7；未入 key 的 raw WEB controls 绕过精确缓存读写，prompt key v3 防止重用旧条目。普通缓存/null/canonical generation 隔离保留，旧过期工具/状态表修正；最终门禁和上线差量继续推进。完整边界、保留失败、历史 Arena 核对和桌面请求组成见[报告](../docs/reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
+- 收尾 0.27.2 修正 LongCat WEB camelCase/catalog v7、raw controls 缓存隔离/prompt v3。用户追加七家全桥接后发布、Qwen 仍排除；CI `37206740522` 已取消，GitOps 未更新，生产仍为 0.27.1。
+- 当前候选 0.27.3 补齐 MiMo assistant 正文/调用 ID、无类型 WEB 参数到 string/nullable string 的 schema 映射、Responses input_items 标准内容块和工具资源缺省状态；不重写存储、不修复显式 JSON 类型错误。Backend 506 passed / 5 条件 skipped、bootJar/版本/JAR 通过，Automation 520 passed、Web lint/build、ruff 通过。
+- 发布前七家完整功能证据已齐：Arena/Grok Web/LongCat/MiniMax 各 7/7；DeepSeek/GLM 前五项与中断后的状态续接/清理均通过。MiMo 候选实际连接 WEB 的 Chat 往返与 Responses 三种调用/回放/续接通过；state `c5a299cb-f327-45dd-b86a-e01b7731e0c4` SDK 资源 schema 通过、测试状态已清理。四角色和 function/custom 调用/结果、分页及资源重新提交本地 2/2 通过。进入统一发布，再验证七家新版本完整协议和运行态；Qwen 仍排除。证据、保留失败和边界见[报告](../docs/reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 
 ## 2026-10-04 Redis 缓存等待与协调错误收敛（0.26.3）
 

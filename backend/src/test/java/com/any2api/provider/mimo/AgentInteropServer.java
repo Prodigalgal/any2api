@@ -74,7 +74,7 @@ public final class AgentInteropServer {
 
     @RestController static class FixtureControl {
         @GetMapping("/__fixture/health") public Map<String,Object> health() {
-            return Map.of("status","ready","upstream","fixture","version","0.27.2");
+            return Map.of("status","ready","upstream","fixture","version","0.27.3");
         }
         @GetMapping("/__fixture/requests") public List<Map<String,Object>> requests() { return List.copyOf(REQUESTS); }
         @PostMapping("/__fixture/shutdown") public Map<String,Boolean> shutdown() {

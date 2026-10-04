@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（源码 0.27.2）
+# OpenAI API 到厂商 WEB 的桥接（源码 0.27.3）
 
 ## 范围
 
@@ -41,7 +41,7 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 ## 常用 API
 
-0.27.0–0.27.2 的逐厂商参数映射、真实 WEB 输入边界、tools/skills 字段探测、Xiaomi 桌面端大请求、可空字段修复与缓存隔离进度见
+0.27.0–0.27.3 的逐厂商参数映射、真实 WEB 输入边界、tools/skills 字段探测、Xiaomi 桌面端大请求、可空字段修复与缓存隔离进度见
 [本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。选定模型后读取
 `models.retrieve(model).parameter_adaptation`，不要把 1M/128K 的客户端配置或官方付费 API
 规格当作 WEB 限制。WEB 没有等价控制的显式参数仍会拒绝；null 可选 generation 字段视为缺省。
@@ -57,6 +57,8 @@ MiMo 长输入拒绝会返回 `context_length_exceeded`，已提交流则以失�
 4. 原生 tools/skills 候选字段尚未证明通用有效，继续使用已实现的模拟桥接。不支持的配置明确拒绝，未知 WEB 限额保持未知；长度超限明确失败。模拟工具可能受到厂商模型拒绝、误判或格式生成不稳定影响，不能等同于厂家原生 function API。
 
 0.27.1 MiMo 的中文 enum/SSE 调用和普通业务结果回放 2/2 通过；随机 REPLAY 标记回显被模型拒绝，失败记录保留。详见本轮报告。0.27.2 另外收敛 WEB raw controls 的缓存隔离，避免不同 search/thinking 配置重用 plain 文本结果。
+
+0.27.2 自动发布已按用户追加门禁取消，未更新 GitOps；生产基线保持 0.27.1。0.27.3 候选修正 MiMo 无类型文本参数的 schema 映射、assistant 正文和调用 ID 的完整回放，以及 Responses `input_items` 官方 SDK 资源格式。显式 JSON 类型错误仍由 strict 拒绝，存储历史不重写。七家完整 Agent 验收和当前发布状态以本轮报告为准；Qwen 不纳入本次发布验收。
 
 调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环、0.26.3 无参数差量七家各 4/4 已实测通过；0.26.2 的 Arena 认证失败独立保留，不能以新一轮通过保证账号永久稳定。结果范围、运行态与剩余默认值差异见验收报告。
 

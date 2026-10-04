@@ -36,7 +36,7 @@ account, then selects one of that provider's role-qualified enabled models. Conc
 rejected on these endpoints. Responses expose the selected route through
 `X-Any2API-Provider` and `X-Any2API-Model`.
 
-### Responses agent contract (0.26.3)
+### Responses agent contract (0.27.3)
 
 Missing or null function `parameters` means an empty parameter list. Since 0.26.2,
 explicit strict functions normalize this default to a closed empty object; explicit caller schemas
@@ -65,6 +65,9 @@ When strict is enabled, function events are withheld until complete JSON argumen
 bad JSON, duplicate keys, conflicting argument deltas, extra fields and schema mismatches fail
 with `tool_call_generation_failed`, without exposing the invalid tool events. No repair is applied.
 The gateway cannot guarantee upstream generation success or native strict decoding performance.
+MiMoML/XML and plain key-value WEB parameters carry untyped text. The MiMo adapter uses the
+declared parameter schema to preserve numeric-looking strings and nullable string fields before
+strict validation. Explicit JSON argument types are preserved; mismatches still fail validation.
 Omitted strict and `strict:false` retain existing best-effort behavior; there is no implicit strict
 normalization for Responses tools in this gateway.
 
@@ -99,12 +102,20 @@ output omitted when needed to retain the terminal error within the configured bo
 `input_items` supports `limit=1..100`, `order=asc|desc`, and one of `after`/`before`, using stable
 item IDs. Resource responses use `Cache-Control: no-store`. Retrieval with `stream:true`, stream
 resumption, WebSocket, background execution, Conversations and `/responses/compact` are unsupported.
+Since 0.27.3, `input_items` projects legacy string message content into SDK resource content blocks:
+system/developer/user use `input_text`, assistant uses `output_text` with annotations. Existing
+media, IDs, phase and status are preserved. Stored input and continuation replay remain unchanged.
+Function/custom call and result resources also receive `status:completed` when omitted in the
+stored input; explicit statuses are preserved.
 
 SSE and final documents use matching item indexes/IDs and a stable `created_at`. Function argument
 completion emits any missing suffix; inconsistent argument streams fail. Token exhaustion emits
 `response.incomplete`; failures preserve partial output. Pre-stream failures return the relevant
 HTTP status and JSON error before SSE begins. Ordinary text caching remains available with fresh
 response IDs and API Key isolation; tool, reasoning, structured and stored requests bypass it.
+Raw non-null WEB controls absent from the cache key bypass both cache reads and writes. Null
+controls remain defaults; canonical sampling fields remain part of the key. Prompt key v3
+isolates earlier entries that may have mixed control semantics.
 
 The context manager preserves full history by default and with `truncation:disabled`.
 Only explicit `truncation:auto` applies the existing 32-message truncation target while retaining

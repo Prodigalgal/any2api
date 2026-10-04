@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（0.26.2）
+# OpenAI API 到厂商 WEB 的桥接（0.26.3）
 
 ## 范围
 
@@ -13,6 +13,7 @@
 | 能力 | 支持范围 |
 |---|---|
 | JSON / SSE | Chat 与 Responses；SDK 可重建最终输出和工具参数 |
+| 协调资源故障 | 获取/续租暂不可用返回可重试 `coordination_unavailable`；首 SSE 前 JSON 503，已提交后标准失败终态，不误归为厂家超时 |
 | 模型详情 | `models.retrieve()` 使用目录返回的 model ID；缺失或无权限返回 OpenAI JSON 404 |
 | 编码模型 ID | 应用安全链仅对 GET 模型详情 ID 放行 `%2F`；当前共享 Envoy 入口先同源 307 归一化，普通 SDK 自动跟随 |
 | 严格函数参数 | 显式 `strict:true`，由公共网关检查完整参数，再输出工具事件；上游生成不合格会失败 |
@@ -32,6 +33,8 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 0.25.0–0.25.2 为现有厂家补齐 emulated function 桥接，0.25.3–0.25.7 的真实验收见 [后续修复与验证](../reports/WEB_BRIDGE_FOLLOWUP_2026-10-03.md)：七家所选模型完成 SDK、完整历史和有限并发检查，LongCat 用户/工具 OCR、TXT/PDF 已通过，厂家原生纯色误判仍保留。Qwen 仅有代码与离线契约证据。本轮模型详情和 strict 的逐厂商结果见 [0.26.0–0.26.2 客户端契约验收](../reports/OPENAI_CLIENT_CONTRACT_2026-10-03.md)。
 
+0.26.3 已部署，七家所选模型无参数 strict 差量各 4/4、28/28 PASS；模型详情、404/400、Chat omitted 与 Responses null 均通过。后台补查保留 MiMo 一次工具生成失败后的透明换号重试，最终成功不等于每次尝试成功。缓存访问默认预算 250ms，慢依赖有界回源；关键协调保持 3s。普通 Read、全目录/WAN 仍有不同成本，不能宣称所有接口普遍变快。[当前运行、真实 Codex、Read 三窗口及回滚](../reports/REDIS_CACHE_COORDINATION_2026-10-04.md)。
+
 ### 历史验收（0.24.4，后续修复见当前发布报告）
 
 最终 0.24.4 的 MiMo `mimo-v2.6-flash`、LongCat `longcat-flash` 官方 SDK 7 组均通过，包含 Chat/Responses 文本工具闭环与可选扩展。MiMo 的标准 Responses 工具图片结果回放也通过。LongCat 工具图片回传尚有 502/熔断缺陷；Grok 的普通 Responses/SSE/function 续接通过前三组，namespace 扩展返回空输出；独立的常用 Chat required function 在 120s 客户端超时，Chat 回传/SSE 未执行。不能将任何一家这些结果扩展到其他模型或全部厂商。证据见 [发布验收与性能](../reports/RELEASE_AND_READ_PERFORMANCE_2026-10-02.md)。
@@ -40,7 +43,7 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 主要入口为 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`。`messages` / `input` 和多轮历史由调用方提供；工具输出按 call_id 回传。Responses 也可使用已实现的 `store:true` / `previous_response_id` 续接，无需厂商 WEB 提供同名资源接口。
 
-调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环均已实测通过；0.26.2 无参数差量六家各 4/4，Arena 认证拒绝仍失败。结果范围、运行态与剩余默认值差异见验收报告。
+调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环、0.26.3 无参数差量七家各 4/4 已实测通过；0.26.2 的 Arena 认证失败独立保留，不能以新一轮通过保证账号永久稳定。结果范围、运行态与剩余默认值差异见验收报告。
 
 ```python
 import os
@@ -85,7 +88,7 @@ supports_websockets = false
 
 历史验收使用 Codex CLI 0.159.2；0.25.5 的只读图片工具闭环使用 0.160.0。实验关闭 apps/plugins/multi_agent，使用 HTTP/SSE、函数工具和 `read-only` sandbox。自定义路由名可能触发 CLI model metadata fallback 提示；已有 OpenAI 原生模型的 metadata 不应被用来承诺本桥接不支持的 grammar/encryption 或完整原生 strict 解码能力。
 
-当前 0.26.2 也已使用 Codex CLI 0.160.0 和现有 MiMo Key 完成真实 `view_image → function_call_output(input_image)` 闭环，HTTP 内容类型记录确认图片工具结果确实回传；metadata fallback 提示保留。诊断补查有两次 Redis 超时后客户端重试成功，中间失败单独记载；详见当前验收报告。此项不替代其他厂商、strict 或 Shell/patch 权限的独立验收。
+0.26.2 使用 Codex CLI 0.160.0 和现有 MiMo Key 完成真实 `view_image → function_call_output(input_image)` 闭环；诊断补查有两次 Redis 超时后客户端重试成功，中间失败保留在旧报告。0.26.3 用相同 CLI/模型和既有 Key 再验：两请求均 `response.completed`、图片结果确实回传、读数正确，未发生 HTTP/SSE 失败或客户端重试；model metadata fallback 提示仍保留。此项不替代其他厂商、显式 strict 或 Shell/patch 权限的独立验收。
 
 0.24.0 的受控上游实验完成 `view_image` 工具闭环；本机 PowerShell 命令工具被 CLI policy 拒绝，未绕过。0.24.4 真实 MiMo 图片实验返回正确颜色，但 CLI JSON 没有显式 image_view completion item，不能仅凭最终标记认定该工具执行轨迹。标准 API 的工具图片回放已单独验证。Shell/patch 权限和 metadata fallback 不属于本项目后端缺口。
 

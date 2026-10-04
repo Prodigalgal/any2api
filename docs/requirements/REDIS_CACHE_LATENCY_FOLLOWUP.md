@@ -19,3 +19,9 @@ AccountLeaseService 的释放失败仍传播明确异常；生成收尾捕获该
 - 两协议覆盖 JSON 503、首帧前 503 和已提交 SSE 的错误终态，错误不泄露 Redis endpoint/内部异常信息。
 - 相关单测、全量 Backend/bootJar、Automation/Web/版本契约、官方 SDK fixture；既有授权下提交、CI/GitOps/四组件运行验证，再进行有限真实厂商/Read 复测。失败样本独立保留。
 - 回滚到 0.26.2 四个不可变镜像（源码 3c92523），无需数据库/Key 恢复。缓存配置恢复默认原逻辑；新的协调错误归一化撤回。
+
+## 交付结果（2026-10-04）
+
+0.26.3 源码 `2388687`、CI `37165657001` success、GitOps `b66f59a` Synced/Healthy，四组件 Ready/restart=0，两个 Automation installed/API 版本一致。本地 Backend 482 passed / 5 条件 skipped、Automation 508 passed、Web/版本/JAR 门禁、真实 HTTP fixture SDK 12+8 组通过。七家所选模型差量 28/28 PASS；MiMo 真实 Codex 图片闭环两请求均 completed。后台 16 个逻辑请求、17 次尝试：MiMo 一次工具生成失败后换号成功，中间失败保留。
+
+缓存慢等待和协调错误契约已交付。稳定窗口 cluster 普通 Read p50 87–96ms，但完整目录/direct 波动仍明显；跨节点 Redis 往返 p50 77ms 对同节点 0.13ms，历史 3s 超时根因、WAN/大目录性能仍待改善。本轮没有迁移依赖、修改 Key 或声称网络根因已解决。完整边界、三窗口原始结果与回滚见 [验收报告](../reports/REDIS_CACHE_COORDINATION_2026-10-04.md)。

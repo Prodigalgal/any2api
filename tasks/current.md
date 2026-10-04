@@ -7,8 +7,9 @@
 
 - 范围：[执行规格](../docs/requirements/REDIS_CACHE_LATENCY_FOLLOWUP.md)。缓存 Redis 每次访问默认 250ms、有界回源/写入/失效；关键协调维持 3s 及既有 fencing/TTL。
 - 获取/续租故障统一可重试 `coordination_unavailable`，JSON/首帧前 503、已提交 SSE failed/error；内部协调故障不进入厂商凭据处置或模型熔断。生成收尾释放失败记录上下文并依赖原 TTL，不覆盖生成终态。
-- 本地门禁：Backend 482 passed / 5 条件 skipped，Automation 508 passed，Web lint/build、版本及 JAR 0.26.3 一致；实际 Security/PG HTTP fixture 官方 SDK 12+8 组通过。将提交、部署后按原有授权验证四组件、七家差量与 Read。
-- 0.26.2 今日 Arena 有限复测 4/4 PASS，昨日失败记录保留；不承诺凭据波动根治。部署前 Read cluster/direct 各 6×5 全部 200：cluster full catalog p50 147.73ms、direct 1028.28ms，direct health 440.85ms。n=5 仅时点对照，Redis/网络根因仍待确认，不迁移 Redis/PV、不新增/更换 Key，Qwen 排除。
+- **已提交部署并验收**：Source `2388687`、[CI 37165657001](https://github.com/Prodigalgal/any2api/actions/runs/37165657001) success、GitOps `b66f59a` Synced/Healthy，四组件 Ready/restart=0，两个 Automation installed/API 0.26.3。Backend 482 passed / 5 条件 skipped，Automation 508 passed，Web/版本/JAR 门禁、Security/PG HTTP fixture SDK 12+8 组通过。
+- 七家所选模型差量各 4/4、28/28 PASS，Arena 本轮通过，昨日失败独立保留。MiMo 真实 Codex `view_image → function_call_output(input_image)` 两请求均 completed、读数正确，metadata fallback 仍有提示。后台 16 个逻辑请求、17 次尝试：MiMo Chat 一次 `tool_call_generation_failed` 后换号成功；不将最终成功等同于每次尝试成功。
+- Read 三窗口 cluster/direct 各 6×5 全 200，稳定窗口 cluster 普通 Read p50 87–96ms、全目录 159.50ms；direct 全目录 1587.26ms且 health 有 1899.83ms 样本，性能未普遍改善。Redis 跨节点往返 p50 77.155ms 对同节点 0.130ms，Hikari pending=0。n=5 仅时点对照，历史 3s 超时、WAN/大目录、Arena/上游生成波动和 Cloudflare 自身错误仍有遗留；不迁移 Redis/PV、不新增/更换 Key，Qwen 排除。[完整验证、风险与回滚](../docs/reports/REDIS_CACHE_COORDINATION_2026-10-04.md)。
 
 ## 2026-10-03 统一 OpenAI 客户端契约补齐（0.26.0 → 0.26.2）
 

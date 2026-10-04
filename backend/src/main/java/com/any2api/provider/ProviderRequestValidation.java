@@ -8,6 +8,9 @@ import java.util.Set;
 import tools.jackson.databind.JsonNode;
 
 public final class ProviderRequestValidation {
+    private static final Set<String> NULLABLE_GENERATION_PARAMETERS = Set.of(
+        "temperature", "top_p", "max_tokens", "max_completion_tokens", "max_output_tokens",
+        "reasoning", "reasoning_effort", "stop", "seed", "presence_penalty", "frequency_penalty");
     private static final Set<String> CHAT_PLATFORM_PARAMETERS = Set.of(
         "model", "messages", "stream", "provider_options", "response_format",
         "stream_options", "metadata", "store", "prompt_cache_key", "safety_identifier", "user", "service_tier");
@@ -493,6 +496,7 @@ public final class ProviderRequestValidation {
         }
         var unsupported = new java.util.ArrayList<String>();
         request.rawRequest().propertyNames().forEach(field -> {
+            if (NULLABLE_GENERATION_PARAMETERS.contains(field) && request.rawRequest().path(field).isNull()) return;
             if (!supported.contains(field)) unsupported.add(field);
         });
         if (!unsupported.isEmpty()) {

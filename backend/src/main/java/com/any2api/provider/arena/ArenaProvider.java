@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.ProviderTransportMode;
@@ -52,7 +53,8 @@ public final class ArenaProvider implements InferenceProvider {
             "web_search", ProviderProtocolContract.OptionType.BOOLEAN),
         Set.of("web_search", "tools", "tool_choice", "parallel_tool_calls"),
         Set.of("web_search", "tools", "tool_choice", "parallel_tool_calls"),
-        Set.of("function"));
+        Set.of("function")).withParameterMappings(Map.of(
+            "search", WebParameterAdaptation.mapped("modality=search")));
 
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "arena",

@@ -10,6 +10,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
@@ -41,7 +42,9 @@ public final class LongcatProvider implements InferenceProvider {
         Set.of(
             "reasoning", "reasoning_effort", "agent_id", "reason_enabled", "search_enabled",
             "tools", "tool_choice", "parallel_tool_calls"),
-        Set.of("function"));
+        Set.of("function")).withParameterMappings(Map.of(
+            "reasoning", WebParameterAdaptation.toggle("reason_enabled"),
+            "search", WebParameterAdaptation.mapped("search_enabled")));
 
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "longcat", "LongCat", "native-longcat-web-v3", "3",

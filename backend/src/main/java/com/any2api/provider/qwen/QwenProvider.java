@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.ProviderTransportMode;
@@ -49,7 +50,14 @@ public final class QwenProvider implements InferenceProvider {
             "max_output_tokens", "reasoning", "reasoning_effort", "thinking_mode",
             "enable_thinking", "thinking_budget", "web_search", "enable_search", "search",
             "tools", "tool_choice", "parallel_tool_calls"),
-        Set.of("function", "web_search", "web_search_preview", "search"));
+        Set.of("function", "web_search", "web_search_preview", "search")).withParameterMappings(Map.of(
+            "temperature", WebParameterAdaptation.mapped("temperature"),
+            "top_p", WebParameterAdaptation.mapped("top_p"),
+            "max_tokens", WebParameterAdaptation.mapped("max_tokens"),
+            "max_completion_tokens", WebParameterAdaptation.mapped("max_tokens"),
+            "max_output_tokens", WebParameterAdaptation.mapped("max_tokens"),
+            "reasoning", WebParameterAdaptation.mapped("messages[].feature_config.thinking_enabled/thinking_mode/thinking_budget"),
+            "search", WebParameterAdaptation.mapped("messages[].feature_config.auto_search")));
     private final OfficialBrowserTransportClient transport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;

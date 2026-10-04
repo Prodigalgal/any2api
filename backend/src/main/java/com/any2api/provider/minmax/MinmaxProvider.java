@@ -11,6 +11,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.RandomModelRole;
@@ -43,7 +44,8 @@ public final class MinmaxProvider implements InferenceProvider {
             "worktree_mode", ProviderProtocolContract.OptionType.BOOLEAN),
         java.util.Set.of("reasoning", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls"),
         java.util.Set.of("reasoning", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls"),
-        java.util.Set.of("function"));
+        java.util.Set.of("function")).withParameterMappings(Map.of(
+            "reasoning", WebParameterAdaptation.toggle("model.variant")));
 
     private final OfficialBrowserTransportClient transport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;

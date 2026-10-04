@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.ProviderTransportMode;
@@ -46,7 +47,9 @@ public final class DeepseekProvider implements InferenceProvider {
         Set.of(
             "reasoning", "reasoning_effort", "enable_thinking",
             "web_search", "enable_search", "search", "tools", "tool_choice", "parallel_tool_calls"),
-        Set.of("function", "web_search", "web_search_preview", "search"));
+        Set.of("function", "web_search", "web_search_preview", "search")).withParameterMappings(Map.of(
+            "reasoning", WebParameterAdaptation.toggle("thinking_enabled"),
+            "search", WebParameterAdaptation.mapped("search_enabled")));
 
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "deepseek", "DeepSeek", "native-deepseek-web-v2.3", "2",

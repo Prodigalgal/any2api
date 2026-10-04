@@ -20,6 +20,49 @@ class MimoProtocolTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void turnsTheExactWebLengthRejectionIntoOneRequestFailureAcrossChunkBoundaries() {
+        var rejection = "Sorry, the text you sent is too long! I suggest you simplify the content "
+            + "appropriately or send it in parts. Thank you for your understanding.";
+        for (var chunkSize : List.of(1, 7, 37, rejection.length())) {
+            for (var required : List.of(false, true)) {
+                var decoder = new MimoEventDecoder("length", List.of(), required, true, "messages");
+                var events = new java.util.ArrayList<CanonicalEvent>();
+                for (var offset = 0; offset < rejection.length(); offset += chunkSize) {
+                    var chunk = rejection.substring(offset, Math.min(rejection.length(), offset + chunkSize));
+                    events.addAll(decoder.decode(mapper.writeValueAsString(
+                        Map.of("type", "text", "content", chunk))));
+                }
+                events.addAll(decoder.finish());
+                assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.OutputTextDelta
+                    || event instanceof CanonicalEvent.Completed);
+                var failures = events.stream().filter(CanonicalEvent.Failed.class::isInstance)
+                    .map(CanonicalEvent.Failed.class::cast).toList();
+                assertThat(failures).hasSize(1);
+                assertThat(failures.getFirst().errorType()).isEqualTo("context_length_exceeded");
+                assertThat(failures.getFirst().detail()).containsEntry("param", "messages")
+                    .containsEntry("retryable", false);
+                assertThat(decoder.finish()).isEmpty();
+                assertThat(decoder.decode("[DONE]")).isEmpty();
+            }
+        }
+    }
+
+    @Test
+    void doesNotMisclassifyAnAnswerQuotingOrExtendingTheRejection() {
+        for (var answer : List.of("Sorry, the text you sent is too long! This is an example sentence.",
+            "The service can return: Sorry, the text you sent is too long!", "Sorry, today I cannot help.")) {
+            var decoder = new MimoEventDecoder("answer", List.of(), false, true);
+            var events = new java.util.ArrayList<>(decoder.decode(mapper.writeValueAsString(
+                Map.of("type", "text", "content", answer))));
+            events.addAll(decoder.finish());
+            assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
+            assertThat(events.stream().filter(CanonicalEvent.OutputTextDelta.class::isInstance)
+                .map(CanonicalEvent.OutputTextDelta.class::cast).map(CanonicalEvent.OutputTextDelta::delta)
+                .collect(java.util.stream.Collectors.joining())).isEqualTo(answer);
+        }
+    }
+
+    @Test
     void mapsResponsesInputAndDecodesReasoningTextAndUsage() {
         var raw = mapper.createObjectNode().put("model", "mimo/mimo-v2.5-pro");
         raw.putArray("input").add(mapper.createObjectNode().put("role", "user")

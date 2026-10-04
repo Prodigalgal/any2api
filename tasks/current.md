@@ -1,7 +1,15 @@
-# 当前任务板（源码 0.26.3）
+# 当前任务板（源码 0.27.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-04 逐厂商 WEB 参数映射与输入边界（0.27.0）
+
+- 范围：[执行规格](../docs/requirements/WEB_PROVIDER_PARAMETER_ADAPTATION.md)。按用户批准逐厂商核对 native 字段、单参数探测、WEB 输入限制及 Xiaomi 桌面端自动引导；Qwen 仍只有代码证据。
+- 参数声明回归各 Provider 的 `ProviderProtocolContract.parameterMappings`，模型详情提供 `parameter_adaptation`；目录不重复大表，v6 cache 使用当前 adapter 能力并保留 discovery / overrides。
+- 已知可选 null generation 当作缺省；MiMo 完整 Unicode schema 无损压缩、空白片段保留、固定长度拒绝变为非重试 OpenAI 错误，不换号/熔断；GLM 正整数输出上限预校验。
+- tools/skills 原生字段追加探测：MiMo 6 个候选位置未见生效，query 两个正向对照有效；DeepSeek/LongCat/Grok 当前通道未见独立字段生效。厂商 Agent/MCP 安装配置与调用方 function 执行边界分别核对，不把 HTTP 200 或前端渲染字段当作原生支持。
+- 本地 Backend 492 passed / 5 skipped、Automation 509 passed、Web lint/build、统一 0.27.0/JAR 通过；已核对七家 38 项参数/输入案例和有限长输入，发布及上线后差量验收继续推进。完整边界、历史 Arena 说明核对和桌面请求组成见[报告](../docs/reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 
 ## 2026-10-04 Redis 缓存等待与协调错误收敛（0.26.3）
 

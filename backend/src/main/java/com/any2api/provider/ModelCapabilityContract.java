@@ -19,7 +19,8 @@ public record ModelCapabilityContract(
     List<String> reasoningLevels,
     ToolSupport tools,
     boolean streaming,
-    MultimodalSupport multimodal
+    MultimodalSupport multimodal,
+    Map<String, Object> parameterAdaptation
 ) {
     private static final ObjectMapper METADATA_MAPPER = new ObjectMapper();
     private static final List<String> STANDARD_REASONING_LEVELS =
@@ -31,6 +32,7 @@ public record ModelCapabilityContract(
                 java.util.stream.Collectors.toUnmodifiableMap(
                     Map.Entry::getKey, entry -> List.copyOf(entry.getValue())));
         providerOptions = providerOptions == null ? Map.of() : Map.copyOf(providerOptions);
+        parameterAdaptation = parameterAdaptation == null ? Map.of() : Map.copyOf(parameterAdaptation);
         reasoningLevels = reasoningLevels == null ? List.of() : List.copyOf(reasoningLevels);
         tools = tools == null ? new ToolSupport(false, List.of(), false) : tools;
         multimodal = multimodal == null
@@ -78,13 +80,14 @@ public record ModelCapabilityContract(
                 protocol.chatParameters().contains("parallel_tool_calls")
                     || protocol.responsesParameters().contains("parallel_tool_calls")),
             supported(manifest, ProviderCapability.STREAMING),
-            new MultimodalSupport(input, output));
+            new MultimodalSupport(input, output), WebParameterAdaptation.describe(protocol, model.metadata()));
     }
 
     public Map<String, Object> asMap() {
         var value = new LinkedHashMap<String, Object>();
         value.put("supported_parameters", supportedParameters);
         value.put("provider_options", providerOptions);
+        value.put("parameter_adaptation", parameterAdaptation);
         value.put("max_context_tokens", maxContextTokens);
         value.put("max_input_tokens", maxInputTokens);
         value.put("max_output_tokens", maxOutputTokens);
@@ -123,7 +126,7 @@ public record ModelCapabilityContract(
         return new ModelCapabilityContract(
             supportedParameters, providerOptions, maxContextTokens, maxInputTokens,
             maxOutputTokens, reasoning, reasoningLevels, tools, streaming,
-            new MultimodalSupport(input, multimodal.output()));
+            new MultimodalSupport(input, multimodal.output()), parameterAdaptation);
     }
 
     public ModelCapabilityContract withoutInputMedia(String mediaType) {
@@ -136,7 +139,7 @@ public record ModelCapabilityContract(
         return new ModelCapabilityContract(
             supportedParameters, providerOptions, maxContextTokens, maxInputTokens,
             maxOutputTokens, reasoning, reasoningLevels, tools, streaming,
-            new MultimodalSupport(input, multimodal.output()));
+            new MultimodalSupport(input, multimodal.output()), parameterAdaptation);
     }
 
     private static boolean supported(ProviderManifest manifest, ProviderCapability capability) {

@@ -68,6 +68,32 @@ def test_mimo_builds_provider_body_from_semantic_command() -> None:
     }
 
 
+def test_mimo_tool_contract_keeps_unicode_and_full_schema_without_escape_expansion() -> None:
+    command = _semantic_command()
+    description = "完整中文工具说明" * 200
+    parameters = {
+        "type": "object",
+        "properties": {"城市": {"type": "string"}},
+        "required": ["城市"],
+    }
+    command["tools"] = [
+        {
+            "type": "function",
+            "function": {
+                "name": "city_lookup",
+                "description": description,
+                "parameters": parameters,
+            },
+        }
+    ]
+    query = build_mimo_chat_request(command)["query"]
+    definitions = json.loads(query.split("<tools>", 1)[1].split("</tools>", 1)[0])
+    assert definitions == [
+        {"name": "city_lookup", "description": description, "parameters": parameters}
+    ]
+    assert "\\u57ce" not in query
+
+
 def test_mimo_media_is_validated_before_browser_upload() -> None:
     source = "data:image/png;base64,aW1hZ2U="
     command = _semantic_command()

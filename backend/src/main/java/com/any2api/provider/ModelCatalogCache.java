@@ -20,6 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ModelCatalogCache {
+    private final ProviderRegistry providers;
     private volatile DecodedCatalog decodedCatalog;
     private static final String MODEL_QUERY = """
         WITH eligible_accounts AS MATERIALIZED (
@@ -149,14 +150,16 @@ public class ModelCatalogCache {
         JdbcClient jdbc,
         ObjectMapper mapper,
         ReactiveStringRedisTemplate redis,
-        Any2ApiProperties properties
+        Any2ApiProperties properties,
+        ProviderRegistry providers
     ) {
         this.jdbc = jdbc;
         this.mapper = mapper;
+        this.providers = providers;
         var policy = properties.getCache().getModelCatalog();
         // Isolate compressed snapshots from older processes during rolling releases.
         this.cache = new LayeredJsonCache(
-            redis, "any2api:cache:model-catalog:v5", policy.getLocalTtl(),
+            redis, "any2api:cache:model-catalog:v6", policy.getLocalTtl(),
             policy.getRedisTtl(), policy.getMaximumEntries(), properties.getCache().getRedisAccessTimeout());
         this.healthWindow = properties.getModelRuntime().getHealthWindow();
         this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
@@ -230,13 +233,21 @@ public class ModelCatalogCache {
         var maxContextTokensOverride = nullableLong(result, "max_context_tokens_override");
         var maxInputTokensOverride = nullableLong(result, "max_input_tokens_override");
         var maxOutputTokensOverride = nullableLong(result, "max_output_tokens_override");
+        var providerId = result.getString("provider_id");
+        var upstreamId = result.getString("upstream_id");
+        var displayName = result.getString("display_name");
+        var metadata = readJson(result.getString("metadata"));
+        var currentCapabilities = mapper.valueToTree(providers.requirePlugin(providerId)
+            .modelContract(new DiscoveredModel(upstreamId, displayName, mapper.convertValue(metadata,
+                new tools.jackson.core.type.TypeReference<java.util.Map<String, Object>>() { })))
+            .asMap());
         return new Entry(
-            result.getString("upstream_id"),
-            result.getString("display_name"),
-            result.getString("provider_id"),
+            upstreamId,
+            displayName,
+            providerId,
             result.getString("provider_name"),
             effectiveCapabilities(
-                discoveredCapabilities,
+                currentCapabilities,
                 maxContextTokensOverride,
                 maxInputTokensOverride,
                 maxOutputTokensOverride),
@@ -245,7 +256,7 @@ public class ModelCatalogCache {
             maxInputTokensOverride,
             maxOutputTokensOverride,
             result.getString("catalog_source"),
-            readJson(result.getString("metadata")),
+            metadata,
             List.of((String[]) result.getArray("random_roles").getArray()),
             fetchedAt == null ? Instant.now().getEpochSecond() : fetchedAt.toEpochSecond(),
             result.getBoolean("available"),

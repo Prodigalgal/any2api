@@ -14,7 +14,8 @@ public record ProviderProtocolContract(
     Set<String> chatParameters,
     Set<String> responsesParameters,
     Set<String> toolTypes,
-    Set<String> reasoningParameters
+    Set<String> reasoningParameters,
+    Map<String, Map<String, Object>> parameterMappings
 ) {
     public ProviderProtocolContract {
         providerOptions = providerOptions == null ? Map.of()
@@ -23,6 +24,23 @@ public record ProviderProtocolContract(
         responsesParameters = immutable(responsesParameters);
         toolTypes = immutable(toolTypes);
         reasoningParameters = immutable(reasoningParameters);
+        parameterMappings = parameterMappings == null ? Map.of() : parameterMappings.entrySet().stream()
+            .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> Map.copyOf(entry.getValue())));
+    }
+
+    public ProviderProtocolContract(
+        Map<String, OptionType> providerOptions,
+        Set<String> chatParameters,
+        Set<String> responsesParameters,
+        Set<String> toolTypes,
+        Set<String> reasoningParameters
+    ) {
+        this(providerOptions, chatParameters, responsesParameters, toolTypes, reasoningParameters, Map.of());
+    }
+
+    public ProviderProtocolContract withParameterMappings(Map<String, Map<String, Object>> mappings) {
+        return new ProviderProtocolContract(providerOptions, chatParameters, responsesParameters,
+            toolTypes, reasoningParameters, mappings);
     }
 
     public static ProviderProtocolContract strict() {

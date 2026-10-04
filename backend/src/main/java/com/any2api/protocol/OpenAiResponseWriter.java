@@ -572,7 +572,7 @@ public class OpenAiResponseWriter {
                 : Set.of("account_unavailable", "model_unavailable", CoordinationUnavailableException.CODE)
                     .contains(failure.errorType())
                     ? HttpStatus.SERVICE_UNAVAILABLE
-                    : Set.of("invalid_request_error", "invalid_request", "unsupported_parameter",
+                    : Set.of("invalid_request_error", "invalid_request", "context_length_exceeded", "unsupported_parameter",
                         "unknown_provider_option", "parameter_conflict")
                         .contains(failure.errorType())
                         ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY;
@@ -725,7 +725,8 @@ public class OpenAiResponseWriter {
     ) {
         var detail = failure.detail() == null ? Map.<String, Object>of() : failure.detail();
         var error = mapper.createObjectNode()
-            .put("type", failure.errorType())
+            .put("type", "context_length_exceeded".equals(failure.errorType())
+                ? "invalid_request_error" : failure.errorType())
             .put("code", failure.errorType())
             .put("message", failure.message())
             .put("retryable", retryable(failure, detail))

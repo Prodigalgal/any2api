@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
@@ -45,7 +46,14 @@ public final class MimoProvider implements InferenceProvider {
             "temperature", "top_p", "max_tokens", "max_completion_tokens",
             "max_output_tokens", "reasoning", "reasoning_effort", "thinking",
             "web_search_status", "tools", "tool_choice", "parallel_tool_calls"),
-        java.util.Set.of("function"));
+        java.util.Set.of("function")).withParameterMappings(Map.of(
+            "temperature", WebParameterAdaptation.mapped("modelConfig.temperature"),
+            "top_p", WebParameterAdaptation.mapped("modelConfig.topP"),
+            "max_tokens", WebParameterAdaptation.nonBindingOutputLimit(),
+            "max_completion_tokens", WebParameterAdaptation.nonBindingOutputLimit(),
+            "max_output_tokens", WebParameterAdaptation.nonBindingOutputLimit(),
+            "reasoning", WebParameterAdaptation.toggle("modelConfig.enableThinking"),
+            "search", WebParameterAdaptation.mapped("modelConfig.webSearchStatus")));
     private final OfficialBrowserTransportClient officialTransport;
     private final OfficialBrowserSemanticCommandFactory semanticCommands;
     private final ProxyPoolService proxyPools;
@@ -210,7 +218,7 @@ public final class MimoProvider implements InferenceProvider {
                 requestId,
                 prepared.tools(),
                 prepared.toolRequired(),
-                prepared.parallelToolCalls());
+                prepared.parallelToolCalls(), inputParameter(semanticCommand));
             var status = new java.util.concurrent.atomic.AtomicInteger(-1);
             var upstream = context.transportMode() == ProviderTransportMode.API
                 ? officialTransport.stream(
@@ -271,6 +279,11 @@ public final class MimoProvider implements InferenceProvider {
     private Map<String, Object> proxyPool() {
         return proxyPools.runtimeForProvider(manifest().id(), ProxyTrafficScope.INFERENCE)
             .orElse(Map.of());
+    }
+
+    private static String inputParameter(JsonNode semanticCommand) {
+        return "CHAT_COMPLETIONS".equals(semanticCommand.path("protocol").asText())
+            ? "messages" : "input";
     }
 
     private static String proxyAffinityKey(LeasedProviderAccount account) {

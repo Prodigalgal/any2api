@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
@@ -50,7 +51,14 @@ public final class GlmProvider implements InferenceProvider {
             "temperature", "top_p", "max_tokens", "max_completion_tokens",
             "max_output_tokens", "reasoning", "reasoning_effort", "web_search",
             "preview_mode", "tools", "tool_choice", "parallel_tool_calls"),
-        java.util.Set.of("function"));
+        java.util.Set.of("function")).withParameterMappings(Map.of(
+            "temperature", WebParameterAdaptation.mapped("params.temperature"),
+            "top_p", WebParameterAdaptation.mapped("params.top_p"),
+            "max_tokens", WebParameterAdaptation.mapped("params.max_tokens"),
+            "max_completion_tokens", WebParameterAdaptation.mapped("params.max_tokens"),
+            "max_output_tokens", WebParameterAdaptation.mapped("params.max_tokens"),
+            "reasoning", WebParameterAdaptation.mapped("features.enable_thinking/features.reasoning_effort"),
+            "search", WebParameterAdaptation.mapped("features.auto_web_search")));
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "glm", "GLM", "official-browser-z-ai-web-v1", "3", List.of("glm-5.3", "glm-5.2", "glm-4-flash"), Map.of(
             ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
@@ -126,6 +134,8 @@ public final class GlmProvider implements InferenceProvider {
 
     @Override
     public void validate(CanonicalRequest request) {
+        ProviderRequestValidation.requirePositiveIntegerParameters(
+            request, "max_tokens", "max_completion_tokens", "max_output_tokens");
         ProviderRequestValidation.requireStringParameters(request, "reasoning_effort");
         ProviderRequestValidation.requireBooleanParameters(
             request, "web_search", "preview_mode");

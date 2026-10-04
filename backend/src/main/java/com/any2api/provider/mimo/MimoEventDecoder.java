@@ -11,6 +11,9 @@ import java.util.regex.Pattern;
 import tools.jackson.databind.ObjectMapper;
 
 final class MimoEventDecoder {
+    private static final String LENGTH_REJECTION = "Sorry, the text you sent is too long! "
+        + "I suggest you simplify the content appropriately or send it in parts. "
+        + "Thank you for your understanding.";
     private static final Set<String> INTERNAL_TOKENS = Set.of(
         "webSearch", "getTime", "getTimeInfo", "sessionSearch", "imageSearch",
         "fileSearch", "getLocation", "webExtract", "getWeather", "calculator");
@@ -32,6 +35,7 @@ final class MimoEventDecoder {
         "TOOL_CALL:\\s*([\\w.-]+)\\s*\\(([^\\n]*)\\)", Pattern.CASE_INSENSITIVE);
 
     private final String requestId;
+    private String inputParameter = "input";
     private final List<MimoTool> tools;
     private final boolean toolRequired;
     private final boolean parallelToolCalls;
@@ -57,16 +61,23 @@ final class MimoEventDecoder {
         this.parallelToolCalls = parallelToolCalls;
     }
 
+    MimoEventDecoder(String requestId, List<MimoTool> tools, boolean toolRequired,
+        boolean parallelToolCalls, String inputParameter) {
+        this(requestId, tools, toolRequired, parallelToolCalls);
+        this.inputParameter = inputParameter;
+    }
+
     List<CanonicalEvent> decode(String data) {
+        if (completed) return List.of();
         var output = start();
         if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) return output;
         try {
             var event = mapper.readTree(data);
             if (event.path("type").asText("").equals("text")) {
                 var text = event.path("content").asText("");
-                if (!text.isBlank() && !INTERNAL_TOKENS.contains(text.trim())) {
+                if (!text.isEmpty() && !INTERNAL_TOKENS.contains(text.trim())) {
                     buffer.append(text.replace("\0", ""));
-                    if (tools.isEmpty()) output.addAll(drain(false));
+                    if (tools.isEmpty() && !pendingLengthRejection()) output.addAll(drain(false));
                 }
             } else if (event.has("promptTokens") && !usageEmitted) {
                 output.add(new CanonicalEvent.Usage(1, requestId, next(),
@@ -82,6 +93,14 @@ final class MimoEventDecoder {
     List<CanonicalEvent> finish() {
         if (completed) return List.of();
         var output = start();
+        if (buffer.toString().trim().equals(LENGTH_REJECTION)) {
+            output.add(new CanonicalEvent.Failed(1, requestId, next(), "context_length_exceeded",
+                "MiMo Web rejected the combined instructions, messages and tool definitions as too long",
+                java.util.Map.of("param", inputParameter, "retryable", false, "status", 400)));
+            buffer.setLength(0);
+            completed = true;
+            return output;
+        }
         if (tools.isEmpty()) {
             output.addAll(drain(true));
         } else {
@@ -122,6 +141,11 @@ final class MimoEventDecoder {
             emittedCalls.isEmpty() ? "stop" : "tool_calls"));
         completed = true;
         return output;
+    }
+
+    private boolean pendingLengthRejection() {
+        var received = buffer.toString().strip();
+        return !emittedAnswer && !reasoning && LENGTH_REJECTION.startsWith(received);
     }
 
     private List<CanonicalEvent> drain(boolean flush) {

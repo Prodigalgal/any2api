@@ -15,6 +15,29 @@ class ProviderRequestValidationTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void treatsNullKnownOptionalControlsAsAbsentButStillRejectsValuesAndUnknownFields() {
+        for (var protocol : CanonicalRequest.Protocol.values()) {
+            var raw = mapper.createObjectNode().put("model", "model");
+            raw.putNull("temperature").putNull("max_output_tokens").putNull("reasoning_effort");
+            var message = mapper.createObjectNode().put("role", "user").put("content", "hello");
+            var request = new CanonicalRequest("null-controls", protocol, "guarded", "model", false,
+                List.of(message), Map.of(), Map.of(), List.of(), Map.of(), raw);
+            var manifest = manifest(Map.of(ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
+                ProviderCapability.RESPONSES, SupportLevel.NATIVE));
+            assertThatCode(() -> ProviderRequestValidation.requireSupportedRequest(
+                request, manifest, ProviderProtocolContract.strict())).doesNotThrowAnyException();
+            raw.put("max_output_tokens", 128);
+            assertThatThrownBy(() -> ProviderRequestValidation.requireSupportedRequest(
+                request, manifest, ProviderProtocolContract.strict())).isInstanceOf(OpenAiRequestException.class)
+                .hasMessageContaining("max_output_tokens");
+            raw.putNull("max_output_tokens").putNull("made_up_option");
+            assertThatThrownBy(() -> ProviderRequestValidation.requireSupportedRequest(
+                request, manifest, ProviderProtocolContract.strict())).isInstanceOf(OpenAiRequestException.class)
+                .hasMessageContaining("made_up_option");
+        }
+    }
+
+    @Test
     void rejectsImageBlocksBeforeAnUnsupportedProviderCanDropThem() {
         var request = requestWith("image_url");
         var manifest = manifest(Map.of());

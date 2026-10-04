@@ -1,6 +1,6 @@
 # 文档入口
 
-本页区分源码契约、历史决策和带日期的运行态证据。仓库中的 `0.24.4` 版本号只说明
+本页区分源码契约、历史决策和带日期的运行态证据。仓库中的 `0.27.0` 版本号只说明
 当前 checkout 的源码版本；CI 通过、镜像发布、GitOps 同步及生产就绪需要各自核验。
 
 ## 当前源码与开发
@@ -14,6 +14,8 @@
 - [当前任务板](../tasks/current.md)：当前源码基线、只读核验结果和待处理事项；旧版本记录已归档。
 
 ## 决策、验收与排查
+
+- [2026-10-04 WEB 参数、上下文与桌面端](reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)记录原生字段映射、七家有限输入边界、Arena 历史默认值核对和 Xiaomi 大请求来源。
 
 - [ADR-0007](adr/0007-action-channel-boundaries.md) 和
   [ADR-0009](adr/0009-provider-api-channel-rollout.md)记录 Action/Channel 决策及当时的 rollout 范围；

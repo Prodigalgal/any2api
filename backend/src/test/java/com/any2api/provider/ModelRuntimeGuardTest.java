@@ -87,7 +87,7 @@ class ModelRuntimeGuardTest {
         var guard = new ModelRuntimeGuard(properties, new SimpleMeterRegistry());
         var request = request();
         for (var errorType : List.of("invalid_request", "unsupported_parameter",
-                "tool_call_generation_failed", "invalid_request_error")) {
+                "tool_call_generation_failed", "invalid_request_error", "context_length_exceeded")) {
             for (var attempt = 0; attempt < 3; attempt++) {
                 StepVerifier.create(guard.execute(request, ignored -> Flux.just(
                     new CanonicalEvent.Failed(1, request.requestId(), 0, errorType, "invalid", Map.of()))))

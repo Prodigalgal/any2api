@@ -657,7 +657,7 @@ def _tool_prompt(tools: list[Any], parallel: bool, required: bool) -> str:
     requirement = "You must call at least one declared function.\n" if required else ""
     return (
         "You can call the functions below. Their JSON Schemas are authoritative.\n<tools>"
-        + json.dumps(definitions, ensure_ascii=True, separators=(",", ":"))
+        + json.dumps(definitions, ensure_ascii=False, separators=(",", ":"))
         + "</tools>\n"
         + f"Parallel calls allowed: {str(parallel).lower()}.\n"
         + requirement

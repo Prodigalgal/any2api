@@ -35,7 +35,8 @@ class ModelsControllerTest {
         when(manifest.id()).thenReturn("mimo");
         when(registry.list()).thenReturn(List.of(manifest));
         var mapper = new ObjectMapper();
-        var capabilities = mapper.readTree("{\"tools\":{\"function_calling\":true,\"strict\":true},\"streaming\":true}");
+        var capabilities = mapper.readTree("{\"tools\":{\"function_calling\":true,\"strict\":true},\"streaming\":true,"
+            + "\"parameter_adaptation\":{\"top_p\":{\"mode\":\"mapped\",\"target\":\"modelConfig.topP\"}}}");
         var entry = new ModelCatalogCache.Entry("group/model", "Fixture", "mimo", "MiMo", capabilities,
             capabilities, null, null, null, "fixture", mapper.createObjectNode(), List.of(), 1, true, "READY",
             1, 1, 0, 0, 0, 1.0, 0, 0, null, null, "PASSED", null, null);
@@ -57,10 +58,23 @@ class ModelsControllerTest {
             client.get().uri(URI.create(uri)).exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.object").isEqualTo("model").jsonPath("$.id").isEqualTo("mimo/group/model")
                 .jsonPath("$.owned_by").isEqualTo("mimo").jsonPath("$.capabilities.tools.strict").isEqualTo(true)
-                .jsonPath("$.available").isEqualTo(true).jsonPath("$.runtime.status").isEqualTo("READY");
+                .jsonPath("$.available").isEqualTo(true).jsonPath("$.runtime.status").isEqualTo("READY")
+                .jsonPath("$.parameter_adaptation.top_p.target").isEqualTo("modelConfig.topP");
         }
         client.get().uri(URI.create("/mimo/v1/models/group%2Fmodel")).exchange().expectStatus().isOk()
             .expectBody().jsonPath("$.id").isEqualTo("group/model");
+    }
+
+    @Test
+    void listsKeepExistingCapabilitiesWithoutRepeatingDetailedAdapterMappings() {
+        for (var uri : List.of("/v1/models", "/mimo/v1/models")) {
+            client.get().uri(uri).exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$.data[0].capabilities.tools.strict").isEqualTo(true)
+                .jsonPath("$.data[0].parameter_adaptation").doesNotExist()
+                .jsonPath("$.data[0].capabilities.parameter_adaptation").doesNotExist();
+        }
+        client.get().uri("/v1/models/mimo/group/model").exchange().expectStatus().isOk().expectBody()
+            .jsonPath("$.capabilities.parameter_adaptation.top_p.target").isEqualTo("modelConfig.topP");
     }
 
     @Test

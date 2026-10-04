@@ -175,7 +175,7 @@ public final class ModelRuntimeGuard {
                 if (!finished.compareAndSet(false, true)) return;
                 var duration = System.nanoTime() - startedAt;
                 var error = failure.get();
-                if (cancelled.get() || java.util.Set.of("invalid_request_error", "invalid_request",
+                if (cancelled.get() || java.util.Set.of("invalid_request_error", "invalid_request", "context_length_exceeded",
                         "unsupported_parameter", "tool_call_generation_failed", CoordinationUnavailableException.CODE)
                         .contains(error == null ? "" : error)) {
                     entry.circuit.releasePermission();

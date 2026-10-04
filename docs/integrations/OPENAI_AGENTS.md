@@ -41,6 +41,12 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 ## 常用 API
 
+0.27.0 候选的逐厂商参数映射、真实 WEB 输入边界和 Xiaomi 桌面端大请求排查见
+[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。选定模型后读取
+`models.retrieve(model).parameter_adaptation`，不要把 1M/128K 的客户端配置或官方付费 API
+规格当作 WEB 限制。WEB 没有等价控制的显式参数仍会拒绝；null 可选 generation 字段视为缺省。
+MiMo 长输入拒绝会返回 `context_length_exceeded`，已提交流则以失败终态结束，不能把拒绝文本当作成功。
+
 主要入口为 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`。`messages` / `input` 和多轮历史由调用方提供；工具输出按 call_id 回传。Responses 也可使用已实现的 `store:true` / `previous_response_id` 续接，无需厂商 WEB 提供同名资源接口。
 
 调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环、0.26.3 无参数差量七家各 4/4 已实测通过；0.26.2 的 Arena 认证失败独立保留，不能以新一轮通过保证账号永久稳定。结果范围、运行态与剩余默认值差异见验收报告。

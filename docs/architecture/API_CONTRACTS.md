@@ -180,6 +180,21 @@ queue or account acquisition when a model is marked unavailable.
 
 Each model publishes a machine-readable contract and runtime snapshot:
 
+Since 0.27.0, model **retrieval** also returns `parameter_adaptation` (at the root and in
+`capabilities`). Provider-owned mappings distinguish native target fields, boolean thinking
+toggles, configured non-binding output limits and unsupported controls. Detailed mappings are
+not repeated across model list entries. `evidence:adapter_mapping` describes code, not a live
+effectiveness guarantee. `input.limit` with `unit:provider_characters` is separate from token
+limits; unknown WEB input/context boundaries remain unknown. See the [dated parameter/input
+report](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md).
+
+Known optional generation controls with JSON `null` behave as omitted; unknown fields and
+explicit unsupported values still fail before generation. A MiMo fixed input-too-long refusal
+becomes non-retryable `context_length_exceeded`: non-streaming HTTP 400 with
+`type:invalid_request_error`, or the protocol failure terminal after SSE has started. This is a
+request failure, not a credential failure or model circuit signal. No history/tools are silently
+discarded to fit WEB limits.
+
 ```json
 {
   "id": "acme/acme-ultra",

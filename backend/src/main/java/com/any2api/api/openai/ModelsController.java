@@ -45,7 +45,7 @@ public class ModelsController {
             "data", models.stream()
                 .filter(model -> enabledProviders.contains(model.providerId()))
                 .filter(model -> grant.allowsModel(model.providerId(), model.id()))
-                .map(model -> response(model, true))
+                .map(model -> response(model, true, false))
                 .toList()));
     }
 
@@ -64,7 +64,7 @@ public class ModelsController {
             "data", models.stream()
                 .filter(model -> model.providerId().equals(providerId))
                 .filter(model -> grant.allowsModel(model.providerId(), model.id()))
-                .map(model -> response(model, false))
+                .map(model -> response(model, false, false))
                 .toList()));
     }
 
@@ -92,11 +92,11 @@ public class ModelsController {
                 ? modelId.equals(model.providerId() + "/" + model.id())
                 : providerId.equals(model.providerId()) && modelId.equals(model.id()))
             .findFirst())
-            .map(model -> response(model, providerId == null))
+            .map(model -> response(model, providerId == null, true))
             .switchIfEmpty(Mono.error(new com.any2api.protocol.ModelNotFoundException())));
     }
 
-    private Map<String, Object> response(ModelCatalogCache.Entry model, boolean namespaced) {
+    private Map<String, Object> response(ModelCatalogCache.Entry model, boolean namespaced, boolean detailed) {
         var result = new LinkedHashMap<String, Object>();
         result.put("id", namespaced ? model.providerId() + "/" + model.id() : model.id());
         result.put("object", "model");
@@ -107,9 +107,17 @@ public class ModelsController {
         result.put("cataloged", true);
         result.put("available", model.available()
             && runtimeGuard.callable(model.providerId(), model.id()));
-        result.put("capabilities", model.capabilities());
+        var capabilities = model.capabilities();
+        if (!detailed && capabilities.isObject()) {
+            // Provider mappings are fetched once for the selected model, not repeated across large catalogs.
+            var summary = (tools.jackson.databind.node.ObjectNode) capabilities.deepCopy();
+            summary.remove("parameter_adaptation");
+            capabilities = summary;
+        }
+        result.put("capabilities", capabilities);
         result.put("supported_parameters", model.capabilities().path("supported_parameters"));
         result.put("provider_options", model.capabilities().path("provider_options"));
+        if (detailed) result.put("parameter_adaptation", model.capabilities().path("parameter_adaptation"));
         result.put("max_context_tokens", nullable(model.capabilities(), "max_context_tokens"));
         result.put("max_input_tokens", nullable(model.capabilities(), "max_input_tokens"));
         result.put("max_output_tokens", nullable(model.capabilities(), "max_output_tokens"));

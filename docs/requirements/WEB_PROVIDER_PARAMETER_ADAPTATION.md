@@ -12,6 +12,15 @@
 
 ## 范围
 
+### 0.27.4 上线验收发现的回放与传输修复
+
+- 目标：0.27.3 七家完整 SDK 首轮 47/49；GLM 首帧前 `provider_transport_error` 的原请求单独重试通过，Grok 原请求及单独重试均遗漏技能要求的业务字段。保留原失败，完成修复及差量验收后发布 0.27.4。
+- 范围：Grok WEB 完整历史的角色、历史结束与下一 assistant 回复边界；共享内部 HTTP 连接池的空闲连接回收与 Spring 生命周期。已核实 Automation Uvicorn 0.51.0 默认 keep-alive 为 5s，当前客户端 max idle 为 30s；配置不匹配属于已知风险，不能将其直接认定为这次提前关闭的唯一根因。
+- 非目标：不裁剪或改写历史、技能、工具定义和结果；不在提示词注入测试答案、不改 strict 校验、公开契约、重试策略、账号/Key、WEB 限制或 DB/Redis 部署。
+- 影响文件：Grok Python WEB builder 与 Java request mapper、`WebClientConfiguration`、对应回归测试、统一版本、接入说明及本报告。
+- 验收：单用户普通提示保持；多角色与完整函数回放顺序、call_id、正文和参数无损；真实 Grok WEB 对失败合成请求的候选回放按原技能返回所有字段。客户端主动回收闲置连接，Spring 关闭释放连接池。七家已有完整证据保留，候选完成相关本地门禁和真实差量后才推送生产，再在新版本核验七家与资源接口。
+- 测试：Grok/容器/历史 Python 回归、Grok mapper Java 与实际本地 HTTP 连接复用/回收测试，Backend test/bootJar、Automation pytest/ruff、Web lint/build、版本/JAR 校验；使用现有账号在隔离进程验证候选 WEB，不持久化凭据补丁。生产记录 CI、GitOps、Pod、SDK、普通 INFERENCE 账本、缓存控制差量、最终模型 guard。
+
 - Arena、MiMo、DeepSeek、LongCat、GLM、Grok Web、MiniMax：逐项核对厂商 WEB 构造字段与官方页面/运行时证据，使用合成内容、单参数变更和有限推理验证。Qwen 沿用此前排除范围，仅检查代码，真实能力标为未验证。
 - 覆盖 temperature、top_p、三个输出 token 上限别名、reasoning/thinking、search、function 控制，以及平台负责的 store/continuation/SSE。区分字段被接受、实际转发、开关映射、网关模拟和不支持；HTTP 200 不作为参数生效的充分证据。
 - 不把客户端填的 1M/128K 或官方付费 API 规格当成 WEB 上限；不默默删除有约束意义的参数。不确定的上限保持未知并给出明确错误。未提供/null 的可选字段不应触发伪兼容错误。

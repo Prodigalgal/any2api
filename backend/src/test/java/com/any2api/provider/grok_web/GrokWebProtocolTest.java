@@ -46,6 +46,37 @@ class GrokWebProtocolTest {
     }
 
     @Test
+    void fullTranscriptContinuesAfterClientToolResultWithoutChangingHistory() {
+        var messages = new java.util.ArrayList<JsonNode>();
+        messages.add(mapper.createObjectNode().put("role", "system").put("content", "文档交付资料-57345.txt"));
+        messages.add(mapper.createObjectNode().put("role", "developer").put("content", "SKILL.md：汇报完整结果"));
+        for (var index = 0; index < 38; index++) {
+            messages.add(mapper.createObjectNode().put("role", index % 2 == 0 ? "user" : "assistant")
+                .put("content", "完整历史-" + index));
+        }
+        var assistant = mapper.createObjectNode().put("role", "assistant").put("content", "正在核验。");
+        assistant.putArray("tool_calls").addObject().put("id", "call_document").put("type", "function")
+            .putObject("function").put("name", "review_document").put("arguments", "{\"batch_number\":\"57345\"}");
+        messages.add(assistant);
+        messages.add(mapper.createObjectNode().put("role", "tool").put("tool_call_id", "call_document")
+            .put("content", "{\"status\":\"已核验\",\"processed_pages\":37}"));
+        var original = mapper.writeValueAsString(messages);
+        var raw = mapper.createObjectNode().put("model", "grok_web/grok-3").put("tool_choice", "none");
+        var request = new CanonicalRequest("id", CanonicalRequest.Protocol.RESPONSES,
+            "grok_web", "grok-3", false, List.copyOf(messages), Map.of(), Map.of(), List.of(), Map.of(), raw);
+
+        var prompt = requestMapper().prepare(request).body().path("message").asText();
+
+        assertThat(prompt).contains("Follow the system and developer instructions", "[system]\n文档交付资料-57345.txt",
+            "[developer]\nSKILL.md：汇报完整结果", "正在核验。", "batch_number", "57345", "Tool result (call_document)", "已核验", "37");
+        for (var index = 0; index < 38; index++) assertThat(prompt).contains("完整历史-" + index);
+        assertThat(prompt.indexOf("完整历史-0")).isLessThan(prompt.indexOf("完整历史-37"));
+        assertThat(prompt.indexOf("Tool result (call_document)")).isLessThan(prompt.indexOf("[End of conversation transcript]"));
+        assertThat(prompt).endsWith("Produce only the next assistant response.").doesNotContain("[Tool calling contract]");
+        assertThat(mapper.writeValueAsString(messages)).isEqualTo(original);
+    }
+
+    @Test
     void streamingJsonObjectsSurviveArbitraryChunkBoundaries() {
         var decoder = new GrokWebEventDecoder(mapper, "request-id");
         var data = ("noise{\"result\":{\"conversation\":{\"conversationId\":\"c1\"}}}"

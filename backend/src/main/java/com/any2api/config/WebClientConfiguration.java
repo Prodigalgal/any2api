@@ -10,20 +10,25 @@ import reactor.netty.resources.ConnectionProvider;
 
 /**
  * Shared HTTP client for internal service calls.
- * Short idle time drops stale ClusterIP connections after pod rollouts;
+ * Idle connections expire before Automation's five-second keep-alive;
  * LifecycleAutomationClient retries one transient DNS/connect failure.
  */
 @Configuration
 public class WebClientConfiguration {
 
-    @Bean
-    public WebClient.Builder webClientBuilder() {
-        var provider = ConnectionProvider.builder("any2api-internal")
+    @Bean(destroyMethod = "dispose")
+    public ConnectionProvider internalConnectionProvider() {
+        return ConnectionProvider.builder("any2api-internal")
             .maxConnections(200)
             .pendingAcquireTimeout(Duration.ofSeconds(10))
-            .maxIdleTime(Duration.ofSeconds(30))
+            .maxIdleTime(Duration.ofSeconds(3))
+            .evictInBackground(Duration.ofSeconds(1))
             .build();
-        var http = HttpClient.create(provider)
+    }
+
+    @Bean
+    public WebClient.Builder webClientBuilder(ConnectionProvider internalConnectionProvider) {
+        var http = HttpClient.create(internalConnectionProvider)
             .responseTimeout(Duration.ofMinutes(15));
         return WebClient.builder()
             .clientConnector(new ReactorClientHttpConnector(http));

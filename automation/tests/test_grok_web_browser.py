@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -150,6 +151,81 @@ def test_grok_web_builds_gateway_command_from_semantic_request() -> None:
     assert "executed by the caller" in request["message"]
     assert request["message"].index("hello") < request["message"].index("Tool calling contract")
     assert request["enableSideBySide"] is False
+
+
+def test_grok_web_continues_after_complete_history_and_client_function_result() -> None:
+    messages = [
+        {"role": "system", "content": "本次文档名称为交付资料-57345.txt。"},
+        {"role": "developer", "content": "SKILL.md：汇报文档、规则、批次和工具结果。"},
+        {"role": "user", "content": "业务批次号为57345。"},
+    ]
+    messages.extend(
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"保留完整历史-{index}"}
+        for index in range(38)
+    )
+    messages.extend(
+        [
+            {
+                "role": "assistant",
+                "content": "正在验收。",
+                "tool_calls": [
+                    {
+                        "id": "call_document",
+                        "type": "function",
+                        "function": {
+                            "name": "review_document",
+                            "arguments": '{"batch_number":"57345"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_document",
+                "content": '{"status":"已核验","processed_pages":37}',
+            },
+        ]
+    )
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": messages,
+        "tools": [],
+        "providerOptions": {},
+        "controls": {"tool_choice": "none"},
+    }
+    original = deepcopy(command)
+
+    request = build_grok_web_request(command)
+
+    prompt = request["message"]
+    assert "Follow the system and developer instructions" in prompt
+    assert prompt.index("[system]") < prompt.index("[developer]") < prompt.index("业务批次号")
+    assert all(message["content"] in prompt for message in messages)
+    assert (
+        prompt.index("保留完整历史-0")
+        < prompt.index("保留完整历史-37")
+        < prompt.index("正在验收。")
+    )
+    assert prompt.index('"id":"call_document"') < prompt.index("Tool result (call_document)")
+    assert prompt.index("Tool result (call_document)") < prompt.index(
+        "[End of conversation transcript]"
+    )
+    assert prompt.endswith("Produce only the next assistant response.")
+    assert "[Tool calling contract]" not in prompt
+    assert command == original
+
+
+def test_grok_web_leaves_a_single_plain_user_prompt_unchanged() -> None:
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [],
+        "providerOptions": {},
+        "controls": {},
+    }
+    assert build_grok_web_request(command)["message"] == "[user]\nhello"
 
 
 def test_grok_web_uses_page_session_and_page_websocket() -> None:

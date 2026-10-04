@@ -4,6 +4,8 @@
 
 基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
+0.27.3 发布前七家完整功能证据完成后已部署。新版本 SDK 首轮 47/49，GLM 传输失败单独重试通过，Grok 完整回放及单独重试两次遗漏技能要求。当前修复候选为 0.27.4，补齐 Grok WEB 对话边界和内部 HTTP 空闲连接回收；候选真实 WEB 差量和本地门禁已通过，尚待发布后七家同版本复测。下面旧版本表格均为对应时间的历史证据。
+
 ## 参数含义与实际 WEB 目标
 
 | 厂商 | temperature / top_p | 三个 max_* 输出上限别名 | reasoning | search |
@@ -187,6 +189,43 @@ Source `cdf32963909d73b426aa337beed3fb6dc1fe29b8`；[CI 37204392918](https://git
 | 0.27.1 发布后 | 1606.49 | 786.17 |
 
 0.27.1 全目录范围 1101.59–2649.94ms，详情 214.50–1279.94ms。这些不同时间的 n=3 样本受 WAN、重定向与缓存影响，详情中位数也有恶化，不能推断所有 Read 变快或把差异全部归因于本轮代码。全目录体积与跨节点/公网延迟仍是后续优化项；本轮没有重构目录查询、迁移 Redis 或改动生产 timeout。
+
+### 0.27.3 发布与新版本七家 SDK 首轮
+
+Source `a1d9035203c86eeb2d3a4b7474c735f4b82e1289`；[CI 37211898821](https://github.com/Prodigalgal/any2api/actions/runs/37211898821) success，四镜像与 update-gitops 通过。GitOps `822270c5430d32cb68c9ce7ab143ffad4289f205`；2026-10-04 15:50:53 UTC 复核 Argo Synced/Healthy，四 Pod Ready/restarts=0，两 Automation project/installed/API、Web package、Server 启动日志均 0.27.3。四镜像统一 suffix `20261004-v0.27.3-release-a1d9035203c86eeb2d3a4b7474c735f4b82e1289`。
+
+`web-bridge-production-v0273.json` 的窗口为 15:17:31–15:26:37 UTC：
+
+| Provider | 七项 SDK 首轮 | 后续单独复验 |
+| --- | ---: | --- |
+| Arena / claude-sonnet-5 | 7/7 | 首次 Chat 后台 credential_rejected 后换号成功 |
+| DeepSeek / default | 7/7 | 部分结果生成 70–100s，不代表低延迟 |
+| GLM / glm-5.2 | 6/7 | 原失败完整回放单独重试通过 |
+| Grok Web / grok-3 | 6/7 | 原请求单独重试仍遗漏字段，继续修复 |
+| LongCat / longcat-flash | 7/7 | 无本轮 SDK 失败 |
+| MiMo / mimo-v2.6-pro | 7/7 | 严格 string 参数及完整历史生产通过 |
+| MiniMax / MiniMax-M3.1-Flash-Preview | 7/7 | 无本轮 SDK 失败 |
+
+七家的 Responses 保存续接、`retrieve/input_items` 官方 SDK strict resource schema 与清理均通过，14 个拥有的合成状态删除后均 404。**47/49 是首轮结果，不改写为 49/49**。
+
+- GLM `89133737-971e-428f-b0b9-67986fbf1a14` 为 502 `provider_transport_error`：235ms、ttfb 56ms、generation 0，记录 `Connection prematurely closed BEFORE response`；原 body / SDK max_retries=0 单独重试 `ec5edb94-d76e-4aee-affd-6353f73d3462` completed 并包含所有业务字段。首轮失败独立保留。
+- Grok `c8f678ac-1a14-4cd2-92aa-9161a22ad6aa` HTTP completed，但只汇报批次并重复历史回答；单独重试 `a3d258ea-6a75-4766-968f-aa5b0750b705` 只汇报状态/页数，仍遗漏文档、规则、批次。DB 可记 success=true，不代表语义验收成功。该重试 attempt 1 还出现 empty_model_response，换号后返回不完整业务信息。
+- 矩阵 35 个请求 + 2 个显式重试共 39 次普通 INFERENCE 尝试，36 次完成生成；其余为 Arena credential_rejected、GLM provider_transport_error、Grok empty_model_response，均保留于 `web-bridge-v0273-usage-and-cache.json`。未混入自动 PROBE 或 isolated native canary。
+- Arena 四个缓存差量请求：plain warm、显式 false、显式 false repeat、plain repeat，均 completed。前三个实际生成 / 4 次后台尝试（一次凭据拒绝后成功）；最后一个仅 Server `prompt_cache_hit` 且无 ordinary usage。证明受控请求绕过缓存读写、普通请求保留命中，不能只凭 HTTP 200 宣称缓存正确。
+- 同一时点目录模型 guard 全部 available=true、queue/concurrent=0/circuit CLOSED；滚动状态 LongCat READY，其余六家 DEGRADED，不能因本轮 SDK 通过而改报全体 READY。
+
+### 0.27.4 Grok 回放与内部连接候选
+
+- Grok Python `_prompt` / Java `GrokWebRequestMapper` 对多角色或历史输入明确完整 transcript、角色顺序、结束及下一 assistant 回复边界，提醒遵守当前 system/developer 和使用调用方工具结果。所有正文、参数、ID、顺序和原输入保留；不在提示词注入业务答案，单用户普通提示保持。WEB 文本仍不具有原生 system role 的强制保证。
+- 同一原失败合成 body 的 42 条规范化历史在隔离现有 WEB 账号上进行对照：baseline 也曾成功，说明存在模型波动，不能证明旧版本必败。候选 `ef7db6cf20f24d14b35a0fb4cfe35802` 与单独 `b25881a8fd054e78ac028e04c6046cc0` 均 completed、文档/规则/批次/状态/37 页全部正确。另一候选 `6c1e640e80414764bc307c74c3448d26` incomplete 空回复保留，不计通过；第一版临时探测器漏解 `response.chunk` 文本的报告也保留，更正解码后才计语义结果。未写账号状态或凭据补丁，不把 isolated canary 算生产协议矩阵。
+- 核实当前 Uvicorn 0.51.0 keep-alive 默认 5s，两个 Automation 镜像 CMD 没有覆盖；旧共享客户端 max idle=30s。`WebClientConfiguration` 改为 3s、每秒后台回收，并把 ConnectionProvider 纳入 Spring dispose 生命周期；保留 200 个连接、10s 获取预算、15m 响应预算和现有错误/重试策略。真实本地 HTTP 测试证明活跃复用、闲置主动替换、关闭释放。不能断言该配置差异已解释历史 502 或 Redis 超时。
+- Backend 513 tests：508 passed、5 条件 skipped，bootJar/源码/JAR 0.27.4 PASS；Automation 全量 522 passed，import 顺序和混合换行 format 修正后 lint、125 文件 format、Grok 13 项通过；Web lint/build 通过。相关本地门禁和真实 WEB 差量完成后进入发布。无数据、凭据、账号、Key、Redis 或 WEB timeout 迁移。
+
+### 0.27.3 Read 后验与性能边界
+
+15:18:35 UTC direct 入口、system 全权限 Key：18 个端点 × 3 全部 200。health median 355.66ms、readiness 433.36ms、session 355.62ms、overview 360.73ms、providers 367.71ms、accounts 412.80ms。全目录 `/v1/models` median **2229.78ms**，1,538,005-byte 解压 JSON / gzip 110,208 bytes。MiMo admin models 样本 6035.02/1976.58/813.15ms，不能报所有管理 Read 都小于 550ms。Hikari active=0/pending=0 的时点快照不证明所有 SQL 无性能问题。
+
+15:22:31 UTC 同一现有 Arena Key、259 模型目录 n=3：全目录 14425.93/859.98/6561.48ms，median **6561.48ms**；单模型详情 755.17/1193.15/861.64ms，median **861.64ms**。目录没有重复 parameter_adaptation；其约 991KB 解压 / 25.6KB gzip 与 system scope 不同，不能混比体积或把窗口差异全部归因代码。公网波动、大目录与跨节点 Redis 成本尚未解决；本轮不声称 Read 性能普遍改善。
 
 ## 遗留与回滚
 

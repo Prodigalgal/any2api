@@ -281,13 +281,14 @@ The current Runtime mappers make that translation explicit:
 
 | Provider | Canonical messages | Generation | Reasoning/search | Tools | Media |
 |---|---|---|---|---|---|
-| Arena | flattened role sections; image/PDF blocks upload in the account page first | unsupported fields rejected before Action | `provider_options.arena.web_search=true` maps to native `modality: "search"` | unsupported | same-session page upload; current declared formats are PNG/JPEG/WebP and PDF |
-| DeepSeek | flattened `prompt` with role sections | unsupported fields rejected before Action | `thinking_enabled`/`search_enabled` booleans | search tools become `search_enabled`; other tools rejected | text-only |
-| GLM | official `chat.history` and completion `messages` | `params.max_tokens`, `temperature`, `top_p` | completion `features.enable_thinking`, `reasoning_effort`, `auto_web_search` | function tools rejected | authenticated image file upload, then official file object |
+| Arena | flattened role sections; image/PDF blocks upload in the account page first | unsupported fields rejected before Action | `provider_options.arena.web_search=true` maps to native `modality: "search"` | emulated function contract in prompt | same-session page upload; current declared formats are PNG/JPEG/WebP and PDF |
+| DeepSeek | flattened `prompt` with role sections | unsupported fields rejected before Action | `thinking_enabled`/`search_enabled` booleans | functions emulated; search tools become `search_enabled` | text-only |
+| GLM | official `chat.history` and completion `messages` | `params.max_tokens`, `temperature`, `top_p` | completion `features.enable_thinking`, `reasoning_effort`, `auto_web_search` | emulated function contract in user context | authenticated image file upload, then official file object |
 | LongCat | flattened `content` with role sections | no output-budget field; unsupported limits rejected | `reasonEnabled`, `searchEnabled`, model-specific `agentId` | function definitions become a provider-local prompt contract | same-session `files` from `/appendix-upload` |
 | MiMo | flattened `query` with system/tool sections | `modelConfig.temperature`, `topP`; output limit is non-binding | `modelConfig.enableThinking`, `webSearchStatus` | function definitions become a provider-local prompt contract | same-session `multiMedias` |
-| MinMax | flattened `content` with role sections | unsupported standard generation fields are rejected | model `variant`, `enable_team`, `worktreeMode` | rejected | Runtime same-session `attachments`; API currently text-only |
-| Qwen | native message graph with `fid`, parent/children and `files` | native `temperature`, `top_p`, `max_tokens` | `feature_config.thinking_mode`, `thinking_budget`, `auto_search` | only search tools; function tools rejected | same-session native image upload |
+| MinMax | flattened `content` with role sections | unsupported standard generation fields are rejected | model `variant`, `enable_team`, `worktreeMode` | emulated function contract in prompt | Runtime same-session `attachments`; API currently text-only |
+| Qwen | native message graph with `fid`, parent/children and `files` | native `temperature`, `top_p`, `max_tokens` | `feature_config.thinking_mode`, `thinking_budget`, `auto_search` | functions emulated; search tools use native search | same-session native image upload; live inference excluded |
+| Grok Web | canonical history becomes a gateway session message | unsupported standard generation fields are rejected | selected model mode; reasoning output decoded | emulated function contract in prompt | separate media ops, not chat image-input support |
 
 The direct API channel reuses the same semantic command contract but performs the provider's
 HTTP/SSE and upload protocol without creating a browser session. It may extract legal non-empty
@@ -404,13 +405,20 @@ completion is a separate release gate.
 
 | Provider | Chat | Responses | Reasoning | Function tools | Image input | File input | Audio input | Video input | Stored Responses |
 |---|---|---|---|---|---|---|---|---|---|
-| Arena | Native | Native | Unsupported | Unsupported | Native page upload | Native page upload (PDF) | Unsupported | Unsupported | Unsupported |
-| Qwen | Native | Native | Native | Unsupported; search tools only | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
-| LongCat | Native | Native | Native | Emulated | Native upload | Native upload | Unsupported | Unsupported | Unsupported |
-| MiMo | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
-| MinMax | Native | Native | Native | Unsupported | Native upload | Unsupported | Unsupported | Unsupported | Unsupported |
-| GLM | Native | Native | Native | Unsupported | Native upload (vision models only) | Unsupported | Unsupported | Unsupported | Unsupported |
-| Grok Web | Native | Native | Native output | Emulated | Separate media ops | Unsupported in chat input | Unsupported in chat input | Separate media ops | Native |
+| Arena | Native | Native | Unsupported | Emulated | Native page upload | Native page upload (PDF) | Unsupported | Unsupported | Gateway |
+| Qwen | Native | Native | Native | Emulated; live inference unverified | Native upload | Unsupported | Unsupported | Unsupported | Gateway |
+| LongCat | Native | Native | Native | Emulated | Native upload | Native upload | Unsupported | Unsupported | Gateway |
+| MiMo | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Gateway |
+| MinMax | Native | Native | Native | Emulated | Native upload | Unsupported | Unsupported | Unsupported | Gateway |
+| GLM | Native | Native | Native | Emulated | Native upload (vision models only) | Unsupported | Unsupported | Unsupported | Gateway |
+| Grok Web | Native | Native | Native output | Emulated | Separate media ops | Unsupported in chat input | Unsupported in chat input | Separate media ops | Gateway |
+
+`Gateway` means the shared Responses store owns `store`, retrieval and continuation. The
+Chat/Responses columns describe gateway protocol support, not a vendor OpenAI endpoint. Skills
+loaded by a client are ordinary instructions/context; they are not installed in a vendor runtime.
+Flattened WEB prompts preserve content and role sections, but cannot promise the same enforced
+system/developer hierarchy as a native role-aware endpoint. Tools run in the caller, and results
+retain call IDs; an upstream model can still refuse or misinterpret the emulated history.
 
 For `Native upload`, the page session obtains the provider's temporary upload authorization,
 uploads through the provider object-storage path, and sends only the resulting provider file object

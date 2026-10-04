@@ -99,6 +99,9 @@ def main() -> None:
                     assert mapping["max_output_tokens"]["enforced"] is False
                 if provider == "glm":
                     assert mapping["max_output_tokens"]["target"] == "params.max_tokens"
+                if provider == "longcat":
+                    assert mapping["reasoning"]["target"] == "reasonEnabled"
+                    assert mapping["search"]["target"] == "searchEnabled"
                 if provider in {"arena", "grok_web"}:
                     assert mapping["max_output_tokens"]["mode"] == "unsupported"
                 return {"mapping": mapping}
@@ -255,12 +258,19 @@ def main() -> None:
                         ):
                             request_id = response.headers.get("x-request-id")
                             if response.status_code == 400:
-                                assert "application/json" in response.headers.get("content-type", "")
+                                assert "application/json" in response.headers.get(
+                                    "content-type", ""
+                                )
                                 detail = json.loads(response.read())["error"]
                                 assert detail["code"] == "context_length_exceeded"
                                 assert detail["type"] == "invalid_request_error"
-                                assert detail["param"] == ("messages" if protocol == "chat" else "input")
-                                assert detail["retryable"] is False and detail["request_id"] == request_id
+                                assert detail["param"] == (
+                                    "messages" if protocol == "chat" else "input"
+                                )
+                                assert (
+                                    detail["retryable"] is False
+                                    and detail["request_id"] == request_id
+                                )
                                 return {
                                     "http_status": 400,
                                     "request_id": request_id,

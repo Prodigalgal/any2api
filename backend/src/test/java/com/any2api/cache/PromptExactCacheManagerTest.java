@@ -138,6 +138,45 @@ class PromptExactCacheManagerTest {
         assertThat(cacheManager.get(request).block()).isNull();
     }
 
+    @Test
+    void doesNotReuseOrPopulateAPlainResponseForUnkeyedWebControls() {
+        var plain = request("{\"input\":\"hello\",\"store\":false}");
+        var plainEvents = List.<CanonicalEvent>of(
+            new CanonicalEvent.OutputTextDelta(1, plain.requestId(), 1, "plain"),
+            new CanonicalEvent.Completed(1, plain.requestId(), 2, "stop"));
+        cacheManager.put(plain, plainEvents).block();
+
+        for (var field : List.of("web_search", "search_enabled", "thinking", "enable_thinking")) {
+            for (var enabled : List.of(true, false)) {
+                var raw = (tools.jackson.databind.node.ObjectNode) plain.rawRequest().deepCopy();
+                raw.put(field, enabled);
+                var controlled = new com.any2api.protocol.CanonicalRequestParser(mapper).parse(
+                    CanonicalRequest.Protocol.RESPONSES,
+                    new com.any2api.routing.ResolvedRoute("mimo", "fixture"), raw);
+                assertThat(cacheManager.get(controlled).block()).isNull();
+                cacheManager.put(controlled, List.of(
+                    new CanonicalEvent.OutputTextDelta(1, controlled.requestId(), 1, "controlled"),
+                    new CanonicalEvent.Completed(1, controlled.requestId(), 2, "stop"))).block();
+            }
+        }
+        var cached = cacheManager.get(plain).block();
+        assertThat(cached).isNotNull();
+        assertThat(((CanonicalEvent.OutputTextDelta) cached.get(1)).delta()).isEqualTo("plain");
+    }
+
+    @Test
+    void keepsOptionalNullsCacheableAndSeparatesCanonicalGenerationValues() {
+        var optionalNull = request("{\"input\":\"hello\",\"temperature\":null,\"reasoning\":null}");
+        assertThat(cacheManager.isEligibleForCache(optionalNull)).isTrue();
+        var cooler = request("{\"input\":\"hello\",\"temperature\":0.2}");
+        var warmer = request("{\"input\":\"hello\",\"temperature\":0.8}");
+        cacheManager.put(cooler, List.of(
+            new CanonicalEvent.OutputTextDelta(1, cooler.requestId(), 1, "cooler"),
+            new CanonicalEvent.Completed(1, cooler.requestId(), 2, "stop"))).block();
+        assertThat(cacheManager.get(cooler).block()).isNotNull();
+        assertThat(cacheManager.get(warmer).block()).isNull();
+    }
+
     private CanonicalRequest request(String json) {
         return new com.any2api.protocol.CanonicalRequestParser(mapper).parse(CanonicalRequest.Protocol.RESPONSES,
             new com.any2api.routing.ResolvedRoute("mimo", "fixture"),

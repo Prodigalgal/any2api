@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
@@ -28,6 +29,8 @@ public class PromptExactCacheManager {
 
     private static final Logger log = LoggerFactory.getLogger(PromptExactCacheManager.class);
     private static final Duration DEFAULT_TTL = Duration.ofMinutes(5);
+    private static final Set<String> CACHE_SAFE_REQUEST_FIELDS = Set.of(
+        "model", "messages", "input", "instructions", "stream", "store");
 
     private final com.github.benmanes.caffeine.cache.Cache<String, String> localCache;
     private final LayeredJsonCache layeredCache;
@@ -160,6 +163,11 @@ public class PromptExactCacheManager {
             || raw.hasNonNull("reasoning_effort")) return false;
         if (request.messages().stream().anyMatch(message -> message.has("tool_calls")
             || message.has("tool_call_id") || message.path("content").isArray())) return false;
+        // Non-canonical WEB controls are absent from the cache key. Bypass both
+        // reads and writes rather than mixing search/thinking/session semantics.
+        if (raw.propertyNames().stream().anyMatch(field -> raw.hasNonNull(field)
+            && !CACHE_SAFE_REQUEST_FIELDS.contains(field)
+            && !request.generation().containsKey(field))) return false;
         // If high temperature is explicitly requested (e.g. creative/random generation > 1.2), skip cache
         var temp = request.generation().get("temperature");
         if (temp instanceof Number num && num.doubleValue() > 1.2) {
@@ -172,7 +180,7 @@ public class PromptExactCacheManager {
         try {
             var digest = MessageDigest.getInstance("SHA-256");
             var sb = new StringBuilder();
-            sb.append("v2|").append(apiKeyId).append("|").append(request.protocol()).append("|")
+            sb.append("v3|").append(apiKeyId).append("|").append(request.protocol()).append("|")
               .append(request.providerId()).append("|")
               .append(request.model()).append("|");
             for (var msg : request.messages()) {

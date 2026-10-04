@@ -43,8 +43,8 @@ public final class LongcatProvider implements InferenceProvider {
             "reasoning", "reasoning_effort", "agent_id", "reason_enabled", "search_enabled",
             "tools", "tool_choice", "parallel_tool_calls"),
         Set.of("function")).withParameterMappings(Map.of(
-            "reasoning", WebParameterAdaptation.toggle("reason_enabled"),
-            "search", WebParameterAdaptation.mapped("search_enabled")));
+            "reasoning", WebParameterAdaptation.toggle("reasonEnabled"),
+            "search", WebParameterAdaptation.mapped("searchEnabled")));
 
     private static final ProviderManifest MANIFEST = new ProviderManifest(
         "longcat", "LongCat", "native-longcat-web-v3", "3",

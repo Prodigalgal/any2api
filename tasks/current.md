@@ -1,15 +1,17 @@
-# 当前任务板（源码 0.27.1）
+# 当前任务板（源码 0.27.2）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-04 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.1）
+## 2026-10-04 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.2）
 
 - 范围：[执行规格](../docs/requirements/WEB_PROVIDER_PARAMETER_ADAPTATION.md)。按用户批准逐厂商核对 native 字段、单参数探测、WEB 输入限制及 Xiaomi 桌面端自动引导；Qwen 仍只有代码证据。
 - 参数声明回归各 Provider 的 `ProviderProtocolContract.parameterMappings`，模型详情提供 `parameter_adaptation`；目录不重复大表，v6 cache 使用当前 adapter 能力并保留 discovery / overrides。
 - 已知可选 null generation 当作缺省；MiMo 完整 Unicode schema 无损压缩、空白片段保留、固定长度拒绝变为非重试 OpenAI 错误，不换号/熔断；GLM 正整数输出上限预校验。
 - tools/skills 原生字段追加探测：MiMo 6 个候选位置未见生效，query 两个正向对照有效；DeepSeek/LongCat/Grok/MiniMax 当前通道未见独立字段生效，GLM tools 流内 INTERNAL_ERROR，Arena 修正临时解析器后 429 停止、语义未验证。厂商 Agent/MCP 安装配置与调用方 function 执行边界分别核对，不把 HTTP 200 或前端渲染字段当作原生支持。
-- 0.27.0 本地 Backend 492 passed / 5 skipped、Automation 509 passed、Web lint/build、版本/JAR 通过；Source `cb9b658`、CI `37202879629` success，GitOps `31af2f5` Synced/Healthy，四组件 Ready/restart=0。上线 SDK 41 项首轮 31 passed / 10 failed：8 个 nullable 真实缺陷、2 个首帧前 JSON 400 的探测误判；修复候选 0.27.1 验证中。完整边界、保留失败、后台重试、历史 Arena 说明核对和桌面请求组成见[报告](../docs/reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
+- 0.27.0 上线 SDK 首轮 31/41：8 个 nullable 缺陷、2 个首帧前 JSON 400 的探测误判；修复 0.27.1 Source `cdf3296`、CI `37204392918` success，GitOps `c59c7eb` Synced/Healthy、四组件 Ready/restart=0。本地 Backend 497 passed / 5 skipped，Automation 509 passed，Web lint/build/版本/JAR 通过。七家参数 41/41、MiMo 无参 strict 4/4、中文 enum/SSE 与普通结果回放 2/2 通过；两次 REPLAY nonce 回显拒绝保留。
+- 0.27.1 后台 34 个真实推理/35 次尝试（Grok 首次空响应换号成功）；Arena 一个 mapped-control 命中精确缓存、不算该次原生验证。MiMo 四个长度拒绝均一次、账号无冷却、模型无熔断；七家 queue/concurrent=0/circuit CLOSED，但滚动目录仅 GLM READY，其余 DEGRADED。
+- 收尾候选 0.27.2 修正 LongCat 说明到实际 WEB camelCase、catalog v7；未入 key 的 raw WEB controls 绕过精确缓存读写，prompt key v3 防止重用旧条目。普通缓存/null/canonical generation 隔离保留，旧过期工具/状态表修正；最终门禁和上线差量继续推进。完整边界、保留失败、历史 Arena 核对和桌面请求组成见[报告](../docs/reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 
 ## 2026-10-04 Redis 缓存等待与协调错误收敛（0.26.3）
 

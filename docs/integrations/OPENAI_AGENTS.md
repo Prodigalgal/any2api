@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（源码 0.27.1）
+# OpenAI API 到厂商 WEB 的桥接（源码 0.27.2）
 
 ## 范围
 
@@ -41,13 +41,22 @@ custom grammar、defer_loading/tool search、原生 hosted tools、opaque encryp
 
 ## 常用 API
 
-0.27.0 的逐厂商参数映射、真实 WEB 输入边界、tools/skills 字段探测和 Xiaomi 桌面端大请求排查，以及 0.27.1 可空字段修复进度见
+0.27.0–0.27.2 的逐厂商参数映射、真实 WEB 输入边界、tools/skills 字段探测、Xiaomi 桌面端大请求、可空字段修复与缓存隔离进度见
 [本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。选定模型后读取
 `models.retrieve(model).parameter_adaptation`，不要把 1M/128K 的客户端配置或官方付费 API
 规格当作 WEB 限制。WEB 没有等价控制的显式参数仍会拒绝；null 可选 generation 字段视为缺省。
 MiMo 长输入拒绝会返回 `context_length_exceeded`，已提交流则以失败终态结束，不能把拒绝文本当作成功。
 
 主要入口为 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`。`messages` / `input` 和多轮历史由调用方提供；工具输出按 call_id 回传。Responses 也可使用已实现的 `store:true` / `previous_response_id` 续接，无需厂商 WEB 提供同名资源接口。
+
+### system prompt、skill 与 tool 如何桥接
+
+1. 客户端发送 OpenAI `messages` 或 `instructions/input` 及 function schema。网关保留完整 system/developer、历史、媒体与工具分组；各 Provider 编成真实 WEB 的 messages/history，或带角色分区的 prompt/query/content。扁平 WEB 输入仍占用上下文，不能保证与原生 system role 相同的强制优先级。
+2. skill 的索引、说明或读取后的正文作为指令/上下文进入同一流程。技能目录加载、按需读 SKILL.md、脚本、文件及终端操作由客户端 Agent 执行；没有把它安装到厂商 WEB，也没有通用可透传的顶层 skills 字段。客户端可以按需读取完整技能，网关不静默删改说明或权限规则。
+3. function schema 编入 Provider 的完整工具约定；模型输出由 ToolEmulationEngine/MiMo 解码器解析，严格参数通过网关校验后还原 OpenAI tool_calls/function_call 与 SSE。真实执行留在客户端；它用 tool_call_id/call_id 返回结果，网关保留完整调用与结果历史后再次生成。
+4. 原生 tools/skills 候选字段尚未证明通用有效，继续使用已实现的模拟桥接。不支持的配置明确拒绝，未知 WEB 限额保持未知；长度超限明确失败。模拟工具可能受到厂商模型拒绝、误判或格式生成不稳定影响，不能等同于厂家原生 function API。
+
+0.27.1 MiMo 的中文 enum/SSE 调用和普通业务结果回放 2/2 通过；随机 REPLAY 标记回显被模型拒绝，失败记录保留。详见本轮报告。0.27.2 另外收敛 WEB raw controls 的缓存隔离，避免不同 search/thinking 配置重用 plain 文本结果。
 
 调用方持有对应厂商的 Key，按标准 SDK 配置 `base_url`、`api_key`，从目录选择 `model` 即可；根路径使用 `provider/upstream-model`，厂商前缀使用原始 model ID。`models.retrieve(model_id)` 交由 SDK 编码，不手动百分编码。0.26.1 七家所选模型的显式 strict 工具闭环、0.26.3 无参数差量七家各 4/4 已实测通过；0.26.2 的 Arena 认证失败独立保留，不能以新一轮通过保证账号永久稳定。结果范围、运行态与剩余默认值差异见验收报告。
 

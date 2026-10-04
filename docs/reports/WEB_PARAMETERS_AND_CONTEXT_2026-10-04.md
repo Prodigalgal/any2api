@@ -2,7 +2,7 @@
 
 ## 范围与当前状态
 
-基线为生产 0.26.3 / `2388687`；本轮兼容能力扩展 0.27.0 已部署，上线差量发现可空字段边界，修复候选另占 0.27.1。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 沿用用户此前排除范围，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
+基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2 候选。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 沿用用户此前排除范围，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
 ## 参数含义与实际 WEB 目标
 
@@ -11,7 +11,7 @@
 | MiMo | `modelConfig.temperature` / `modelConfig.topP` | WEB 请求没有对应字段；仅保留既有非约束值策略，低于部署配置 ceiling 明确拒绝 | `modelConfig.enableThinking`，开关映射，不保证 low/medium/high 精确档位 | `modelConfig.webSearchStatus` |
 | GLM | `params.temperature` / `params.top_p` | 均映射 `params.max_tokens` | `features.enable_thinking` / `features.reasoning_effort` | `features.auto_web_search` |
 | DeepSeek | 无对应字段，显式值拒绝 | 无对应字段，拒绝 | `thinking_enabled`，开关映射 | `search_enabled` |
-| LongCat | 无对应字段，显式值拒绝 | 无对应字段，拒绝 | `reason_enabled`，开关映射 | `search_enabled` |
+| LongCat | 无对应字段，显式值拒绝 | 无对应字段，拒绝 | `reasonEnabled`（WEB 0/1），开关映射 | `searchEnabled`（WEB 0/1） |
 | Arena | 无对应字段，显式值拒绝 | 无对应字段，拒绝 | 通用 effort 没有对应字段；由选定模型变体决定 | `modality=search` |
 | Grok Web | 无对应字段，显式值拒绝 | 无对应字段，拒绝 | 通用 effort 没有对应字段；由选定模型 mode 决定 | 当前桥接不提供通用 search 开关 |
 | MiniMax | 无对应字段，显式值拒绝 | 无对应字段，拒绝 | `model.variant` 的 thinking 开关映射 | 当前桥接不提供通用 search 开关 |
@@ -19,7 +19,7 @@
 
 函数工具由网关生成完整调用约定并解码，调用方执行工具；这属于 emulated function bridge。`store` / `previous_response_id` 属于网关状态能力，不要求 WEB 存在同名字段。参数声明归各 Provider 的 `ProviderProtocolContract.parameterMappings` 所有，公共层不写入厂商 ID 或字段规则。
 
-部署后可以用 `models.retrieve("provider/model")` 查看 `parameter_adaptation`：区分 `mapped`、`toggle_mapping`、`non_binding_only`、`unsupported` 与 `unknown`。详细表只在模型详情返回，目录保留原有字段，避免数百个模型重复携带两份映射表。缓存 namespace 升为 v6，能力由当前适配器和模型 metadata 重建，保留历史发现证据及管理员 token overrides。
+部署后可以用 `models.retrieve("provider/model")` 查看 `parameter_adaptation`：区分 `mapped`、`toggle_mapping`、`non_binding_only`、`unsupported` 与 `unknown`。详细表只在模型详情返回，目录保留原有字段，避免数百个模型重复携带两份映射表。0.27.0 catalog namespace 为 v6，0.27.2 修正 LongCat 说明另占 v7，避免共享 L2 返回旧声明；能力由当前适配器和模型 metadata 重建，保留历史发现证据及管理员 token overrides。
 
 ### 探测证据与含义
 
@@ -108,7 +108,58 @@ Xiaomi 客户端的 skills 已作为 system 文本发送，网关收到的并非
 - 七家 41 项检查首轮 31 passed / 10 failed。8 项为真实缺陷：七家 Responses 的 `reasoning:null` 被 Parser 冗余 shape 校验拒绝，Arena Chat 的 `reasoning_effort:null` 又穿过 semantic controls allowlist，触发 Automation 422。0.27.1 去除重复检查，保留非 null 类型校验，并让语义控制边界只复制非 null 值、保留显式 false。
 - 另外 2 项是探测器误判：MiMo 的流式长输入在首事件/提交 SSE 前已经被拒绝，正确返回 HTTP 400 JSON；原脚本强制 HTTP 200。修正脚本同时接受首帧前 JSON 400 与已提交 SSE 的单一失败终态，补充两协议首事件失败回归。不为通过脚本改变既有错误交付契约。
 - 初次窗口（DB time `2026-10-04 12:50:12.933619+00`）含 24 个逻辑推理、26 次后台尝试；DeepSeek 一次 provider_upstream_error、LongCat 一次 empty_model_response 后换号成功，Arena 一次 credential_rejected 后成功。所有 MiMo 长输入拒绝均是 attempt=1 / success=false / output_tokens=0 / context_length_exceeded；网关预校验拒绝没有租用账号，不伪造 usage。窗口包含额外合成诊断请求，不能与 SDK 41 项简单相减。
-- 0.27.1 本地 Backend 497 passed / 5 条件 skipped、bootJar、统一版本/JAR 契约和探测脚本 ruff 通过；Automation/Web 无业务源码变化，发布 CI 仍完整执行各门禁。发布与修复后真实验收待补充；0.27.0 失败报告及后台尝试保留，不覆盖原记录。
+- 0.27.1 本地 Backend 497 passed / 5 条件 skipped、bootJar、统一版本/JAR 契约和探测脚本 ruff lint 通过；Automation/Web 无业务源码变化，发布 CI 完整执行各门禁，Automation 509 passed（1 条已有 httpx deprecation warning）、Web lint/build 通过。`tools/` 的 3 处新增分支换行在未发布的 0.27.2 候选一并修正，按 Automation 100-column 配置 format/lint 通过，未覆盖旧制品。
+
+### 0.27.1 生产发布
+
+Source `cdf32963909d73b426aa337beed3fb6dc1fe29b8`；[CI 37204392918](https://github.com/Prodigalgal/any2api/actions/runs/37204392918) 全部门禁、四镜像构建及 update-gitops success。GitOps `c59c7eb87a778d101dd1e98254e1397af8e074f0`，Argo Synced/Healthy，四个 Deployment rollout success，四个新 Pod Ready/restarts=0；两个 Automation project/installed/API 0.27.1 PASS，Web package 0.27.1，Server 启动日志 2026-10-04 21:12:17 UTC+8 为 v0.27.1。
+
+四镜像 suffix 为 `20261004-v0.27.1-release-cdf32963909d73b426aa337beed3fb6dc1fe29b8`：
+
+| 组件 | Pod | 镜像 digest（sha256） |
+| --- | --- | --- |
+| Server | any2api-server-87db7649b-nn4f4 | 48403ac8167d044a075e626f19c3974e5a685c325b94b075c76c6afa5fde724a |
+| Automation | any2api-automation-8984fccd4-tkd99 | 1bb7f5b8eb903d6d9dff026dd6d763bb38a3309c01977ac6f7dedae47983e67f |
+| Arena Automation | any2api-automation-arena-5d7cbc6797-scxcb | 3aa72c6e316ead1d743bf9d130ec9e5202dc36e1c020ec36747ce4f04ad8009c |
+| Web | any2api-web-5877f95558-wqf6g | 909fcf6e782e65cf56c0bf90f74fa9a57060a79c5e3ccf5a969a272b5c7b4dd1 |
+
+0.27.1 差量验收窗口从 DB time `2026-10-04 13:14:06.302359+00` 开始；0.27.0 的失败报告不覆盖。
+
+| Provider / 选定模型 | 参数契约检查 |
+| --- | ---: |
+| Arena / claude-sonnet-5 | 5/5 |
+| DeepSeek / default | 5/5 |
+| GLM / glm-5.2 | 8/8 |
+| Grok Web / grok-3 | 4/4 |
+| LongCat / longcat-flash | 5/5 |
+| MiMo / mimo-v2.6-pro | 9/9 |
+| MiniMax / MiniMax-M3.1-Flash-Preview | 5/5 |
+
+- 合计 **41/41 PASS**，涵盖模型说明、Chat/Responses 可空参数、支持/拒绝/非法值、GLM 三别名原生输出上限以及 MiMo 长输入错误。GLM 三别名各 UPSTREAM output_tokens=16，对应请求 `94d2ac15-520e-4eba-951b-f789c285f542`、`5795d39e-213d-4c79-b929-248894921c81`、`1b2b581e-a4ad-482c-9e6e-ecd8a1bcbeda`。
+- MiMo 无参数 strict 默认值 4/4 PASS；中文 schema/enum 的三个生成请求均完成单一结构化 function call。首次把回显指令放进工具结果，模型拒绝；将指令移回 user 后，`REPLAY_…` 随机标记仍被模型识别为可疑重放。两次 nonce 回显不通过的记录保留，不以 HTTP completed 当作语义验收成功，也不改写模型的拒绝来通过测试。
+- 使用普通业务数据的最后一个完整闭环 **2/2 PASS**：`6e24f25b-f412-4b26-a4a8-0cbca7f6c5d4`（中文 enum / SSE function call），`cbfbe663-a394-45ca-8e17-8b0e56eae653`（function_call_output 返回 `status=已核验, processed_pages=37`，模型正确汇报）。这验证当前所选 MiMo 模型的工具输入与结果回放，不能推广到所有工具内容或所有模型。
+- SDK 和额外合成工具诊断窗口共 **34 个实际推理 / 35 次后台尝试**；Grok Responses `7720f390-4660-4fe3-933a-8a6388c74103` 首次 empty_model_response，第二次成功。Arena mapped-controls `057a6cdf-dc21-4e8b-bee1-830494da8668` 在 Server 日志明确 `prompt_cache_hit`，没有租用账号/usage 记录，不能算作该次原生参数再次生效的证据。
+- MiMo 四个长度错误均 HTTP 400（包括请求 stream=true 但首事件前拒绝）、attempt=1 / success=false / output_tokens=0。关联四账号均 ACTIVE/enabled、cooldown_until=null、active model cooldown=0；七个所选模型的队列/并发均 0、circuit CLOSED。最新滚动目录仍只有 GLM READY，其余 DEGRADED，包含之前真实失败和本轮主动拒绝输入；不能把 Pod Healthy 或 41 项通过描述为七家全部 READY。
+- 本轮普通推理 queue_ms 均 0，account_acquire_ms 最大 213ms，DeepSeek 最长 TTFB 63783ms、GLM 42289ms。这些请求的大部分等待在上游首输出阶段；不据此排除其他负载下的网关成本，也不宣称所有 Read/推理性能问题已解决。
+
+### 0.27.2 收尾修复候选
+
+- LongCat 构造实际上由内部 `reason_enabled` / `search_enabled` 映射为 WEB `reasonEnabled` / `searchEnabled` 的 0/1。修正公开参数说明目标，catalog namespace v7 隔离旧 v6 声明；实际推理字段构造没有改变。
+- `PromptExactCacheManager` 原 cache key 仅包含 canonical messages/generation，raw WEB controls 未参与。0.27.1 的 Arena mapped-controls 缓存命中直接暴露了这一边界：开关变化也可能命中 plain 结果。现在只允许明确的原始协议字段和已在 generation key 中的字段使用精确缓存，其余非 null 控制绕过缓存读写；null 缺省和普通缓存保留。prompt key v3 隔离旧条目，代价是受控请求减少缓存命中、更多真实上游生成。
+- 更新旧文档中 function=Unsupported / state=Unsupported 的过期表述，明确现有 emulated function 与 Gateway state，并区分 skill 说明、调用方执行及 WEB 扁平 prompt 的优先级边界。
+- 新增普通缓存不会被 search/thinking 控制读取/污染、显式 false、nullable 和不同 canonical sampling key 的回归。0.27.2 本地 Backend 499 passed / 5 条件 skipped、bootJar、版本/JAR、探测脚本 format/lint 通过；CI、部署和有界差量待补充。
+
+### 目录 Read 的有界检查
+
+同一 direct 入口、现有 Arena Key，每个端点每窗口 3 个样本，均 HTTP 200。全目录 259 个模型，解压 JSON 约 991KB，gzip 约 25.6KB；新参数表仅详情提供，目录没有重复增加。
+
+| 窗口 | `/v1/models` median ms | 单模型详情 median ms |
+| --- | ---: | ---: |
+| 0.26.3 发布前 | 5715.71 | 266.50 |
+| 0.27.0 发布后 | 2061.55 | 1799.62 |
+| 0.27.1 发布后 | 1606.49 | 786.17 |
+
+0.27.1 全目录范围 1101.59–2649.94ms，详情 214.50–1279.94ms。这些不同时间的 n=3 样本受 WAN、重定向与缓存影响，详情中位数也有恶化，不能推断所有 Read 变快或把差异全部归因于本轮代码。全目录体积与跨节点/公网延迟仍是后续优化项；本轮没有重构目录查询、迁移 Redis 或改动生产 timeout。
 
 ## 遗留与回滚
 

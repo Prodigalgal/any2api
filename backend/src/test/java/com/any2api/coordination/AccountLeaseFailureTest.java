@@ -14,7 +14,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -31,7 +30,7 @@ class AccountLeaseFailureTest {
             new QueryTimeoutException("private Redis endpoint"),
             new DataAccessResourceFailureException("private Redis endpoint")
         }) {
-            var redis = mock(ReactiveStringRedisTemplate.class);
+            var redis = mock(AccountLeaseRedisClient.class);
             when(redis.execute(any(RedisScript.class), anyList(), anyList())).thenReturn(Flux.error(failure));
             StepVerifier.create(invoke(operation, new AccountLeaseService(redis)))
                 .expectErrorSatisfies(error -> {
@@ -44,7 +43,7 @@ class AccountLeaseFailureTest {
 
     @Test
     void programmingErrorsRemainDistinctFromTransientResourceFailure() {
-        var redis = mock(ReactiveStringRedisTemplate.class);
+        var redis = mock(AccountLeaseRedisClient.class);
         var failure = new IllegalArgumentException("invalid script");
         when(redis.execute(any(RedisScript.class), anyList(), anyList())).thenReturn(Flux.error(failure));
         StepVerifier.create(invoke(Operation.ACQUIRE, new AccountLeaseService(redis)))
@@ -53,7 +52,7 @@ class AccountLeaseFailureTest {
 
     @Test
     void capacityRejectionAndSuccessfulFencingRemainIntact() {
-        var redis = mock(ReactiveStringRedisTemplate.class);
+        var redis = mock(AccountLeaseRedisClient.class);
         when(redis.execute(any(RedisScript.class), anyList(), anyList())).thenReturn(Flux.just(0L));
         var service = new AccountLeaseService(redis);
         StepVerifier.create(invoke(Operation.ACQUIRE, service)).expectError(AccountCapacityException.class).verify();

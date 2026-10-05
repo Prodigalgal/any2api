@@ -168,25 +168,25 @@ _STREAM_REQUEST = r"""async request => {
           done();
           return;
         }
+        const inputChunks = [{text: {text: request.message}}];
+        if (request.systemProvidedContext) {
+          inputChunks.push({system_provided_context: {text: request.systemProvidedContext}});
+        }
         const item = {
           type: 'message',
           role: 'user',
           x_grok: {
             client_message_id: crypto.randomUUID(),
-            input_chunks: [{text: {text: request.message}}]
+            input_chunks: inputChunks
           }
         };
-        const itemEvent = {
-          type: 'conversation.item.create',
-          event_id: 'evt_msg_' + crypto.randomUUID().replaceAll('-', ''),
+        const responseEvent = {
+          type: 'response.create',
+          event_id: 'evt_resp_' + crypto.randomUUID().replaceAll('-', ''),
           item
         };
-        if (request.parentResponseId) itemEvent.parent_response_id = request.parentResponseId;
-        socket.send(JSON.stringify({session_id: sessionId, event: itemEvent}));
-        socket.send(JSON.stringify({session_id: sessionId, event: {
-          type: 'response.create',
-          event_id: 'evt_resp_' + crypto.randomUUID().replaceAll('-', '')
-        }}));
+        if (request.parentResponseId) responseEvent.parent_response_id = request.parentResponseId;
+        socket.send(JSON.stringify({session_id: sessionId, event: responseEvent}));
       }
       if (event.type === 'response.done') done();
     };
@@ -486,12 +486,13 @@ def build_grok_web_request(command: dict[str, Any]) -> dict[str, Any]:
     if choice == "none" or isinstance(choice, dict) and choice.get("type") == "none":
         choice = "none"
         tools = []
-    message = _prompt(command["messages"])
+    message, context = _conversation_input(command["messages"])
     if tools:
         message = _tool_prompt(message, tools, choice, controls.get("parallel_tool_calls"))
     return {
         "mode": mode,
         "message": message,
+        "systemProvidedContext": context,
         "conversationId": str(command.get("previousConversationId") or "").strip(),
         "parentResponseId": str(command.get("previousUpstreamResponseId") or "").strip(),
         "enableSideBySide": False,
@@ -502,6 +503,34 @@ def build_grok_web_request(command: dict[str, Any]) -> dict[str, Any]:
         "forceConcise": False,
         "disableMemory": True,
     }
+
+
+def _conversation_input(messages: list[dict[str, Any]]) -> tuple[str, str]:
+    complete = _prompt(messages)
+    start = max(
+        (
+            index
+            for index, message in enumerate(messages)
+            if isinstance(message, dict)
+            and message.get("role") == "user"
+            and _text(message.get("content")).strip()
+        ),
+        default=0,
+    )
+    if start == 0:
+        return complete, ""
+    # Keep the current turn separate from history using the WEB's native context chunk.
+    history = []
+    for message in messages[:start]:
+        if (
+            isinstance(message, dict)
+            and message.get("role") in {"system", "developer", "user", "assistant", "tool"}
+            and message.get("type") in {None, "message"}
+        ):
+            # Message resource IDs belong to Gateway state; nested function IDs remain intact.
+            message = {key: value for key, value in message.items() if key != "id"}
+        history.append(message)
+    return _prompt(messages[start:]), json.dumps(history, ensure_ascii=False, separators=(",", ":"))
 
 
 def _validate_command(command: dict[str, Any]) -> None:

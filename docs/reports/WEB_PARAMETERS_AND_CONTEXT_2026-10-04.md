@@ -4,7 +4,7 @@
 
 基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
-生产已推进到 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。七家同版本 SDK 首轮 48/49，其余六家各 7/7，Grok state 一次重复旧回答；35 个请求的 38 次后台尝试完整保留。0.27.7 的正文分区实验未通过真实 SDK，已撤回；当前候选收敛为模型账号资格与对象形式 none 修复，本地门禁通过，尚未发布。Grok 完整 Agent 验收仍未满足。下面各版本表格均为对应时间的证据，不能混合为当前版本全通过。
+生产仍为 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。其 SDK 首轮 48/49，35 个请求 / 38 次 INFERENCE 尝试完整。0.27.7 正文分区实验撤回，账号资格/对象 none 继承至 0.27.8 单 SQL 优化；0.27.9 native context 隔离 SDK 6/7，0.27.10 消费资源元数据、补齐 Java 历史函数身份后隔离 Grok 7/7。发布前其余六家复核 31/42，发生五次协调失败及六项前置衍生失败，当前 0.27.11 隔离关键租约连接，尚未发布。各版本/运行路径的证据分别保留，不能混合为当前生产全部通过。
 
 ## 参数含义与实际 WEB 目标
 
@@ -327,6 +327,54 @@ Source `112459a5894deb4c1f45bbe8fbde92fd930ff5d5`，[CI 37251876959](https://git
 - **工具选择**：Python 将字符串 none 与对象 `{type:none}` 都归一后清空可用工具；保留原有完整正文、历史工具内容及参数对象不可变。Java 原有 none 行为保留，补齐跨语言两种形式回归；没有额外提示语或 JSON 分区。
 - **验证**：Backend 527 tests：522 passed / 5 条件 skipped、bootJar；Automation 527 passed；Web lint/build、ruff check/126 文件 format，八处源码/JAR 0.27.7 版本均通过。PG 两处资格回归先复现失败；首次全量架构门禁把通用变量 profile 识别成保留厂商名，改为 accountProfile 后全量通过，没有弱化门禁。
 - **发布边界**：0.27.7 尚未推送 main/部署；Grok 完整 Agent 语义门禁未满足。没有 API/DB/凭据/Key/重试或部署结构迁移，不能把目录与 none 修复报成 Grok 完整 Agent 闭环修复。未来发布后直接回滚点为 0.27.6 上述四组件不可变镜像，恢复目录/对象 none 缺陷但保留已上线的账本和原生终态修复。
+
+### 0.27.8 目录冷加载往返收敛（未发布）
+
+`ModelCatalogCache` 使用同一 SQL 的 eligible accounts 快照：账号 metadata 与模型 cooldown 分别聚合，不做高基数宽 JOIN；资格 JSON 只随首个模型行返回、只解析一次。不限制策略、限制策略/空账号/空目录均冷加载一次 SQL，热缓存零 SQL；DB 时间资格、原公开字段、健康算法、TTL 和 v8 namespace 保持。真实 PG 回归先在旧实现复现 3 个查询次数失败，优化后 10 个相关/架构测试通过；Backend 523 passed / 5 条件 skipped、Automation 527 passed、Web lint/build、ruff/126 文件 format、八处版本/JAR 0.27.8 通过，未发布。
+
+2026-10-05 11:50:19（UTC+8）生产 DB 只读 repeatable-read 对照 0.27.7 原主查询与候选：318 行、双向 EXCEPT 差异 0，资格快照仅 1 行、14,452 bytes、19 个限制账号、该时点 active model cooldown=0。3 次 EXPLAIN ANALYZE：原主查询执行 21.641–22.486ms、候选 22.322–24.801ms（增加约 1ms 量级本地聚合，减少两次数据库网络往返）；shared hit blocks 2466→2467，无 shared reads。这是 SQL 成本证据，未声称 HTTP p50 改善或所有 Read 秒级波动已关闭。原始 `catalog-sql-v0278-readonly.json`，版本 0.27.8/9 均未部署且不复用正式候选号。
+
+### 0.27.9 原生上下文与完整 SDK 的保留失败（未发布）
+
+2026-10-05 官方主站静态资源读取 83 个脚本（约 10.7MB），发现 `buildWireInputChunks` 把 `systemProvidedContext` 编入 `InputChunkSchema`，`encodeInputChunk` 使用 `useProtoFieldName=true`，当前 user 通过带 item 的 `response.create` 一次发送。公开源码 [Grok 静态前端](https://cdn.grok.com/_next/static/chunks/2nt79td3dv899.js) 当次 sha256=`af9620e7be40b50235a6cca4d14d190e4d82f501a092d1a98b20296681e92f22`，proto `chat.InputChunk.system_provided_context`→`chat.SystemProvidedContext.text` 明确存在；`client_tool_result` 也存在，但不能据此认为支持调用方自定义工具。
+
+同一已验证 basic 配置账号/fast 模式、合成内容对照：inline 系统口令、仅 native context 的系统口令、42 条消息的最早历史批次、原失败 42 条消息的完整函数结果四项均生效，后三项输入块都被 `conversation.item.added` 回显。请求分别为 `1697a7fe11db4c9492490e90e4999117`、`3ec86a3632c14158a263f8b1afe011ef`、`bc33320292e94075b052fa6b0fe57ce4`、`ceef445c8bf04acfa5b98efbe9f29167`。原始 `grok-native-context-chunks-v0278.json`、`grok-public-proto-v0278.json`，没有持久化凭据补丁。
+
+Java/Python 接入 native context 的 0.27.9 完整隔离 SDK 首轮 6/7：Chat strict call `1f3b7f9c-11b4-4d72-9e7c-a8d9024bbfd4`、Chat SSE result `f1ca9273-88cf-44b5-ab08-0a304558fdc5`、Responses strict call `506273eb-1b95-440c-8a61-0feaa10287f6`、manual result `a1bc05bc-a4c3-48cf-aab0-a2e176bddd9e` 均通过；state `ad37f8cf-e9d8-497b-abb1-f1f3bd93e7f4` 返回“已记录，继续保留当前文档和批次。”，五个字段遗漏。资源验证因该步骤语义失败未执行，两个自有状态已删除。fixture 使用真实公开 Controller/Parser/ResponsesService/PG→真实 Grok WEB，但不经过生产 coordinator/租约/账本；原始 `web-bridge-grok-native-candidate-v0279.json`。
+
+保留三组同账号/相同失败合成输入的有限原生对照：完整 JSON context 的结果/strict initial 2/2；完整文本 context 及拆分 system context+quoted 历史均 initial 通过、result 重复旧回答，各 1/2。原生 `client_tool_result` 追加单独探测把实际 tool_call_id/结果移入该块，WEB HTTP 200/completed/回显，但五字段全部遗漏（`a5aff350bc3f41a9919a5f1cf46c0f28`）；上游没有对应的原生 pending call，通用支持未证明，不采纳 quoted/client result 方案。原始 `grok-native-quoted-context-v0279.json`、`grok-native-client-result-v0279.json`。这些单次成功不能覆盖 SDK 的失败，也没有通过增加隐式生成重试来满足门禁。
+
+### 0.27.10 消费资源元数据与两端语义一致（未发布）
+
+实际 WEB 输入证明上述 manual/state 当前正文相同，历史 prefix 只增加了 Gateway message 资源 ID。原 compact JSON 把资源元数据引入模型；candidate 仅在普通 role message 的 native context 表示中消费顶层 `id`，原始 Gateway 输入/存储/权限和资源 ID 保持，嵌套 function ID、call_id/tool_call_id、其他类型的 id、所有正文、顺序和其他字段保留。不是裁剪历史。Java 当前轮 formatter 另补齐原有 assistant tool_calls 身份、消除 tool 正文重复，与 Python 对齐；这也不单独证明 Grok 模型语义问题已解决。
+
+已知生产两条合成请求的实际 Parser→SmartContext→ToolBridge→Java/Python 表示核验：42 条 canonical 消息，39 条 context、当前正文 848 字符，manual/store context 均 2,243 字符，两端及两种回放均一致；原 state context 为 3,877 字符。普通 message ID 消费、function 身份、无 user、空白后续、原对象不变和真实 WebSocket 发帧/父响应/SSE EOF 路径均补回归。完整本地门禁 Backend 531 tests：526 passed / 5 条件 skipped、bootJar，Automation 536 passed、Web lint/build、ruff/126 文件 format、八处源码/JAR 0.27.10 版本通过。
+
+0.27.10 隔离 Grok 真实 WEB 官方 SDK 首轮七项 7/7，固定既有账号、`max_retries=0`，未重跑失败候选以掩盖结果：Chat call `f70e35c9-c635-4d96-b8cc-80d695d9ff08`、Chat result `dbc72198-d213-4449-ab61-0a5dbe9202dc`、Responses call `e80c3614-3595-4724-b483-650f3f0e22b0`、manual result `669c926a-0118-4b43-8260-7fd7aebf1264`、state/resources `acde651b-4130-42be-b3d9-7c78fc96a68a`。后者完整五字段、previous_response_id、官方资源 schema 均通过；两个自有状态已清理，fixture 已关闭。原始 `web-bridge-grok-native-candidate-v02710.json`、`grok-prompt-equivalence-v02710.json`。这是代表性组合和一个账号的有限证据，不代表全部模型/账号的语义稳定性。其余六家桥接代码未变，正以生产 0.27.6 做发布前完整 SDK 复核，未推送 main/未部署。
+
+生产独立只读核验：2026-10-05 11:42:33（UTC+8）仍为 0.27.6 / GitOps `2d1c056218cbe7508398884e983a0f9e461545e6`，四组件 Ready/restarts=0、Argo Synced/Healthy，源码/installed/API 一致，healthz/readyz=200。原始 `release-0.27.6-runtime-20261005-continue.json`。所有本轮原生合成 canary 不计入生产 INFERENCE 账本，账号配置/Key/凭据和 DB 结构没有变更。
+
+### 0.27.11 发布前协调故障及连接隔离（当前候选）
+
+`web-bridge-unchanged-six-before-v02710.json` 官方 SDK `max_retries=0` 首轮 **31/42**：Arena/GLM 各 7/7，DeepSeek 4/7、LongCat 5/7、MiMo 6/7、MiniMax 2/7。五次实际请求返回协调错误，六项依赖步骤因前置缺失未执行，所有拥有的测试状态均清理；没有语义失败被改写为通过。Server 2026-10-05 12:36:09–12:38:21（UTC+8）日志确认生成前失败、account_id=null、queue/acquire/ttfb=0，duration 3025–3085ms：
+
+| 厂商 / 步骤 | request_id |
+| --- | --- |
+| DeepSeek / Responses strict | 35ea947c-ca00-473c-b893-8774cb1750a4 |
+| LongCat / Chat strict | aa2928b5-e4eb-41ca-8b0c-e09c02d38a9e |
+| MiMo / state | 8f25021e-7723-4342-9d23-ca3c546fcab3 |
+| MiniMax / Chat strict | f724cc53-8a04-479b-910c-28212fec3fef |
+| MiniMax / Responses strict | d2eb3e6e-8453-49e4-841e-94488abd6037 |
+
+同窗口 cache v7 的 250ms 写预算持续触发。Redis/Server 位于不同节点；Redis 无重启、blocked client/eviction=0，近期慢命令没有本次秒级执行记录，资源快照没有 CPU/内存饱和证据。Server 原始 socket 16 个小 PING 76.859–85.282ms；159,512-byte GET 三次 372.250/174.338/115.331ms。另一个有界测试只写唯一合成诊断 Key（15s TTL、finally DEL）：1KB SET 79.213ms，160KB SET 393.823ms；没有修改应用缓存、账号或容量键。
+
+同一真实 driver 的三次共享 Lua 为 486.254/103.910/104.147ms，独立连接 78.286/78.286/79.196ms。第一组可能含冷脚本装载和写重试成本；这个有限对照未复现 3s，不能将其视作历史超时唯一根因。新增确定性真实 TCP fixture 则阻塞缓存响应，证明原共享 Lua 超时、独立租约正常返回 fencing；独立连接超时继续返回协调异常。认证/数据库选择继承、关闭独立 client 后主连接可用，以及缓存/租约任一故障 readiness=503 都有回归。
+
+`AccountLeaseRedisClient` 复制原 Redis/Lettuce 配置，拥有独立连接和 Spring 关闭生命周期；`AccountLeaseService` 保留全部 Lua/容量/fencing/TTL，仅改变执行连接并补 operation/provider/account/cause_type 安全日志。readiness 并行检查 PostgreSQL、原缓存 Redis 与租约 Redis，保留原 3s 总预算。无 DB、Key、凭据、Redis/PV、外部 API 或厂商重试迁移。当前生产仍 0.27.6；先以既有 workflow 的 deploy=false 构建四个不可变候选，七家隔离完整后端/WEB 验收通过后通过同一 GitOps 路径提升这些制品。
+
+本地 Backend 全量/bootJar 通过，新增七项及原租约失败回归共 13 项通过，包含真实 Boot 自动装配保留唯一默认工厂/模板。Automation 536 passed，Web lint/build、ruff check/126 format、八处源码/JAR 版本 0.27.11 通过。新测试方法拼写的初次 compileTestJava 失败及 main.py 混合换行 format 失败均保留，修正后门禁通过；没有弱化架构校验或新增依赖。
+
+Read 后续窗口集群 18×3 全 200，普通管理 median 81–94ms，全目录 220.29ms、解压 1,537,921 bytes / gzip 110,155 bytes；Hikari pending/active=0。Lettuce 累计 2832 次/408.17s、近期 max 165.79ms 是后续窗口，不能覆盖上述故障。原始 `redis-fault-window-v0276-20261005.json`、`redis-transfer-window-v0276-20261005.json`、`redis-client-interference-v0276-20261005.json`、`redis-client-metrics-v0276-20261005.json`、`read-redis-fault-window-v0276.jsonl`。本机与集群 UTC 记录存在约 85s 偏差，duration 使用单调计时，故障关联使用 request_id 和 Server 时间。
 
 ## 遗留与回滚
 

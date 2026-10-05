@@ -144,15 +144,73 @@ class GrokWebProtocolTest {
         var request = new CanonicalRequest("id", CanonicalRequest.Protocol.RESPONSES,
             "grok_web", "grok-3", false, List.copyOf(messages), Map.of(), Map.of(), List.of(), Map.of(), raw);
 
-        var prompt = requestMapper().prepare(request).body().path("message").asText();
+        var body = requestMapper().prepare(request).body();
+        var prompt = body.path("message").asText();
+        assertThat(mapper.readTree(body.path("systemProvidedContext").asText()))
+            .isEqualTo(mapper.valueToTree(messages.subList(0, 38)));
 
-        assertThat(prompt).contains("Follow the system and developer instructions", "[system]\n文档交付资料-57345.txt",
-            "[developer]\nSKILL.md：汇报完整结果", "正在核验。", "batch_number", "57345", "Tool result (call_document)", "已核验", "37");
-        for (var index = 0; index < 38; index++) assertThat(prompt).contains("完整历史-" + index);
-        assertThat(prompt.indexOf("完整历史-0")).isLessThan(prompt.indexOf("完整历史-37"));
+        assertThat(prompt).contains("Follow the system and developer instructions", "正在核验。", "batch_number", "57345", "Tool result (call_document)", "已核验", "37", "\"id\":\"call_document\"");
+        assertThat(prompt).containsOnlyOnce("已核验");
+        assertThat(prompt).doesNotContain("[system]", "[developer]", "完整历史-0");
+        assertThat(prompt.indexOf("完整历史-36")).isLessThan(prompt.indexOf("完整历史-37"));
         assertThat(prompt.indexOf("Tool result (call_document)")).isLessThan(prompt.indexOf("[End of conversation transcript]"));
         assertThat(prompt).endsWith("Produce only the next assistant response.").doesNotContain("[Tool calling contract]");
         assertThat(mapper.writeValueAsString(messages)).isEqualTo(original);
+    }
+
+    @Test
+    void nativeContextPreservesEarlierFunctionIdentityAndBlankCurrentUser() {
+        var oldCall = message("assistant", "早先调用");
+        oldCall.putArray("tool_calls").addObject().put("id", "call_old").put("type", "function")
+            .putObject("function").put("name", "review").put("arguments", "{\"中文\":null}");
+        var history = List.<JsonNode>of(message("system", "当前技能\n完整规则"), message("developer", "SKILL.md"),
+            message("user", "早先任务"), oldCall,
+            message("tool", "早先结果\n第二行").put("tool_call_id", "call_old"));
+        var messages = new java.util.ArrayList<>(history);
+        messages.add(message("user", "当前任务"));
+        messages.add(message("user", " \n\t"));
+        var body = requestMapper().prepare(request(CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            mapper.createObjectNode(), List.of(), messages)).body();
+
+        assertThat(mapper.readTree(body.path("systemProvidedContext").asText())).isEqualTo(mapper.valueToTree(history));
+        assertThat(body.path("message").asText()).contains("当前任务").doesNotContain("call_old", "早先结果");
+    }
+
+    @Test
+    void requestWithoutUserKeepsSystemAndDeveloperInTheCompleteOriginalPrompt() {
+        var body = requestMapper().prepare(request(CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            mapper.createObjectNode(), List.of(), List.of(message("system", "遵守技能"), message("developer", "汇报状态")))).body();
+
+        assertThat(body.path("systemProvidedContext").asText()).isEmpty();
+        assertThat(body.path("message").asText()).contains("[system]\n遵守技能", "[developer]\n汇报状态");
+    }
+
+    @Test
+    void gatewayMessageResourceIdsDoNotChangeNativeContextOrFunctionIdentity() {
+        var call = message("assistant", "此前调用");
+        call.putArray("tool_calls").addObject().put("id", "call_real").put("type", "function")
+            .putObject("function").put("name", "review").put("arguments", "{}");
+        var typedCall = mapper.createObjectNode().put("type", "function_call").put("id", "fc_resource")
+            .put("call_id", "call_typed").put("name", "lookup").put("arguments", "{}");
+        var messages = List.<JsonNode>of(message("developer", "SKILL.md"), message("user", "早先批次"), call,
+            message("tool", "此前结果").put("tool_call_id", "call_real"), typedCall, message("user", "当前任务"));
+        var stored = messages.stream().map(JsonNode::deepCopy).toList();
+        for (var index = 0; index < 4; index++) ((tools.jackson.databind.node.ObjectNode) stored.get(index))
+            .put("id", "in_gateway_" + index);
+        var original = mapper.writeValueAsString(stored);
+
+        var plain = requestMapper().prepare(request(CanonicalRequest.Protocol.RESPONSES,
+            mapper.createObjectNode(), List.of(), messages)).body();
+        var state = requestMapper().prepare(request(CanonicalRequest.Protocol.RESPONSES,
+            mapper.createObjectNode(), List.of(), stored)).body();
+
+        assertThat(state.path("message")).isEqualTo(plain.path("message"));
+        assertThat(state.path("systemProvidedContext")).isEqualTo(plain.path("systemProvidedContext"));
+        var context = mapper.readTree(state.path("systemProvidedContext").asText());
+        assertThat(context.get(2).path("tool_calls").get(0).path("id").asText()).isEqualTo("call_real");
+        assertThat(context.get(3).path("tool_call_id").asText()).isEqualTo("call_real");
+        assertThat(context.get(4).path("id").asText()).isEqualTo("fc_resource");
+        assertThat(mapper.writeValueAsString(stored)).isEqualTo(original);
     }
 
     @Test
@@ -512,6 +570,7 @@ class GrokWebProtocolTest {
 
         var body = mapper.createObjectNode()
             .put("message", "hello")
+            .put("systemProvidedContext", "[\"system skill and complete history\"]")
             .put("modeId", "fast")
             .put("responseId", "parent-response-id");
         var result = protocol.chat(
@@ -525,11 +584,10 @@ class GrokWebProtocolTest {
             anyString(), path.capture(), any(), anyInt(), any());
         assertThat(path.getValue()).isEqualTo("/ws/mgw/?uid=user-id");
         var sent = ArgumentCaptor.forClass(tools.jackson.databind.JsonNode.class);
-        verify(transport, times(3)).sendWebSocket(anyString(), anyString(), sent.capture());
+        verify(transport, times(2)).sendWebSocket(anyString(), anyString(), sent.capture());
         assertThat(sent.getAllValues()).extracting(value ->
                 value.path("event").path("type").asText())
-            .containsExactly(
-                "session.create", "conversation.item.create", "response.create");
+            .containsExactly("session.create", "response.create");
         assertThat(sent.getAllValues().get(0).path("event").path("session")
             .path("x_grok").path("protocol_capabilities"))
             .extracting(JsonNode::asText)
@@ -540,10 +598,14 @@ class GrokWebProtocolTest {
             .isEqualTo("conversation-0");
         assertThat(sessionOptions.path("load_existing").asBoolean()).isTrue();
         assertThat(sessionOptions.path("needs_history").asBoolean()).isFalse();
+        assertThat(sessionOptions.path("enable_side_by_side").asBoolean()).isFalse();
         assertThat(sent.getAllValues().get(1).path("event")
             .path("parent_response_id").asText()).isEqualTo("parent-response-id");
-        assertThat(sent.getAllValues().get(2).path("event")
-            .has("parent_response_id")).isFalse();
+        var chunks = sent.getAllValues().get(1).path("event").path("item").path("x_grok").path("input_chunks");
+        assertThat(chunks.size()).isEqualTo(2);
+        assertThat(chunks.get(0).path("text").path("text").asText()).isEqualTo("hello");
+        assertThat(chunks.get(1).path("system_provided_context").path("text").asText())
+            .isEqualTo(body.path("systemProvidedContext").asText());
         verify(transport, times(1)).open(any());
     }
 

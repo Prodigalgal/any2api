@@ -39,6 +39,36 @@
 - 测试：真实 PostgreSQL 覆盖 basic/混合等级、冷却/过期/禁用、null/未知等级、模型别名/未知模型、媒体、其他厂商及缓存；有合格限制账号时冷加载固定 3 次批量查询，空限制账号 2 次，无限制策略 1 次，热缓存无新增 SQL。Java/Python 相关及全量门禁、版本/JAR 校验；生产只读核对账号等级和现有模型详情。缓存 namespace 升为 v8 隔离旧资格结果。
 - 已撤回实验：当前轮次分区 JSON、完整 JSON 和额外 none 提示虽有单次成功，两轮真实 SDK 仍有函数/结果遗漏；原生多角色/多 user item 与 keep_context 三组对照没有保留早先历史。这些实验均不进入候选代码，保留完整输入及失败证据，不将有限成功样本当作稳定性保证。
 
+### 0.27.8 目录资格校验读取成本与 Grok 协议调查
+
+- 目标：消除 0.27.7 账号资格校验引入的两次冷缓存数据库往返，继续定位 Grok 完整历史/函数回放的真实 WEB 入口。
+- 范围/文件：`ModelCatalogCache` 在同一 SQL 快照内分别聚合限制厂商的账号与模型冷却，仅随首行传输；保留现有模型/滚动健康/探测查询及策略判断。真实 PostgreSQL 回归、统一版本、当前任务与证据报告；Grok 先调查官方静态前端和合成原生事件，仅采用有正向语义证据的字段。
+- 非目标：不改变公开 API、账号等级、权限、冷却语义、TTL、DB 结构、历史正文、工具执行边界或用户所选模型，不扩展 Qwen，不增加重试次数。
+- 验收：限制/不限策略、混合等级、空账号、空目录均冷加载一次 SQL、热缓存零 SQL；账号及模型冷却来自同一数据库快照，资格数据不随每个模型重复传输；目录字段及资格结果保持。Grok 未通过完整 Agent 验收时候选不推送 main。
+- 测试：真实 PostgreSQL 资格/配额/空值/缓存/首行与空目录验证、只读生产 SQL 结果差量及执行计划；Backend test/bootJar、Automation pytest/ruff、Web lint/build、版本/JAR 校验。合成 WEB 调查保留失败，不持久化会话凭据补丁。
+
+### 0.27.9 Grok 原生系统提供上下文桥接候选
+
+- 目标：修复完整历史混在当前 user 正文造成的历史回答/函数结果遗漏。0.27.8 调查确认官方 WEB `buildWireInputChunks` 使用 `systemProvidedContext`，`encodeInputChunk` 按 proto 字段名编码；原生 `system_provided_context` 的系统口令、40 轮历史批次和原失败函数结果三项均正向生效，inline 对照通过。
+- 范围/文件：Grok Java/Python 构造器将当前最后一个有正文的 user 及之后的调用/结果保留在当前输入，前缀完整消息无损 compact JSON 放入 `systemProvidedContext`；Gateway 发送一次带 item 的 `response.create`，输入块映射为 `system_provided_context`。当前工具契约、strict 校验、调用方执行和错误终态保持。相关回归、统一版本与发布证据。
+- 非目标：不把 WEB 系统提供上下文宣称为 OpenAI 原生角色优先级，不映射未验收的原生 clientToolResult/MCP，不缩短/重复历史，不改变付费等级、所选模型、Gateway store/continuation 和重试预算。
+- 验收/测试：Java/Python 顺序、完整 system/developer/skill/所有历史与工具 ID 保留，两种 none、单 user、无 user 及空白后续保持；真实原生正向证据之后仍需官方 SDK 七项完整通过，保留所有失败。相关/全量 Backend/Automation/Web/版本门禁；满足七厂商门禁前不推送 main。
+
+### 0.27.11 关键租约与缓存连接隔离
+
+- 目标：消除非关键缓存命令对账号获取/续租/释放的连接队头阻塞，并提供可定位的内部故障日志。
+- 范围：`AccountLeaseRedisClient` 复制现有 Redis/Lettuce 配置、拥有独立连接生命周期；`AccountLeaseService` 通过它执行原 Lua，readiness 并行检查缓存与租约两条连接。
+- 非目标：不迁移 Redis/PV、不修改 3s/250ms 预算、账号容量/fencing/TTL、API/DB/Key/厂商重试；独立连接不能解决 Redis 服务或底层网络整体不可用。
+- 验收：真实 TCP fixture 阻塞缓存响应并令原共享 Lua 超时，独立租约仍完成；关闭资源、连接故障/超时失败封闭、配置继承、两条 readiness 的失败路径正确。对外继续使用既有 `coordination_unavailable`。
+- 验证：Backend 相关与全量测试/bootJar，Automation/Web/版本契约；保留生产 0.27.6 发布前六家 31/42 的五次协调失败与衍生跳过。七家已取得的厂商语义证据、候选隔离证据和发布后真实协调/账本证据分别记录，不将一次正向连接对照当作 3s 根因已关闭。
+
+### 0.27.10 Grok 状态资源元数据消费与历史调用身份一致性
+
+- 目标：0.27.9 正向原生字段通过，但隔离 SDK 首轮 6/7、state 汇报失败，候选不发布。真实 WEB 输入证明手工与 state 当前文本一致，历史仅增加 Gateway message ID；原 JSON 上下文把这些非语义资源 ID 送入模型，造成相同正文的上下文不同。Java formatter 同时遗漏 assistant function ID、重复 tool 正文，与 Python 不一致。
+- 范围：仅在 Grok native context 表示中消费普通 role message 的顶层资源 `id`，原始 Gateway 状态、输入对象、正文、顺序、嵌套 function ID、call_id/tool_call_id 及其他字段保留；非 message 类型身份保持。Java 当前轮历史采用完整 tool_calls JSON，tool 正文只输出一次，两端保持一致；继承 0.27.8 单 SQL 目录优化和 0.27.9 已证明的 native context 字段。
+- 验收：相同业务内容的手工/状态桥接当前输入与 context 完全一致，资源查询的身份和权限不变；call/result 对应关系完整、原对象未变。相关及完整门禁、版本/JAR、候选真实 SDK 七项、其余六家复核后才发布。
+- 边界：`quoted_text` 历史与原生 `client_tool_result` 虽被接受/回显，结果语义未通过，不进入正式映射；不将 formatter/资源元数据修复认定为全部模型语义稳定，候选完整失败仍须保留。
+
 ### 0.27.6 跨通道尝试账本修复
 
 - 目标：0.27.4 DeepSeek 的 API 失败后 Runtime 生成成功，但 fallback 将 attempt 重置为 1，与 `usage_events(request_id, attempt)` 唯一约束冲突，成功记录被 `ON CONFLICT DO NOTHING` 丢弃。修正单请求跨通道的记录编号。

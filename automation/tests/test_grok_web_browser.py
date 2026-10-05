@@ -199,11 +199,14 @@ def test_grok_web_continues_after_complete_history_and_client_function_result() 
     request = build_grok_web_request(command)
 
     prompt = request["message"]
+    history = json.loads(request["systemProvidedContext"])
+    assert history == messages[:39]
     assert "Follow the system and developer instructions" in prompt
-    assert prompt.index("[system]") < prompt.index("[developer]") < prompt.index("业务批次号")
-    assert all(message["content"] in prompt for message in messages)
+    assert all(message["content"] in prompt for message in messages[39:])
+    assert "[system]" not in prompt
+    assert "业务批次号" not in prompt
     assert (
-        prompt.index("保留完整历史-0")
+        prompt.index("保留完整历史-36")
         < prompt.index("保留完整历史-37")
         < prompt.index("正在验收。")
     )
@@ -214,6 +217,110 @@ def test_grok_web_continues_after_complete_history_and_client_function_result() 
     assert prompt.endswith("Produce only the next assistant response.")
     assert "[Tool calling contract]" not in prompt
     assert command == original
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [[], [{"role": "user", "content": " \n\t"}]],
+)
+def test_grok_native_context_preserves_earlier_calls_and_blank_follow_up(suffix) -> None:
+    history = [
+        {"role": "system", "content": "遵守当前验收技能。\n保留每个批次。"},
+        {"role": "developer", "content": "SKILL.md：保留规则与函数结果。"},
+        {"role": "user", "content": "早先任务"},
+        {
+            "role": "assistant",
+            "content": "此前调用。",
+            "tool_calls": [
+                {"id": "call_old", "function": {"name": "review", "arguments": '{"中文":null}'}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_old", "content": "早先结果\n第二行"},
+    ]
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [*history, {"role": "user", "content": "当前任务"}, *suffix],
+        "tools": [],
+        "providerOptions": {},
+        "controls": {},
+    }
+    original = deepcopy(command)
+
+    request = build_grok_web_request(command)
+
+    assert json.loads(request["systemProvidedContext"]) == history
+    assert "当前任务" in request["message"]
+    assert "call_old" not in request["message"]
+    assert command == original
+
+
+def test_grok_without_user_preserves_the_complete_original_prompt() -> None:
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [
+            {"role": "system", "content": "遵守技能。"},
+            {"role": "developer", "content": "汇报当前状态。"},
+        ],
+        "tools": [],
+        "providerOptions": {},
+        "controls": {},
+    }
+
+    request = build_grok_web_request(command)
+
+    assert request["systemProvidedContext"] == ""
+    assert "[system]\n遵守技能。" in request["message"]
+    assert "[developer]\n汇报当前状态。" in request["message"]
+
+
+@pytest.mark.parametrize("message_type", [None, "message"])
+def test_grok_gateway_resource_ids_do_not_change_model_context_or_function_ids(
+    message_type,
+) -> None:
+    history = [
+        {"role": "developer", "content": "SKILL.md：保留每个调用身份。"},
+        {"role": "user", "content": "原业务批次。"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call_real", "function": {"name": "review", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call_real", "content": "此前结果。"},
+        {
+            "type": "function_call",
+            "id": "fc_resource",
+            "call_id": "call_typed",
+            "name": "lookup",
+            "arguments": "{}",
+        },
+    ]
+    if message_type:
+        for message in history[:4]:
+            message["type"] = message_type
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [*history, {"role": "user", "content": "当前任务"}],
+        "tools": [],
+        "providerOptions": {},
+        "controls": {},
+    }
+    stored = deepcopy(command)
+    for index, message in enumerate(stored["messages"][:4]):
+        message["id"] = f"in_gateway_{index}"
+    original = deepcopy(stored)
+
+    plain = build_grok_web_request(command)
+    state = build_grok_web_request(stored)
+
+    assert plain["message"] == state["message"]
+    assert plain["systemProvidedContext"] == state["systemProvidedContext"]
+    context = json.loads(state["systemProvidedContext"])
+    assert context[2]["tool_calls"][0]["id"] == context[3]["tool_call_id"] == "call_real"
+    assert context[4]["id"] == "fc_resource" and context[4]["call_id"] == "call_typed"
+    assert stored == original
 
 
 def test_grok_web_leaves_a_single_plain_user_prompt_unchanged() -> None:
@@ -251,7 +358,10 @@ def test_grok_web_uses_page_session_and_page_websocket() -> None:
     assert "/api/auth/session" in _SESSION_REQUEST
     assert "/api/auth/session" in _STREAM_REQUEST
     assert "new WebSocket" in _STREAM_REQUEST
-    assert "conversation.item.create" in _STREAM_REQUEST
+    assert "const inputChunks = [{text: {text: request.message}}]" in _STREAM_REQUEST
+    assert "system_provided_context: {text: request.systemProvidedContext}" in _STREAM_REQUEST
+    assert "event: responseEvent" in _STREAM_REQUEST
+    assert "conversation.item.create" not in _STREAM_REQUEST
     assert "response.create" in _STREAM_REQUEST
 
 
@@ -277,13 +387,17 @@ def test_grok_web_builds_request_with_model_aliases() -> None:
 
 
 @pytest.mark.parametrize("scenario", ["binary", "binary_close", "silent", "http_error"])
-def test_gateway_preserves_frame_order_and_closes_on_completion_or_timeout(scenario: str) -> None:
+@pytest.mark.parametrize("context", ["", "系统技能。\n完整历史。"])
+def test_gateway_preserves_frame_order_and_closes_on_completion_or_timeout(
+    scenario: str, context: str
+) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is required to execute the page WebSocket contract")
     harness = r"""
 const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const events = [];
+const sent = [];
 let closed = false;
 global.window = {__any2apiGrokWebEmit: async event => {
   if (event.type === 'data') await new Promise(resolve => setTimeout(resolve, 2));
@@ -297,7 +411,9 @@ global.fetch = async () => ({
 global.WebSocket = class {
   constructor() { setTimeout(() => this.onopen(), 0); }
   send(raw) {
-    const type = JSON.parse(raw).event.type;
+    const outgoing = JSON.parse(raw);
+    sent.push(outgoing);
+    const type = outgoing.event.type;
     const frame = event => this.onmessage({data: new Blob([JSON.stringify({session_id: 'test', event})])});
     if (type === 'session.create') setTimeout(() => frame({type: 'conversation.attached'}), 0);
     if (type === 'response.create' && input.scenario.startsWith('binary')) setTimeout(() => {
@@ -311,13 +427,14 @@ global.WebSocket = class {
 };
 (async () => {
   await eval('(' + input.script + ')')({requestId: 'test', mode: 'fast', message: 'hi',
+    systemProvidedContext: input.context, parentResponseId: 'parent-id',
     timeoutMs: 500, firstFrameTimeoutMs: 150});
-  process.stdout.write(JSON.stringify({events, closed, streams: window.__any2apiGrokWebStreams.size}));
+  process.stdout.write(JSON.stringify({events, sent, closed, streams: window.__any2apiGrokWebStreams.size}));
 })().catch(error => { process.stderr.write(String(error)); process.exitCode = 1; });
 """
     completed = subprocess.run(
         [node, "-e", harness],
-        input=json.dumps({"script": _STREAM_REQUEST, "scenario": scenario}),
+        input=json.dumps({"script": _STREAM_REQUEST, "scenario": scenario, "context": context}),
         capture_output=True,
         text=True,
         check=True,
@@ -325,6 +442,17 @@ global.WebSocket = class {
     )
     result = json.loads(completed.stdout)
     assert result["streams"] == 0
+    if scenario != "http_error":
+        assert [frame["event"]["type"] for frame in result["sent"]] == [
+            "session.create",
+            "response.create",
+        ]
+        event = result["sent"][1]["event"]
+        assert event["parent_response_id"] == "parent-id"
+        assert event["item"]["x_grok"]["input_chunks"] == [
+            {"text": {"text": "hi"}},
+            *([{"system_provided_context": {"text": context}}] if context else []),
+        ]
     if scenario.startswith("binary"):
         assert result["closed"]
         frames = [

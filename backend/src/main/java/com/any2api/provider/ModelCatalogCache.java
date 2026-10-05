@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -27,7 +28,9 @@ public class ModelCatalogCache {
     private static final String QUOTA_COOLDOWN_REASON_PATTERN = "(rate|quota|limit|credit|balance)";
     private static final String MODEL_QUERY = """
         WITH eligible_accounts AS MATERIALIZED (
-            SELECT id, provider_id FROM accounts
+            SELECT id, provider_id,
+                   CASE WHEN provider_id IN (:restrictedProviderIds) THEN metadata END AS account_metadata
+            FROM accounts
             WHERE enabled = TRUE AND status IN ('ACTIVE', 'DEGRADED')
               AND (cooldown_until IS NULL OR cooldown_until <= CURRENT_TIMESTAMP)
               AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
@@ -45,6 +48,25 @@ public class ModelCatalogCache {
               ON cooldown.account_id = account.id AND cooldown.provider_id = account.provider_id
             WHERE cooldown.cooldown_until > CURRENT_TIMESTAMP
             GROUP BY account.provider_id, cooldown.model_id
+        ), restricted_account_snapshot AS (
+            SELECT jsonb_build_object(
+                'accounts', COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                        'id', id, 'provider_id', provider_id, 'metadata', account_metadata))
+                    FROM eligible_accounts WHERE provider_id IN (:restrictedProviderIds)
+                ), '[]'::jsonb),
+                'cooldowns', COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                        'account_id', cooldown.account_id, 'provider_id', cooldown.provider_id,
+                        'model_id', cooldown.model_id,
+                        'quota_limited', cooldown.reason ~* :quotaReasonPattern))
+                    FROM eligible_accounts account
+                    JOIN account_model_cooldowns cooldown
+                      ON cooldown.account_id = account.id AND cooldown.provider_id = account.provider_id
+                    WHERE account.provider_id IN (:restrictedProviderIds)
+                      AND cooldown.cooldown_until > CURRENT_TIMESTAMP
+                ), '[]'::jsonb)
+            ) AS account_snapshot
         )
         SELECT m.upstream_id, m.display_name, m.provider_id,
                p.display_name AS provider_name,
@@ -67,6 +89,9 @@ public class ModelCatalogCache {
                probe.status AS probe_status,
                probe.error_class AS probe_error,
                probe.probed_at,
+               CASE WHEN ROW_NUMBER() OVER (ORDER BY m.provider_id, m.upstream_id) = 1
+                    THEN (SELECT account_snapshot::text FROM restricted_account_snapshot)
+               END AS account_snapshot,
                CASE
                    WHEN account_runtime.eligible_accounts = 0
                      OR account_runtime.available_accounts = 0 THEN 'UNAVAILABLE'
@@ -205,54 +230,62 @@ public class ModelCatalogCache {
 
     private List<Entry> load() {
         var now = Instant.now();
-        var accounts = loadAccountAvailability();
+        var policies = accountPolicies();
         return jdbc.sql(MODEL_QUERY)
+            .param("restrictedProviderIds", policies.isEmpty() ? List.of("") : policies.keySet())
             .param("quotaReasonPattern", QUOTA_COOLDOWN_REASON_PATTERN)
             .param("windowStart", PostgresResultValues.timestamp(now.minus(healthWindow)))
             .param("probeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness)))
             .param("providerProbeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness.multipliedBy(4))))
             .param("readySuccessRate", readySuccessRate)
             .param("readyP95Ms", readyP95Ms)
-            .query((result, rowNumber) -> row(result, rowNumber, accounts)).list();
+            .query(new CatalogRowMapper(policies)).list();
     }
 
-    private AccountAvailability loadAccountAvailability() {
+    private Map<String, ModelAccountPolicy> accountPolicies() {
         var policies = new java.util.LinkedHashMap<String, ModelAccountPolicy>();
         for (var provider : providers.plugins()) {
             provider.modelAccountPolicy().ifPresent(policy -> policies.put(provider.manifest().id(), policy));
         }
-        if (policies.isEmpty()) return new AccountAvailability(Map.of(), Map.of(), Map.of());
-        var eligible = jdbc.sql("""
-            SELECT id, provider_id, metadata::text AS metadata FROM accounts
-            WHERE provider_id IN (:providerIds) AND enabled = TRUE AND status IN ('ACTIVE', 'DEGRADED')
-              AND (cooldown_until IS NULL OR cooldown_until <= CURRENT_TIMESTAMP)
-              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-            """)
-            .param("providerIds", policies.keySet())
-            .query((result, rowNumber) -> new EligibleAccount(result.getString("provider_id"),
-                new ProviderAccountProfile(result.getObject("id", UUID.class), mapper.convertValue(
-                    readJson(result.getString("metadata")),
-                    new tools.jackson.core.type.TypeReference<Map<String, Object>>() { })))).list();
-        var profiles = eligible.stream().collect(java.util.stream.Collectors.groupingBy(
-            EligibleAccount::providerId, java.util.stream.Collectors.mapping(
-                EligibleAccount::accountProfile, java.util.stream.Collectors.toList())));
-        if (eligible.isEmpty()) return new AccountAvailability(policies, profiles, Map.of());
-        // Only restricted providers require metadata; load cooldowns in one second phase.
-        var cooldowns = jdbc.sql("""
-            SELECT account_id, provider_id, model_id, reason ~* :quotaReasonPattern AS quota_limited
-            FROM account_model_cooldowns WHERE account_id IN (:accountIds) AND cooldown_until > CURRENT_TIMESTAMP
-            """)
-            .param("accountIds", eligible.stream().map(account -> account.accountProfile().accountId()).toList())
-            .param("quotaReasonPattern", QUOTA_COOLDOWN_REASON_PATTERN)
-            .query((result, rowNumber) -> new ModelCooldown(new CooldownKey(result.getObject("account_id", UUID.class),
-                result.getString("provider_id"), result.getString("model_id")), result.getBoolean("quota_limited")))
-            .list().stream().collect(java.util.stream.Collectors.toMap(ModelCooldown::key, ModelCooldown::quotaLimited));
+        return policies;
+    }
+
+    private AccountAvailability accountAvailability(String serialized, Map<String, ModelAccountPolicy> policies) {
+        var snapshot = readJson(serialized);
+        var profiles = new java.util.LinkedHashMap<String, List<ProviderAccountProfile>>();
+        for (var account : snapshot.path("accounts")) {
+            var accountProfile = new ProviderAccountProfile(UUID.fromString(account.path("id").asString()),
+                mapper.convertValue(account.path("metadata"),
+                    new tools.jackson.core.type.TypeReference<Map<String, Object>>() { }));
+            profiles.computeIfAbsent(account.path("provider_id").asString(), ignored -> new java.util.ArrayList<>())
+                .add(accountProfile);
+        }
+        var cooldowns = new java.util.HashMap<CooldownKey, Boolean>();
+        for (var cooldown : snapshot.path("cooldowns")) {
+            cooldowns.put(new CooldownKey(UUID.fromString(cooldown.path("account_id").asString()),
+                cooldown.path("provider_id").asString(), cooldown.path("model_id").asString()),
+                cooldown.path("quota_limited").asBoolean(false));
+        }
         return new AccountAvailability(policies, profiles, cooldowns);
     }
 
-    private record EligibleAccount(String providerId, ProviderAccountProfile accountProfile) {}
+    private final class CatalogRowMapper implements RowMapper<Entry> {
+        private final Map<String, ModelAccountPolicy> policies;
+        private AccountAvailability accounts;
+
+        private CatalogRowMapper(Map<String, ModelAccountPolicy> policies) {
+            this.policies = policies;
+        }
+
+        @Override
+        public Entry mapRow(ResultSet result, int rowNumber) throws SQLException {
+            // Ship and decode the account snapshot once; never multiply it by the model count.
+            if (rowNumber == 0) accounts = accountAvailability(result.getString("account_snapshot"), policies);
+            return row(result, rowNumber, accounts);
+        }
+    }
+
     private record CooldownKey(UUID accountId, String providerId, String modelId) {}
-    private record ModelCooldown(CooldownKey key, boolean quotaLimited) {}
     private record AccountRuntime(long eligible, long available, long quotaLimited) {}
     private record AccountAvailability(
         Map<String, ModelAccountPolicy> policies,

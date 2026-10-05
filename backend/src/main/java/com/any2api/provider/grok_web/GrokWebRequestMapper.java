@@ -9,6 +9,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 @Component
 final class GrokWebRequestMapper {
+    private static final java.util.Set<String> MESSAGE_ROLES = java.util.Set.of("system", "developer", "user", "assistant", "tool");
     private final ObjectMapper mapper;
     private final GrokWebToolProtocol tools;
 
@@ -23,17 +24,46 @@ final class GrokWebRequestMapper {
             throw new IllegalArgumentException("Grok Web model is not a conversation model: " + request.model());
         }
         var configuration = tools.parse(request);
-        var prompt = tools.inject(prompt(request), configuration);
-        return new Prepared(payload(prompt, spec.mode()), configuration, tools.sieve(configuration));
+        // Validate the whole transcript before moving earlier messages into native context.
+        var complete = prompt(request.messages());
+        var start = currentTurnStart(request);
+        var current = start == 0 ? complete : prompt(request.messages().subList(start, request.messages().size()));
+        var prompt = tools.inject(current, configuration);
+        var body = payload(prompt, spec.mode());
+        body.put("systemProvidedContext", start == 0 ? "" : context(request.messages().subList(0, start)));
+        return new Prepared(body, configuration, tools.sieve(configuration));
     }
 
     void validateTools(CanonicalRequest request) {
         tools.parse(request);
     }
 
-    private String prompt(CanonicalRequest request) {
+    private int currentTurnStart(CanonicalRequest request) {
+        for (var index = request.messages().size() - 1; index >= 0; index--) {
+            var message = request.messages().get(index);
+            if ("user".equals(message.path("role").asText()) && !text(message.path("content")).isBlank()) return index;
+        }
+        return 0;
+    }
+
+    private String context(java.util.List<JsonNode> messages) {
+        var history = mapper.createArrayNode();
+        for (var message : messages) {
+            var copy = message.deepCopy();
+            if (copy.isObject() && MESSAGE_ROLES.contains(copy.path("role").asText(""))
+                    && (copy.path("type").isMissingNode() || copy.path("type").isNull()
+                        || "message".equals(copy.path("type").asText()))) {
+                // Consume Gateway message resource identity without changing function call identity.
+                ((ObjectNode) copy).remove("id");
+            }
+            history.add(copy);
+        }
+        return mapper.writeValueAsString(history);
+    }
+
+    private String prompt(java.util.List<JsonNode> messages) {
         var value = new StringBuilder();
-        for (var message : request.messages()) {
+        for (var message : messages) {
             var history = tools.history(message);
             var type = message.path("type").asText("").trim().toLowerCase();
             if ("function_call".equals(type) || "function_call_output".equals(type)) {
@@ -42,12 +72,20 @@ final class GrokWebRequestMapper {
             }
             var role = message.path("role").asText("user");
             var content = text(message.path("content"));
-            if (!history.isBlank()) content = content.isBlank() ? history : content + "\n" + history;
+            if (!message.path("tool_call_id").asText("").isBlank()) {
+                role = "tool";
+                content = "Tool result (" + message.path("tool_call_id").asText() + "):\n" + content;
+            } else if (message.path("tool_calls").isArray()) {
+                var calls = mapper.writeValueAsString(message.path("tool_calls"));
+                content = content.isBlank() ? calls : content + "\n" + calls;
+            } else if (!history.isBlank()) {
+                content = content.isBlank() ? history : content + "\n" + history;
+            }
             if (!content.isBlank()) value.append('[').append(role).append("]\n")
                 .append(content).append("\n\n");
         }
         var prompt = value.toString().trim();
-        if (request.messages().size() == 1 && prompt.startsWith("[user]\n")) return prompt;
+        if (messages.size() == 1 && prompt.startsWith("[user]\n")) return prompt;
         return """
             [Conversation transcript]
             The following role-labeled messages are the complete conversation, in order.

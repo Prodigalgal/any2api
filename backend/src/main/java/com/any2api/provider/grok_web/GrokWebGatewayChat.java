@@ -120,23 +120,22 @@ final class GrokWebGatewayChat {
             .put("role", "user");
         var xGrok = mapper.createObjectNode()
             .put("client_message_id", UUID.randomUUID().toString());
-        xGrok.putArray("input_chunks").addObject().putObject("text")
+        var inputChunks = xGrok.putArray("input_chunks");
+        inputChunks.addObject().putObject("text")
             .put("text", request.path("message").asText(""));
+        var context = request.path("systemProvidedContext").asText("");
+        if (!context.isBlank()) inputChunks.addObject().putObject("system_provided_context").put("text", context);
         item.set("x_grok", xGrok);
 
-        var itemEvent = event("conversation.item.create", "evt_msg_" + now)
+        var responseEvent = event("response.create", "evt_resp_" + now)
             .set("item", item);
         var parentResponseId = request.path("responseId").asText("").trim();
-        if (!parentResponseId.isBlank()) itemEvent.put("parent_response_id", parentResponseId);
+        if (!parentResponseId.isBlank()) responseEvent.put("parent_response_id", parentResponseId);
 
-        var createItem = mapper.createObjectNode()
-            .put("session_id", attached.sessionId())
-            .set("event", itemEvent);
         var createResponse = mapper.createObjectNode()
             .put("session_id", attached.sessionId())
-            .set("event", event("response.create", "evt_resp_" + now));
-        return transport.sendWebSocket(browserSession.id(), websocket.id(), createItem)
-            .then(transport.sendWebSocket(browserSession.id(), websocket.id(), createResponse));
+            .set("event", responseEvent);
+        return transport.sendWebSocket(browserSession.id(), websocket.id(), createResponse);
     }
 
     private Flux<byte[]> responseFrames(
@@ -157,7 +156,7 @@ final class GrokWebGatewayChat {
             .add("conversation_attached")
             .add("custom_methods_v1");
         xGrok.put("use_chunk", true);
-        xGrok.put("enable_side_by_side", request.path("enableSideBySide").asBoolean(true));
+        xGrok.put("enable_side_by_side", request.path("enableSideBySide").asBoolean(false));
         xGrok.put("force_side_by_side", request.path("forceSideBySide").asBoolean(false));
         xGrok.put("enable_image_generation",
             request.path("enableImageGeneration").asBoolean(false));

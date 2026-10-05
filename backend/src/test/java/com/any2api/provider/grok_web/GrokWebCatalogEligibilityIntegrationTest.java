@@ -74,16 +74,15 @@ class GrokWebCatalogEligibilityIntegrationTest {
                 assertThat(entry.probeStatus()).as(model).isEqualTo("READY");
             }
             assertThat(cache.list().block()).isSameAs(entries);
-            // No eligible-account cooldown query is issued per model or per account.
-            verify(jdbc, times(3)).sql(anyString());
+            // The complete catalog and account eligibility share one database round trip.
+            verify(jdbc, times(1)).sql(anyString());
             database.jdbc.sql("UPDATE accounts SET enabled=FALSE WHERE provider_id='grok_web'").update();
             cache.invalidate().block();
             var unavailable = cache.list().block();
             assertThat(entry(unavailable, "grok-3").eligibleAccountCount()).isZero();
             assertThat(entry(unavailable, "grok-3").available()).isFalse();
             assertThat(entry(unavailable, "grok-3").runtimeStatus()).isEqualTo("UNAVAILABLE");
-            // With no eligible restricted accounts the cooldown batch is omitted.
-            verify(jdbc, times(5)).sql(anyString());
+            verify(jdbc, times(2)).sql(anyString());
         }
     }
 
@@ -131,7 +130,7 @@ class GrokWebCatalogEligibilityIntegrationTest {
             assertThat(unrestricted.availableAccountCount()).isEqualTo(1);
             assertThat(unrestricted.available()).isTrue();
             cache.list().block();
-            verify(jdbc, times(3)).sql(anyString());
+            verify(jdbc, times(1)).sql(anyString());
         }
     }
 
@@ -171,6 +170,32 @@ class GrokWebCatalogEligibilityIntegrationTest {
             assertThat(entries.getFirst().available()).isFalse();
             cache.list().block();
             verify(jdbc, times(1)).sql(anyString());
+        }
+    }
+
+    @Test
+    void catalogWithRestrictedAccountsHandlesUnrestrictedFirstRowAndEmptyResults() throws Exception {
+        try (var database = new InteropDatabase()) {
+            seedModels(database);
+            account(database, "basic", "basic", "ACTIVE", true);
+            database.jdbc.sql("UPDATE models SET enabled=FALSE WHERE provider_id='grok_web'").update();
+            database.jdbc.sql("INSERT INTO accounts(id,provider_id,external_id,status,enabled) VALUES(gen_random_uuid(),'mimo','fixture','ACTIVE',TRUE)")
+                .update();
+            var jdbc = spy(database.jdbc);
+            var cache = cache(jdbc, List.of(grok(), mimo()));
+
+            var entries = cache.list().block();
+
+            assertThat(entries).hasSize(1);
+            assertThat(entries.getFirst().providerId()).isEqualTo("mimo");
+            assertThat(entries.getFirst().availableAccountCount()).isEqualTo(1);
+            assertThat(entries.getFirst().available()).isTrue();
+            verify(jdbc, times(1)).sql(anyString());
+            database.jdbc.sql("UPDATE models SET enabled=FALSE").update();
+            cache.invalidate().block();
+            assertThat(cache.list().block()).isEmpty();
+            assertThat(cache.list().block()).isEmpty();
+            verify(jdbc, times(2)).sql(anyString());
         }
     }
 

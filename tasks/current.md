@@ -1,11 +1,12 @@
-# 当前任务板（源码 0.27.7）
+# 当前任务板（源码 0.27.11）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-04–05 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.7）
+## 2026-10-04–05 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.11）
 
 - 范围：[执行规格](../docs/requirements/WEB_PROVIDER_PARAMETER_ADAPTATION.md)。按用户批准逐厂商核对 native 字段、单参数探测、WEB 输入限制及 Xiaomi 桌面端自动引导；Qwen 仍只有代码证据。
+- 当前 0.27.11 未发布：生产 0.27.6 六家复核 31/42，五次协调失败、六项前置衍生失败；Grok 0.27.10 隔离真实 WEB 7/7 保留。新增独立租约 Redis client、内部失败日志及双连接 readiness；真实 TCP 回归复现旧共享连接超时而独立租约完成，故障仍失败封闭。13 项相关测试通过，含真实 Boot 默认工厂/模板保留；Backend 全量/bootJar、Automation 536、Web lint/build、ruff/126 format、八处版本通过。按现有 workflow 的 deploy=false 构建不可变候选，再进行七家隔离运行验收及相同制品的 GitOps 提升，不提前更新生产。
 - 参数声明回归各 Provider 的 `ProviderProtocolContract.parameterMappings`，模型详情提供 `parameter_adaptation`；目录不重复大表，v6 cache 使用当前 adapter 能力并保留 discovery / overrides。
 - 已知可选 null generation 当作缺省；MiMo 完整 Unicode schema 无损压缩、空白片段保留、固定长度拒绝变为非重试 OpenAI 错误，不换号/熔断；GLM 正整数输出上限预校验。
 - tools/skills 原生字段追加探测：MiMo 6 个候选位置未见生效，query 两个正向对照有效；DeepSeek/LongCat/Grok/MiniMax 当前通道未见独立字段生效，GLM tools 流内 INTERNAL_ERROR，Arena 修正临时解析器后 429 停止、语义未验证。厂商 Agent/MCP 安装配置与调用方 function 执行边界分别核对，不把 HTTP 200 或前端渲染字段当作原生支持。
@@ -24,6 +25,9 @@
 - 0.27.7 正文实验已撤回：Grok 手工/state 的 42 条消息生成相同 WEB 正文，未丢历史；分区/完整 JSON 虽有有限成功，两轮完整 SDK 仍有函数/结果遗漏，不以重跑成功掩盖失败。原生多角色/多 user item/keep_context 三组 0/3，均只记录最后一条 user。原始失败、自有资源清理和 runtime 关闭保留。
 - 0.27.7 当前候选收敛为 Grok 静态账号资格与对象 none 修复：生产只读确认 19 个 basic 配置账号，而目录把高等级模式误标 19 个可用；可选 ModelAccountPolicy 复用现有路由规则，按合格账号计算 cooldown/quota，cache v8，null metadata 不可变保留、未知模型不能拖垮全目录。无专属策略保持原目录行为；冷加载固定最多 3 次批量 SQL，热缓存无 SQL。Backend 522 passed / 5 skipped、bootJar，Automation 527 passed、Web lint/build、ruff/八处版本通过。未推送 main/未发布，Grok 完整 Agent 门禁仍未完成；生产 0.27.6 及其余六家的通过证据保留。
 - Arena 0.27.3 缓存差量四请求完成：两个显式 `web_search:false` 都真实生成，plain 重复仅 cache hit，3 个实际生成请求/4 次尝试，首次受控请求一次 credential_rejected 后成功；缓存隔离证明通过。Read 18×3 全 200，但 system 全目录 median 2229.78ms，同一 Arena Key 目录 median 6561.48ms，n=3/WAN/大目录波动仍未关闭，不声称性能普遍改善。
+- 0.27.8 目录优化占用新版本，未发布：限制账号与 cooldown 在同一 SQL 快照分别聚合，仅随目录首行传输；冷加载从 3 次降至 1 次，热缓存零 SQL。真实 PG 及生产只读 318 行双向差异 0，资格快照 1 行/14,452 bytes，原主查询 21.641–22.486ms、新查询 22.322–24.801ms；HTTP 冷加载收益尚未上线验证，历史秒级波动未关闭。
+- 0.27.9 Grok native context 未发布：官方静态前端/proto 与原生合成语义证明 `system_provided_context` 生效，系统口令/40 轮批次/原失败函数结果 3/3，inline 对照通过。接入 Java/Python 和一次带 item 的 `response.create`；全量本地门禁通过，但隔离 SDK 6/7，state `ad37f8cf-e9d8-497b-abb1-f1f3bd93e7f4` 仍重复旧回答，资源语义后续校验未执行、两个自有状态已清理。quoted 历史及 native client_tool_result 结果失败，不采用。
+- 当前候选 0.27.10：消费 native context 内普通 message 的顶层 Gateway 资源 ID，原状态/正文、嵌套 function ID 和其他类型身份保留；Java 当前轮 formatter 补齐完整 tool_calls ID、tool 正文不重复。已知手工/store 输入两端当前文本 848 字符、context 2,243 字符一致，39 条历史完整。Backend 526 passed / 5 条件 skipped、bootJar，Automation 536 passed、Web lint/build、ruff/126 文件 format、八处版本/JAR 通过。隔离真实 Grok WEB SDK 七项 7/7，state/resources schema 与两个自有状态清理均通过；其余六家已有桥接代码未变，发布前使用生产 0.27.6 复核进行中。未推送 main/未部署，七家全部完成仍是发布条件。
 
 ## 2026-10-04 Redis 缓存等待与协调错误收敛（0.26.3）
 

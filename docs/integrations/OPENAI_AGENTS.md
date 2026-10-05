@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（源码 0.27.7）
+# OpenAI API 到厂商 WEB 的桥接（源码 0.27.11）
 
 ## 范围
 
@@ -8,7 +8,11 @@
 
 ## 当前能力
 
-0.27.6 已部署，七家同版本严格 Agent SDK 首轮 48/49：其余六家各 7/7，Grok 6/7，state 的技能汇报一次重复旧回答。Grok 单回答、原生失败终态/stream_error 和全局限流分类已上线；跨通道账本 35 个请求 / 38 次尝试完整，DeepSeek 和 LongCat 的 API 失败及 Runtime 成功分别入账。0.27.7 未发布候选修正 Grok 模型目录的账号等级/冷却资格和对象形式的 none；JSON 分区及额外提示实验因两轮真实 SDK 失败已撤回，完整正文格式保持。19 个账号的配置等级均为 basic，生产目录尚有高等级模式误标可用，不能据此认为这些模式具备合格账号。原生 `session.instructions`/system item，以及多角色/多 user item 与 keep_context 的历史探测均未证明有效，system/developer/skill 仍通过完整正文桥接，不能声称厂家原生角色隔离。实际候选门禁及生产验收见[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
+生产仍为 0.27.6。其首轮严格 Agent SDK 48/49，六家各 7/7、Grok state 一次技能汇报失败；35 个请求 / 38 次 INFERENCE 账本完整。2026-10-05 发布前六家复核 31/42，五次 `coordination_unavailable` 及六项前置缺失导致的失败保留，不能报告为全部可用。
+
+当前未发布候选 0.27.11 包含 Grok 账号等级资格、对象 none、目录冷加载一次 SQL、native `system_provided_context` 及手工/state 表示一致性修复。Grok 0.27.10 隔离真实 WEB SDK 7/7，包含完整五字段和状态资源 schema；这仍是一个账号/代表性组合的有限证据。19 个既有账号均为 basic 配置，生产高等级模式目录的误标尚待上线修正，原生付费权益没有验证。
+
+候选将账号租约命令从缓存连接隔离，复制原 Redis/Lettuce 配置并管理资源关闭，readiness 并行检查两条连接。外部 `coordination_unavailable`、3s 协调预算、250ms 缓存预算、容量/fencing/TTL 保持。源代码验收和线上结果分别记录；不能把连接隔离报告为底层网络故障已修复。实际门禁及运行证据见[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 
 使用 `/v1/chat/completions` 和 `/v1/responses`，或 `/{provider}/v1` 前缀。统一入口的 `model` 使用 `provider/upstream-model`，实际可用模型和账号以运行态 `/v1/models` 为准。
 
@@ -57,6 +61,8 @@ MiMo 长输入拒绝会返回 `context_length_exceeded`，已提交流则以失�
 2. skill 的索引、说明或读取后的正文作为指令/上下文进入同一流程。技能目录加载、按需读 SKILL.md、脚本、文件及终端操作由客户端 Agent 执行；没有把它安装到厂商 WEB，也没有通用可透传的顶层 skills 字段。客户端可以按需读取完整技能，网关不静默删改说明或权限规则。
 3. function schema 编入 Provider 的完整工具约定；模型输出由 ToolEmulationEngine/MiMo 解码器解析，严格参数通过网关校验后还原 OpenAI tool_calls/function_call 与 SSE。真实执行留在客户端；它用 tool_call_id/call_id 返回结果，网关保留完整调用与结果历史后再次生成。
 4. 原生 tools/skills 候选字段尚未证明通用有效，继续使用已实现的模拟桥接。不支持的配置明确拒绝，未知 WEB 限额保持未知；长度超限明确失败。模拟工具可能受到厂商模型拒绝、误判或格式生成不稳定影响，不能等同于厂家原生 function API。
+
+Grok 的未发布 0.27.10 候选利用已实测的 WEB `input_chunks.system_provided_context` 分离完整历史与当前输入，system/developer/skill 作为完整上下文传递；只消费网关 message 资源 ID，不修改 stored state，嵌套 function ID/结果对应关系保留。该字段不能证明 OpenAI 原生角色强制优先级。原生 `client_tool_result` 对当前自定义函数回放未证明有效，不用于替代客户端 function 结果桥接。0.27.9 隔离 SDK 6/7 的失败保留；0.27.10 Grok 隔离 SDK 七项已 7/7，包含 state/resource schema 和清理，其余六家发布前复核进行中。生产当前仍为 0.27.6，隔离结果不替代生产 coordinator/租约/账本验收。
 
 0.27.1 MiMo 的中文 enum/SSE 调用和普通业务结果回放 2/2 通过；随机 REPLAY 标记回显被模型拒绝，失败记录保留。详见本轮报告。0.27.2 另外收敛 WEB raw controls 的缓存隔离，避免不同 search/thinking 配置重用 plain 文本结果。
 

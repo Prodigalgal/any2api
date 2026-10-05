@@ -1,5 +1,6 @@
 package com.any2api.api;
 
+import com.any2api.coordination.AccountLeaseRedisClient;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -16,15 +17,18 @@ import reactor.core.scheduler.Schedulers;
 public class HealthController {
     private final JdbcClient jdbc;
     private final ReactiveStringRedisTemplate redis;
+    private final AccountLeaseRedisClient accountLeases;
     private final ExecutorService databaseExecutor;
 
     public HealthController(
         JdbcClient jdbc,
         ReactiveStringRedisTemplate redis,
+        AccountLeaseRedisClient accountLeases,
         ExecutorService databaseExecutor
     ) {
         this.jdbc = jdbc;
         this.redis = redis;
+        this.accountLeases = accountLeases;
         this.databaseExecutor = databaseExecutor;
     }
 
@@ -38,7 +42,7 @@ public class HealthController {
         var postgres = Mono.fromCallable(() -> jdbc.sql("SELECT 1").query(Integer.class).single())
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor));
         var redisPing = redis.hasKey("any2api:readiness");
-        return Mono.when(postgres, redisPing)
+        return Mono.when(postgres, redisPing, accountLeases.checkReadiness())
             .timeout(Duration.ofSeconds(3))
             .thenReturn(ResponseEntity.ok(Map.of("status", "UP")))
             .onErrorReturn(ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)

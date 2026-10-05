@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 
 import pytest
@@ -144,9 +145,18 @@ def test_every_web_builder_keeps_system_skill_complete_history_and_prepared_func
     }
     original = deepcopy(command)
 
-    prompt = builder(command, **kwargs)
+    request = builder(command, **kwargs)
+    prompt = request
     for component in path:
         prompt = prompt[component]
+    if builder is build_grok_web_request:
+        prompt = (
+            "\n".join(
+                message["content"] for message in json.loads(request["systemProvidedContext"])
+            )
+            + "\n"
+            + prompt
+        )
 
     assert all(message["content"] in prompt for message in messages)
     assert command == original

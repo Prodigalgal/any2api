@@ -6,14 +6,17 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Service
 public class AccountLeaseService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AccountLeaseService.class);
+    private enum Operation { ACQUIRE, EXCLUSIVE, RENEW, RELEASE }
 
     private static final RedisScript<Long> ACQUIRE = RedisScript.of("""
         local time = redis.call('TIME')
@@ -62,9 +65,9 @@ public class AccountLeaseService {
         return redis.call('ZREM', KEYS[1], ARGV[1])
         """, Long.class);
 
-    private final ReactiveStringRedisTemplate redis;
+    private final AccountLeaseRedisClient redis;
 
-    public AccountLeaseService(ReactiveStringRedisTemplate redis) {
+    public AccountLeaseService(AccountLeaseRedisClient redis) {
         this.redis = redis;
     }
 
@@ -93,7 +96,8 @@ public class AccountLeaseService {
         }
         var owner = UUID.randomUUID().toString();
         var keys = keys(providerId, accountId);
-        return executeLeaseScript(ACQUIRE, keys, List.of(
+        return executeLeaseScript(exclusive ? Operation.EXCLUSIVE : Operation.ACQUIRE,
+            providerId, accountId, ACQUIRE, keys, List.of(
                 Long.toString(ttl.toMillis()),
                 Integer.toString(maxConcurrency),
                 owner,
@@ -111,7 +115,8 @@ public class AccountLeaseService {
     }
 
     public Mono<Boolean> renew(AccountLease lease, Duration ttl) {
-        return executeLeaseScript(RENEW, ownershipKeys(lease), List.of(
+        return executeLeaseScript(Operation.RENEW, lease.providerId(), lease.accountId(), RENEW,
+            ownershipKeys(lease), List.of(
                 lease.ownerToken(),
                 Long.toString(ttl.toMillis())))
             .singleOrEmpty()
@@ -120,7 +125,8 @@ public class AccountLeaseService {
     }
 
     public Mono<Boolean> release(AccountLease lease) {
-        return executeLeaseScript(RELEASE, ownershipKeys(lease), List.of(
+        return executeLeaseScript(Operation.RELEASE, lease.providerId(), lease.accountId(), RELEASE,
+            ownershipKeys(lease), List.of(
                 lease.ownerToken()))
             .singleOrEmpty()
             .map(result -> result == 1)
@@ -133,10 +139,14 @@ public class AccountLeaseService {
             "any2api:account:" + tag + ":exclusive");
     }
 
-    private Flux<Long> executeLeaseScript(RedisScript<Long> script, List<String> keys, List<String> arguments) {
+    private Flux<Long> executeLeaseScript(Operation operation, String providerId, UUID accountId,
+        RedisScript<Long> script, List<String> keys, List<String> arguments) {
         return redis.execute(script, keys, arguments)
             .onErrorMap(QueryTimeoutException.class, CoordinationUnavailableException::new)
-            .onErrorMap(DataAccessResourceFailureException.class, CoordinationUnavailableException::new);
+            .onErrorMap(DataAccessResourceFailureException.class, CoordinationUnavailableException::new)
+            .doOnError(CoordinationUnavailableException.class, error -> LOGGER.warn(
+                "account lease coordination failed operation={} provider={} account_id={} cause_type={}",
+                operation, providerId, accountId, error.getCause().getClass().getSimpleName()));
     }
 
     private List<String> ownershipKeys(AccountLease lease) {

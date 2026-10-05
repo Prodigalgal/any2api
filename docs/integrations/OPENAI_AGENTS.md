@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（源码 0.27.4）
+# OpenAI API 到厂商 WEB 的桥接（源码 0.27.5）
 
 ## 范围
 
@@ -7,6 +7,8 @@
 不以完整 OpenAI 协议兼容作为目标；namespace/custom 和状态资源的现有实现保留，扩展按需使用。Codex 配置、模型 metadata 和本机工具策略属于可选客户端事项，不纳入后端交付。
 
 ## 当前能力
+
+0.27.4 已发布，七家同版本严格 Agent SDK 首轮 47/49：其余六家各 7/7，Grok 5/7，Chat 结果回放及 Responses state 的技能汇报仍遗漏字段。0.27.5 候选关闭 Grok WEB 比较模式，补齐原生非 completed/缺终帧/stream_error 失败处理；全局限流归上游暂不可用，不冷却账号。隔离候选连接真实 Grok WEB 七项通过，完成本地门禁，等待统一发布后复测。原生 `session.instructions`/system item 未证明有效，system/developer/skill 仍通过完整正文桥接，不能声称厂家原生角色隔离。详见[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 
 使用 `/v1/chat/completions` 和 `/v1/responses`，或 `/{provider}/v1` 前缀。统一入口的 `model` 使用 `provider/upstream-model`，实际可用模型和账号以运行态 `/v1/models` 为准。
 

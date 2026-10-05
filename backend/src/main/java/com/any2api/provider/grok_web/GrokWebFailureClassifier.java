@@ -9,6 +9,11 @@ import org.springframework.stereotype.Component;
 final class GrokWebFailureClassifier {
     ProviderFailure classify(Throwable error) {
         var message = error.getMessage() == null ? "" : error.getMessage();
+        if (error instanceof GrokWebEventDecoder.GrokWebStreamException stream
+            && "global_rate_limit".equals(stream.code())) {
+            return new ProviderFailure("upstream_unavailable", stream.getMessage(), true,
+                Map.of("code", stream.code(), "channel", "web", "scope", "provider"));
+        }
         if (definitiveBlock(message)) {
             return new ProviderFailure("account_blocked", "Grok Web account is blocked",
                 false, Map.of("channel", "web"));

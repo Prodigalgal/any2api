@@ -227,6 +227,33 @@ Source `a1d9035203c86eeb2d3a4b7474c735f4b82e1289`；[CI 37211898821](https://git
 
 15:22:31 UTC 同一现有 Arena Key、259 模型目录 n=3：全目录 14425.93/859.98/6561.48ms，median **6561.48ms**；单模型详情 755.17/1193.15/861.64ms，median **861.64ms**。目录没有重复 parameter_adaptation；其约 991KB 解压 / 25.6KB gzip 与 system scope 不同，不能混比体积或把窗口差异全部归因代码。公网波动、大目录与跨节点 Redis 成本尚未解决；本轮不声称 Read 性能普遍改善。
 
+### 0.27.4 发布、七家严格 SDK 与 Read 对照
+
+Source `6c7391aafd3ea9016326759a344064921d59461d`，[CI 37215047762](https://github.com/Prodigalgal/any2api/actions/runs/37215047762) success，四镜像及 GitOps 更新通过，初次 GitOps revision `507f99278bfa4575fc1bbba2950f3dfa8ae46c42`。2026-10-05 09:08（UTC+8）重新核验：当前 revision `3d52a000fc6062fb458a4c84a942537f14f60f2a`，Argo Synced/Healthy，四组件 Ready/restarts=0，版本仍 0.27.4；不可变镜像 suffix `20261004-v0.27.4-release-6c7391aafd3ea9016326759a344064921d59461d`。记录当前 revision，不沿用旧同步快照。
+
+- 新版本首轮 **47/49**：Arena、DeepSeek、GLM、LongCat、MiMo、MiniMax 各 7/7，Grok 5/7。Grok Chat 结果 `70950bed-7c7a-497a-a18b-6300bde8a1e1` 及 state `bab3b4ff-f0ec-4b30-b753-ce661e31a67d` 重复历史回答，遗漏文档、规则、批次、状态和页数；不能以 completed 或 DB success 替代内容验收。七家测试资源均删除后 404；Grok state 在内容断言失败后未执行 resource schema 断言，不报该项新版本 schema 已验证。
+- 35 个 SDK 请求目前关联 **40 次普通 INFERENCE 账本 / 34 次后台成功**，包括 Grok 工具生成失败、三次空回复、Arena 凭据拒绝、DeepSeek 上游错误。DeepSeek `1745ac77-4c11-40c9-99d9-59b5009eb2fb` 的 SDK completed/内容正确与当前单条失败账本不一致；保留差异，后续核对请求关联/转发重试，不增加一个未经证实的成功尝试。其他 SDK 通过与后台重试分别记录。
+- 同一全权限 Key、公网 direct 与集群两侧各 **18 端点 × 3 / 全 200**。这是有界窗口，不是容量测试；全目录两侧解压 JSON 都约 1.54MB、gzip 约 110KB。
+
+| Read 端点 | 集群 median ms | 公网 direct median ms |
+| --- | ---: | ---: |
+| overview | 110.05 | 839.51 |
+| providers | 91.27 | 434.08 |
+| api-keys | 90.09 | 378.85 |
+| `/v1/models` | 223.47 | 1122.56 |
+
+该窗口显示公网额外等待明显，全目录仍有序列化/传输成本；n=3 和 Hikari active/pending=0 的时点快照不足以关闭历史数秒级波动、Redis 3s 超时或所有 SQL 成本。本轮不调整 Redis/PV/公网配置，不宣称全部 Read 性能已解决。
+
+### 0.27.5 Grok 契约修复候选与发布前真实 WEB 验收
+
+- **单回答**：Python builder 先按 none 清空工具，旧逻辑因此重新打开 `enableSideBySide`；Java mapper 也默认为 true。统一关闭 WEB 比较模式，none/auto/required 都保持单回答。保留完整历史、工具定义/ID/结果及普通单用户提示。三轮原失败合成 body 对照中 true 和 false 都曾完整正确返回，不能声称双回答是模型语义遗漏的唯一原因。
+- **完成状态**：Gateway 仅明确 `response.done.response.status=completed` 才结束成功。incomplete/failed/cancelled/未知/缺失 status 和缺终帧均失败，保留已流出的文本，不产生成功完成/usage/状态保存；legacy 流保持原兼容行为。
+- **原生 stream_error**：真实事件 `response.grok.output.output.stream_error.kind=global_rate_limit`，message 为服务暂不可用。解码器不再忽略该事件，分类 `upstream_unavailable` 并保留 code/channel/provider scope；不再以空响应触发账号 quota 冷却或认证恢复。账号配额保持 `rate_limited`。沿用已有前输出重试边界，不新增自动重放策略。两个新增错误回归先红后绿，保留原失败日志。
+- **原生 system 探测**：用户正文内唯一标记的正向对照生效；`session.instructions` 能在 session.created 回显，但冷却后再次测试仍未影响回答；独立 system item 也未见生效。首次 instructions 测试返回 global_rate_limit/incomplete，按限流停止扩探。两类未知字段均不写入生产构造器，system/developer/skills 继续完整正文桥接。
+- **隔离候选 7/7**：官方 SDK 2.54.0 → 本地 0.27.5 公共 Controller/认证/PG 状态服务 → 实际既有 Grok WEB 账号与候选 Python builder，完整跑模型说明、Chat strict 调用/SSE 结果、Responses strict 调用/全量回放/state/resource schema/清理。请求 `d2a9a04d-9819-44ee-953a-052f5fc45ef1`、`ec24c2e5-7622-4a5b-9e1d-e9986e41af5e`、`d7e3eaaf-be84-4c5d-99b0-1c73b310a648`、`7783547c-e021-4e10-bae2-6e03779406ca`、`1cceee7a-8590-4e9f-8557-36c8498efd3c` 全部内容和终态通过。该隔离测试不包括生产租约/重试协调器，不算生产账本；两个拥有的合成状态已清理，临时服务关闭。辅助服务初次因 Java 路径转义编译失败保留，修正后才执行 SDK。
+- **门禁**：Backend 518 tests：513 passed / 5 条件 skipped，bootJar 通过；Automation 525 passed；Web lint/build、ruff check/format、源码与 JAR 八处版本均 0.27.5。候选满足发布前相关门禁，进入提交/发布及七家统一新版本复测。
+- **兼容与回滚**：没有 API/DB/凭据/Key 迁移。Grok 之前被误报成功的不完整原生响应改为标准失败；单次推理不再触发可选 WEB 比较。直接回滚使用 0.27.4 四组件的上述不可变 suffix，会恢复 Grok 比较模式及原生错误/终态缺陷；0.27.3 和 0.27.1 为历史回滚点。
+
 ## 遗留与回滚
 
 未知精确 token 上下文、全部模型/账号/mode、采样统计、多模态 token 成本、GLM 截断终帧，以及 Xiaomi 默认 Agent 引导的长期控制仍需独立证据。当前不将完整 Agent 输入拆成 WEB 上传文件，不自动压缩/截断历史来掩盖边界；上传/RAG 是否保留 system 与工具语义需要另做实现和验收。

@@ -225,7 +225,26 @@ def test_grok_web_leaves_a_single_plain_user_prompt_unchanged() -> None:
         "providerOptions": {},
         "controls": {},
     }
-    assert build_grok_web_request(command)["message"] == "[user]\nhello"
+    request = build_grok_web_request(command)
+    assert request["message"] == "[user]\nhello"
+    assert request["enableSideBySide"] is False
+
+
+@pytest.mark.parametrize("choice", ["auto", "none", "required"])
+def test_grok_web_never_enables_comparison_when_function_policy_changes(choice) -> None:
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [
+            {"type": "function", "name": "review_document", "parameters": {"type": "object"}}
+        ],
+        "providerOptions": {},
+        "controls": {"tool_choice": choice},
+    }
+    original = deepcopy(command)
+    assert build_grok_web_request(command)["enableSideBySide"] is False
+    assert command == original
 
 
 def test_grok_web_uses_page_session_and_page_websocket() -> None:

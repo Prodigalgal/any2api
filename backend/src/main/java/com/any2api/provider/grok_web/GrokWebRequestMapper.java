@@ -81,7 +81,7 @@ final class GrokWebRequestMapper {
             .put("disableTextFollowUps", false)
             .put("enableImageGeneration", true)
             .put("enableImageStreaming", true)
-            .put("enableSideBySide", true)
+            .put("enableSideBySide", false)
             .put("forceConcise", false)
             .put("forceSideBySide", false)
             .put("imageGenerationCount", 2)

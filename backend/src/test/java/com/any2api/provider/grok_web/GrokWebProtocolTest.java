@@ -43,6 +43,70 @@ class GrokWebProtocolTest {
         assertThat(payload.path("modeId").asText()).isEqualTo("auto");
         assertThat(payload.path("message").asText()).contains("[user]\nhello");
         assertThat(payload.path("temporary").asBoolean()).isTrue();
+        assertThat(payload.path("enableSideBySide").asBoolean()).isFalse();
+    }
+
+    @Test
+    void gatewayNonCompletedTerminalsNeverTurnPartialTextIntoSuccess() {
+        for (var status : List.of("incomplete", "failed", "cancelled", "unknown", "")) {
+            var decoder = new GrokWebEventDecoder(mapper, "gateway-non-completed");
+            var partial = decoder.decode(gatewayEvent("""
+                {"type":"response.output_text.delta","delta":"partial answer"}
+                """));
+            assertThat(partial.stream().filter(CanonicalEvent.OutputTextDelta.class::isInstance)).hasSize(1);
+            assertThatThrownBy(() -> decoder.decode(gatewayEvent(mapper.writeValueAsString(
+                mapper.createObjectNode().put("type", "response.done").set("response",
+                    mapper.createObjectNode().put("id", "response-1").put("status", status))))))
+                .isInstanceOf(GrokWebEventDecoder.GrokWebStreamException.class)
+                .hasMessageContaining("status");
+        }
+    }
+
+    @Test
+    void gatewayEofWithoutDoneCannotFinishPartialTextAsSuccessful() {
+        var decoder = new GrokWebEventDecoder(mapper, "gateway-truncated");
+        decoder.decode(gatewayEvent("""
+            {"type":"response.output_text.delta","delta":"partial answer"}
+            """));
+        assertThatThrownBy(decoder::finish)
+            .isInstanceOf(GrokWebEventDecoder.GrokWebStreamException.class)
+            .hasMessageContaining("response.done");
+    }
+
+    @Test
+    void gatewayGlobalRateLimitPreservesProviderScopeAndNeverCompletes() {
+        var decoder = new GrokWebEventDecoder(mapper, "gateway-global-limit");
+
+        assertThatThrownBy(() -> decoder.decode(gatewayEvent("""
+            {"type":"response.grok.output","output":{"stream_error":{
+              "kind":"global_rate_limit",
+              "message":"Service temporarily unavailable. Please try again later.",
+              "severity":"normal"}}}
+            """)))
+            .isInstanceOf(GrokWebEventDecoder.GrokWebStreamException.class)
+            .hasMessageContaining("temporarily unavailable");
+        var failure = new GrokWebFailureClassifier().classify(
+            new GrokWebEventDecoder.GrokWebStreamException(
+                "global_rate_limit", "Service temporarily unavailable. Please try again later."));
+        assertThat(failure.type()).isEqualTo("upstream_unavailable");
+        assertThat(failure.retryable()).isTrue();
+        assertThat(failure.detail()).containsEntry("code", "global_rate_limit")
+            .containsEntry("scope", "provider");
+    }
+
+    @Test
+    void gatewayAccountRateLimitRetainsTheExistingQuotaClassification() {
+        var decoder = new GrokWebEventDecoder(mapper, "gateway-account-limit");
+        assertThatThrownBy(() -> decoder.decode(gatewayEvent("""
+            {"type":"response.grok.output","output":{"stream_error":{
+              "kind":"subscription:free-usage-exhausted", "message":"Usage limit reached"}}}
+            """)))
+            .isInstanceOf(GrokWebEventDecoder.GrokWebStreamException.class)
+            .hasMessageContaining("Usage limit reached");
+        var failure = new GrokWebFailureClassifier().classify(
+            new GrokWebEventDecoder.GrokWebStreamException(
+                "subscription:free-usage-exhausted", "Usage limit reached"));
+        assertThat(failure.type()).isEqualTo("rate_limited");
     }
 
     @Test

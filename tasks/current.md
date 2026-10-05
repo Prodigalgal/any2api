@@ -1,9 +1,9 @@
-# 当前任务板（源码 0.27.4）
+# 当前任务板（源码 0.27.5）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-04 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.4）
+## 2026-10-04–05 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.5）
 
 - 范围：[执行规格](../docs/requirements/WEB_PROVIDER_PARAMETER_ADAPTATION.md)。按用户批准逐厂商核对 native 字段、单参数探测、WEB 输入限制及 Xiaomi 桌面端自动引导；Qwen 仍只有代码证据。
 - 参数声明回归各 Provider 的 `ProviderProtocolContract.parameterMappings`，模型详情提供 `parameter_adaptation`；目录不重复大表，v6 cache 使用当前 adapter 能力并保留 discovery / overrides。
@@ -17,6 +17,8 @@
 - 0.27.3 Source `a1d9035`、CI `37211898821` success、GitOps `822270c` Synced/Healthy、四组件 Ready/restarts=0。七家新版本 SDK 首轮 47/49，全部 state/resource schema/清理通过；GLM 原请求单独重试通过，Grok 完整回放及重试均语义失败。35 个矩阵请求 + 2 个单独重试 / 39 次后台尝试，保留 Arena 凭据拒绝、GLM 传输失败、Grok 空回复后换号；DB 生成成功不代替技能结果检查。
 - 0.27.4 候选补齐 Grok 的角色/完整历史结束/下一 assistant 回复边界，普通单用户提示保持；真实 WEB 的原失败合成输入候选两次完整结果通过，另外一次 incomplete 空回复与一次探测器漏解 response.chunk 均保留。内部客户端 max idle 30s → 3s、每秒回收闲置连接并由 Spring 关闭资源，保留 200 连接、10s 获取预算、15m 响应预算与原重试契约。实际 HTTP 复用/回收/关闭测试通过，不将空闲配置不匹配当作该次 502 唯一根因。
 - 0.27.4 本地 Backend 508 passed / 5 条件 skipped、bootJar/版本/JAR；Automation 全量 522 passed、修正 import 顺序与混合换行后 ruff/125 文件 format 和 Grok 13 项通过；Web lint/build 通过。候选已满足相关本地及真实 WEB 差量门禁，待统一发布后七家复测。
+- 0.27.4 Source `6c7391a`、CI `37215047762` success，四镜像 suffix `20261004-v0.27.4-release-6c7391aafd3ea9016326759a344064921d59461d`；2026-10-05 09:08（UTC+8）复核 Argo Synced/Healthy、四组件 Ready/restarts=0、版本一致。七家首轮 47/49：其余六家各 7/7，Grok Chat 结果回放及 state 内容遗漏。35 个 SDK 请求对应当前可关联 40 次 INFERENCE 账本 / 34 次后台成功；DeepSeek 一次 SDK completed 与单条失败账本不一致待定位，不能把 34/40 改报全请求成功。
+- 0.27.5 候选单回答、不完整终态及原生 stream_error 修复；global_rate_limit 分类 upstream_unavailable，保留 provider scope、不冷却账号，账号 quota 保持原分类。新错误回归先失败 2 项后修复；Backend 513 passed / 5 skipped、Automation 525 passed、Web lint/build、ruff/版本/JAR 通过；隔离候选真实 Grok WEB 官方 SDK 7/7，两个测试状态已清理、服务已关闭。原生 session.instructions 回显但未影响模型，system item 未生效；仍完整正文桥接。准备统一发布，再跑七家新版本完整验收。
 - Arena 0.27.3 缓存差量四请求完成：两个显式 `web_search:false` 都真实生成，plain 重复仅 cache hit，3 个实际生成请求/4 次尝试，首次受控请求一次 credential_rejected 后成功；缓存隔离证明通过。Read 18×3 全 200，但 system 全目录 median 2229.78ms，同一 Arena Key 目录 median 6561.48ms，n=3/WAN/大目录波动仍未关闭，不声称性能普遍改善。
 
 ## 2026-10-04 Redis 缓存等待与协调错误收敛（0.26.3）

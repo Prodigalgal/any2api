@@ -493,7 +493,7 @@ def build_grok_web_request(command: dict[str, Any]) -> dict[str, Any]:
         "message": message,
         "conversationId": str(command.get("previousConversationId") or "").strip(),
         "parentResponseId": str(command.get("previousUpstreamResponseId") or "").strip(),
-        "enableSideBySide": not bool(tools),
+        "enableSideBySide": False,
         "forceSideBySide": False,
         "enableImageGeneration": False,
         "imageGenerationCount": 2,

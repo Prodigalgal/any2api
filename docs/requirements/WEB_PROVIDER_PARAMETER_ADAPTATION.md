@@ -21,6 +21,15 @@
 - 验收：单用户普通提示保持；多角色与完整函数回放顺序、call_id、正文和参数无损；真实 Grok WEB 对失败合成请求的候选回放按原技能返回所有字段。客户端主动回收闲置连接，Spring 关闭释放连接池。七家已有完整证据保留，候选完成相关本地门禁和真实差量后才推送生产，再在新版本核验七家与资源接口。
 - 测试：Grok/容器/历史 Python 回归、Grok mapper Java 与实际本地 HTTP 连接复用/回收测试，Backend test/bootJar、Automation pytest/ruff、Web lint/build、版本/JAR 校验；使用现有账号在隔离进程验证候选 WEB，不持久化凭据补丁。生产记录 CI、GitOps、Pod、SDK、普通 INFERENCE 账本、缓存控制差量、最终模型 guard。
 
+### 0.27.5 Grok 单回答和原生终态修复
+
+- 目标：0.27.4 Grok 真实 Chat 结果和 Responses state 仍各一次遗漏，不能判全家验收完成。确认 builder 在 none 时清空 tools 并重新开启 `enableSideBySide`，Java mapper 也默认开启；Gateway 解码器忽略 `response.done.response.status`。修复这两处契约缺陷，并继续用原失败合成请求做原生字段对照，不能仅以 HTTP 200 计通过。
+- 范围/影响：Grok WEB Python/Java request mapper、Gateway event decoder 与回归、统一版本；保留原输入、历史/工具语义、已有 SSE、媒体及状态所有权。单个公开推理不启用厂家比较模式；Gateway 只有明确 completed 才进入成功，非 completed 或缺失终帧失败，legacy 流保持原行为。
+- 原生错误：`response.grok.output.output.stream_error` 按实际 kind/message 解码；已证实的 `global_rate_limit` 映射为 `upstream_unavailable`，保留 code/channel/provider scope，沿用既有前输出重试边界，不触发账号冷却或认证恢复。账号配额错误保持原 `rate_limited` 分类。不新增重试策略。
+- 非目标：不增加公开 API 或协议，不改严格参数或测试答案，不改重试/凭据/账号，不将历史模型语义遗漏断言为双回答的唯一后果。未经实测的 system 参数不直接进入生产。
+- 验收/测试：none/auto/required 都不重新打开双回答，完整原输入不变；原生 incomplete/failed/未知/缺终帧不能转成 completed，已输出片段保留且没有成功 usage/state。相关 Java/Python 回归及完整门禁；原合成失败 WEB 对照通过后才发布，最后验证新版本七家完整 SDK 与资源清理。
+- 发布前证据：2026-10-05 隔离候选连接真实 Grok WEB 的官方 SDK 七项全部通过，覆盖完整历史、strict 函数、结果语义、Gateway state/resource schema/清理；候选本地 Backend 513 passed / 5 skipped、Automation 525 passed、Web lint/build、ruff、八处版本/JAR 校验通过。`session.instructions` 虽回显但未影响回答，独立 system item 未见生效，不写入生产映射。
+
 - Arena、MiMo、DeepSeek、LongCat、GLM、Grok Web、MiniMax：逐项核对厂商 WEB 构造字段与官方页面/运行时证据，使用合成内容、单参数变更和有限推理验证。Qwen 沿用此前排除范围，仅检查代码，真实能力标为未验证。
 - 覆盖 temperature、top_p、三个输出 token 上限别名、reasoning/thinking、search、function 控制，以及平台负责的 store/continuation/SSE。区分字段被接受、实际转发、开关映射、网关模拟和不支持；HTTP 200 不作为参数生效的充分证据。
 - 不把客户端填的 1M/128K 或官方付费 API 规格当成 WEB 上限；不默默删除有约束意义的参数。不确定的上限保持未知并给出明确错误。未提供/null 的可选字段不应触发伪兼容错误。

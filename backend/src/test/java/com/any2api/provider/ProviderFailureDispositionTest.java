@@ -15,6 +15,18 @@ import reactor.core.publisher.Mono;
 
 class ProviderFailureDispositionTest {
     @Test
+    void providerCapacityFailureNeverCoolsOrExpiresTheAccount() {
+        var accounts = mock(AccountSelectionService.class);
+        var recoveries = mock(AccountRecoveryService.class);
+        new ProviderFailureDisposition(accounts, recoveries).report(
+            mock(LeasedProviderAccount.class), "grok-3",
+            new ProviderFailure("upstream_unavailable", "temporarily unavailable", true,
+                Map.of("code", "global_rate_limit", "scope", "provider"))).block();
+
+        org.mockito.Mockito.verifyNoInteractions(accounts, recoveries);
+    }
+
+    @Test
     void rateLimitCoolsOnlyTheRequestedModel() {
         var accounts = mock(AccountSelectionService.class);
         var recoveries = mock(AccountRecoveryService.class);

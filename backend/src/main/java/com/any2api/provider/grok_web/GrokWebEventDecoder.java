@@ -21,6 +21,8 @@ final class GrokWebEventDecoder {
     private String conversationId = "";
     private String upstreamResponseId = "";
     private boolean hasToolCalls;
+    private boolean gatewayStream;
+    private boolean gatewayCompleted;
 
     GrokWebEventDecoder(ObjectMapper mapper, String requestId) {
         this(mapper, requestId, "", null);
@@ -52,6 +54,10 @@ final class GrokWebEventDecoder {
 
     List<CanonicalEvent> finish() {
         frames.finish();
+        if (gatewayStream && !gatewayCompleted) {
+            throw new GrokWebStreamException("incomplete_stream",
+                "Grok Web stream ended before a completed response.done");
+        }
         var output = new ArrayList<CanonicalEvent>();
         start(output);
         if (toolSieve != null) emitToolResult(output, toolSieve.flush());
@@ -104,9 +110,18 @@ final class GrokWebEventDecoder {
     }
 
     private List<CanonicalEvent> parseGateway(JsonNode event) {
+        gatewayStream = true;
         var output = new ArrayList<CanonicalEvent>();
         var type = event.path("type").asText("");
         if ("error".equals(type)) throw upstreamError(event.path("error"));
+        if ("response.grok.output".equals(type)) {
+            var error = event.path("output").path("stream_error");
+            if (error.isObject()) {
+                throw new GrokWebStreamException(error.path("kind").asText("provider_error"),
+                    error.path("message").asText("Grok Web stream failed"));
+            }
+            return output;
+        }
         if ("conversation.attached".equals(type)) {
             conversationId = event.path("conversation").path("id").asText(conversationId);
             return output;
@@ -142,7 +157,15 @@ final class GrokWebEventDecoder {
             return output;
         }
         if ("response.done".equals(type)) {
-            upstreamResponseId = event.path("response").path("id")
+            var response = event.path("response");
+            if (response.path("error").isObject()) throw upstreamError(response.path("error"));
+            var status = response.path("status").asText("");
+            if (!"completed".equals(status)) {
+                throw new GrokWebStreamException("response_not_completed",
+                    "Grok Web response ended with status " + (status.isBlank() ? "missing" : status));
+            }
+            gatewayCompleted = true;
+            upstreamResponseId = response.path("id")
                 .asText(upstreamResponseId);
             start(output);
         }

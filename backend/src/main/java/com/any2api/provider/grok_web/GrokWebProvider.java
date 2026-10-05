@@ -5,6 +5,7 @@ import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
 import com.any2api.protocol.state.ProviderResponseStateStore;
 import com.any2api.provider.InferenceProvider;
+import com.any2api.provider.ModelAccountPolicy;
 import com.any2api.provider.DiscoveredModel;
 import com.any2api.provider.ProviderAccountProfile;
 import com.any2api.provider.ProviderCapability;
@@ -114,10 +115,16 @@ public final class GrokWebProvider implements InferenceProvider {
     }
 
     @Override
+    public java.util.Optional<ModelAccountPolicy> modelAccountPolicy() {
+        return java.util.Optional.of((modelId, account) -> GrokWebModelCatalog.find(modelId)
+            .map(model -> GrokWebModelCatalog.supports(
+                String.valueOf(account.metadata().getOrDefault("tier", "basic")), model))
+            .orElse(false));
+    }
+
+    @Override
     public boolean supportsAccount(CanonicalRequest request, ProviderAccountProfile account) {
-        var model = GrokWebModelCatalog.require(request.model());
-        if (!GrokWebModelCatalog.supports(String.valueOf(
-            account.metadata().getOrDefault("tier", "basic")), model)) return false;
+        if (!InferenceProvider.super.supportsAccount(request, account)) return false;
         return previousResponseId(request)
             .flatMap(responseId -> responseStates.find(manifest().id(), responseId))
             .map(state -> state.accountId().equals(account.accountId()))

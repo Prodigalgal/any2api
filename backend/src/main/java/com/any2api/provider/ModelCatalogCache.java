@@ -7,7 +7,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 public class ModelCatalogCache {
     private final ProviderRegistry providers;
     private volatile DecodedCatalog decodedCatalog;
+    private static final String QUOTA_COOLDOWN_REASON_PATTERN = "(rate|quota|limit|credit|balance)";
     private static final String MODEL_QUERY = """
         WITH eligible_accounts AS MATERIALIZED (
             SELECT id, provider_id FROM accounts
@@ -35,7 +38,7 @@ public class ModelCatalogCache {
             SELECT account.provider_id, cooldown.model_id,
                    COUNT(DISTINCT account.id) AS cooled_accounts,
                    COUNT(DISTINCT account.id) FILTER (
-                       WHERE cooldown.reason ~* '(rate|quota|limit|credit|balance)'
+                       WHERE cooldown.reason ~* :quotaReasonPattern
                    ) AS quota_limited_accounts
             FROM eligible_accounts account
             JOIN account_model_cooldowns cooldown
@@ -159,7 +162,7 @@ public class ModelCatalogCache {
         var policy = properties.getCache().getModelCatalog();
         // Isolate compressed snapshots from older processes during rolling releases.
         this.cache = new LayeredJsonCache(
-            redis, "any2api:cache:model-catalog:v7", policy.getLocalTtl(),
+            redis, "any2api:cache:model-catalog:v8", policy.getLocalTtl(),
             policy.getRedisTtl(), policy.getMaximumEntries(), properties.getCache().getRedisAccessTimeout());
         this.healthWindow = properties.getModelRuntime().getHealthWindow();
         this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
@@ -202,13 +205,73 @@ public class ModelCatalogCache {
 
     private List<Entry> load() {
         var now = Instant.now();
+        var accounts = loadAccountAvailability();
         return jdbc.sql(MODEL_QUERY)
+            .param("quotaReasonPattern", QUOTA_COOLDOWN_REASON_PATTERN)
             .param("windowStart", PostgresResultValues.timestamp(now.minus(healthWindow)))
             .param("probeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness)))
             .param("providerProbeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness.multipliedBy(4))))
             .param("readySuccessRate", readySuccessRate)
             .param("readyP95Ms", readyP95Ms)
-            .query(this::row).list();
+            .query((result, rowNumber) -> row(result, rowNumber, accounts)).list();
+    }
+
+    private AccountAvailability loadAccountAvailability() {
+        var policies = new java.util.LinkedHashMap<String, ModelAccountPolicy>();
+        for (var provider : providers.plugins()) {
+            provider.modelAccountPolicy().ifPresent(policy -> policies.put(provider.manifest().id(), policy));
+        }
+        if (policies.isEmpty()) return new AccountAvailability(Map.of(), Map.of(), Map.of());
+        var eligible = jdbc.sql("""
+            SELECT id, provider_id, metadata::text AS metadata FROM accounts
+            WHERE provider_id IN (:providerIds) AND enabled = TRUE AND status IN ('ACTIVE', 'DEGRADED')
+              AND (cooldown_until IS NULL OR cooldown_until <= CURRENT_TIMESTAMP)
+              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            """)
+            .param("providerIds", policies.keySet())
+            .query((result, rowNumber) -> new EligibleAccount(result.getString("provider_id"),
+                new ProviderAccountProfile(result.getObject("id", UUID.class), mapper.convertValue(
+                    readJson(result.getString("metadata")),
+                    new tools.jackson.core.type.TypeReference<Map<String, Object>>() { })))).list();
+        var profiles = eligible.stream().collect(java.util.stream.Collectors.groupingBy(
+            EligibleAccount::providerId, java.util.stream.Collectors.mapping(
+                EligibleAccount::accountProfile, java.util.stream.Collectors.toList())));
+        if (eligible.isEmpty()) return new AccountAvailability(policies, profiles, Map.of());
+        // Only restricted providers require metadata; load cooldowns in one second phase.
+        var cooldowns = jdbc.sql("""
+            SELECT account_id, provider_id, model_id, reason ~* :quotaReasonPattern AS quota_limited
+            FROM account_model_cooldowns WHERE account_id IN (:accountIds) AND cooldown_until > CURRENT_TIMESTAMP
+            """)
+            .param("accountIds", eligible.stream().map(account -> account.accountProfile().accountId()).toList())
+            .param("quotaReasonPattern", QUOTA_COOLDOWN_REASON_PATTERN)
+            .query((result, rowNumber) -> new ModelCooldown(new CooldownKey(result.getObject("account_id", UUID.class),
+                result.getString("provider_id"), result.getString("model_id")), result.getBoolean("quota_limited")))
+            .list().stream().collect(java.util.stream.Collectors.toMap(ModelCooldown::key, ModelCooldown::quotaLimited));
+        return new AccountAvailability(policies, profiles, cooldowns);
+    }
+
+    private record EligibleAccount(String providerId, ProviderAccountProfile accountProfile) {}
+    private record CooldownKey(UUID accountId, String providerId, String modelId) {}
+    private record ModelCooldown(CooldownKey key, boolean quotaLimited) {}
+    private record AccountRuntime(long eligible, long available, long quotaLimited) {}
+    private record AccountAvailability(
+        Map<String, ModelAccountPolicy> policies,
+        Map<String, List<ProviderAccountProfile>> profiles,
+        Map<CooldownKey, Boolean> cooldowns
+    ) {
+        Optional<AccountRuntime> runtime(String providerId, String modelId) {
+            var policy = policies.get(providerId);
+            if (policy == null) return Optional.empty();
+            long eligible = 0, available = 0, quotaLimited = 0;
+            for (var account : profiles.getOrDefault(providerId, List.of())) {
+                if (!policy.supports(modelId, account)) continue;
+                eligible++;
+                var cooldown = cooldowns.get(new CooldownKey(account.accountId(), providerId, modelId));
+                if (cooldown == null) available++;
+                else if (cooldown) quotaLimited++;
+            }
+            return Optional.of(new AccountRuntime(eligible, available, quotaLimited));
+        }
     }
 
     private synchronized Mono<List<Entry>> decode(String value) {
@@ -227,7 +290,7 @@ public class ModelCatalogCache {
 
     private record DecodedCatalog(String serialized, Mono<List<Entry>> entries) {}
 
-    private Entry row(ResultSet result, int rowNumber) throws SQLException {
+    private Entry row(ResultSet result, int rowNumber, AccountAvailability accounts) throws SQLException {
         var fetchedAt = result.getObject("fetched_at", java.time.OffsetDateTime.class);
         var discoveredCapabilities = readJson(result.getString("discovered_capabilities"));
         var maxContextTokensOverride = nullableLong(result, "max_context_tokens_override");
@@ -237,6 +300,10 @@ public class ModelCatalogCache {
         var upstreamId = result.getString("upstream_id");
         var displayName = result.getString("display_name");
         var metadata = readJson(result.getString("metadata"));
+        var accountRuntime = accounts.runtime(providerId, upstreamId).orElse(new AccountRuntime(
+            result.getLong("eligible_accounts"), result.getLong("available_accounts"),
+            result.getLong("quota_limited_accounts")));
+        var accountsAvailable = accountRuntime.eligible() > 0 && accountRuntime.available() > 0;
         var currentCapabilities = mapper.valueToTree(providers.requirePlugin(providerId)
             .modelContract(new DiscoveredModel(upstreamId, displayName, mapper.convertValue(metadata,
                 new tools.jackson.core.type.TypeReference<java.util.Map<String, Object>>() { })))
@@ -259,11 +326,11 @@ public class ModelCatalogCache {
             metadata,
             List.of((String[]) result.getArray("random_roles").getArray()),
             fetchedAt == null ? Instant.now().getEpochSecond() : fetchedAt.toEpochSecond(),
-            result.getBoolean("available"),
-            result.getString("runtime_status"),
-            result.getLong("eligible_accounts"),
-            result.getLong("available_accounts"),
-            result.getLong("quota_limited_accounts"),
+            accountsAvailable && result.getBoolean("available"),
+            accountsAvailable ? result.getString("runtime_status") : "UNAVAILABLE",
+            accountRuntime.eligible(),
+            accountRuntime.available(),
+            accountRuntime.quotaLimited(),
             result.getLong("request_count"),
             result.getLong("attempt_count"),
             result.getDouble("success_rate"),

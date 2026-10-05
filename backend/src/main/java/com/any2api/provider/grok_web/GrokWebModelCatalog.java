@@ -41,10 +41,13 @@ final class GrokWebModelCatalog {
 
     static ModelSpec require(String id) {
         if (id == null) throw new IllegalArgumentException("model id cannot be null");
+        return find(id).orElseThrow(() -> new IllegalArgumentException("unknown Grok Web model: " + id));
+    }
+
+    static java.util.Optional<ModelSpec> find(String id) {
+        if (id == null) return java.util.Optional.empty();
         var resolved = ALIASES.getOrDefault(id.trim().toLowerCase(), id.trim());
-        var model = BY_ID.get(resolved);
-        if (model == null) throw new IllegalArgumentException("unknown Grok Web model: " + id);
-        return model;
+        return java.util.Optional.ofNullable(BY_ID.get(resolved));
     }
 
     static boolean supports(String tier, ModelSpec model) {

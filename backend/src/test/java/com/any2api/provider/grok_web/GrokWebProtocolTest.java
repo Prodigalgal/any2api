@@ -31,6 +31,21 @@ class GrokWebProtocolTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void disabledFunctionPolicySupportsBothChoiceFormsWithoutAdvertisingTools() {
+        var tool = mapper.createObjectNode().put("type", "function").put("name", "review");
+        for (var choice : List.<JsonNode>of(mapper.getNodeFactory().textNode("none"), mapper.createObjectNode().put("type", "none"))) {
+            var raw = mapper.createObjectNode().set("tool_choice", choice);
+            var prepared = requestMapper().prepare(request(CanonicalRequest.Protocol.CHAT_COMPLETIONS, raw,
+                List.of(tool), List.of(message("user", "正常回复"))));
+
+            assertThat(prepared.body().path("message").asText()).isEqualTo("[user]\n正常回复")
+                .doesNotContain("AVAILABLE TOOLS", "<tool_calls>");
+            assertThat(prepared.toolSieve()).isNull();
+        }
+    }
+
+
+    @Test
     void requestUsesTierSpecificModeAndProviderOwnedPayload() {
         var raw = mapper.createObjectNode().put("model", "grok_web/grok-chat-auto");
         var message = mapper.createObjectNode().put("role", "user").put("content", "hello");

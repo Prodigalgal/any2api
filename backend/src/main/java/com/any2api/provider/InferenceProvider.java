@@ -22,8 +22,12 @@ public interface InferenceProvider {
     default void validate(CanonicalRequest request) {
     }
 
+    default Optional<ModelAccountPolicy> modelAccountPolicy() {
+        return Optional.empty();
+    }
+
     default boolean supportsAccount(CanonicalRequest request, ProviderAccountProfile account) {
-        return true;
+        return modelAccountPolicy().map(policy -> policy.supports(request.model(), account)).orElse(true);
     }
 
     default void validateCredential(JsonNode credential) {

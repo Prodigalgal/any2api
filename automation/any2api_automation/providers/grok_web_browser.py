@@ -483,7 +483,8 @@ def build_grok_web_request(command: dict[str, Any]) -> dict[str, Any]:
     mode = str(options.get("mode_id") or _MODEL_MODES.get(str(command["model"]), "fast"))
     tools = _supported_tools(command.get("tools"))
     choice = controls.get("tool_choice")
-    if choice == "none":
+    if choice == "none" or isinstance(choice, dict) and choice.get("type") == "none":
+        choice = "none"
         tools = []
     message = _prompt(command["messages"])
     if tools:

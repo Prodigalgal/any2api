@@ -1,10 +1,10 @@
-# WEB 参数映射、输入边界与 Xiaomi 桌面端排查（2026-10-04）
+# WEB 参数映射、输入边界与 Xiaomi 桌面端排查（2026-10-04–05）
 
 ## 范围与当前状态
 
 基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
-0.27.3 发布前七家完整功能证据完成后已部署。新版本 SDK 首轮 47/49，GLM 传输失败单独重试通过，Grok 完整回放及单独重试两次遗漏技能要求。当前修复候选为 0.27.4，补齐 Grok WEB 对话边界和内部 HTTP 空闲连接回收；候选真实 WEB 差量和本地门禁已通过，尚待发布后七家同版本复测。下面旧版本表格均为对应时间的历史证据。
+生产已推进到 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。七家同版本 SDK 首轮 48/49，其余六家各 7/7，Grok state 一次重复旧回答；35 个请求的 38 次后台尝试完整保留。0.27.7 的正文分区实验未通过真实 SDK，已撤回；当前候选收敛为模型账号资格与对象形式 none 修复，本地门禁通过，尚未发布。Grok 完整 Agent 验收仍未满足。下面各版本表格均为对应时间的证据，不能混合为当前版本全通过。
 
 ## 参数含义与实际 WEB 目标
 
@@ -264,8 +264,72 @@ Source `6c7391aafd3ea9016326759a344064921d59461d`，[CI 37215047762](https://git
 - Grok WEB 构造/解码与 0.27.5 隔离真实 WEB 七项通过的代码一致；本候选增加共享协调器差量门禁后再统一发布和七家复验。Backend 全量 522 tests：517 passed / 5 条件 skipped，bootJar 通过；Automation 525 passed，Web lint/build、ruff、八处源码/JAR 版本 0.27.6 通过。全部相关候选门禁完成，进入统一发布，再核验七家 SDK/真实账本与运行态。
 - 直接回滚仍为 0.27.4 四组件不可变镜像，会恢复 Grok 终态问题及跨通道账本记录冲突；没有历史数据重写。
 
+### 0.27.6 生产发布、七家验收及账本闭环
+
+Source `112459a5894deb4c1f45bbe8fbde92fd930ff5d5`，[CI 37251876959](https://github.com/Prodigalgal/any2api/actions/runs/37251876959) quality、四镜像与 update-gitops success；浏览器基础镜像 job 按条件 skipped。2026-10-05 10:10:19（UTC+8）复核 GitOps `2d1c056218cbe7508398884e983a0f9e461545e6`、Argo Synced/Healthy；四组件 Ready/restarts=0，两个 Automation project/installed/API、Web package 和 Server boot 均 0.27.6。不可变 suffix `20261005-v0.27.6-release-112459a5894deb4c1f45bbe8fbde92fd930ff5d5`。
+
+2026-10-05 11:18:25（UTC+8）再次读取运行态：同一 GitOps revision、四个不可变镜像及 digest、版本保持；四组件仍 Ready/restarts=0，healthz/readyz=200。七家所选模型 available=true，全部 concurrent/queue=0、circuit CLOSED；GLM READY，其余六家 DEGRADED。滚动窗口含调度 PROBE，不能与下面普通 INFERENCE/严格 SDK 的证据混计。最终快照 `release-0.27.6-final-runtime.json`；0.27.7 尚未部署。
+
+| 组件 | Pod | 镜像 digest（sha256） |
+| --- | --- | --- |
+| Server | any2api-server-6bf7566cdd-hjh5h | eadc845997237fe8cc14917ea10701b047a86e4968b11ebea20ca5a40a76c6ae |
+| Automation | any2api-automation-7c856b7b96-gl9lj | c31394e13771e45423e206cd04dc07d11fabaa43a0a0e1313d974436465799f3 |
+| Arena Automation | any2api-automation-arena-f985cf485-6wdj5 | 2902850c2ecc91e8c6f81aa2299325b38959b3898db9e3ff2a3b10e5328f3897 |
+| Web | any2api-web-686f9499bb-lr4dw | 6c24ae107bd0395f65f2f6149f5bbbeb629e133d56195a7783f1922f3aa0bf51 |
+
+官方 SDK 2.54.0，10:01:47–10:09:06（UTC+8），`web-bridge-production-v0276.json` 首轮：
+
+| 厂商 / 所选模型 | SDK 结果 |
+| --- | ---: |
+| Arena / claude-sonnet-5 | 7/7 |
+| DeepSeek / default | 7/7 |
+| GLM / glm-5.2 | 7/7 |
+| Grok Web / grok-3 | 6/7 |
+| LongCat / longcat-flash | 7/7 |
+| MiMo / mimo-v2.6-pro | 7/7 |
+| MiniMax / MiniMax-M3.1-Flash-Preview | 7/7 |
+
+- 首轮 **48/49**，不改写。Grok Chat 调用/结果、Responses 调用及手工结果均通过；state `0284dc9b-b362-4509-9ce6-a45c773c2171` 再次复述旧 assistant 回答，遗漏五项业务字段，该项未继续执行 resource schema 校验。14 个拥有的合成状态删除后均 404。
+- `web-bridge-v0276-ordinary-inference-ledger.json`：**35 个请求 / 38 条 INFERENCE 尝试 / 35 次后台生成成功 / 3 次失败**，全部请求最终成功、attempt 连续 1..N；不混入 PROBE、native canary 或本地候选。失败为 Arena credential_rejected，LongCat 和 DeepSeek 的 API provider_upstream_error。Server 日志明确 LongCat `5210e295-61fc-4257-841e-38da6029cf41` 与 DeepSeek `5e0a18ea-68c7-4ba8-ad8f-bfde8d933756` 的 `channel=api attempt=1` 和 `channel=camoufox_browser_runtime attempt=2`，失败/成功两条账本均保留。跨通道编号修复得到实际线上证明；生成成功仍不等于 Grok state 语义通过。
+- 七家目录模型 available=true、queue/concurrent=0、circuit CLOSED；滚动状态仅 GLM READY，其余六家 DEGRADED，包含此前失败和自动探测，不报七家全部 READY。
+- 10:01–10:02（UTC+8）同一 system 全权限 Key，集群/公网 direct 各 **18×3 全 200**。集群调用 Pod `any2api-automation-7c856b7b96-gl9lj` 位于 `instance-20250708-1530`，Server 位于 `instance-20251229-0833`。全目录 1,538,198-byte 解压 JSON / gzip 约 110KB。
+
+| Read 端点 | 集群 median ms | 公网 direct median ms |
+| --- | ---: | ---: |
+| health | 103.64 | 420.16 |
+| overview | 88.19 | 407.61 |
+| providers | 89.04 | 410.59 |
+| api-keys | 91.83 | 367.14 |
+| `/v1/models` | 226.06 | 491.11 |
+
+本窗口普通管理 Read 集群约 83–102ms、公网约 360–428ms，公网全目录样本 910.94/491.11/479.18ms，集群 366.37/226.06/154.02ms。Hikari pending/active=0 的时点快照与 n=3 不足以关闭历史数秒波动、跨节点 Redis 超时和大目录成本。0.27.6 没有修改 Read 查询/部署/timeout；不把时点差异归因于其账本修复。
+
+### 0.27.7 正文格式实验：未通过，已撤回
+
+- 实际 Parser → Context → ToolBridge → Java mapper / Python builder 对照 `e14cddc6-1d14-4888-9a4d-23ce5aaf2d26` 与上述失败 state：42 条消息完整，生成的两个 WEB prompt 都为 2304 字符且相同，conversation/parent ID 为空；Gateway store、资源 ID 等元数据不同。不能认定 state 丢历史是本次原因。
+- 原失败输入 native baseline 仍复述旧回答；简单当前轮次分区 1/2、单独 none 策略 1/2，通过/失败均保留。独立当前轮次 JSON 的重复投影与无重复投影各 2/2 完整结果通过，但后续完整 SDK 没有重复这一结果，不能依据这些有限样本发布。
+- 第一轮隔离官方 SDK：Chat 调用/结果两项通过；Responses 指定函数 `7a7c188b-2e24-4a68-a53f-b2d8d93920fe` 复述旧回答，被 strict 正确拒绝，手工回放/state 因前置缺失未执行。自有测试状态已删除、服务已关闭。
+- 将待答初始 user 也独立呈现后，第二轮 Chat 调用 `72144507-9e21-46fb-af4b-42aa776e8e09` 通过；Chat SSE 结果 `3d149f49-e85d-44b0-b914-6f44b0924f5f` 遗漏文档名称、规则和批次，Responses 指定函数 `1c6397d7-c46e-49ca-81ac-7f9d04e1f14f` 再次失败；后续回放/state 因前置缺失未执行，自有测试状态删除、服务关闭。两次失败报告分别保留，SDK max_retries=0。
+- 完整 JSON 对照同进程/账号四个 canary：两次函数参数正确，结果汇报一次失败、一次完整，但带旧确认前缀。没有采用此格式，也没有注入期望业务答案。实验后 Python/Java prompt 与工具策略恢复为 0.27.6，完整输入、调用 ID、工具定义、strict 和状态所有权不变；仅保留已证实的 none 对象形式兼容修复。
+- 实验期间本地门禁曾达到 Backend 521 passed / 5 skipped、Automation 532 passed；这属于已撤回格式的本地结果，不替代最终候选和真实 WEB 门禁。保留 Python 新边界先红后绿、首次 mixed newline format 失败及全部原始失败报告。
+
+### 原生历史 item 与 keep_context 的有限对照
+
+2026-10-05 同一已验证账号、同一 fast 模式，三组仅合成历史的探测：分别发送 user/assistant item、相同输入开启 keep_context、将前文合并为另一个 user item。当前 user 没有携带历史批次口令；三组均 HTTP 200/completed，但 `conversation.item.added` 只出现最后一条 user 且没有批次，回答均未返回历史口令，0/3 有效。没有将这些字段写入生产映射，也没有增加模型生成历史来伪造回放。
+
+原始证据 `grok-native-history-items-v0277.json` 记录所用账号 UUID、模式、item 角色与三个 request_id。探测 runner 现在允许固定一个已验证账号，并记录实际账号，避免不同进程按最近成功账号选取时混淆对照；以往报告没有记录的账号不追补推断。全部 native canary 都关闭 runtime，不持久化凭据补丁，不计入生产 INFERENCE 账本。
+
+### 0.27.7 模型账号资格与 none 修复候选
+
+- **生产根因证据**：2026-10-05 11:01:39（UTC+8）只读查询确认 Grok 19 个账号均 enabled/ACTIVE、配置 tier=basic、符合通用时间资格。`/v1/models` 却把 Auto/Expert/Heavy 和 image-quality 都报 available=true、eligible/available=19；Grok 现有路由规则分别要求 SUPER/HEAVY，生产目录与实际账号筛选不一致。这只是配置等级证据，没有探测这些账号的付费原生权益。
+- **修复**：可选 `ModelAccountPolicy` 由厂商提供，Grok 目录与推理路由复用已有最低等级规则；其他厂商没有策略时保留原行为。合格账号的模型 cooldown/quota 才参与计数；零合格/可用时 UNAVAILABLE，即使 probe READY 也不能提升。别名、媒体、未知模型及 null metadata 均处理；metadata 的外层不可变快照保留 JSON null，不改账号等级或内容。cache namespace v8 隔离旧目录，公开字段不变。
+- **成本**：只有声明限制策略的厂商读取 metadata，账号和 cooldown 两阶段批量加载。真实 PG 证明有合格限制账号时冷加载 3 次 SQL、空限制账号 2 次、无限制策略 1 次；热缓存不增加 SQL。该候选未部署，额外冷加载往返的线上延迟仍未测量，不把生产 0.27.6 Read 数字当作它的性能结果。
+- **工具选择**：Python 将字符串 none 与对象 `{type:none}` 都归一后清空可用工具；保留原有完整正文、历史工具内容及参数对象不可变。Java 原有 none 行为保留，补齐跨语言两种形式回归；没有额外提示语或 JSON 分区。
+- **验证**：Backend 527 tests：522 passed / 5 条件 skipped、bootJar；Automation 527 passed；Web lint/build、ruff check/126 文件 format，八处源码/JAR 0.27.7 版本均通过。PG 两处资格回归先复现失败；首次全量架构门禁把通用变量 profile 识别成保留厂商名，改为 accountProfile 后全量通过，没有弱化门禁。
+- **发布边界**：0.27.7 尚未推送 main/部署；Grok 完整 Agent 语义门禁未满足。没有 API/DB/凭据/Key/重试或部署结构迁移，不能把目录与 none 修复报成 Grok 完整 Agent 闭环修复。未来发布后直接回滚点为 0.27.6 上述四组件不可变镜像，恢复目录/对象 none 缺陷但保留已上线的账本和原生终态修复。
+
 ## 遗留与回滚
 
 未知精确 token 上下文、全部模型/账号/mode、采样统计、多模态 token 成本、GLM 截断终帧，以及 Xiaomi 默认 Agent 引导的长期控制仍需独立证据。当前不将完整 Agent 输入拆成 WEB 上传文件，不自动压缩/截断历史来掩盖边界；上传/RAG 是否保留 system 与工具语义需要另做实现和验收。
 
-没有数据库/凭据迁移。0.27.3 后续发布的直接回滚点为 0.27.1 四组件不可变镜像 suffix `20261004-v0.27.1-release-cdf32963909d73b426aa337beed3fb6dc1fe29b8`；会恢复已记录的缓存、MiMo 参数/历史、资源格式缺陷，历史 usage 不原地改写。整轮之前的 0.26.3 基线 suffix `20261004-v0.26.3-release-2388687ea3675e14a24dead88bb91f37b4663ceb` 为历史回滚点，其旧 catalog v5 与本轮 v6/v7 隔离。
+没有数据库/凭据迁移。当前生产 0.27.6 的直接回滚点为 0.27.4 四组件 suffix `20261004-v0.27.4-release-6c7391aafd3ea9016326759a344064921d59461d`，会恢复跨通道账本冲突及 Grok 原生终态缺陷。0.27.1 suffix `20261004-v0.27.1-release-cdf32963909d73b426aa337beed3fb6dc1fe29b8` 与整轮前 0.26.3 suffix `20261004-v0.26.3-release-2388687ea3675e14a24dead88bb91f37b4663ceb` 仅为历史回滚点；历史 usage 不原地改写，各版本 catalog v5/v6/v7/v8 缓存按 namespace 隔离。

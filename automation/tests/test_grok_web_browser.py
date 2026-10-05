@@ -426,3 +426,25 @@ def test_register_grok_web_fallback_uuid_when_session_empty_but_sso_present() ->
     assert result.credential["sso-rw"] == "sso_rw_test_val"
     assert result.ready_for_inference is True
     assert RegistrationStage.CREDENTIAL_CAPTURED.value in trace.stages
+
+
+@pytest.mark.parametrize("choice", ["none", {"type": "none"}])
+def test_grok_web_normalizes_both_disabled_function_choices_without_exposing_tools(
+    choice,
+) -> None:
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [{"role": "user", "content": "正常回复"}],
+        "tools": [{"type": "function", "name": "review", "parameters": {"type": "object"}}],
+        "providerOptions": {},
+        "controls": {"tool_choice": choice},
+    }
+    original = deepcopy(command)
+
+    prompt = build_grok_web_request(command)["message"]
+
+    assert "正常回复" in prompt
+    assert prompt == "[user]\n正常回复"
+    assert "AVAILABLE TOOLS" not in prompt and "<tool_calls>" not in prompt
+    assert command == original

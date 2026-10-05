@@ -30,6 +30,15 @@
 - 验收/测试：none/auto/required 都不重新打开双回答，完整原输入不变；原生 incomplete/failed/未知/缺终帧不能转成 completed，已输出片段保留且没有成功 usage/state。相关 Java/Python 回归及完整门禁；原合成失败 WEB 对照通过后才发布，最后验证新版本七家完整 SDK 与资源清理。
 - 发布前证据：2026-10-05 隔离候选连接真实 Grok WEB 的官方 SDK 七项全部通过，覆盖完整历史、strict 函数、结果语义、Gateway state/resource schema/清理；候选本地 Backend 513 passed / 5 skipped、Automation 525 passed、Web lint/build、ruff、八处版本/JAR 校验通过。`session.instructions` 虽回显但未影响回答，独立 system item 未见生效，不写入生产映射。
 
+### 0.27.7 Grok 模型账号资格与禁用工具修正
+
+- 目标：修正 Grok 账号等级与模型目录资格不一致，以及 Runtime 未识别对象形式 `tool_choice={"type":"none"}`；不把模型语义偶发成功认定为完整 Agent 验收。
+- 范围/文件：`InferenceProvider` 的可选 `ModelAccountPolicy`、Grok Provider 复用现有等级规则、`ModelCatalogCache`、Java/真实 PostgreSQL 回归；账号 metadata 的不可变快照保留 JSON null；Python builder 与 none 形式回归、统一版本、接入及发布记录。
+- 非目标：不修改账号等级、购买订阅、替换客户端所选模式、Key、DB 结构、重试、历史内容、Gateway 状态或其他厂商策略；不采用未通过的 JSON 分区格式。
+- 验收：basic 不被目录计入 SUPER/HEAVY 模式；别名及媒体也遵循同一资格规则，合格账号的模型冷却/配额计数准确，零可用账号时明确 UNAVAILABLE；未知 Grok 模型不能导致全目录读取失败。无专属策略的厂商保留原目录语义；禁用工具的两种形式均清理工具定义，保留原有正文格式。完整 Agent 门禁未通过前不推送 main。
+- 测试：真实 PostgreSQL 覆盖 basic/混合等级、冷却/过期/禁用、null/未知等级、模型别名/未知模型、媒体、其他厂商及缓存；有合格限制账号时冷加载固定 3 次批量查询，空限制账号 2 次，无限制策略 1 次，热缓存无新增 SQL。Java/Python 相关及全量门禁、版本/JAR 校验；生产只读核对账号等级和现有模型详情。缓存 namespace 升为 v8 隔离旧资格结果。
+- 已撤回实验：当前轮次分区 JSON、完整 JSON 和额外 none 提示虽有单次成功，两轮真实 SDK 仍有函数/结果遗漏；原生多角色/多 user item 与 keep_context 三组对照没有保留早先历史。这些实验均不进入候选代码，保留完整输入及失败证据，不将有限成功样本当作稳定性保证。
+
 ### 0.27.6 跨通道尝试账本修复
 
 - 目标：0.27.4 DeepSeek 的 API 失败后 Runtime 生成成功，但 fallback 将 attempt 重置为 1，与 `usage_events(request_id, attempt)` 唯一约束冲突，成功记录被 `ON CONFLICT DO NOTHING` 丢弃。修正单请求跨通道的记录编号。

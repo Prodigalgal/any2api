@@ -244,7 +244,7 @@ public class InferenceCoordinator {
         return executeWithRetries(
             request, provider, lease, validateInsideLease, attempt, apiKeyId,
             requestKind, queueMs, transportMode, fallbackTransportMode, modelCapabilities,
-            java.util.Set.of());
+            java.util.Set.of(), attempt);
     }
 
     private Flux<CanonicalEvent> executeWithRetries(
@@ -259,8 +259,10 @@ public class InferenceCoordinator {
         ProviderTransportMode transportMode,
         ProviderTransportMode fallbackTransportMode,
         JsonNode modelCapabilities,
-        java.util.Set<UUID> attemptedAccountIds
+        java.util.Set<UUID> attemptedAccountIds,
+        int telemetryAttempt
     ) {
+        // A fallback starts a new transport retry budget, while telemetry spans the entire request.
         var currentAccountId = new java.util.concurrent.atomic.AtomicReference<UUID>();
         var wrappedLease = lease.doOnNext(account -> currentAccountId.set(account.accountId()));
         var attemptEvents = Flux.defer(() -> {
@@ -268,7 +270,7 @@ public class InferenceCoordinator {
                 request.requestId(), request.providerId(), request.model(),
                 request.protocol().name(), apiKeyId, requestKind, request.rawRequest(),
                 transportMode.externalName()),
-                attempt, queueMs);
+                telemetryAttempt, queueMs);
             return usage.normalize(request,
                     executeWithLease(
                         request, provider, wrappedLease, validateInsideLease, observed, transportMode,
@@ -295,14 +297,14 @@ public class InferenceCoordinator {
                     return executeWithRetries(
                         request, provider, accountLease(request, provider, nextExcluded), false, 1,
                         apiKeyId, requestKind, 0, fallbackTransportMode, null,
-                        modelCapabilities, nextExcluded);
+                        modelCapabilities, nextExcluded, telemetryAttempt + 1);
                 }
                 if (failure.isPresent()
                     && provider.retryPolicy().shouldRetry(failure.get().errorType(), attempt)) {
                     return executeWithRetries(
                         request, provider, accountLease(request, provider, nextExcluded), false,
                         attempt + 1, apiKeyId, requestKind, 0,
-                        transportMode, fallbackTransportMode, modelCapabilities, nextExcluded);
+                        transportMode, fallbackTransportMode, modelCapabilities, nextExcluded, telemetryAttempt + 1);
                 }
                 return Flux.fromIterable(events);
             });
@@ -319,7 +321,7 @@ public class InferenceCoordinator {
                     return events.thenMany(executeWithRetries(
                         request, provider, accountLease(request, provider, nextExcluded), false, 1,
                         apiKeyId, requestKind, 0, fallbackTransportMode, null,
-                        modelCapabilities, nextExcluded));
+                        modelCapabilities, nextExcluded, telemetryAttempt + 1));
                 }
                 if (signal.hasValue()
                     && signal.get() instanceof CanonicalEvent.Failed failure
@@ -327,7 +329,7 @@ public class InferenceCoordinator {
                     return events.thenMany(executeWithRetries(
                         request, provider, accountLease(request, provider, nextExcluded), false,
                         attempt + 1, apiKeyId, requestKind, 0,
-                        transportMode, fallbackTransportMode, modelCapabilities, nextExcluded));
+                        transportMode, fallbackTransportMode, modelCapabilities, nextExcluded, telemetryAttempt + 1));
                 }
                 return events;
             });

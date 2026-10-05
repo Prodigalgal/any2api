@@ -30,6 +30,13 @@
 - 验收/测试：none/auto/required 都不重新打开双回答，完整原输入不变；原生 incomplete/failed/未知/缺终帧不能转成 completed，已输出片段保留且没有成功 usage/state。相关 Java/Python 回归及完整门禁；原合成失败 WEB 对照通过后才发布，最后验证新版本七家完整 SDK 与资源清理。
 - 发布前证据：2026-10-05 隔离候选连接真实 Grok WEB 的官方 SDK 七项全部通过，覆盖完整历史、strict 函数、结果语义、Gateway state/resource schema/清理；候选本地 Backend 513 passed / 5 skipped、Automation 525 passed、Web lint/build、ruff、八处版本/JAR 校验通过。`session.instructions` 虽回显但未影响回答，独立 system item 未见生效，不写入生产映射。
 
+### 0.27.6 跨通道尝试账本修复
+
+- 目标：0.27.4 DeepSeek 的 API 失败后 Runtime 生成成功，但 fallback 将 attempt 重置为 1，与 `usage_events(request_id, attempt)` 唯一约束冲突，成功记录被 `ON CONFLICT DO NOTHING` 丢弃。修正单请求跨通道的记录编号。
+- 范围/影响：`InferenceCoordinator` 及真实 PostgreSQL/完整协调器回归、统一版本与发布记录。分离现有通道内重试计数与全请求遥测尝试编号，后者严格递增；保留 API→Runtime fallback、重试预算、有效输出后不重试、账号排除及释放、PROBE/INFERENCE 边界。
+- 非目标：不改 API、数据库结构、重试条件或次数，不回填缺失的历史成功事件，不根据 SDK 输出伪造账本。0.27.5 CI 三项质量通过但镜像发布阶段已主动取消，GitOps 未更新；不复用或覆盖其版本和可能的部分制品。
+- 验收/测试：JSON/SSE 都覆盖 API 失败→Runtime 成功，以及 Runtime 两次失败后第三次成功；真实 PG 保留每次失败和成功，attempt 为 1..N，原本 Runtime 三次预算保持。完整 Backend/Automation/Web/版本/JAR 门禁，通过后发布 0.27.6 并验证七家 SDK 与普通推理账本。
+
 - Arena、MiMo、DeepSeek、LongCat、GLM、Grok Web、MiniMax：逐项核对厂商 WEB 构造字段与官方页面/运行时证据，使用合成内容、单参数变更和有限推理验证。Qwen 沿用此前排除范围，仅检查代码，真实能力标为未验证。
 - 覆盖 temperature、top_p、三个输出 token 上限别名、reasoning/thinking、search、function 控制，以及平台负责的 store/continuation/SSE。区分字段被接受、实际转发、开关映射、网关模拟和不支持；HTTP 200 不作为参数生效的充分证据。
 - 不把客户端填的 1M/128K 或官方付费 API 规格当成 WEB 上限；不默默删除有约束意义的参数。不确定的上限保持未知并给出明确错误。未提供/null 的可选字段不应触发伪兼容错误。

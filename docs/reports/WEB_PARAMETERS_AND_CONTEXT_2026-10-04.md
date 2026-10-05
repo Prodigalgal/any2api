@@ -254,6 +254,16 @@ Source `6c7391aafd3ea9016326759a344064921d59461d`，[CI 37215047762](https://git
 - **门禁**：Backend 518 tests：513 passed / 5 条件 skipped，bootJar 通过；Automation 525 passed；Web lint/build、ruff check/format、源码与 JAR 八处版本均 0.27.5。候选满足发布前相关门禁，进入提交/发布及七家统一新版本复测。
 - **兼容与回滚**：没有 API/DB/凭据/Key 迁移。Grok 之前被误报成功的不完整原生响应改为标准失败；单次推理不再触发可选 WEB 比较。直接回滚使用 0.27.4 四组件的上述不可变 suffix，会恢复 Grok 比较模式及原生错误/终态缺陷；0.27.3 和 0.27.1 为历史回滚点。
 
+### 0.27.6 跨通道账本根因及候选
+
+0.27.5 Source `82b8c2a6547a105eed50d194a92057c7ca4cf2f7`，[CI 37250823775](https://github.com/Prodigalgal/any2api/actions/runs/37250823775) 三项质量门禁 success；下述账本根因确认后主动取消发布，四镜像和 update-gitops cancelled，生产仍为 0.27.4。即使已有部分制品也不复用或覆盖 0.27.5，后续候选占用 0.27.6。
+
+- 根因：`InferenceCoordinator` 在 API→Runtime fallback 时将 `attempt` 重置为 1，现有 `InferenceTelemetryService` 使用 `(request_id, attempt)` 唯一约束且 `ON CONFLICT DO NOTHING`。DeepSeek 原失败记录先写入，随后实际成功的 Runtime attempt=1 被丢弃。这解释 SDK completed 与 DB 只有失败记录的差异，无需假设客户端偷偷重试。历史丢失记录不伪造回填。
+- 修复：新增独立 `telemetryAttempt`，同一请求跨通道、跨账号单调递增；原 attempt 继续负责通道内 retryPolicy。API→Runtime 仍开启原 Runtime 三次预算，API/Runtime 选择、失败类型、账号排除/释放、有效输出后禁止重试、JSON/SSE 外部行为均保持；无 DB 迁移或权限修改。
+- 验证：真实 PostgreSQL 与完整 InferenceCoordinator，JSON/SSE × Runtime 失败 0/2 次四个用例。旧编号在数据库留下 1/3 条，新编号保留 2/4 条、完整失败和最后成功，编号 1..N；第三次 Runtime 成功仍可执行。初次测试辅助代码 MeterRegistry 关闭方式及过早关闭 executor 的 doFinally 竞态均独立保留并修正；增加有界异步持久化等待后再证明编号冲突。协调器 24 项全部通过，原有不重试输出/取消/租约回归保留。
+- Grok WEB 构造/解码与 0.27.5 隔离真实 WEB 七项通过的代码一致；本候选增加共享协调器差量门禁后再统一发布和七家复验。Backend 全量 522 tests：517 passed / 5 条件 skipped，bootJar 通过；Automation 525 passed，Web lint/build、ruff、八处源码/JAR 版本 0.27.6 通过。全部相关候选门禁完成，进入统一发布，再核验七家 SDK/真实账本与运行态。
+- 直接回滚仍为 0.27.4 四组件不可变镜像，会恢复 Grok 终态问题及跨通道账本记录冲突；没有历史数据重写。
+
 ## 遗留与回滚
 
 未知精确 token 上下文、全部模型/账号/mode、采样统计、多模态 token 成本、GLM 截断终帧，以及 Xiaomi 默认 Agent 引导的长期控制仍需独立证据。当前不将完整 Agent 输入拆成 WEB 上传文件，不自动压缩/截断历史来掩盖边界；上传/RAG 是否保留 system 与工具语义需要另做实现和验收。

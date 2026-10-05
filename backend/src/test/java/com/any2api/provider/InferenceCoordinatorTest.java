@@ -36,6 +36,84 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 class InferenceCoordinatorTest {
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,0", "true,0", "false,2", "true,2"})
+    void persistsEveryAttemptAcrossTransportFallbackWithoutReducingRuntimeRetries(
+        boolean stream, int failedRuntimeAttempts
+    ) throws Exception {
+        var accounts = mock(AccountSelectionService.class);
+        when(accounts.acquire(eq("alpha"), eq("model"), any()))
+            .thenAnswer(ignored -> Mono.just(leased("alpha")));
+        when(accounts.release(any())).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportSuccess(any(), eq("model"))).thenReturn(Mono.empty());
+        var transportModes = mock(ProviderTransportModeService.class);
+        when(transportModes.plan(any())).thenReturn(new ProviderTransportModeService.TransportPlan(
+            ProviderTransportMode.AUTO, ProviderTransportMode.API, ProviderTransportMode.RUNTIME));
+        var generatedModes = new java.util.ArrayList<ProviderTransportMode>();
+        var runtimeCalls = new AtomicInteger();
+        var provider = new InferenceProvider() {
+            @Override public ProviderManifest manifest() { return new TestProvider(false).manifest(); }
+
+            @Override
+            public Flux<CanonicalEvent> generate(CanonicalRequest request,
+                ProviderExecutionContext context, LeasedProviderAccount account) {
+                generatedModes.add(context.transportMode());
+                if (context.transportMode() == ProviderTransportMode.API
+                    || runtimeCalls.getAndIncrement() < failedRuntimeAttempts) {
+                    return Flux.just(new CanonicalEvent.Failed(1, request.requestId(), 0,
+                        "upstream_unavailable", "synthetic unavailable", Map.of()));
+                }
+                return Flux.just(new CanonicalEvent.ResponseStarted(1, request.requestId(), 0, "resp_test"),
+                    new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1, "complete answer"),
+                    new CanonicalEvent.Usage(1, request.requestId(), 2, 1, 1, 0),
+                    new CanonicalEvent.Completed(1, request.requestId(), 3, "stop"));
+            }
+
+            @Override public ProviderFailure classify(Throwable error) {
+                throw new AssertionError("Synthetic canonical failures do not need classification", error);
+            }
+        };
+        var meters = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        try (var database = new com.any2api.interop.InteropDatabase()) {
+            List<CanonicalEvent> events;
+            try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+                var telemetry = new InferenceTelemetryService(database.jdbc, meters, executor,
+                    new tools.jackson.databind.ObjectMapper(),
+                    new org.springframework.beans.factory.support.StaticListableBeanFactory()
+                        .getBeanProvider(com.any2api.routing.ModelHealthTracker.class));
+                events = coordinator(provider, accounts, transportModes, telemetry)
+                    .execute(request("alpha", stream)).collectList().block();
+                org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5))
+                    .untilAsserted(() -> assertThat(database.jdbc.sql("""
+                        SELECT COUNT(*) FROM usage_events
+                        WHERE request_id='request-id' AND request_kind='INFERENCE'
+                        """).query(Integer.class).single()).isEqualTo(failedRuntimeAttempts + 2));
+            }
+            assertThat(events).anyMatch(CanonicalEvent.Completed.class::isInstance)
+                .noneMatch(CanonicalEvent.Failed.class::isInstance);
+            var attempts = database.jdbc.sql("""
+                SELECT attempt, success FROM usage_events
+                WHERE request_id='request-id' AND request_kind='INFERENCE' ORDER BY attempt
+                """).query((row, index) -> new TelemetryAttempt(row.getInt("attempt"), row.getBoolean("success")))
+                .list();
+            var expectedAttempts = failedRuntimeAttempts + 2;
+            assertThat(attempts).hasSize(expectedAttempts);
+            assertThat(attempts).extracting(TelemetryAttempt::attempt).containsExactlyElementsOf(
+                java.util.stream.IntStream.rangeClosed(1, expectedAttempts).boxed().toList());
+            assertThat(attempts.getLast().success()).isTrue();
+            assertThat(attempts.subList(0, attempts.size() - 1)).allMatch(row -> !row.success());
+            assertThat(generatedModes).hasSize(expectedAttempts).startsWith(ProviderTransportMode.API);
+            assertThat(generatedModes.subList(1, generatedModes.size())).allMatch(
+                mode -> mode == ProviderTransportMode.RUNTIME);
+            verify(accounts, times(expectedAttempts)).release(any());
+        } finally {
+            meters.close();
+        }
+    }
+
+    private record TelemetryAttempt(int attempt, boolean success) {}
+
     @Test
     void renewalFailureReachesTheGatewayWithoutBeingClassifiedAsAProviderFailure() {
         var accounts = mock(AccountSelectionService.class);
@@ -443,11 +521,20 @@ class InferenceCoordinatorTest {
         when(telemetry.start(
             any(InferenceTelemetryService.InferenceTrace.class), anyInt(), anyLong()))
             .thenReturn(started);
+        when(transportModes.plan(any())).thenReturn(new ProviderTransportModeService.TransportPlan(
+            ProviderTransportMode.RUNTIME, ProviderTransportMode.RUNTIME, null));
+        return coordinator(provider, accounts, transportModes, telemetry);
+    }
+
+    private InferenceCoordinator coordinator(
+        InferenceProvider provider,
+        AccountSelectionService accounts,
+        ProviderTransportModeService transportModes,
+        InferenceTelemetryService telemetry
+    ) {
         var catalog = mock(ModelCatalogCache.class);
         when(catalog.find(anyString(), anyString()))
             .thenReturn(Mono.just(java.util.Optional.empty()));
-        when(transportModes.plan(any())).thenReturn(new ProviderTransportModeService.TransportPlan(
-            ProviderTransportMode.RUNTIME, ProviderTransportMode.RUNTIME, null));
         return new InferenceCoordinator(
             ProviderRegistry.allEnabled(List.of(provider)),
             accounts,

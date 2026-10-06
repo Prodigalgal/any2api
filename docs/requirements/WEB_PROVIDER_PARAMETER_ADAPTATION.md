@@ -84,6 +84,15 @@
 - 按用户后续要求继续定位各家 WEB 输入限制：区分前端字符/字节限制、服务端实际接受边界、模型 token 上下文；有来源的字符限制独立展示，禁止换算成虚假的 token 规格。未知上限保持未知，有限合成探测遇到拒绝/超时即停止增大输入。
 - 核对原生 WEB 的 tools/functions/skills/system 入口：只使用合成 schema 和唯一标记，区分字段接受、被忽略、真正的结构化调用与专用 Agent 执行。只有已证明调用/返回/续接语义的字段才进入生产映射；不能用重新放置字段的方式丢失 system 或工具定义。
 
+## 0.27.12：Grok native input chunk 时序修复
+
+- 目标：修复 0.27.11 完整 SDK 中两次手工工具结果回放遗漏；保持 OpenAI Chat/Responses、none 策略和完整历史契约。
+- 范围：将 Grok WEB `response.create.item.x_grok.input_chunks` 中完整 `system_provided_context` 放在当前 `text` 之前；无 context 时仍只有 text。Java API 与 Python Runtime 两条发送路径同步。
+- 非目标：不修改 caller system/skill、工具 schema、正文、顺序、call_id、stored state、账号选择或重试，不新增托管工具、历史截断/压缩、native 角色强制优先级声明。
+- 影响文件：`GrokWebGatewayChat`、`grok_web_browser.py`、真实发帧/Java transport 回归、统一版本与当前报告/接入说明。
+- 验收：原顺序对照失败保留；固定输入、既有失败账号的两种顺序对照；空/nonempty context 与父响应/EOF/错误回归；新不可变 0.27.12 完整协调器七家官方 SDK、INFERENCE 账本通过后提升同一四镜像。
+- 测试：先以新发帧期望复现旧实现失败，再运行 Backend/Automation 全量、Web lint/build、ruff/版本/JAR；按既有 deploy=false/GitOps 路径验收和发布。0.27.11 未发布，不复用其版本或覆盖镜像。
+
 ## 非目标
 
 不扩展全协议、托管工具、本机工具执行或厂商音视频；不新增账号、不轮换 Key、不处理 Qwen 账号、不迁移 DB/Redis/PV，不发布 Cloudflare Worker。

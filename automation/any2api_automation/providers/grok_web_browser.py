@@ -168,10 +168,12 @@ _STREAM_REQUEST = r"""async request => {
           done();
           return;
         }
-        const inputChunks = [{text: {text: request.message}}];
+        const inputChunks = [];
+        // The WEB consumes chunks in order; current input must follow earlier context.
         if (request.systemProvidedContext) {
           inputChunks.push({system_provided_context: {text: request.systemProvidedContext}});
         }
+        inputChunks.push({text: {text: request.message}});
         const item = {
           type: 'message',
           role: 'user',

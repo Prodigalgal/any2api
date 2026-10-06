@@ -121,10 +121,11 @@ final class GrokWebGatewayChat {
         var xGrok = mapper.createObjectNode()
             .put("client_message_id", UUID.randomUUID().toString());
         var inputChunks = xGrok.putArray("input_chunks");
+        var context = request.path("systemProvidedContext").asText("");
+        // The WEB consumes chunks in order; current input must follow earlier context.
+        if (!context.isBlank()) inputChunks.addObject().putObject("system_provided_context").put("text", context);
         inputChunks.addObject().putObject("text")
             .put("text", request.path("message").asText(""));
-        var context = request.path("systemProvidedContext").asText("");
-        if (!context.isBlank()) inputChunks.addObject().putObject("system_provided_context").put("text", context);
         item.set("x_grok", xGrok);
 
         var responseEvent = event("response.create", "evt_resp_" + now)

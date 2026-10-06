@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（源码 0.27.11）
+# OpenAI API 到厂商 WEB 的桥接（源码 0.27.12）
 
 ## 范围
 
@@ -10,7 +10,9 @@
 
 生产仍为 0.27.6。其首轮严格 Agent SDK 48/49，六家各 7/7、Grok state 一次技能汇报失败；35 个请求 / 38 次 INFERENCE 账本完整。2026-10-05 发布前六家复核 31/42，五次 `coordination_unavailable` 及六项前置缺失导致的失败保留，不能报告为全部可用。
 
-当前未发布候选 0.27.11 包含 Grok 账号等级资格、对象 none、目录冷加载一次 SQL、native `system_provided_context` 及手工/state 表示一致性修复。Grok 0.27.10 隔离真实 WEB SDK 7/7，包含完整五字段和状态资源 schema；这仍是一个账号/代表性组合的有限证据。19 个既有账号均为 basic 配置，生产高等级模式目录的误标尚待上线修正，原生付费权益没有验证。
+0.27.11 已构建四个候选镜像、未发布；完整协调器/真实账号/WEB 官方 SDK 首轮 47/49，除 Grok 外六家各 7/7，Grok Chat 与 Responses 手工结果回放仍有语义遗漏、state 续接通过。35 请求 / 38 次 INFERENCE 账本完整，本窗口未出现 coordination_unavailable。Grok 0.27.10 隔离 SDK 7/7 是一个账号/代表性组合的历史证据。2026-10-06 候选目录基础模式 24 个合格账号，高等级模式 0 个；付费权益没有验证。
+
+当前源码候选 0.27.12 修正 Grok WEB 的 input chunk 顺序：完整 native 历史先发，当前请求与工具结果最后发。固定输入在两个既有失败账号上交叉对照，修正顺序 2/2 完整结果、原顺序 0/2；单纯增强 none 提示没有生效，不采用。system/skill/工具定义、消息/身份/正文、none 策略及错误/重试契约保持，新版本七家完整门禁仍待验收。
 
 候选将账号租约命令从缓存连接隔离，复制原 Redis/Lettuce 配置并管理资源关闭，readiness 并行检查两条连接。外部 `coordination_unavailable`、3s 协调预算、250ms 缓存预算、容量/fencing/TTL 保持。源代码验收和线上结果分别记录；不能把连接隔离报告为底层网络故障已修复。实际门禁及运行证据见[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 
@@ -62,7 +64,7 @@ MiMo 长输入拒绝会返回 `context_length_exceeded`，已提交流则以失�
 3. function schema 编入 Provider 的完整工具约定；模型输出由 ToolEmulationEngine/MiMo 解码器解析，严格参数通过网关校验后还原 OpenAI tool_calls/function_call 与 SSE。真实执行留在客户端；它用 tool_call_id/call_id 返回结果，网关保留完整调用与结果历史后再次生成。
 4. 原生 tools/skills 候选字段尚未证明通用有效，继续使用已实现的模拟桥接。不支持的配置明确拒绝，未知 WEB 限额保持未知；长度超限明确失败。模拟工具可能受到厂商模型拒绝、误判或格式生成不稳定影响，不能等同于厂家原生 function API。
 
-Grok 的未发布 0.27.10 候选利用已实测的 WEB `input_chunks.system_provided_context` 分离完整历史与当前输入，system/developer/skill 作为完整上下文传递；只消费网关 message 资源 ID，不修改 stored state，嵌套 function ID/结果对应关系保留。该字段不能证明 OpenAI 原生角色强制优先级。原生 `client_tool_result` 对当前自定义函数回放未证明有效，不用于替代客户端 function 结果桥接。0.27.9 隔离 SDK 6/7 的失败保留；0.27.10 Grok 隔离 SDK 七项已 7/7，包含 state/resource schema 和清理，其余六家发布前复核进行中。生产当前仍为 0.27.6，隔离结果不替代生产 coordinator/租约/账本验收。
+Grok 利用实测的 WEB `input_chunks.system_provided_context` 分离完整历史与当前输入，system/developer/skill 作为完整上下文传递；只消费网关 message 资源 ID，不修改 stored state，嵌套 function ID/结果对应关系保留。0.27.12 使 native 历史 chunk 位于当前 text 之前，空历史仍只发 text。该字段不能证明 OpenAI 原生角色强制优先级。原生 `client_tool_result` 对当前自定义函数回放未证明有效，不用于替代客户端 function 结果桥接。0.27.9/0.27.11 的语义失败均保留；当前生产及完整七家验收状态以本轮报告为准。
 
 0.27.1 MiMo 的中文 enum/SSE 调用和普通业务结果回放 2/2 通过；随机 REPLAY 标记回显被模型拒绝，失败记录保留。详见本轮报告。0.27.2 另外收敛 WEB raw controls 的缓存隔离，避免不同 search/thinking 配置重用 plain 文本结果。
 

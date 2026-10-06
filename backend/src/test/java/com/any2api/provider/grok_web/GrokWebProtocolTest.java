@@ -603,9 +603,9 @@ class GrokWebProtocolTest {
             .path("parent_response_id").asText()).isEqualTo("parent-response-id");
         var chunks = sent.getAllValues().get(1).path("event").path("item").path("x_grok").path("input_chunks");
         assertThat(chunks.size()).isEqualTo(2);
-        assertThat(chunks.get(0).path("text").path("text").asText()).isEqualTo("hello");
-        assertThat(chunks.get(1).path("system_provided_context").path("text").asText())
+        assertThat(chunks.get(0).path("system_provided_context").path("text").asText())
             .isEqualTo(body.path("systemProvidedContext").asText());
+        assertThat(chunks.get(1).path("text").path("text").asText()).isEqualTo("hello");
         verify(transport, times(1)).open(any());
     }
 

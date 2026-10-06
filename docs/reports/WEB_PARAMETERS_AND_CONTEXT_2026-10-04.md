@@ -1,10 +1,10 @@
-# WEB 参数映射、输入边界与 Xiaomi 桌面端排查（2026-10-04–05）
+# WEB 参数映射、输入边界与 Xiaomi 桌面端排查（2026-10-04–06）
 
 ## 范围与当前状态
 
 基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
-生产仍为 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。其 SDK 首轮 48/49，35 个请求 / 38 次 INFERENCE 尝试完整。0.27.7 正文分区实验撤回，账号资格/对象 none 继承至 0.27.8 单 SQL 优化；0.27.9 native context 隔离 SDK 6/7，0.27.10 消费资源元数据、补齐 Java 历史函数身份后隔离 Grok 7/7。发布前其余六家复核 31/42，发生五次协调失败及六项前置衍生失败，当前 0.27.11 隔离关键租约连接，尚未发布。各版本/运行路径的证据分别保留，不能混合为当前生产全部通过。
+生产仍为 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。其 SDK 首轮 48/49，35 个请求 / 38 次 INFERENCE 尝试完整。0.27.7 正文分区实验撤回，账号资格/对象 none 继承至 0.27.8 单 SQL 优化；0.27.9 native context 隔离 SDK 6/7，0.27.10 消费资源元数据、补齐 Java 历史函数身份后隔离 Grok 7/7。发布前其余六家复核 31/42，发生五次协调失败及六项前置衍生失败；0.27.11 隔离关键租约连接，完整候选 SDK 47/49，仍有两次 Grok 手工回放语义失败，未发布。当前 0.27.12 修正 native chunk 顺序，固定输入交叉对照 2/2 完整结果，新版本完整门禁继续执行。各版本/运行路径的证据分别保留，不能混合为当前生产全部通过。
 
 ## 参数含义与实际 WEB 目标
 
@@ -354,7 +354,7 @@ Java/Python 接入 native context 的 0.27.9 完整隔离 SDK 首轮 6/7：Chat 
 
 生产独立只读核验：2026-10-05 11:42:33（UTC+8）仍为 0.27.6 / GitOps `2d1c056218cbe7508398884e983a0f9e461545e6`，四组件 Ready/restarts=0、Argo Synced/Healthy，源码/installed/API 一致，healthz/readyz=200。原始 `release-0.27.6-runtime-20261005-continue.json`。所有本轮原生合成 canary 不计入生产 INFERENCE 账本，账号配置/Key/凭据和 DB 结构没有变更。
 
-### 0.27.11 发布前协调故障及连接隔离（当前候选）
+### 0.27.11 发布前协调故障及连接隔离（未发布）
 
 `web-bridge-unchanged-six-before-v02710.json` 官方 SDK `max_retries=0` 首轮 **31/42**：Arena/GLM 各 7/7，DeepSeek 4/7、LongCat 5/7、MiMo 6/7、MiniMax 2/7。五次实际请求返回协调错误，六项依赖步骤因前置缺失未执行，所有拥有的测试状态均清理；没有语义失败被改写为通过。Server 2026-10-05 12:36:09–12:38:21（UTC+8）日志确认生成前失败、account_id=null、queue/acquire/ttfb=0，duration 3025–3085ms：
 
@@ -375,6 +375,30 @@ Java/Python 接入 native context 的 0.27.9 完整隔离 SDK 首轮 6/7：Chat 
 本地 Backend 全量/bootJar 通过，新增七项及原租约失败回归共 13 项通过，包含真实 Boot 自动装配保留唯一默认工厂/模板。Automation 536 passed，Web lint/build、ruff check/126 format、八处源码/JAR 版本 0.27.11 通过。新测试方法拼写的初次 compileTestJava 失败及 main.py 混合换行 format 失败均保留，修正后门禁通过；没有弱化架构校验或新增依赖。
 
 Read 后续窗口集群 18×3 全 200，普通管理 median 81–94ms，全目录 220.29ms、解压 1,537,921 bytes / gzip 110,155 bytes；Hikari pending/active=0。Lettuce 累计 2832 次/408.17s、近期 max 165.79ms 是后续窗口，不能覆盖上述故障。原始 `redis-fault-window-v0276-20261005.json`、`redis-transfer-window-v0276-20261005.json`、`redis-client-interference-v0276-20261005.json`、`redis-client-metrics-v0276-20261005.json`、`read-redis-fault-window-v0276.jsonl`。本机与集群 UTC 记录存在约 85s 偏差，duration 使用单调计时，故障关联使用 request_id 和 Server 时间。
+
+### 2026-10-06：0.27.11 完整候选验收，发布门禁未通过
+
+源码 `49a9f8b992b925c07c428bdbfd1541d97c7a62b7` 已推送功能分支；[CI 37267648014](https://github.com/Prodigalgal/any2api/actions/runs/37267648014) 三项质量和四镜像构建均成功，`deploy=false`，GitOps 未更新。不可变 suffix 为 `20261005-v0.27.11-release-49a9f8b992b925c07c428bdbfd1541d97c7a62b7`。四个临时候选 Pod 的运行/installed/API 版本一致，Ready、restarts=0，healthz/readyz=200；启动 wrapper 仅关闭候选自身的后台调度和 catalog startup sync，认证、真实 PG、协调器、租约、账号选择、WEB、usage/state 持久化全部使用真实链路。
+
+首次候选创建因 namespace ResourceQuota 拒绝 Automation/Web：CPU limits 已用满 10，memory requests/limits 分别限制 8Gi/20Gi。临时候选的资源预算缩小后四组件启动，配额总用量为 CPU limits 9750m、memory limits 20224Mi、memory requests 7936Mi。Arena 完成验收后通过 Pod resize 将其 CPU limit 750m→250m、Automation 750m→1250m，候选总 CPU limit 保持；首次 merge patch 被拒绝，改为按容器名称合并的 strategic patch 后成功，Pod 未重启。生产资源、配额、Redis/PV 未修改。候选资源/digest 证据为 `acceptance-v02711-runtime-20261006.json`、`acceptance-v02711-budget.json`、`acceptance-v02711-cpu-resize.json`。
+
+官方 SDK 2.54.0、`max_retries=0`、最多两个客户端，完整矩阵 **47/49**：Arena、DeepSeek、GLM、LongCat、MiMo、MiniMax 各 **7/7**，Grok **5/7**。Grok Chat 结果回放 `b4c2b124-fbfe-4596-a8ac-1f8762237378` 和 Responses 手工结果回放 `4c4f3c6a-4377-456b-b829-2f661acc08b7` 均只回复旧的“已记录，继续保留当前文档和批次。”，五个业务字段遗漏；state 续接 `a778c6dd-ce98-48b8-ab7c-4be7aab010b2` 通过。所有七家的两个自有测试状态均删除。原始 `web-bridge-full-candidate-v02711.json`/`.log` 保留，不把传输成功当作技能语义正确，也不以重复运行直到通过作为发布依据。
+
+精确 35 个 SDK request_id 对应 **38 次普通 INFERENCE**，35 次最终后台成功、3 次失败，attempt 连续且无遗漏。保留 Arena credential_rejected 后换号，LongCat tool_call_generation_failed / provider_upstream_error 后成功；本窗口未出现 coordination_unavailable。独立连接隔离的本轮证据不等于底层网络 3s 尾延迟根因已经关闭。`web-bridge-full-candidate-v02711-ledger.json` 保留后台尝试，语义失败仍按 SDK 判断。
+
+DeepSeek `8c9f924b-1fd2-4a85-99a2-82384023bc17` 总耗时 238598ms，账号获取 136ms、ttfb 238436ms，仅一次成功尝试，慢主要发生于获取租约之后的 WEB 链路；尚未把该延迟归因到单一网络或浏览器原因。候选 CPU 配额有限，本轮厂商耗时不作为生产延迟目标。
+
+同一生产 Automation 节点对候选和生产各做 18 个 Read × 3 次，全部 200；候选普通热读多数约 80–120ms，全目录 median 227.67ms（164.93–388.85ms），生产 0.27.6 全目录 median 205.59ms（153.08–322.53ms）。目录解压后约 1.51MB、gzip 约 109KB；两侧 Hikari active/pending=0。候选首次 SDK models.retrieve 为 5.274/5.525s，保留该慢样本；有限热读对照未证明 HTTP 普遍提速、冷启动或 WAN 尾延迟关闭。原始 `read-candidate-v02711-20261006.jsonl`、`read-production-v0276-20261006.jsonl`。
+
+Grok 目录只读核验：基础模式 eligible/available account_count=24，auto/expert/heavy、deepsearch 和高等级媒体模式均 eligible=0、available=false、UNAVAILABLE；原 2026-10-05 的 19 个 basic 配置账号是历史快照。检查脚本首次误用了不存在的 image-lite 模型名返回 404，随后按真实 models.list 的 13 个公开 ID 核验；没有生成付费模式、修改账号等级或 Key。证据 `grok-eligibility-candidate-v02711.json`。生产仍为 0.27.6，0.27.11 尚未通过七家功能发布门禁；固定合成输入的 native chunk 顺序和 none policy 对照继续定位 Grok 手工回放。
+
+### 0.27.12：native chunk 顺序对照与修复（当前候选）
+
+两次 Grok 手工回放的实际后台均单次完成，没有 cache hit/协调失败；HTTP/INFERENCE 成功不能解释业务结果遗漏。使用同一 42 条合成输入、固定 tools/none、两次既有失败账号，分别按 baseline→修正和修正→baseline 顺序做有限对照，caller payload sha256 均 `53baada3d1d4aa51ad5be5c401a41b52302d046673723fb7611e881b5f5dcbba`。先当前 text、后 native context 时两次都缺工具结果；先完整 native context、后当前 text 时两次都包含完整五字段，completed 且无 native 错误。额外保持原顺序但增加 none/工具定义提示仍失败，不采用。原始 `grok-none-order-candidate-v02711.json`、`grok-none-order-reverse-v02711.json` 保留所有输出、echo chunk 顺序；仅使用合成输入、已有账号，独立 runtime 关闭且 credential patch 未写回，不列为生产 INFERENCE 证据。
+
+新发帧期望先使旧实现失败：Backend transport 回归失败、Python 实际 WebSocket VM 四项失败（空 context 路径仍通过）。0.27.12 同步 Java `GrokWebGatewayChat` 和 Python `_STREAM_REQUEST`，只移动 context/text 两块的发送顺序；正文、完整历史、工具定义/ID、父响应、none 策略、EOF/错误、SBS=false 保持。生产仍 0.27.6；未发布的 0.27.11 四 Pod/两个 Service/launcher ConfigMap 在测试状态清理及有限探测结束后按 source/version 所有权校验删除，释放验收配额。新候选全量质量和七家完整门禁继续执行，修复后的有限对照不替代新镜像完整验收。
+
+本地 0.27.12 Backend 共 538 tests：533 passed / 5 条件 skipped、bootJar；Automation 536 passed，Web lint/build、ruff check/126 文件 format、八处源码/JAR 版本一致。原发帧回归失败为 Backend 28 项中的 1 项、Python 27 项中的 4 项，修正后全量通过；原始 before XML/log 和全量 `web-bridge-v02712-*` 证据保留。新版本尚待不可变镜像的七家完整门禁。
 
 ## 遗留与回滚
 

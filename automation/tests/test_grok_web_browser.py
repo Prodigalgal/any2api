@@ -358,7 +358,7 @@ def test_grok_web_uses_page_session_and_page_websocket() -> None:
     assert "/api/auth/session" in _SESSION_REQUEST
     assert "/api/auth/session" in _STREAM_REQUEST
     assert "new WebSocket" in _STREAM_REQUEST
-    assert "const inputChunks = [{text: {text: request.message}}]" in _STREAM_REQUEST
+    assert "const inputChunks = []" in _STREAM_REQUEST
     assert "system_provided_context: {text: request.systemProvidedContext}" in _STREAM_REQUEST
     assert "event: responseEvent" in _STREAM_REQUEST
     assert "conversation.item.create" not in _STREAM_REQUEST
@@ -450,8 +450,8 @@ global.WebSocket = class {
         event = result["sent"][1]["event"]
         assert event["parent_response_id"] == "parent-id"
         assert event["item"]["x_grok"]["input_chunks"] == [
-            {"text": {"text": "hi"}},
             *([{"system_provided_context": {"text": context}}] if context else []),
+            {"text": {"text": "hi"}},
         ]
     if scenario.startswith("binary"):
         assert result["closed"]

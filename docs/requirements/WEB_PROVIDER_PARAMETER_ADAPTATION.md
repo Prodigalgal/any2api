@@ -108,6 +108,14 @@
 - 非目标：不采用对照中失败的 history+current 双说明，不增强 caller skill/none，不删历史、不变更重试/账号/Key，不将原始映射一次正向复测当作稳定性修复。
 - 验收/测试：旧实现先在 Java/Python 多轮工具回放回归中失败；无 history/no user/单用户路径保持。固定失败输入和两账号交叉对照保留 baseline 1/2、current-only 2/2、history-only 2/2、combined 0/2，仅选择修正范围矛盾的 current-only。完整质量、版本与新四镜像七家 SDK/普通账本通过后才能发布，有限样本不作原生角色优先级或全账号稳定性保证。
 
+### 0.27.15：分离 Grok 指令上下文与历史
+
+- 目标：0.27.14 候选 49/49，但生产复测 48/49；Grok Chat 工具结果回放的原生完成响应仍重复历史确认语句，不能报告为完整验收通过。
+- 范围/影响文件：Python `grok_web_browser._conversation_input/_prompt` 与 Java `GrokWebRequestMapper` 同步；仅把开头连续的普通 system/developer 消息放入 native context，其他早期历史以完整 JSON 放在当前轮文本前。沿用原 chunk 顺序、工具选择、身份消费规则与原始存储；相关 Java/Python 与真实发送回归及统一版本文件同步。
+- 非目标：不删减或压缩正文/字段，不重复系统指令，不修改 caller/技能/工具结果，不按账号切换顺序，不改变账号、Key、重试、错误或 API 契约。
+- 验收：旧实现先复现分区断言失败；完整历史/嵌套调用 ID/附加字段、Gateway message ID 消费、非开头指令原位、无 user/空白 follow-up/无历史、源对象不变均覆盖。修正后质量/版本、新四镜像七家完整 SDK 和普通账本通过，再提升同一制品并复核生产；保留 0.27.14 的生产失败。
+- 原生依据：相同失败输入在三账号上，原映射 2/3、反序 1/2、仅指令 context 5/5（context-first 3/3、context-last 2/2）；JSON 当前轮、当前区前置指令、单 transcript 均未解决原账号失败。选择分区修正，保持现有 context-first 时序；有限样本不作全账号或原生 system 优先级保证。
+
 ## 非目标
 
 不扩展全协议、托管工具、本机工具执行或厂商音视频；不新增账号、不轮换 Key、不处理 Qwen 账号、不迁移 DB/Redis/PV，不发布 Cloudflare Worker。

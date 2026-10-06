@@ -224,8 +224,12 @@ async def test_chat_stream_full_websocket_lifecycle(with_history: bool) -> None:
     chunks = item["x_grok"]["input_chunks"]
     if with_history:
         assert len(chunks) == 2
-        assert json.loads(chunks[0]["system_provided_context"]["text"]) == original["messages"][:4]
+        assert json.loads(chunks[0]["system_provided_context"]["text"]) == original["messages"][:2]
         text = chunks[1]["text"]["text"]
+        encoded_history = text.split("[Earlier conversation history]\n", 1)[1].split(
+            "\n[End of earlier conversation history]", 1
+        )[0]
+        assert json.loads(encoded_history) == original["messages"][2:4]
         assert "Review this document" in text and "call-review" in text
         assert '{"status":"verified","pages":37}' in text
     else:

@@ -1,11 +1,18 @@
-# 当前任务板（源码 0.27.14）
+# 当前任务板（源码 0.27.15）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-04–06 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.14）
+## 2026-10-04–06 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.15）
 
-- 当前候选 0.27.14 明确 Grok 分区后 current turn 范围，Java/Python 同步，原 JSON history/工具结果/ID/none 保持。原多轮回归 Java 1/28、Python 1/34 失败，修正后 Python 34 passed；全量 Backend 533 passed / 5 条件 skipped、bootJar，Automation 537 passed，Web lint/build、ruff/126 format、版本/JAR 通过。两失败账号相同合成输入交叉对照 baseline 1/2、current-only 2/2、history-only 2/2、combined 0/2，选择修正范围矛盾的 current-only。0.27.13 Source `4e253a0`、CI `37401477468` success，完整矩阵 47/49：六家各 7/7、Grok Chat/state 语义遗漏；35 请求 / 35 次普通账本单次传输全成功，失败均 Browser Runtime。自有状态/候选/探测进程已清理，生产仍 0.27.6，新四镜像七家完整门禁通过后发布。
+- 当前候选 0.27.15 将 Grok 开头连续 system/developer 留在 native context、其他完整历史 JSON 放在 current turn 前，附加字段/中途指令/工具 ID/原始状态保持，chunk 顺序及 none 不变。三个账号原生 5/5、当前源码在独立探测进程中的原账号 1/1；Java 旧回归 4/29 failed、Python 8 failed / 28 passed，修正后通过。Backend 534 passed / 5 条件 skipped、bootJar，Automation 539 passed，Web lint/build、版本/JAR通过；新四镜像七家完整 SDK/普通账本门禁继续。
+- 生产 0.27.14 Source `939b4a8`，CI `37451074979` success，候选 SDK 49/49、35 请求 / 39 尝试，四次上游失败后的成功重试保留；自有资源清理后提升原四镜像，GitOps `4c0ab35` Synced/Healthy、Ready/restart=0、installed/API版本及候选/生产digest相等。生产公网 SDK 48/49、六家各7/7、Grok Chat回放语义失败；35 请求 / 36次INFERENCE完整，无协调故障，14个自有状态清理。新生产 Read 两侧18×3全200，全目录集群median316.85ms/WAN1513.47ms；旧生产一次登录挑战Redis3s/500、候选全目录4.29s/SDK模型详情10.5s慢样本仍保留，性能风险未关闭。
+
+### 历史开发与验收记录
+
+以下保留各候选当时的状态；当前发布与候选状态以上方记录为准。
+
+- 0.27.14 历史候选明确 Grok 分区后 current turn 范围，Java/Python 同步，原 JSON history/工具结果/ID/none 保持。原多轮回归 Java 1/28、Python 1/34 失败，修正后 Python 34 passed；全量 Backend 533 passed / 5 条件 skipped、bootJar，Automation 537 passed，Web lint/build、ruff/126 format、版本/JAR 通过。两失败账号相同合成输入交叉对照 baseline 1/2、current-only 2/2、history-only 2/2、combined 0/2，选择修正范围矛盾的 current-only。0.27.13 Source `4e253a0`、CI `37401477468` success，完整矩阵 47/49：六家各 7/7、Grok Chat/state 语义遗漏；35 请求 / 35 次普通账本单次传输全成功，失败均 Browser Runtime。自有状态/候选/探测进程已清理，生产仍 0.27.6，新四镜像七家完整门禁通过后发布。
 
 - 0.27.13 历史候选补齐 Grok 内部 WEB 直连 WebSocket 的完整历史、一次带 item 的 response.create 与父响应映射；两条 Python 发送路径共享 context-first/current-last chunks。旧直连生命周期回归 2 failed / 5 passed，修正后相关 34 passed。Backend 533 passed / 5 条件 skipped、bootJar，Automation 537 passed，Web lint/build、ruff/126 format、源码/JAR 版本通过。0.27.12 Source `2e17ef2`、CI `37399484609` success、未发布，矩阵 47/49，其余六家各 7/7、Grok Responses 手工/state 语义遗漏；35 请求 / 40 次普通账本完整，5 次失败保留，自有状态/候选资源已清理。
 

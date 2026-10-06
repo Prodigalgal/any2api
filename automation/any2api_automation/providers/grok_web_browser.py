@@ -521,9 +521,31 @@ def _conversation_input(messages: list[dict[str, Any]]) -> tuple[str, str]:
     )
     if start == 0:
         return complete, ""
-    # Keep the current turn separate from history using the WEB's native context chunk.
+    leading = 0
+    while (
+        leading < start
+        and isinstance(messages[leading], dict)
+        and messages[leading].get("role") in {"system", "developer"}
+        and messages[leading].get("type") in {None, "message"}
+    ):
+        leading += 1
+    earlier = messages[leading:start]
+    current = _prompt(messages[start:], current_turn=True, inline_history=bool(earlier))
+    if earlier:
+        current = (
+            "[Earlier conversation history]\n"
+            + _serialize_context(earlier)
+            + "\n[End of earlier conversation history]\n\n"
+            + current
+        )
+    # Historical assistant replies are conversation data, not active native instructions.
+    instructions = _serialize_context(messages[:leading]) if leading else ""
+    return current, instructions
+
+
+def _serialize_context(messages: list[dict[str, Any]]) -> str:
     history = []
-    for message in messages[:start]:
+    for message in messages:
         if (
             isinstance(message, dict)
             and message.get("role") in {"system", "developer", "user", "assistant", "tool"}
@@ -532,9 +554,7 @@ def _conversation_input(messages: list[dict[str, Any]]) -> tuple[str, str]:
             # Message resource IDs belong to Gateway state; nested function IDs remain intact.
             message = {key: value for key, value in message.items() if key != "id"}
         history.append(message)
-    return _prompt(messages[start:], current_turn=True), json.dumps(
-        history, ensure_ascii=False, separators=(",", ":")
-    )
+    return json.dumps(history, ensure_ascii=False, separators=(",", ":"))
 
 
 def _validate_command(command: dict[str, Any]) -> None:
@@ -550,7 +570,7 @@ def _validate_command(command: dict[str, Any]) -> None:
             raise TypeError(f"Grok Web semantic command {field} must be an object")
 
 
-def _prompt(messages: Any, *, current_turn: bool = False) -> str:
+def _prompt(messages: Any, *, current_turn: bool = False, inline_history: bool = False) -> str:
     blocks: list[str] = []
     for message in messages:
         if not isinstance(message, dict):
@@ -588,6 +608,12 @@ def _prompt(messages: Any, *, current_turn: bool = False) -> str:
         if current_turn
         else "The following role-labeled messages are the complete conversation, in order."
     )
+    if current_turn and inline_history:
+        introduction = (
+            "Leading system/developer instructions are in the separate context chunk; earlier "
+            "conversation history is above. The following messages are the current user "
+            "request, assistant calls and supplied tool results, in order."
+        )
     return (
         f"[{title}]\n{introduction}\n\n" + prompt + f"\n\n[End of {title.lower()}]\n"
         "Continue as the assistant after the last message. "

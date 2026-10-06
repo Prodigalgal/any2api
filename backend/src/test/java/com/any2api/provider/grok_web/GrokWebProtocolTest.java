@@ -147,13 +147,15 @@ class GrokWebProtocolTest {
         var body = requestMapper().prepare(request).body();
         var prompt = body.path("message").asText();
         assertThat(mapper.readTree(body.path("systemProvidedContext").asText()))
-            .isEqualTo(mapper.valueToTree(messages.subList(0, 38)));
+            .isEqualTo(mapper.valueToTree(messages.subList(0, 2)));
+        assertThat(inlineHistory(body)).isEqualTo(mapper.valueToTree(messages.subList(2, 38)));
 
         assertThat(prompt).contains("Follow the system and developer instructions", "正在核验。", "batch_number", "57345", "Tool result (call_document)", "已核验", "37", "\"id\":\"call_document\"");
         assertThat(prompt).containsOnlyOnce("已核验");
-        assertThat(prompt).doesNotContain("[system]", "[developer]", "完整历史-0");
+        assertThat(prompt).doesNotContain("[system]", "[developer]").contains("完整历史-0");
         assertThat(prompt.indexOf("完整历史-36")).isLessThan(prompt.indexOf("完整历史-37"));
-        assertThat(prompt).startsWith("[Current turn]\nEarlier system/developer instructions")
+        assertThat(prompt).startsWith("[Earlier conversation history]\n")
+            .contains("[Current turn]\nLeading system/developer instructions are in the separate context chunk")
             .doesNotContain("are the complete conversation");
         assertThat(prompt.indexOf("Tool result (call_document)")).isLessThan(prompt.indexOf("[End of current turn]"));
         assertThat(prompt).endsWith("Produce only the next assistant response.").doesNotContain("[Tool calling contract]");
@@ -174,8 +176,9 @@ class GrokWebProtocolTest {
         var body = requestMapper().prepare(request(CanonicalRequest.Protocol.CHAT_COMPLETIONS,
             mapper.createObjectNode(), List.of(), messages)).body();
 
-        assertThat(mapper.readTree(body.path("systemProvidedContext").asText())).isEqualTo(mapper.valueToTree(history));
-        assertThat(body.path("message").asText()).contains("当前任务").doesNotContain("call_old", "早先结果");
+        assertThat(mapper.readTree(body.path("systemProvidedContext").asText())).isEqualTo(mapper.valueToTree(history.subList(0, 2)));
+        assertThat(inlineHistory(body)).isEqualTo(mapper.valueToTree(history.subList(2, history.size())));
+        assertThat(body.path("message").asText()).contains("当前任务", "call_old", "早先结果");
     }
 
     @Test
@@ -209,11 +212,37 @@ class GrokWebProtocolTest {
 
         assertThat(state.path("message")).isEqualTo(plain.path("message"));
         assertThat(state.path("systemProvidedContext")).isEqualTo(plain.path("systemProvidedContext"));
-        var context = mapper.readTree(state.path("systemProvidedContext").asText());
-        assertThat(context.get(2).path("tool_calls").get(0).path("id").asText()).isEqualTo("call_real");
-        assertThat(context.get(3).path("tool_call_id").asText()).isEqualTo("call_real");
-        assertThat(context.get(4).path("id").asText()).isEqualTo("fc_resource");
+        assertThat(mapper.readTree(state.path("systemProvidedContext").asText())).isEqualTo(mapper.valueToTree(messages.subList(0, 1)));
+        var context = inlineHistory(state);
+        assertThat(context.get(1).path("tool_calls").get(0).path("id").asText()).isEqualTo("call_real");
+        assertThat(context.get(2).path("tool_call_id").asText()).isEqualTo("call_real");
+        assertThat(context.get(3).path("id").asText()).isEqualTo("fc_resource");
         assertThat(mapper.writeValueAsString(stored)).isEqualTo(original);
+    }
+
+    @Test
+    void interleavedInstructionsAndExtraHistoryFieldsStayInOrderWithoutLeadingInstructions() {
+        var first = message("user", "早期批次");
+        first.putObject("metadata").put("id", "nested_identity");
+        var history = List.<JsonNode>of(first,
+            message("system", "中途规则").put("phase", "commentary"),
+            message("assistant", "保留记录").putNull("refusal"));
+        var messages = new java.util.ArrayList<>(history);
+        messages.add(message("user", "当前任务"));
+        var original = mapper.writeValueAsString(messages);
+
+        var body = requestMapper().prepare(request(CanonicalRequest.Protocol.CHAT_COMPLETIONS,
+            mapper.createObjectNode(), List.of(), messages)).body();
+
+        assertThat(body.path("systemProvidedContext").asText()).isEmpty();
+        assertThat(inlineHistory(body)).isEqualTo(mapper.valueToTree(history));
+        assertThat(mapper.writeValueAsString(messages)).isEqualTo(original);
+    }
+
+    private JsonNode inlineHistory(tools.jackson.databind.node.ObjectNode body) {
+        var prompt = body.path("message").asText();
+        var start = "[Earlier conversation history]\n".length();
+        return mapper.readTree(prompt.substring(start, prompt.indexOf("\n[End of earlier conversation history]")));
     }
 
     @Test

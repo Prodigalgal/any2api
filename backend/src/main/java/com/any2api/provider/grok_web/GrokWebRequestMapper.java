@@ -27,10 +27,17 @@ final class GrokWebRequestMapper {
         // Validate the whole transcript before moving earlier messages into native context.
         var complete = prompt(request.messages(), false);
         var start = currentTurnStart(request);
-        var current = start == 0 ? complete : prompt(request.messages().subList(start, request.messages().size()), true);
+        var leading = leadingInstructionCount(request.messages(), start);
+        var earlier = request.messages().subList(leading, start);
+        var current = start == 0 ? complete : prompt(request.messages().subList(start, request.messages().size()), true, !earlier.isEmpty());
+        if (!earlier.isEmpty()) {
+            current = "[Earlier conversation history]\n" + context(earlier)
+                + "\n[End of earlier conversation history]\n\n" + current;
+        }
         var prompt = tools.inject(current, configuration);
         var body = payload(prompt, spec.mode());
-        body.put("systemProvidedContext", start == 0 ? "" : context(request.messages().subList(0, start)));
+        // Historical assistant replies remain conversation data, outside active native instructions.
+        body.put("systemProvidedContext", leading == 0 ? "" : context(request.messages().subList(0, leading)));
         return new Prepared(body, configuration, tools.sieve(configuration));
     }
 
@@ -44,6 +51,18 @@ final class GrokWebRequestMapper {
             if ("user".equals(message.path("role").asText()) && !text(message.path("content")).isBlank()) return index;
         }
         return 0;
+    }
+
+    private int leadingInstructionCount(java.util.List<JsonNode> messages, int currentStart) {
+        var index = 0;
+        while (index < currentStart) {
+            var message = messages.get(index);
+            if (!("system".equals(message.path("role").asText()) || "developer".equals(message.path("role").asText()))
+                    || !(message.path("type").isMissingNode() || message.path("type").isNull()
+                        || "message".equals(message.path("type").asText()))) break;
+            index++;
+        }
+        return index;
     }
 
     private String context(java.util.List<JsonNode> messages) {
@@ -62,6 +81,10 @@ final class GrokWebRequestMapper {
     }
 
     private String prompt(java.util.List<JsonNode> messages, boolean currentTurn) {
+        return prompt(messages, currentTurn, false);
+    }
+
+    private String prompt(java.util.List<JsonNode> messages, boolean currentTurn, boolean inlineHistory) {
         var value = new StringBuilder();
         for (var message : messages) {
             var history = tools.history(message);
@@ -90,6 +113,9 @@ final class GrokWebRequestMapper {
         var introduction = currentTurn
             ? "Earlier system/developer instructions and conversation history are in the preceding context chunk. The following messages are the current user request, assistant calls and supplied tool results, in order."
             : "The following role-labeled messages are the complete conversation, in order.";
+        if (currentTurn && inlineHistory) {
+            introduction = "Leading system/developer instructions are in the separate context chunk; earlier conversation history is above. The following messages are the current user request, assistant calls and supplied tool results, in order.";
+        }
         return """
             [%s]
             %s

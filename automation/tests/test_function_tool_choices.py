@@ -150,13 +150,12 @@ def test_every_web_builder_keeps_system_skill_complete_history_and_prepared_func
     for component in path:
         prompt = prompt[component]
     if builder is build_grok_web_request:
-        prompt = (
-            "\n".join(
-                message["content"] for message in json.loads(request["systemProvidedContext"])
-            )
-            + "\n"
-            + prompt
-        )
+        encoded_history = prompt.split("[Earlier conversation history]\n", 1)[1].split(
+            "\n[End of earlier conversation history]", 1
+        )[0]
+        context = json.loads(request["systemProvidedContext"])
+        history = json.loads(encoded_history)
+        prompt = "\n".join(message["content"] for message in [*context, *history]) + "\n" + prompt
 
     assert all(message["content"] in prompt for message in messages)
     assert command == original

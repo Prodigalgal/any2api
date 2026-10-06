@@ -199,9 +199,13 @@ def test_grok_web_continues_after_complete_history_and_client_function_result() 
     request = build_grok_web_request(command)
 
     prompt = request["message"]
-    history = json.loads(request["systemProvidedContext"])
-    assert history == messages[:39]
-    assert prompt.startswith("[Current turn]\nEarlier system/developer instructions")
+    assert json.loads(request["systemProvidedContext"]) == messages[:2]
+    assert _inline_history(prompt) == messages[2:39]
+    assert prompt.startswith("[Earlier conversation history]\n")
+    assert (
+        "[Current turn]\nLeading system/developer instructions are in the separate context chunk"
+        in prompt
+    )
     assert "are the complete conversation" not in prompt
     assert request["inputChunks"] == [
         {"system_provided_context": {"text": request["systemProvidedContext"]}},
@@ -210,7 +214,7 @@ def test_grok_web_continues_after_complete_history_and_client_function_result() 
     assert "Follow the system and developer instructions" in prompt
     assert all(message["content"] in prompt for message in messages[39:])
     assert "[system]" not in prompt
-    assert "业务批次号" not in prompt
+    assert "业务批次号" in prompt
     assert (
         prompt.index("保留完整历史-36")
         < prompt.index("保留完整历史-37")
@@ -253,9 +257,10 @@ def test_grok_native_context_preserves_earlier_calls_and_blank_follow_up(suffix)
 
     request = build_grok_web_request(command)
 
-    assert json.loads(request["systemProvidedContext"]) == history
+    assert json.loads(request["systemProvidedContext"]) == history[:2]
+    assert _inline_history(request["message"]) == history[2:]
     assert "当前任务" in request["message"]
-    assert "call_old" not in request["message"]
+    assert "call_old" in request["message"]
     assert command == original
 
 
@@ -323,10 +328,50 @@ def test_grok_gateway_resource_ids_do_not_change_model_context_or_function_ids(
 
     assert plain["message"] == state["message"]
     assert plain["systemProvidedContext"] == state["systemProvidedContext"]
-    context = json.loads(state["systemProvidedContext"])
-    assert context[2]["tool_calls"][0]["id"] == context[3]["tool_call_id"] == "call_real"
-    assert context[4]["id"] == "fc_resource" and context[4]["call_id"] == "call_typed"
+    assert json.loads(state["systemProvidedContext"]) == history[:1]
+    context = _inline_history(state["message"])
+    assert context[1]["tool_calls"][0]["id"] == context[2]["tool_call_id"] == "call_real"
+    assert context[3]["id"] == "fc_resource" and context[3]["call_id"] == "call_typed"
     assert stored == original
+
+
+def _inline_history(prompt: str) -> list[dict]:
+    encoded = prompt.split("[Earlier conversation history]\n", 1)[1].split(
+        "\n[End of earlier conversation history]", 1
+    )[0]
+    return json.loads(encoded)
+
+
+@pytest.mark.parametrize("leading", [[], [{"role": "system", "content": "初始规则"}]])
+def test_grok_keeps_interleaved_instructions_and_extra_history_fields_in_order(leading) -> None:
+    history = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "早期批次"}],
+            "metadata": {"id": "nested_identity"},
+        },
+        {"role": "system", "content": "中途更新规则", "phase": "commentary"},
+        {"role": "assistant", "content": "保留记录", "refusal": None},
+    ]
+    command = {
+        "schemaVersion": 1,
+        "model": "grok-3",
+        "messages": [*leading, *history, {"role": "user", "content": "当前任务"}],
+        "tools": [],
+        "providerOptions": {},
+        "controls": {},
+    }
+    original = deepcopy(command)
+
+    request = build_grok_web_request(command)
+
+    assert _inline_history(request["message"]) == history
+    if leading:
+        assert json.loads(request["systemProvidedContext"]) == leading
+    else:
+        assert request["systemProvidedContext"] == ""
+    assert "初始规则" not in request["message"]
+    assert command == original
 
 
 def test_grok_web_leaves_a_single_plain_user_prompt_unchanged() -> None:

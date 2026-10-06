@@ -1,10 +1,10 @@
-# WEB 参数映射、输入边界与 Xiaomi 桌面端排查（2026-10-04–06）
+# WEB 参数映射、输入边界与 Xiaomi 桌面端排查（2026-10-04–07）
 
 ## 范围与当前状态
 
 基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
-生产当前为 0.27.14：候选完整 SDK 49/49 后提升同一四镜像，生产公网复测 48/49，六家各 7/7、Grok Chat 工具回放一次语义遗漏。35 请求 / 36 次普通 INFERENCE 完整，全部最终传输成功不等于 SDK 语义成功。当前源码 0.27.15 分离 Grok 的指令上下文与历史 JSON，尚未发布。历史 0.27.6 首轮 48/49；0.27.11–13 各为 47/49，失败及各自 SDK/账本/运行路径证据保留，不能混合报告为当前生产全部通过。
+生产当前为 **0.27.15**，Source `08b0717`、CI `37487198470`、GitOps `3930c78`。新四镜像候选完整 SDK **49/49** 后提升同一制品，生产公网完整复测 **49/49**，七家所选模型各 **7/7**。候选 35 请求 / 37 次、生产 35 请求 / 36 次普通 INFERENCE 完整，所有最终传输与本轮语义均通过，保留三次上游失败及透明重试；自有测试状态和候选资源已清理。四组件 Ready/restarts=0、版本及 digest 验证一致。历史 0.27.6/14 首轮 48/49、0.27.11–13 各 47/49 的失败及 SDK/账本/运行路径证据保留。Read、上游等待、全模型/账号与精确 WEB 上下文边界仍未关闭。
 
 ## 参数含义与实际 WEB 目标
 
@@ -434,16 +434,43 @@ Grok 目录只读核验：基础模式 eligible/available account_count=24，aut
 - 针对目录慢请求，授权后的 stream/raw 分阶段检查：候选三次服务端 timer 增量合计 **52.039ms**，客户端完整接收 **152.42–364.46ms**；旧生产分别 **40.675ms / 145.72–353.32ms**。这证明所测窗口客户端接收与服务端计时不能混为一项，未定位先前每个慢样本的全部等待。最初未登录的 actuator 检查返回 401，后按已有会话权限查询。
 - 证据 `read-candidate-v02714-20261006.*`、`read-production-v0276-control-20261006-evening{,-retry1}.*`、`read-production-v02714{,-wan}-20261006.*`、`read-v02714-{control-error-window,models-phase}-20261006.*`。独立租约连接不代表 DB/Redis 网络尾延迟或登录挑战路径已完全修复。
 
-### 0.27.15：只将开头指令放入 native context（未发布）
+### 0.27.15：只将开头指令放入 native context
 
 - 固定生产失败输入 42 条消息、原调用 ID 和正文不变，原账号 native baseline/JSON current/前置指令/single transcript 均遗漏五字段。反序在原账号通过，但在 b959 对照账号失败，而该账号原顺序通过；不再全局翻转顺序。
 - 仅指令 context + 完整历史 JSON inline 在三账号 **5/5**（原顺序 3/3、反序 2/2），原映射对照 2/3。Python 当前候选源码三函数在独立探测进程中原样使用，原失败账号 **1/1**，current/context **2917/365 chars**，caller hash `7dbe864119252f4d21ade117f208377879e7186c882aa8c6a94e83ef15d08f13` 未变。实际宿主仍 0.27.14；没有修改生产进程/文件或持久化探测 credential patch，不将此报为新制品验收。
 - Java/Python 同步分区：开头连续普通 system/developer 留在 native context，其他完整历史 JSON 位于 current turn 前；非开头指令/附加字段保持原位，message Gateway 顶层 ID 消费、嵌套 function ID 及原始状态保持。无 user、单用户、原 chunk 顺序、none、工具约定、错误/重试和账号/Key 保持。
 - 旧实现回归 Java **4/29 failed**、Python **8 failed / 28 passed**；修正后相关回归通过。全量 Backend **539 tests / 534 passed / 5 条件 skipped**、bootJar；Automation **539 passed**；Web lint/build、版本/JAR 通过。首次组合测试按旧 native-history 布局解码而失败，修正为同时解码 native 指令及 inline 历史，继续逐条检查原文/源对象不变；原失败日志/XML保留。
-- 原生报告 `grok-{json-current,directives-current,chunk,instructions-context}-*-production-v02714.*`、`grok-source15-on-production14-failed-account.*`；质量证据 `grok-instruction-context-v02715-*`、`web-bridge-v02715-*`。三账号合成样本不能证明全部模型/账号或原生角色强制优先级；新四镜像完整七家 SDK/账本仍为提升门禁。
+- 原生报告 `grok-{json-current,directives-current,chunk,instructions-context}-*-production-v02714.*`、`grok-source15-on-production14-failed-account.*`；质量证据 `grok-instruction-context-v02715-*`、`web-bridge-v02715-*`。三账号合成样本不能证明全部模型/账号或原生角色强制优先级；四镜像完整七家 SDK/账本验收见下方发布记录。
+
+### 0.27.15：候选与生产七家完整通过
+
+- Source `08b0717ab8233d32e407523b3e24d8c950e7630a`，[CI 37487198470](https://github.com/Prodigalgal/any2api/actions/runs/37487198470) 三项质量及四个 ARM 镜像成功，deploy=false、update-gitops skipped。不可变 suffix `20261006-v0.27.15-release-08b0717ab8233d32e407523b3e24d8c950e7630a`，未覆盖上一候选制品。
+- 候选与生产完整官方 SDK 各 **49/49**；每家五次实际推理加模型契约与自有状态清理共七项。保留完整 system/developer/skill、40 条初始消息及调用/结果回放、strict 参数、Chat/Responses JSON/SSE、previous_response_id 与 input_items schema。Qwen 仍排除，结果只覆盖下表代表性模型及所测组合。
+
+| 厂商 | 所选模型 | 候选 / 生产 SDK | 最终目录状态 | 合格 / 可用账号 |
+| --- | --- | --- | --- | --- |
+| Grok Web | `grok-3` | 7/7 / 7/7 | READY | 24 / 24 |
+| Arena | `claude-sonnet-5` | 7/7 / 7/7 | DEGRADED | 125 / 125 |
+| DeepSeek | `default` | 7/7 / 7/7 | DEGRADED | 16 / 16 |
+| GLM | `glm-5.2` | 7/7 / 7/7 | DEGRADED | 35 / 35 |
+| LongCat | `longcat-flash` | 7/7 / 7/7 | READY | 84 / 84 |
+| MiMo | `mimo-v2.6-pro` | 7/7 / 7/7 | READY | 113 / 113 |
+| MiniMax | `MiniMax-M3.1-Flash-Preview` | 7/7 / 7/7 | READY | 39 / 39 |
+
+- 候选账本精确 **35 请求 / 37 次 INFERENCE**，编号连续；Arena 一次 credential_rejected、DeepSeek 一次 provider_upstream_error 后成功。生产精确 **35 请求 / 36 次 INFERENCE**，Arena 一次 credential_rejected 后成功；两侧各 35 次最终传输成功，本轮 SDK 语义全部通过，无 coordination_unavailable。失败次数没有用成功结果覆盖。
+- 两侧各 14 个自有状态已删除。七个候选资源逐项核对 version/source 后清理，本地 forward 已结束；namespace 回到 CPU limits=7、memory limits=13184Mi、requests memory=4480Mi，配额没有变更。候选首次 45s readiness 等待在 Server/Web 超时，后正常 Ready、零重启；启动记录保留在 `acceptance-v02715-startup.json`。
+- 候选门禁及资源清理通过后将原 Source fast-forward 到 main。[GitOps 3930c78](https://github.com/Prodigalgal/ircs-prod-config/commit/3930c7875df7bf1a1a8a80a64beca29a29610714) 仅替换四个 tag，提升相同 digest，没有重建制品。最终集群时刻 **2026-10-06T15:59:49.737106Z**（UTC+8 23:59:49）：Argo Synced/Healthy，四组件 Ready/restarts=0，installed/API 版本一致、digest 等于候选，公网 healthz/readyz=200；七个所选模型 available，concurrent/queue=0、circuit=CLOSED。
+- 证据 `web-bridge-full-{candidate,production}-v02715{,-ledger}.json`、`acceptance-v02715-{runtime-20261006,startup,cleanup}.json`、`release-v02715-{promotion,runtime-20261006,final-runtime}.json`。运行目录的滚动健康、普通账本传输结果和 SDK 语义是不同指标。
+
+### 0.27.15：性能仍需推进
+
+- 本轮七个公网 models.retrieve 首请求耗时 **1.436–2.972s**；各使用对应 Key 的新 SDK client，仅每模型一个样本，包含连接及响应处理，不能当成 p95 或与旧窗口证明因果改善。此前 0.27.14 全目录/登录挑战失败及慢样本继续保留，本次没有声称所有 Read 已变快。
+- 本轮每家五次合成推理：SDK median 分别为 Grok **12.043s**、Arena **19.829s**、DeepSeek **64.836s**、GLM **49.195s**、LongCat **6.743s**、MiMo **17.302s**、MiniMax **8.796s**。成功尝试的 queue median 均 0，account acquire median **101–135ms**；DeepSeek/GLM 的 TTFB median 分别 **61,467ms / 44,195ms**。主要等待位于首个有效上游事件之前，仍需分解 WEB/Browser Runtime 准备、厂家等待和事件桥接；不把 TTFB 直接归为厂家模型计算。
+- 三个 DEGRADED 模型的滚动 p95：Arena **70,056ms**、DeepSeek **126,958ms**、GLM **71,600ms**，均超过现有 **60s** readiness 门槛；滚动成功率分别为 1.0、0.9661、1.0。目录降级符合当前耗时规则，没有通过放宽阈值伪造 READY。
+- 证据 `web-bridge-v02715-{latency,degraded-models}.json`。有限矩阵不替代容量/长尾验收；后续优先定位 Read 冷请求/Redis 网络尾延迟及 DeepSeek/GLM 首帧前等待，再扩展全账号/模型、付费模式与未知 WEB 长度边界。
 
 ## 遗留与回滚
 
 未知精确 token 上下文、全部模型/账号/mode、采样统计、多模态 token 成本、GLM 截断终帧，以及 Xiaomi 默认 Agent 引导的长期控制仍需独立证据。当前不将完整 Agent 输入拆成 WEB 上传文件，不自动压缩/截断历史来掩盖边界；上传/RAG 是否保留 system 与工具语义需要另做实现和验收。
 
-没有数据库/凭据迁移。当前生产 0.27.14 的直接回滚点为 0.27.6 四组件 suffix `20261005-v0.27.6-release-112459a5894deb4c1f45bbe8fbde92fd930ff5d5`，会恢复共享租约 Redis、目录资格/读取及 Grok context 缺陷。0.27.4 及更早镜像仅为历史回滚点；历史 usage 不原地改写，各版本 catalog v5/v6/v7/v8 缓存按 namespace 隔离。
+没有数据库/凭据迁移。当前生产 0.27.15 的直接回滚点为 0.27.14 四组件 suffix `20261006-v0.27.14-release-939b4a871c6f38ea14bdee56a2af1b2ffadaa16d`，会撤回指令/历史分区修正并恢复已记录的 Grok Chat 回放风险。0.27.6 suffix `20261005-v0.27.6-release-112459a5894deb4c1f45bbe8fbde92fd930ff5d5` 仅为更早回滚点，还会恢复共享租约 Redis、目录资格/读取缺陷；0.27.4 及更早同样仅保留历史记录。历史 usage 不原地改写，各版本 catalog v5/v6/v7/v8 缓存按 namespace 隔离。

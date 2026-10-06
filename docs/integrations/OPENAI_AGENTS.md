@@ -8,7 +8,9 @@
 
 ## 当前能力
 
-生产为 0.27.14，候选完整 SDK 49/49 后提升同一四镜像，生产公网复测 48/49：其余六家各 7/7，Grok Chat 工具回放一次语义遗漏。生产 35 请求 / 36 次普通 INFERENCE 完整，一次 Arena 认证失败后的成功重试保留；所有最终传输成功不等于 Agent 语义通过。当前 0.27.15 源码分离指令上下文与历史 JSON，尚未发布。0.27.6 及 0.27.11–13 的失败均作为历史证据保留。
+生产为 **0.27.15**，Source `08b0717`、CI `37487198470`、GitOps `3930c78`。候选和生产公网完整官方 SDK 均 **49/49**，七家所选模型各 **7/7**：覆盖 system/developer/skill、完整历史、Chat/Responses JSON/SSE、strict function、客户端工具结果回传、状态续接及资源 schema/清理。候选 35 请求 / 37 次、生产 35 请求 / 36 次普通 INFERENCE 完整，原失败尝试与成功重试保留；两侧各 14 个自有状态已删除。四组件 Ready/restarts=0、installed/API 版本一致、生产 digest 等于候选，healthz/readyz=200。本窗口无 coordination_unavailable；验收不覆盖全部模型/账号/付费模式或无限上下文。Qwen 仍排除。
+
+### 历史验证
 
 0.27.11 已构建四个候选镜像、未发布；完整协调器/真实账号/WEB 官方 SDK 首轮 47/49，除 Grok 外六家各 7/7，Grok Chat 与 Responses 手工结果回放仍有语义遗漏、state 续接通过。35 请求 / 38 次 INFERENCE 账本完整，本窗口未出现 coordination_unavailable。Grok 0.27.10 隔离 SDK 7/7 是一个账号/代表性组合的历史证据。2026-10-06 候选目录基础模式 24 个合格账号，高等级模式 0 个；付费权益没有验证。
 
@@ -16,9 +18,11 @@
 
 0.27.13 补齐已有 Python WEB 直连路径，两条 Python 转发路径共用有序 native chunks；完整协调器验收仍为 47/49，Grok Chat/state 回放语义失败，其他六家各 7/7。35 请求 / 35 次普通 INFERENCE 单次传输全部成功，失败的实际通道均为 Browser Runtime，直连缺漏不是本轮语义失败的已证实原因。该候选未发布。
 
-0.27.14 修正历史分区后的范围表述，候选完整通过，生产 Grok Chat 回放仍失败。当前 0.27.15 只把开头连续普通 system/developer 放入 native context，其他完整历史以 JSON 放到 current turn 前；原角色/正文/附加字段/工具身份、存储和 none 保持，非开头指令保留原位。三个账号固定输入 5/5、当前源码独立原生探测 1/1；候选四镜像七家完整门禁仍待验收，有限样本不代表全部模型/账号稳定。
+0.27.14 修正历史分区后的范围表述，候选 49/49，生产 48/49；Grok Chat 回放仍失败。0.27.15 只把开头连续普通 system/developer 放入 native context，其他完整历史以 JSON 放到 current turn 前；原角色/正文/附加字段/工具身份、存储和 none 保持，非开头指令保留原位。三个账号固定输入 5/5、候选源码独立原生探测 1/1，随后新四镜像候选与生产七家完整门禁均通过；有限样本不代表全部模型/账号稳定。历史失败及各自 SDK/账本证据保留。
 
-候选将账号租约命令从缓存连接隔离，复制原 Redis/Lettuce 配置并管理资源关闭，readiness 并行检查两条连接。外部 `coordination_unavailable`、3s 协调预算、250ms 缓存预算、容量/fencing/TTL 保持。源代码验收和线上结果分别记录；不能把连接隔离报告为底层网络故障已修复。实际门禁及运行证据见[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
+### 当前运行与接口
+
+生产已将账号租约命令从缓存连接隔离，复制原 Redis/Lettuce 配置并管理资源关闭，readiness 并行检查两条连接。外部 `coordination_unavailable`、3s 协调预算、250ms 缓存预算、容量/fencing/TTL 保持。当前七个模型均 available，Grok/LongCat/MiMo/MiniMax 为 READY，Arena/DeepSeek/GLM 为 DEGRADED，后者滚动 p95 超过现有 60s 门槛。本轮公网 models.retrieve 的七个首请求耗时 1.436–2.972s，Read 及上游首帧前等待仍需优化；连接隔离不代表底层网络尾延迟已关闭。实际门禁、模型状态和运行证据见[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 
 使用 `/v1/chat/completions` 和 `/v1/responses`，或 `/{provider}/v1` 前缀。统一入口的 `model` 使用 `provider/upstream-model`，实际可用模型和账号以运行态 `/v1/models` 为准。
 
@@ -68,7 +72,7 @@ MiMo 长输入拒绝会返回 `context_length_exceeded`，已提交流则以失�
 3. function schema 编入 Provider 的完整工具约定；模型输出由 ToolEmulationEngine/MiMo 解码器解析，严格参数通过网关校验后还原 OpenAI tool_calls/function_call 与 SSE。真实执行留在客户端；它用 tool_call_id/call_id 返回结果，网关保留完整调用与结果历史后再次生成。
 4. 原生 tools/skills 候选字段尚未证明通用有效，继续使用已实现的模拟桥接。不支持的配置明确拒绝，未知 WEB 限额保持未知；长度超限明确失败。模拟工具可能受到厂商模型拒绝、误判或格式生成不稳定影响，不能等同于厂家原生 function API。
 
-Grok 生产 0.27.14 使用 WEB `input_chunks.system_provided_context` 传递早期历史。候选 0.27.15 改为仅传开头的 system/developer/skill，完整其他历史 JSON 位于当前文本前；没有静默删除或压缩内容。只消费网关 message 资源 ID，不修改 stored state，嵌套 function ID/结果对应关系保留；现有 context-first 顺序保持，没有 native 指令时只发 text。该字段不能证明 OpenAI 原生角色强制优先级。原生 `client_tool_result` 对当前自定义函数回放未证明有效，不用于替代客户端 function 结果桥接。历史语义失败保留，当前生产及完整七家验收状态以本轮报告为准。
+Grok 生产 0.27.15 使用 WEB `input_chunks.system_provided_context` 仅传开头的 system/developer/skill，完整其他历史 JSON 位于当前文本前；没有静默删除或压缩内容。只消费网关 message 资源 ID，不修改 stored state，嵌套 function ID/结果对应关系保留；现有 context-first 顺序保持，没有 native 指令时只发 text。该字段不能证明 OpenAI 原生角色强制优先级。原生 `client_tool_result` 对当前自定义函数回放未证明有效，不用于替代客户端 function 结果桥接。候选与生产的 Grok Chat、Responses 手工/state 回放均通过；历史语义失败保留，当前完整七家验收状态以本轮报告为准。
 
 0.27.1 MiMo 的中文 enum/SSE 调用和普通业务结果回放 2/2 通过；随机 REPLAY 标记回显被模型拒绝，失败记录保留。详见本轮报告。0.27.2 另外收敛 WEB raw controls 的缓存隔离，避免不同 search/thinking 配置重用 plain 文本结果。
 

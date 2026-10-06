@@ -532,7 +532,9 @@ def _conversation_input(messages: list[dict[str, Any]]) -> tuple[str, str]:
             # Message resource IDs belong to Gateway state; nested function IDs remain intact.
             message = {key: value for key, value in message.items() if key != "id"}
         history.append(message)
-    return _prompt(messages[start:]), json.dumps(history, ensure_ascii=False, separators=(",", ":"))
+    return _prompt(messages[start:], current_turn=True), json.dumps(
+        history, ensure_ascii=False, separators=(",", ":")
+    )
 
 
 def _validate_command(command: dict[str, Any]) -> None:
@@ -548,7 +550,7 @@ def _validate_command(command: dict[str, Any]) -> None:
             raise TypeError(f"Grok Web semantic command {field} must be an object")
 
 
-def _prompt(messages: Any) -> str:
+def _prompt(messages: Any, *, current_turn: bool = False) -> str:
     blocks: list[str] = []
     for message in messages:
         if not isinstance(message, dict):
@@ -578,11 +580,16 @@ def _prompt(messages: Any) -> str:
     prompt = "\n\n".join(blocks)
     if len(blocks) == 1 and blocks[0].startswith("[user]\n"):
         return prompt
+    title = "Current turn" if current_turn else "Conversation transcript"
+    introduction = (
+        "Earlier system/developer instructions and conversation history are in the preceding "
+        "context chunk. The following messages are the current user request, assistant calls "
+        "and supplied tool results, in order."
+        if current_turn
+        else "The following role-labeled messages are the complete conversation, in order."
+    )
     return (
-        "[Conversation transcript]\n"
-        "The following role-labeled messages are the complete conversation, in order.\n\n"
-        + prompt
-        + "\n\n[End of conversation transcript]\n"
+        f"[{title}]\n{introduction}\n\n" + prompt + f"\n\n[End of {title.lower()}]\n"
         "Continue as the assistant after the last message. "
         "Follow the system and developer instructions for the current task. "
         "Use the provided tool results to complete the requested task; "

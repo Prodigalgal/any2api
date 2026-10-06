@@ -153,7 +153,9 @@ class GrokWebProtocolTest {
         assertThat(prompt).containsOnlyOnce("已核验");
         assertThat(prompt).doesNotContain("[system]", "[developer]", "完整历史-0");
         assertThat(prompt.indexOf("完整历史-36")).isLessThan(prompt.indexOf("完整历史-37"));
-        assertThat(prompt.indexOf("Tool result (call_document)")).isLessThan(prompt.indexOf("[End of conversation transcript]"));
+        assertThat(prompt).startsWith("[Current turn]\nEarlier system/developer instructions")
+            .doesNotContain("are the complete conversation");
+        assertThat(prompt.indexOf("Tool result (call_document)")).isLessThan(prompt.indexOf("[End of current turn]"));
         assertThat(prompt).endsWith("Produce only the next assistant response.").doesNotContain("[Tool calling contract]");
         assertThat(mapper.writeValueAsString(messages)).isEqualTo(original);
     }
@@ -182,7 +184,8 @@ class GrokWebProtocolTest {
             mapper.createObjectNode(), List.of(), List.of(message("system", "遵守技能"), message("developer", "汇报状态")))).body();
 
         assertThat(body.path("systemProvidedContext").asText()).isEmpty();
-        assertThat(body.path("message").asText()).contains("[system]\n遵守技能", "[developer]\n汇报状态");
+        assertThat(body.path("message").asText()).startsWith("[Conversation transcript]\n")
+            .contains("are the complete conversation", "[system]\n遵守技能", "[developer]\n汇报状态");
     }
 
     @Test

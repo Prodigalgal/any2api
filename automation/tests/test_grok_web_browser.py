@@ -201,6 +201,8 @@ def test_grok_web_continues_after_complete_history_and_client_function_result() 
     prompt = request["message"]
     history = json.loads(request["systemProvidedContext"])
     assert history == messages[:39]
+    assert prompt.startswith("[Current turn]\nEarlier system/developer instructions")
+    assert "are the complete conversation" not in prompt
     assert request["inputChunks"] == [
         {"system_provided_context": {"text": request["systemProvidedContext"]}},
         {"text": {"text": prompt}},
@@ -215,9 +217,7 @@ def test_grok_web_continues_after_complete_history_and_client_function_result() 
         < prompt.index("正在验收。")
     )
     assert prompt.index('"id":"call_document"') < prompt.index("Tool result (call_document)")
-    assert prompt.index("Tool result (call_document)") < prompt.index(
-        "[End of conversation transcript]"
-    )
+    assert prompt.index("Tool result (call_document)") < prompt.index("[End of current turn]")
     assert prompt.endswith("Produce only the next assistant response.")
     assert "[Tool calling contract]" not in prompt
     assert command == original
@@ -275,6 +275,8 @@ def test_grok_without_user_preserves_the_complete_original_prompt() -> None:
     request = build_grok_web_request(command)
 
     assert request["systemProvidedContext"] == ""
+    assert request["message"].startswith("[Conversation transcript]\n")
+    assert "are the complete conversation" in request["message"]
     assert "[system]\n遵守技能。" in request["message"]
     assert "[developer]\n汇报当前状态。" in request["message"]
 

@@ -4,7 +4,7 @@
 
 基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
-生产仍为 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。其 SDK 首轮 48/49，35 个请求 / 38 次 INFERENCE 尝试完整。0.27.7 正文分区实验撤回，账号资格/对象 none 继承至 0.27.8 单 SQL 优化；0.27.9 native context 隔离 SDK 6/7，0.27.10 消费资源元数据、补齐 Java 历史函数身份后隔离 Grok 7/7。发布前其余六家复核 31/42，发生五次协调失败及六项前置衍生失败；0.27.11 隔离关键租约连接，完整候选 SDK 47/49，仍有两次 Grok 手工回放语义失败，未发布。0.27.12 修正 native chunk 顺序，固定输入交叉对照 2/2，但完整候选仍为 47/49；当前 0.27.13 补齐第三条现有 WEB 直连路径，新版本完整门禁继续执行。各版本/运行路径的证据分别保留，不能混合为当前生产全部通过。
+生产仍为 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。其 SDK 首轮 48/49，35 个请求 / 38 次 INFERENCE 尝试完整。0.27.7 正文分区实验撤回，账号资格/对象 none 继承至 0.27.8 单 SQL 优化；0.27.9 native context 隔离 SDK 6/7，0.27.10 消费资源元数据、补齐 Java 历史函数身份后隔离 Grok 7/7。发布前其余六家复核 31/42，发生五次协调失败及六项前置衍生失败；0.27.11 隔离关键租约连接，完整候选 SDK 47/49，仍有两次 Grok 手工回放语义失败，未发布。0.27.12 修正 native chunk 顺序，固定输入交叉对照 2/2，但完整候选仍为 47/49；0.27.13 补齐第三条现有 WEB 直连路径，完整矩阵仍为 47/49，实际失败通道为 Runtime。当前 0.27.14 明确历史分区后的当前轮范围，新版本完整门禁继续执行。各版本/运行路径的证据分别保留，不能混合为当前生产全部通过。
 
 ## 参数含义与实际 WEB 目标
 
@@ -400,13 +400,23 @@ Grok 目录只读核验：基础模式 eligible/available account_count=24，aut
 
 本地 0.27.12 Backend 共 538 tests：533 passed / 5 条件 skipped、bootJar；Automation 536 passed，Web lint/build、ruff check/126 文件 format、八处源码/JAR 版本一致。原发帧回归失败为 Backend 28 项中的 1 项、Python 27 项中的 4 项，修正后全量通过；原始 before XML/log 和全量 `web-bridge-v02712-*` 证据保留。新版本尚待不可变镜像的七家完整门禁。
 
-### 0.27.13：补齐已有 Python WEB 直连路径（当前候选）
+### 0.27.13：补齐已有 Python WEB 直连路径（未发布）
 
 0.27.12 Source `2e17ef21fbb4d3dfa12f0e22d004c312eaeec76f`、[CI 37399484609](https://github.com/Prodigalgal/any2api/actions/runs/37399484609) 三项质量与四镜像成功、deploy=false；临时四组件 installed/API 版本一致、Ready/restarts=0。完整 AUTO 验收 47/49，其他六家各 7/7；Grok Chat 结果回放 `2f76b2da-f17b-4bca-b5a8-aa4c82972157` 通过，Responses 手工 `7ba7eec3-11c5-4482-8923-aae581d7c06a` 和 state `691dc4b1-a678-454b-b3da-ed306517c0d4` 仍返回旧确认语句，Grok 5/7。35 请求 / 40 次普通 INFERENCE 全部关联、编号连续，35 次最终传输成功；5 次失败为 Arena 三次 credential_rejected、DeepSeek 一次 provider_upstream_error、LongCat 一次 empty_model_response，重试保留。本窗口无 coordination_unavailable，语义失败仍保持发布门禁。14 个自有测试状态已删除，全部七个自有候选资源按 version/source 校验清理，本地 forward 结束，namespace 配额回到 CPU limits=7、memory limits=13184Mi 的生产基线。原始矩阵/账本、runtime/cleanup 报告位于 `backend/build/*v02712*`。
 
 沿实际通道发现 `grok_web_api_actions.py::_chat_stream` 是另一条现有 WEB WebSocket 转发路径：共享 builder 已拆出的 systemProvidedContext 没有发出，先 conversation.item.create 再 response.create，且 parent_response_id 位于 item 事件。因此隔离 Runtime 顺序对照不能替代完整 AUTO 验收。新回归先复现旧直连 2 failed / 5 passed；修正为一次带 item 的 response.create，完整 context-first/current-last inputChunks 在 Python builder 构造，API 与 Runtime 共用；父响应位于 response.create。保留原输入、工具 ID/结果、none、session/load_existing、SBS=false、EOF/错误与选择/重试行为。真实直连生命周期与 Runtime VM 共 34 passed，包含无历史/完整 system/skill/早期历史/工具结果、父会话/响应及源对象不变。新 0.27.13 不复用 0.27.12 镜像，质量和七家完整门禁继续执行。
 
 本地 0.27.13 Backend 538 tests（533 passed / 5 条件 skipped）、bootJar 成功，Automation 537 passed，Web lint/build、ruff check/126 文件 format、源码与实际 `any2api-backend-0.27.13.jar` 八处版本通过。main.py 因修改版本产生混合换行，首次 format check 失败，规范换行后通过；初次版本命令误用了不存在的 server JAR 文件名，改用实际 backend 制品校验通过。原失败和修正结果分别保留在 `web-bridge-v02713-*`。
+
+0.27.13 Source `4e253a07fb901371d0c6e38fc22751d42cc33e00`、[CI 37401477468](https://github.com/Prodigalgal/any2api/actions/runs/37401477468) 三项质量/四镜像成功、deploy=false。不可变 suffix `20261006-v0.27.13-release-4e253a07fb901371d0c6e38fc22751d42cc33e00`，四组件 actual installed/API 版本一致、Ready/restarts=0，healthz/readyz=200；`acceptance-v02713-runtime-20261006.json` 保留 digest。完整七家 SDK **47/49**，六家各 7/7；Grok Chat 回放 `48d87a62-2459-4741-b15d-06e422b27580` 和 state `9f72f46e-2da4-455d-9a01-7f9835a94e51` 仍只返回旧确认语句，手工 Responses `bf6942cf-f220-4765-a798-7777dd64b4e3` 通过。精确 **35 请求 / 35 次普通 INFERENCE**、编号连续、全部单次传输成功，没有后台失败/协调错误；SDK 的两次语义失败保留，未发布。实际三次日志 channel 均 camoufox_browser_runtime，因此直连旧发帧缺漏虽已修正，不是该次语义遗漏的已证明原因。
+
+### 0.27.14：明确当前轮范围（当前候选）
+
+已拆出的 native context 保存早期 system/developer/history，但当前片段的 formatter 仍声明 complete conversation，产生范围矛盾。使用上述失败 Chat 的原始合成 42 条消息和实际 call ID，caller payload SHA256 `e72d86aa86beb2a4f13f18800d057cdf0f1f1e4a346318a990b492747282c584`；两个既有失败账号按反向顺序各做 baseline/current-only/history-only/combined 四组。baseline 1/2、current-only 2/2、history-only 2/2、combined 0/2；HTTP 200/completed 与 native context-first/text-last echo 均保留，组合说明仍返回旧确认语句。该有限对照证明不应把旧映射一次成功或更强的提示当作稳定性保证；只选择修正明确范围矛盾的 current-only，原 context JSON 2243 chars 保持，当前说明 848→954 chars，原正文/身份/工具数据不变。原始 `grok-scope-first-candidate-v02713.json`、`grok-scope-reverse-candidate-v02713.json` 保留全部结果，仅独立 Runtime、无普通 INFERENCE 账本、credential patch 未写回，两个 Runtime finally 关闭。
+
+旧 Java 多轮回归 28 项中的 1 项失败，Python 34 项中的 1 项失败；修正后相关 Python 34 passed。0.27.14 将 Java/Python formatter 显式区分当前轮与完整对话，仅分区后多条当前消息使用 Current turn 标题及 preceding context 指引；无 history/no user/单用户行为保持，native JSON/context 顺序、消息/工具 ID、none、状态及选择/重试保持。0.27.13 自有 14 个测试状态与七个候选资源已清理，forward 结束；生产仍 0.27.6。新版本不复用上一候选制品，完整质量及七家 SDK/普通账本继续验证。
+
+本地 0.27.14 全量 Backend 538 tests（533 passed / 5 条件 skipped）/bootJar、Automation 537 passed、Web lint/build、ruff check/126 format、八处源码/JAR 版本通过。原失败 SDK 合成输入的离线对照确认当前 mapper 输出与已探测 current-only 原型逐字节一致，JSON context 不变、原对象未修改，954/2243 chars；`grok-current-scope-v02714-prototype.json` 和 before/all-quality 证据保留。新四镜像完整验收仍待执行。
 
 ## 遗留与回滚
 

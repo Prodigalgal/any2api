@@ -101,6 +101,13 @@
 - 非目标：不改变客户端协议、系统/技能/工具正文、历史/身份、none、账号/Key、通道选择、重试或终态；不将隔离 Runtime 证据替代完整 AUTO 路由验收。
 - 验收/测试：先在旧直连实现复现 frame/context/parent 断言失败；覆盖空历史、有 system/skill/早期历史及工具结果、父会话/父响应和源对象不变，两个 Python 发送路径共用有序 chunks；质量/版本门禁后，新四镜像七家完整 SDK 与普通账本通过再发布。0.27.12 的失败原样保留、版本不复用。
 
+### 0.27.14：明确已分区的 Grok 当前轮范围
+
+- 目标：0.27.13 七家矩阵仍为 47/49、Grok Chat/state 回放遗漏。实际失败均为 Browser Runtime 单次成功，不能把已修正的直连路径缺漏当作该语义失败的已证实原因。
+- 范围/影响：历史已放入独立 native context，而当前工具结果片段仍声明为 complete conversation；在 Python `_prompt` / Java `GrokWebRequestMapper` 中显式区分完整对话与当前轮，仅分区后有多条当前消息时使用 Current turn 说明。保持原 JSON context、chunk 顺序、全部角色/字段/工具 ID/正文、none、源对象和状态资源不变。
+- 非目标：不采用对照中失败的 history+current 双说明，不增强 caller skill/none，不删历史、不变更重试/账号/Key，不将原始映射一次正向复测当作稳定性修复。
+- 验收/测试：旧实现先在 Java/Python 多轮工具回放回归中失败；无 history/no user/单用户路径保持。固定失败输入和两账号交叉对照保留 baseline 1/2、current-only 2/2、history-only 2/2、combined 0/2，仅选择修正范围矛盾的 current-only。完整质量、版本与新四镜像七家 SDK/普通账本通过后才能发布，有限样本不作原生角色优先级或全账号稳定性保证。
+
 ## 非目标
 
 不扩展全协议、托管工具、本机工具执行或厂商音视频；不新增账号、不轮换 Key、不处理 Qwen 账号、不迁移 DB/Redis/PV，不发布 Cloudflare Worker。

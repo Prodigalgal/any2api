@@ -168,18 +168,12 @@ _STREAM_REQUEST = r"""async request => {
           done();
           return;
         }
-        const inputChunks = [];
-        // The WEB consumes chunks in order; current input must follow earlier context.
-        if (request.systemProvidedContext) {
-          inputChunks.push({system_provided_context: {text: request.systemProvidedContext}});
-        }
-        inputChunks.push({text: {text: request.message}});
         const item = {
           type: 'message',
           role: 'user',
           x_grok: {
             client_message_id: crypto.randomUUID(),
-            input_chunks: inputChunks
+            input_chunks: request.inputChunks
           }
         };
         const responseEvent = {
@@ -491,10 +485,16 @@ def build_grok_web_request(command: dict[str, Any]) -> dict[str, Any]:
     message, context = _conversation_input(command["messages"])
     if tools:
         message = _tool_prompt(message, tools, choice, controls.get("parallel_tool_calls"))
+    # Both WEB transports consume chunks in order, with current input after history.
+    input_chunks = [
+        *([{"system_provided_context": {"text": context}}] if context else []),
+        {"text": {"text": message}},
+    ]
     return {
         "mode": mode,
         "message": message,
         "systemProvidedContext": context,
+        "inputChunks": input_chunks,
         "conversationId": str(command.get("previousConversationId") or "").strip(),
         "parentResponseId": str(command.get("previousUpstreamResponseId") or "").strip(),
         "enableSideBySide": False,

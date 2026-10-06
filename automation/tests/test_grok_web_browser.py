@@ -201,6 +201,10 @@ def test_grok_web_continues_after_complete_history_and_client_function_result() 
     prompt = request["message"]
     history = json.loads(request["systemProvidedContext"])
     assert history == messages[:39]
+    assert request["inputChunks"] == [
+        {"system_provided_context": {"text": request["systemProvidedContext"]}},
+        {"text": {"text": prompt}},
+    ]
     assert "Follow the system and developer instructions" in prompt
     assert all(message["content"] in prompt for message in messages[39:])
     assert "[system]" not in prompt
@@ -358,8 +362,7 @@ def test_grok_web_uses_page_session_and_page_websocket() -> None:
     assert "/api/auth/session" in _SESSION_REQUEST
     assert "/api/auth/session" in _STREAM_REQUEST
     assert "new WebSocket" in _STREAM_REQUEST
-    assert "const inputChunks = []" in _STREAM_REQUEST
-    assert "system_provided_context: {text: request.systemProvidedContext}" in _STREAM_REQUEST
+    assert "input_chunks: request.inputChunks" in _STREAM_REQUEST
     assert "event: responseEvent" in _STREAM_REQUEST
     assert "conversation.item.create" not in _STREAM_REQUEST
     assert "response.create" in _STREAM_REQUEST
@@ -426,15 +429,27 @@ global.WebSocket = class {
   close() { closed = true; this.onclose?.(); }
 };
 (async () => {
-  await eval('(' + input.script + ')')({requestId: 'test', mode: 'fast', message: 'hi',
-    systemProvidedContext: input.context, parentResponseId: 'parent-id',
+  await eval('(' + input.script + ')')({...input.request, requestId: 'test',
     timeoutMs: 500, firstFrameTimeoutMs: 150});
   process.stdout.write(JSON.stringify({events, sent, closed, streams: window.__any2apiGrokWebStreams.size}));
 })().catch(error => { process.stderr.write(String(error)); process.exitCode = 1; });
 """
+    request = build_grok_web_request(
+        {
+            "schemaVersion": 1,
+            "model": "grok-3",
+            "messages": [
+                *([{"role": "system", "content": context}] if context else []),
+                {"role": "user", "content": "hi"},
+            ],
+            "providerOptions": {},
+            "controls": {},
+            "previousUpstreamResponseId": "parent-id",
+        }
+    )
     completed = subprocess.run(
         [node, "-e", harness],
-        input=json.dumps({"script": _STREAM_REQUEST, "scenario": scenario, "context": context}),
+        input=json.dumps({"script": _STREAM_REQUEST, "scenario": scenario, "request": request}),
         capture_output=True,
         text=True,
         check=True,
@@ -450,8 +465,12 @@ global.WebSocket = class {
         event = result["sent"][1]["event"]
         assert event["parent_response_id"] == "parent-id"
         assert event["item"]["x_grok"]["input_chunks"] == [
-            *([{"system_provided_context": {"text": context}}] if context else []),
-            {"text": {"text": "hi"}},
+            *(
+                [{"system_provided_context": {"text": request["systemProvidedContext"]}}]
+                if context
+                else []
+            ),
+            {"text": {"text": "[user]\nhi"}},
         ]
     if scenario.startswith("binary"):
         assert result["closed"]

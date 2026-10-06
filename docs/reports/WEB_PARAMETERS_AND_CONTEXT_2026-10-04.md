@@ -4,7 +4,7 @@
 
 基线为生产 0.26.3 / `2388687`；兼容能力扩展 0.27.0 与可空字段修复 0.27.1 已部署，0.27.1 七家差量及 MiMo 普通工具结果回放已完成。收尾发现 LongCat 目标字段说明与 WEB 控制缓存隔离问题，另占 0.27.2；用户追加七家全部桥接后发布门禁，该候选 CI 已取消、GitOps 未更新，生产保持 0.27.1。后续真实工具组合暴露 MiMo 参数类型及 Responses 资源格式缺陷，修复候选占用 0.27.3。七家使用既有分发 Key、官方 OpenAI SDK 2.54.0、最多 2 个并行探测、客户端 `max_retries=0`，仅发送合成内容。Qwen 已再次确认排除，只有代码证据。以下分别保留本地门禁、生产发布和真实调用结果，不将最终 SDK 成功等同于后台每次尝试成功。
 
-生产仍为 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。其 SDK 首轮 48/49，35 个请求 / 38 次 INFERENCE 尝试完整。0.27.7 正文分区实验撤回，账号资格/对象 none 继承至 0.27.8 单 SQL 优化；0.27.9 native context 隔离 SDK 6/7，0.27.10 消费资源元数据、补齐 Java 历史函数身份后隔离 Grok 7/7。发布前其余六家复核 31/42，发生五次协调失败及六项前置衍生失败；0.27.11 隔离关键租约连接，完整候选 SDK 47/49，仍有两次 Grok 手工回放语义失败，未发布。当前 0.27.12 修正 native chunk 顺序，固定输入交叉对照 2/2 完整结果，新版本完整门禁继续执行。各版本/运行路径的证据分别保留，不能混合为当前生产全部通过。
+生产仍为 0.27.6，包含 Grok 单回答、原生失败终态和跨通道账本修复。其 SDK 首轮 48/49，35 个请求 / 38 次 INFERENCE 尝试完整。0.27.7 正文分区实验撤回，账号资格/对象 none 继承至 0.27.8 单 SQL 优化；0.27.9 native context 隔离 SDK 6/7，0.27.10 消费资源元数据、补齐 Java 历史函数身份后隔离 Grok 7/7。发布前其余六家复核 31/42，发生五次协调失败及六项前置衍生失败；0.27.11 隔离关键租约连接，完整候选 SDK 47/49，仍有两次 Grok 手工回放语义失败，未发布。0.27.12 修正 native chunk 顺序，固定输入交叉对照 2/2，但完整候选仍为 47/49；当前 0.27.13 补齐第三条现有 WEB 直连路径，新版本完整门禁继续执行。各版本/运行路径的证据分别保留，不能混合为当前生产全部通过。
 
 ## 参数含义与实际 WEB 目标
 
@@ -392,13 +392,21 @@ DeepSeek `8c9f924b-1fd2-4a85-99a2-82384023bc17` 总耗时 238598ms，账号获�
 
 Grok 目录只读核验：基础模式 eligible/available account_count=24，auto/expert/heavy、deepsearch 和高等级媒体模式均 eligible=0、available=false、UNAVAILABLE；原 2026-10-05 的 19 个 basic 配置账号是历史快照。检查脚本首次误用了不存在的 image-lite 模型名返回 404，随后按真实 models.list 的 13 个公开 ID 核验；没有生成付费模式、修改账号等级或 Key。证据 `grok-eligibility-candidate-v02711.json`。生产仍为 0.27.6，0.27.11 尚未通过七家功能发布门禁；固定合成输入的 native chunk 顺序和 none policy 对照继续定位 Grok 手工回放。
 
-### 0.27.12：native chunk 顺序对照与修复（当前候选）
+### 0.27.12：native chunk 顺序对照与修复（未发布）
 
 两次 Grok 手工回放的实际后台均单次完成，没有 cache hit/协调失败；HTTP/INFERENCE 成功不能解释业务结果遗漏。使用同一 42 条合成输入、固定 tools/none、两次既有失败账号，分别按 baseline→修正和修正→baseline 顺序做有限对照，caller payload sha256 均 `53baada3d1d4aa51ad5be5c401a41b52302d046673723fb7611e881b5f5dcbba`。先当前 text、后 native context 时两次都缺工具结果；先完整 native context、后当前 text 时两次都包含完整五字段，completed 且无 native 错误。额外保持原顺序但增加 none/工具定义提示仍失败，不采用。原始 `grok-none-order-candidate-v02711.json`、`grok-none-order-reverse-v02711.json` 保留所有输出、echo chunk 顺序；仅使用合成输入、已有账号，独立 runtime 关闭且 credential patch 未写回，不列为生产 INFERENCE 证据。
 
 新发帧期望先使旧实现失败：Backend transport 回归失败、Python 实际 WebSocket VM 四项失败（空 context 路径仍通过）。0.27.12 同步 Java `GrokWebGatewayChat` 和 Python `_STREAM_REQUEST`，只移动 context/text 两块的发送顺序；正文、完整历史、工具定义/ID、父响应、none 策略、EOF/错误、SBS=false 保持。生产仍 0.27.6；未发布的 0.27.11 四 Pod/两个 Service/launcher ConfigMap 在测试状态清理及有限探测结束后按 source/version 所有权校验删除，释放验收配额。新候选全量质量和七家完整门禁继续执行，修复后的有限对照不替代新镜像完整验收。
 
 本地 0.27.12 Backend 共 538 tests：533 passed / 5 条件 skipped、bootJar；Automation 536 passed，Web lint/build、ruff check/126 文件 format、八处源码/JAR 版本一致。原发帧回归失败为 Backend 28 项中的 1 项、Python 27 项中的 4 项，修正后全量通过；原始 before XML/log 和全量 `web-bridge-v02712-*` 证据保留。新版本尚待不可变镜像的七家完整门禁。
+
+### 0.27.13：补齐已有 Python WEB 直连路径（当前候选）
+
+0.27.12 Source `2e17ef21fbb4d3dfa12f0e22d004c312eaeec76f`、[CI 37399484609](https://github.com/Prodigalgal/any2api/actions/runs/37399484609) 三项质量与四镜像成功、deploy=false；临时四组件 installed/API 版本一致、Ready/restarts=0。完整 AUTO 验收 47/49，其他六家各 7/7；Grok Chat 结果回放 `2f76b2da-f17b-4bca-b5a8-aa4c82972157` 通过，Responses 手工 `7ba7eec3-11c5-4482-8923-aae581d7c06a` 和 state `691dc4b1-a678-454b-b3da-ed306517c0d4` 仍返回旧确认语句，Grok 5/7。35 请求 / 40 次普通 INFERENCE 全部关联、编号连续，35 次最终传输成功；5 次失败为 Arena 三次 credential_rejected、DeepSeek 一次 provider_upstream_error、LongCat 一次 empty_model_response，重试保留。本窗口无 coordination_unavailable，语义失败仍保持发布门禁。14 个自有测试状态已删除，全部七个自有候选资源按 version/source 校验清理，本地 forward 结束，namespace 配额回到 CPU limits=7、memory limits=13184Mi 的生产基线。原始矩阵/账本、runtime/cleanup 报告位于 `backend/build/*v02712*`。
+
+沿实际通道发现 `grok_web_api_actions.py::_chat_stream` 是另一条现有 WEB WebSocket 转发路径：共享 builder 已拆出的 systemProvidedContext 没有发出，先 conversation.item.create 再 response.create，且 parent_response_id 位于 item 事件。因此隔离 Runtime 顺序对照不能替代完整 AUTO 验收。新回归先复现旧直连 2 failed / 5 passed；修正为一次带 item 的 response.create，完整 context-first/current-last inputChunks 在 Python builder 构造，API 与 Runtime 共用；父响应位于 response.create。保留原输入、工具 ID/结果、none、session/load_existing、SBS=false、EOF/错误与选择/重试行为。真实直连生命周期与 Runtime VM 共 34 passed，包含无历史/完整 system/skill/早期历史/工具结果、父会话/响应及源对象不变。新 0.27.13 不复用 0.27.12 镜像，质量和七家完整门禁继续执行。
+
+本地 0.27.13 Backend 538 tests（533 passed / 5 条件 skipped）、bootJar 成功，Automation 537 passed，Web lint/build、ruff check/126 文件 format、源码与实际 `any2api-backend-0.27.13.jar` 八处版本通过。main.py 因修改版本产生混合换行，首次 format check 失败，规范换行后通过；初次版本命令误用了不存在的 server JAR 文件名，改用实际 backend 制品校验通过。原失败和修正结果分别保留在 `web-bridge-v02713-*`。
 
 ## 遗留与回滚
 

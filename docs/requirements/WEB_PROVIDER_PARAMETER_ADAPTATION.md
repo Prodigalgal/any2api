@@ -93,6 +93,14 @@
 - 验收：原顺序对照失败保留；固定输入、既有失败账号的两种顺序对照；空/nonempty context 与父响应/EOF/错误回归；新不可变 0.27.12 完整协调器七家官方 SDK、INFERENCE 账本通过后提升同一四镜像。
 - 测试：先以新发帧期望复现旧实现失败，再运行 Backend/Automation 全量、Web lint/build、ruff/版本/JAR；按既有 deploy=false/GitOps 路径验收和发布。0.27.11 未发布，不复用其版本或覆盖镜像。
 
+### 0.27.13：补齐已有 WEB 直连 WebSocket 转发
+
+- 目标：修复 0.27.12 完整候选中 Responses 手工/state 回放仍失败的跨通道缺漏；调用方继续只用 OpenAI Chat/Responses。
+- 范围：Grok 内部 API 通道的 `_chat_stream` 仍只发送当前 text，丢弃已拆出的 native history，并使用旧的 item.create + response.create。改为与已验证 Runtime 一致的一次带 item 的 response.create；完整 context 在前、当前 text 在后，parent_response_id 属于 response.create。
+- 影响文件：`grok_web_browser.py` 的共享 `inputChunks` 构造、`grok_web_api_actions.py`、两个通道真实发帧/VM 回归、统一版本和当前证据。沿用现有内部传输选择，不扩展厂商官方 API。
+- 非目标：不改变客户端协议、系统/技能/工具正文、历史/身份、none、账号/Key、通道选择、重试或终态；不将隔离 Runtime 证据替代完整 AUTO 路由验收。
+- 验收/测试：先在旧直连实现复现 frame/context/parent 断言失败；覆盖空历史、有 system/skill/早期历史及工具结果、父会话/父响应和源对象不变，两个 Python 发送路径共用有序 chunks；质量/版本门禁后，新四镜像七家完整 SDK 与普通账本通过再发布。0.27.12 的失败原样保留、版本不复用。
+
 ## 非目标
 
 不扩展全协议、托管工具、本机工具执行或厂商音视频；不新增账号、不轮换 Key、不处理 Qwen 账号、不迁移 DB/Redis/PV，不发布 Cloudflare Worker。

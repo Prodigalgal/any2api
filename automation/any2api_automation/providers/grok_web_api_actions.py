@@ -245,33 +245,22 @@ async def _chat_stream(
                         yield transport_frame("error", data="Grok Web gateway omitted session_id")
                         break
 
-                    item_event: dict[str, Any] = {
-                        "type": "conversation.item.create",
-                        "event_id": f"evt_msg_{uuid4().hex}",
+                    response_event: dict[str, Any] = {
+                        "type": "response.create",
+                        "event_id": f"evt_resp_{uuid4().hex}",
                         "item": {
                             "type": "message",
                             "role": "user",
                             "x_grok": {
                                 "client_message_id": str(uuid4()),
-                                "input_chunks": [{"text": {"text": command["message"]}}],
+                                "input_chunks": command["inputChunks"],
                             },
                         },
                     }
                     if command.get("parentResponseId"):
-                        item_event["parent_response_id"] = command["parentResponseId"]
+                        response_event["parent_response_id"] = command["parentResponseId"]
 
-                    await ws.send(json.dumps({"session_id": session_id, "event": item_event}))
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "session_id": session_id,
-                                "event": {
-                                    "type": "response.create",
-                                    "event_id": f"evt_resp_{uuid4().hex}",
-                                },
-                            }
-                        )
-                    )
+                    await ws.send(json.dumps({"session_id": session_id, "event": response_event}))
 
                 if event_type == "response.done":
                     break

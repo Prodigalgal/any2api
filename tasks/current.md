@@ -1,11 +1,13 @@
-# 当前任务板（源码 0.27.12）
+# 当前任务板（源码 0.27.13）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-04–06 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.12）
+## 2026-10-04–06 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.13）
 
-- 当前候选 0.27.12 修正 Grok native chunk 顺序，完整历史先于当前 text；两个原失败账号固定输入交叉对照，新顺序 2/2、旧顺序 0/2，追加 none 提示失败未采用。旧实现真实发帧回归先失败后修复，Backend/Automation/Web/版本门禁执行中。0.27.11 Source `49a9f8b`、CI `37267648014` success、四镜像已构建但七家完整 SDK 47/49，六家 7/7、Grok 手工 Chat/Responses 回放失败，state 通过；35 请求 / 38 次 INFERENCE 完整，三次后台失败保留。本窗口无 coordination_unavailable，不关闭底层网络尾延迟根因。自有状态/候选资源均清理，生产仍 0.27.6，七家全通过后发布门禁保持。
+- 当前候选 0.27.13 补齐 Grok 内部 WEB 直连 WebSocket 的完整历史、一次带 item 的 response.create 与父响应映射；两条 Python 发送路径共享 context-first/current-last chunks。旧直连生命周期回归 2 failed / 5 passed，修正后相关 34 passed。Backend 533 passed / 5 条件 skipped、bootJar，Automation 537 passed，Web lint/build、ruff/126 format、源码/JAR 版本通过。0.27.12 Source `2e17ef2`、CI `37399484609` success、未发布，矩阵 47/49，其余六家各 7/7、Grok Responses 手工/state 语义遗漏；35 请求 / 40 次普通账本完整，5 次失败保留，自有状态/候选资源已清理。生产仍 0.27.6，新四镜像七家完整门禁通过后发布。
+
+- 0.27.12 历史候选修正 Grok native chunk 顺序，完整历史先于当前 text；两个原失败账号固定输入交叉对照，新顺序 2/2、旧顺序 0/2，追加 none 提示失败未采用。旧实现真实发帧回归先失败后修复。0.27.11 Source `49a9f8b`、CI `37267648014` success、四镜像已构建但七家完整 SDK 47/49，六家 7/7、Grok 手工 Chat/Responses 回放失败，state 通过；35 请求 / 38 次 INFERENCE 完整，三次后台失败保留。本窗口无 coordination_unavailable，不关闭底层网络尾延迟根因。自有状态/候选资源均清理，生产仍 0.27.6，七家全通过后发布门禁保持。
 
 - 范围：[执行规格](../docs/requirements/WEB_PROVIDER_PARAMETER_ADAPTATION.md)。按用户批准逐厂商核对 native 字段、单参数探测、WEB 输入限制及 Xiaomi 桌面端自动引导；Qwen 仍只有代码证据。
 - 当前 0.27.11 未发布：生产 0.27.6 六家复核 31/42，五次协调失败、六项前置衍生失败；Grok 0.27.10 隔离真实 WEB 7/7 保留。新增独立租约 Redis client、内部失败日志及双连接 readiness；真实 TCP 回归复现旧共享连接超时而独立租约完成，故障仍失败封闭。13 项相关测试通过，含真实 Boot 默认工厂/模板保留；Backend 全量/bootJar、Automation 536、Web lint/build、ruff/126 format、八处版本通过。按现有 workflow 的 deploy=false 构建不可变候选，再进行七家隔离运行验收及相同制品的 GitOps 提升，不提前更新生产。

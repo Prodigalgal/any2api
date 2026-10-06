@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -118,7 +119,8 @@ async def test_chat_stream_session_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_full_websocket_lifecycle() -> None:
+@pytest.mark.parametrize("with_history", [False, True])
+async def test_chat_stream_full_websocket_lifecycle(with_history: bool) -> None:
     handler = GrokWebApiActionHandler()
     request = ProviderActionRequest(
         provider_id="grok_web",
@@ -136,6 +138,34 @@ async def test_chat_stream_full_websocket_lifecycle() -> None:
             "tools": [],
         },
     )
+    request.semantic_command["previousConversationId"] = "conversation-parent"
+    request.semantic_command["previousUpstreamResponseId"] = "response-parent"
+    if with_history:
+        request.semantic_command["messages"] = [
+            {"role": "system", "content": "System instructions"},
+            {"role": "developer", "content": "SKILL.md: summarize tool results"},
+            {"role": "user", "content": "Remember batch 7391"},
+            {"role": "assistant", "content": "Batch recorded"},
+            {"role": "user", "content": "Review this document"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-review",
+                        "type": "function",
+                        "function": {"name": "review", "arguments": '{"batch":"7391"}'},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call-review",
+                "content": '{"status":"verified","pages":37}',
+            },
+        ]
+        request.semantic_command["controls"] = {"tool_choice": "none"}
+    original = deepcopy(request.semantic_command)
 
     mock_ws = AsyncMock()
     mock_ws.send = AsyncMock()
@@ -182,7 +212,25 @@ async def test_chat_stream_full_websocket_lifecycle() -> None:
     assert decoded[0]["type"] == "status"
     assert decoded[0]["status"] == 200
     assert any("Hello!" in str(d) for d in decoded)
-    assert mock_ws.send.await_count >= 2
+    sent = [json.loads(call.args[0]) for call in mock_ws.send.await_args_list]
+    assert [frame["event"]["type"] for frame in sent] == ["session.create", "response.create"]
+    assert sent[0]["event"]["session"]["x_grok"]["enable_side_by_side"] is False
+    assert sent[0]["event"]["session"]["x_grok"]["conversation_id"] == "conversation-parent"
+    assert sent[0]["event"]["session"]["x_grok"]["load_existing"] is True
+    assert sent[1]["session_id"] == "sess_123"
+    assert sent[1]["event"]["parent_response_id"] == "response-parent"
+    item = sent[1]["event"]["item"]
+    assert item["type"] == "message" and item["role"] == "user"
+    chunks = item["x_grok"]["input_chunks"]
+    if with_history:
+        assert len(chunks) == 2
+        assert json.loads(chunks[0]["system_provided_context"]["text"]) == original["messages"][:4]
+        text = chunks[1]["text"]["text"]
+        assert "Review this document" in text and "call-review" in text
+        assert '{"status":"verified","pages":37}' in text
+    else:
+        assert chunks == [{"text": {"text": "[user]\nhello grok"}}]
+    assert request.semantic_command == original
 
 
 def test_grok_web_api_action_bindings_registers_both_channels() -> None:

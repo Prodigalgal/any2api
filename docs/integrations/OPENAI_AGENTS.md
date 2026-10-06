@@ -1,4 +1,4 @@
-# OpenAI API 到厂商 WEB 的桥接（源码 0.27.12）
+# OpenAI API 到厂商 WEB 的桥接（源码 0.27.13）
 
 ## 范围
 
@@ -12,7 +12,9 @@
 
 0.27.11 已构建四个候选镜像、未发布；完整协调器/真实账号/WEB 官方 SDK 首轮 47/49，除 Grok 外六家各 7/7，Grok Chat 与 Responses 手工结果回放仍有语义遗漏、state 续接通过。35 请求 / 38 次 INFERENCE 账本完整，本窗口未出现 coordination_unavailable。Grok 0.27.10 隔离 SDK 7/7 是一个账号/代表性组合的历史证据。2026-10-06 候选目录基础模式 24 个合格账号，高等级模式 0 个；付费权益没有验证。
 
-当前源码候选 0.27.12 修正 Grok WEB 的 input chunk 顺序：完整 native 历史先发，当前请求与工具结果最后发。固定输入在两个既有失败账号上交叉对照，修正顺序 2/2 完整结果、原顺序 0/2；单纯增强 none 提示没有生效，不采用。system/skill/工具定义、消息/身份/正文、none 策略及错误/重试契约保持，新版本七家完整门禁仍待验收。
+0.27.12 修正 Java/Python Runtime 的 native chunk 顺序：完整历史先发，当前请求与工具结果最后发。固定输入在两个既有失败账号上交叉对照，修正顺序 2/2 完整结果、原顺序 0/2；单纯增强 none 提示没有生效，不采用。新镜像完整 AUTO 验收的 Grok Responses 手工/state 仍失败，候选未发布。
+
+当前源码候选 0.27.13 补齐已有 Python WEB 直连路径，该路径先前遗漏拆出的完整历史并使用旧的分开发帧协议。两条 Python 转发路径共用有序 native chunks，以同一 response.create 提交完整 context 与当前请求，父响应附在该事件。system/skill/工具定义、消息/身份/正文、none 策略及错误/重试契约保持；七家完整门禁仍待新候选验收。
 
 候选将账号租约命令从缓存连接隔离，复制原 Redis/Lettuce 配置并管理资源关闭，readiness 并行检查两条连接。外部 `coordination_unavailable`、3s 协调预算、250ms 缓存预算、容量/fencing/TTL 保持。源代码验收和线上结果分别记录；不能把连接隔离报告为底层网络故障已修复。实际门禁及运行证据见[本轮报告](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)。
 

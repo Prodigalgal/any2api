@@ -1,0 +1,49 @@
+[
+  {
+    "provider": "glm",
+    "model": "glm/GLM-5-Turbo",
+    "account_id": "ab7ec6f1-0724-4d35-9625-4acfd11971c7",
+    "multi_turn": [
+      {
+        "round": 1,
+        "input_tokens": 37,
+        "output_tokens": 291,
+        "total_tokens": 328,
+        "reply_snippet": "确认收到标记。",
+        "elapsed_ms": 56768
+      },
+      {
+        "round": 2,
+        "failed": true,
+        "error": "{\"error\":{\"type\":\"provider_upstream_error\",\"code\":\"provider_upstream_error\",\"message\":\"GLM completion error class=provider_upstream_error\",\"retryable\":false,\"provider\":\"glm\",\"model\":\"GLM-5-Turbo\",\"request_id\":\"9ad58dae-7ac4-4026-988a-e7dd913f89eb\",\"param\":null}}"
+      }
+    ],
+    "stress_input": [
+      {
+        "target_scale": 2000,
+        "success": true,
+        "actual_prompt_tokens": 2261,
+        "actual_completion_tokens": 157,
+        "elapsed_ms": 51658,
+        "reply_snippet": "【已成功处理2000数据】"
+      },
+      {
+        "target_scale": 8000,
+        "success": true,
+        "actual_prompt_tokens": 8981,
+        "actual_completion_tokens": 165,
+        "elapsed_ms": 48569,
+        "reply_snippet": "【已成功处理8000数据】"
+      },
+      {
+        "target_scale": 16000,
+        "success": true,
+        "actual_prompt_tokens": 17941,
+        "actual_completion_tokens": 185,
+        "elapsed_ms": 50781,
+        "reply_snippet": "【已成功处理16000数据】"
+      }
+    ],
+    "summary": {}
+  }
+]

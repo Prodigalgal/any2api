@@ -1,0 +1,33 @@
+[
+  {
+    "provider": "longcat",
+    "model": "longcat/longcat-pro",
+    "account_id": "0a086d87-0c11-45ed-9fc1-2ec383b51013",
+    "multi_turn": [
+      {
+        "round": 1,
+        "failed": true,
+        "error": "{\"error\":{\"type\":\"account_unavailable\",\"code\":\"account_unavailable\",\"message\":\"no eligible account for provider longcat\",\"retryable\":true,\"provider\":\"longcat\",\"model\":\"longcat-pro\",\"request_id\":\"fb7fb840-3732-421b-ba6c-20113f8f15bb\",\"param\":null}}"
+      }
+    ],
+    "stress_input": [
+      {
+        "target_scale": 2000,
+        "success": true,
+        "actual_prompt_tokens": 3309,
+        "actual_completion_tokens": 64,
+        "elapsed_ms": 11992,
+        "reply_snippet": "【已成功处理2000数据】"
+      },
+      {
+        "target_scale": 8000,
+        "success": true,
+        "actual_prompt_tokens": 10989,
+        "actual_completion_tokens": 34,
+        "elapsed_ms": 25254,
+        "reply_snippet": "【已成功处理8000数据】"
+      }
+    ],
+    "summary": {}
+  }
+]

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import queue
 import re
 import threading
+import time
 from collections.abc import AsyncIterator, Iterable, Mapping
 from http.cookies import CookieError, SimpleCookie
 from typing import Any
@@ -351,19 +351,23 @@ async def api_stream(
     max_response_bytes: int | None = None,
     include_unprefixed_lines: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Read SSE with a bounded cross-thread queue and cancellation-aware teardown."""
+    """Read SSE with an event-driven cross-thread queue and cancellation-aware teardown."""
 
-    events: queue.Queue[dict[str, Any] | object] = queue.Queue(maxsize=64)
+    loop = asyncio.get_running_loop()
+    async_queue: asyncio.Queue[dict[str, Any] | object] = asyncio.Queue(maxsize=512)
     stop = threading.Event()
     response_holder: list[Any] = [None]
 
     def publish(event: dict[str, Any] | object) -> bool:
         while not stop.is_set():
             try:
-                events.put(event, timeout=0.2)
+                loop.call_soon_threadsafe(async_queue.put_nowait, event)
                 return True
-            except queue.Full:
+            except asyncio.QueueFull:
+                time.sleep(0.005)
                 continue
+            except RuntimeError:
+                return False
         return False
 
     def worker() -> None:
@@ -438,12 +442,7 @@ async def api_stream(
     task = asyncio.create_task(asyncio.to_thread(worker))
     try:
         while True:
-            try:
-                event = await asyncio.to_thread(events.get, True, 0.2)
-            except queue.Empty:
-                if task.done() and events.empty():
-                    break
-                continue
+            event = await async_queue.get()
             if event is _QUEUE_STOP:
                 break
             if isinstance(event, dict):

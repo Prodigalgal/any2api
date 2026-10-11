@@ -74,6 +74,32 @@ any2api:
     ready-p95-threshold: ${ANY2API_MODEL_READY_P95:60s}
   lifecycle:
     action-concurrency: ${ANY2API_LIFECYCLE_ACTION_CONCURRENCY:2}
+    conditional-registration:
+      enabled: ${ANY2API_CONDITIONAL_REGISTRATION_ENABLED:true}
+      min-active-accounts: ${ANY2API_CONDITIONAL_REGISTRATION_MIN_ACCOUNTS:50}
+      batch-target: ${ANY2API_CONDITIONAL_REGISTRATION_BATCH_TARGET:5}
+      cooldown: ${ANY2API_CONDITIONAL_REGISTRATION_COOLDOWN:24h}
+      check-interval: ${ANY2API_CONDITIONAL_REGISTRATION_CHECK_INTERVAL:30s}
+    account-purge:
+      enabled: ${ANY2API_ACCOUNT_PURGE_ENABLED:true}
+      check-interval: ${ANY2API_ACCOUNT_PURGE_CHECK_INTERVAL:1h}
+      retention-period: ${ANY2API_ACCOUNT_PURGE_RETENTION:72h}
+      failure-threshold: ${ANY2API_ACCOUNT_PURGE_FAILURE_THRESHOLD:5}
+      batch-size: ${ANY2API_ACCOUNT_PURGE_BATCH_SIZE:100}
+  egress-gate:
+    enabled: ${ANY2API_EGRESS_GATE_ENABLED:true}
+    default-node-concurrency: ${ANY2API_EGRESS_GATE_NODE_CONCURRENCY:2}
+    default-provider-concurrency: ${ANY2API_EGRESS_GATE_PROVIDER_CONCURRENCY:6}
+    default-stagger: ${ANY2API_EGRESS_GATE_STAGGER:300ms}
+    provider-concurrency:
+      qwen: 4
+      deepseek: 4
+      glm: 4
+      arena: 6
+      grok_web: 4
+      longcat: 4
+      mimo: 4
+      minmax: 4
   observability:
     operation-retention: ${ANY2API_OBSERVABILITY_OPERATION_RETENTION:30d}
     usage-retention: ${ANY2API_OBSERVABILITY_USAGE_RETENTION:90d}
@@ -108,6 +134,7 @@ any2api:
     max-response-bytes: ${ANY2API_AUTOMATION_MAX_RESPONSE_BYTES:8388608}
     provider-urls:
       arena: ${ANY2API_AUTOMATION_PROVIDER_URLS_ARENA:${AUTOMATION_BASE_URL:http://localhost:8090}}
+      qwen: ${ANY2API_AUTOMATION_PROVIDER_URLS_QWEN:${AUTOMATION_BASE_URL:http://localhost:8090}}
 
   temp-mail:
     api-base: ${ANY2API_AUTOMATION_MAIL_API_BASE:}
@@ -136,6 +163,7 @@ any2api:
       base-url: ${ANY2API_PROVIDER_MIMO_BASE_URL:https://aistudio.xiaomimimo.com}
       web-output-token-ceiling: ${ANY2API_PROVIDER_MIMO_WEB_OUTPUT_TOKEN_CEILING:65536}
     qwen:
+      enabled: ${ANY2API_PROVIDER_QWEN_ENABLED:false}
       base-url: ${ANY2API_PROVIDER_QWEN_BASE_URL:https://chat.qwen.ai}
       source: ${ANY2API_PROVIDER_QWEN_SOURCE:web}
       request-version: ${ANY2API_PROVIDER_QWEN_REQUEST_VERSION:2.1}

@@ -1,0 +1,68 @@
+[
+  {
+    "provider": "minmax",
+    "model": "minmax/MiniMax-M3",
+    "account_id": "b937a729-ccc5-4761-9597-c0ce9646a796",
+    "multi_turn": [
+      {
+        "round": 1,
+        "input_tokens": 54,
+        "output_tokens": 9,
+        "total_tokens": 63,
+        "reply_snippet": "收到 【SEC_TAG_MINMAX_8866】。",
+        "elapsed_ms": 8624
+      },
+      {
+        "round": 2,
+        "input_tokens": 102,
+        "output_tokens": 47,
+        "total_tokens": 149,
+        "retained_memory": true,
+        "reply_snippet": "第一轮的标记是 【SEC_TAG_MINMAX_8866】。\n\n量子纠缠：两个粒子一旦纠缠，对其中任意一个的测量会瞬间决定另一个的状态，无论它们相隔多远。",
+        "elapsed_ms": 10179
+      },
+      {
+        "round": 3,
+        "input_tokens": 2183,
+        "output_tokens": 18,
+        "total_tokens": 2201,
+        "retained_memory": true,
+        "reply_snippet": "秘密标记是 【SEC_TAG_MINMAX_8866】。\n\n100 的平方 = 10000。",
+        "elapsed_ms": 9691
+      }
+    ],
+    "stress_input": [
+      {
+        "target_scale": 2000,
+        "success": true,
+        "actual_prompt_tokens": 2680,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 10623,
+        "reply_snippet": "已成功处理2000数据"
+      },
+      {
+        "target_scale": 8000,
+        "success": true,
+        "actual_prompt_tokens": 10600,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 10833,
+        "reply_snippet": "已成功处理8000数据"
+      },
+      {
+        "target_scale": 16000,
+        "success": true,
+        "actual_prompt_tokens": 21160,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 10739,
+        "reply_snippet": "已成功处理16000数据"
+      },
+      {
+        "target_scale": 32000,
+        "success": false,
+        "status": 413,
+        "error": "{\"timestamp\":\"2026-10-07T15:22:43.092Z\",\"path\":\"/v1/chat/completions\",\"status\":413,\"error\":\"Content Too Large\",\"requestId\":\"22fb8c52-11464\"}"
+      }
+    ],
+    "summary": {}
+  }
+]

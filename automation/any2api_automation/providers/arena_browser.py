@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -354,6 +355,7 @@ def build_arena_request(
     *,
     model_id: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    web_search_override: bool | None = None,
 ) -> dict[str, Any]:
     """Map the canonical semantic command to Arena's create-evaluation body."""
 
@@ -377,7 +379,11 @@ def build_arena_request(
     mode = str(options.get("mode") or "direct").strip().lower()
     if mode != "direct":
         raise ValueError("Arena only supports direct mode")
-    web_search = _arena_search_enabled(options, controls)
+    web_search = (
+        web_search_override
+        if web_search_override is not None
+        else _arena_search_enabled(options, controls)
+    )
 
     explicit_model_id = model_id or options.get("model_id")
     requested_model = str(command.get("model") or "").strip()
@@ -467,7 +473,9 @@ def _arena_content(content: Any) -> str:
     return "".join(parts)
 
 
-def _arena_search_enabled(options: dict[str, Any], controls: dict[str, Any]) -> bool:
+def _arena_search_enabled(
+    options: dict[str, Any], controls: dict[str, Any], default: bool = True
+) -> bool:
     values: list[bool] = []
     for source, name in ((options, "provider_options.arena.web_search"), (controls, "web_search")):
         if "web_search" not in source:
@@ -478,7 +486,7 @@ def _arena_search_enabled(options: dict[str, Any], controls: dict[str, Any]) -> 
         values.append(value)
     if len(set(values)) > 1:
         raise ValueError("Arena web_search conflicts between provider options and controls")
-    return values[0] if values else False
+    return values[0] if values else default
 
 
 def _has_supported_media(messages: Any) -> bool:
@@ -1807,13 +1815,17 @@ def register_with_magic_link(
         )
     status = int(result.get("status") or 502)
     if status < 200 or status >= 300:
-        failure_class = _arena_error_class(status, str(result.get("body") or ""))
+        raw_body = str(result.get("body") or "").strip()
+        failure_class = _arena_error_class(status, raw_body)
+        error_detail = f"Arena signup rejected with HTTP {status} ({failure_class})"
+        if raw_body:
+            error_detail += f": {raw_body[:300]}"
         raise _arena_registration_failure(
             trace,
             f"arena_{failure_class}",
-            f"Arena signup rejected with HTTP {status} ({failure_class})",
+            error_detail,
             error_type="ArenaSignupRejected",
-            retryable=_arena_transient_status(status),
+            retryable=_arena_transient_status(status) or failure_class == "domain_rejected",
         )
     trace.mark(RegistrationStage.FORM_SUBMITTED)
     trace.mark(RegistrationStage.UPSTREAM_ACCEPTED)
@@ -2233,6 +2245,12 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         # reCAPTCHA Enterprise v3 behaviour model sees user-like activity
         # before the first create-evaluation token is requested.
         try:
+            await self._simulate_human_interactions(page)
+        except Exception as error:  # noqa: BLE001 - non-critical, must not block session
+            self._logger.debug(
+                "arena_human_interactions state=error error_type=%s", type(error).__name__
+            )
+        try:
             await page.evaluate(_arena_natural_behavior_script())
         except Exception as error:  # noqa: BLE001 - non-critical, must not block session
             self._logger.debug(
@@ -2240,6 +2258,49 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             )
             return
         self._logger.debug("arena_behavior_warmup state=complete")
+
+    async def _simulate_human_interactions(self, page: Any) -> None:
+        """Simulate realistic, trusted human mouse movements and scrolls via Playwright CDP."""
+        try:
+            import random as _rnd
+
+            viewport = getattr(page, "viewport_size", None) or {"width": 1440, "height": 900}
+            w = int(viewport.get("width") or 1440)
+            h = int(viewport.get("height") or 900)
+            mouse = getattr(page, "mouse", None)
+            if mouse is None:
+                return
+
+            # Start from a natural position on screen
+            start_x = _rnd.randint(int(w * 0.15), int(w * 0.45))
+            start_y = _rnd.randint(int(h * 0.15), int(h * 0.45))
+            await mouse.move(start_x, start_y)
+
+            # Move along realistic waypoints with varying steps
+            for _ in range(_rnd.randint(2, 3)):
+                target_x = _rnd.randint(int(w * 0.25), int(w * 0.75))
+                target_y = _rnd.randint(int(h * 0.55), int(h * 0.88))
+                steps = _rnd.randint(8, 16)
+                await mouse.move(target_x, target_y, steps=steps)
+                await asyncio.sleep(_rnd.uniform(0.04, 0.09))
+
+            # Gentle wheel scroll mimicking reading behavior
+            if hasattr(mouse, "wheel"):
+                scroll_down = _rnd.randint(40, 120)
+                await mouse.wheel(0, scroll_down)
+                await asyncio.sleep(_rnd.uniform(0.05, 0.10))
+                await mouse.wheel(0, -_rnd.randint(15, max(16, scroll_down // 2)))
+
+            # Settle mouse near the prompt input / submit region
+            final_x = _rnd.randint(int(w * 0.35), int(w * 0.65))
+            final_y = _rnd.randint(int(h * 0.70), int(h * 0.88))
+            await mouse.move(final_x, final_y, steps=_rnd.randint(5, 10))
+        except Exception as error:  # noqa: BLE001 - non-critical, must not block request
+            self._logger.debug("arena_human_interaction_simulation_error error=%s", error)
+
+    async def before_stream_request(self, page: Any) -> None:
+        """Inject real trusted CDP mouse movements and scrolls right before token evaluation."""
+        await self._simulate_human_interactions(page)
 
     async def upload_attachments(
         self,
@@ -2312,14 +2373,16 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                 records, str(command.get("model") or ""), explicit_model_id=explicit
             )
             controls = command.get("controls")
-            web_search = _arena_search_enabled(
-                options if isinstance(options, dict) else {},
-                controls if isinstance(controls, dict) else {},
-            )
+            options_dict = options if isinstance(options, dict) else {}
+            controls_dict = controls if isinstance(controls, dict) else {}
+            explicit_search = ("web_search" in options_dict) or ("web_search" in controls_dict)
+            web_search = _arena_search_enabled(options_dict, controls_dict, default=True)
             if web_search:
                 search_capability = _arena_model_search_capability(records, arena_model_id)
                 if search_capability is False:
-                    raise ValueError("Arena selected model does not expose web search")
+                    if explicit_search:
+                        raise ValueError("Arena selected model does not expose web search")
+                    web_search = False
             sources = arena_media_sources(command.get("messages"))
             uploaded = await self.upload_attachments(credential, sources, proxy_url, plan)
             for report in uploaded.get("runtime_reports", []):
@@ -2343,6 +2406,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                 command,
                 model_id=arena_model_id,
                 attachments=uploaded.get("attachments", []),
+                web_search_override=web_search,
             )
             body = json.dumps(
                 request_body,
@@ -2448,6 +2512,8 @@ def _validate_arena_link(value: str) -> str:
 
 def _arena_error_class(status: int, body: str) -> str:
     text = str(body or "").lower()
+    if "signup_domain_not_allowed" in text or "domain_not_allowed" in text:
+        return "domain_rejected"
     if any(marker in text for marker in ("captcha", "recaptcha", "challenge", "verify", "bot")):
         return "captcha_rejected"
     if status == 429 or any(marker in text for marker in ("rate limit", "too many")):

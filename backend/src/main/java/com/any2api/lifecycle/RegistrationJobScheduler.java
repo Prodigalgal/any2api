@@ -169,7 +169,7 @@ public class RegistrationJobScheduler {
             var observed = observability.start(
                 "REGISTRATION", job.providerId(), "register", context);
             return automation.execute(job.providerId(), "register", payload, context)
-                .timeout(Duration.ofSeconds(job.attemptTimeoutSeconds()))
+                .timeout(Duration.ofSeconds(Math.max(600, job.attemptTimeoutSeconds())))
                 .map(result -> importResult(job, result))
                 .doOnNext(result -> {
                     observability.linkAccount(observed, result.accountId());

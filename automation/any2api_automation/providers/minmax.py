@@ -93,7 +93,7 @@ class MinmaxAutomationProvider(AutomationProvider):
         ):
             raise RuntimeError("MinMax overseas registration requires the CF dynamic proxy")
         mail, mailbox, password = await prepare_registration(payload)
-        attempts = flow_max_attempts(payload, settings().minmax_registration_attempts)
+        attempts = min(flow_max_attempts(payload, settings().minmax_registration_attempts), 2)
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -380,7 +380,7 @@ def build_minmax_request(command: dict[str, Any]) -> dict[str, Any]:
     variant = str(options.get("variant") or "").strip()
     if not variant:
         effort = str(command.get("reasoning", {}).get("effort") or "").lower()
-        variant = "thinking" if effort not in {"", "none", "minimal"} else ""
+        variant = "thinking" if effort not in {"none", "minimal"} else ""
     model = {"provider_id": "minimax", "model_id": model_id}
     if variant:
         model["variant"] = variant

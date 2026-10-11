@@ -91,7 +91,7 @@ final class MinmaxRequestMapper {
     private String defaultVariant(CanonicalRequest request) {
         var effort = String.valueOf(request.reasoning().getOrDefault("effort",
             request.rawRequest().path("reasoning_effort").asText(""))).toLowerCase();
-        return effort.isBlank() || List.of("none", "minimal").contains(effort) ? "" : "thinking";
+        return List.of("none", "minimal").contains(effort) ? "" : "thinking";
     }
 
     private String string(Object value, String fallback) {

@@ -18,6 +18,7 @@ public class Any2ApiProperties {
     private final ModelRuntime modelRuntime = new ModelRuntime();
     private final TempMail tempMail = new TempMail();
     private final Responses responses = new Responses();
+    private final EgressGate egressGate = new EgressGate();
 
     public Security getSecurity() {
         return security;
@@ -35,6 +36,7 @@ public class Any2ApiProperties {
     public ModelRuntime getModelRuntime() { return modelRuntime; }
     public TempMail getTempMail() { return tempMail; }
     public Responses getResponses() { return responses; }
+    public EgressGate getEgressGate() { return egressGate; }
 
     public static class Responses {
         private Duration retention = Duration.ofHours(24);
@@ -263,6 +265,96 @@ public class Any2ApiProperties {
             }
             actionConcurrency = value;
         }
+
+        private final ConditionalRegistration conditionalRegistration = new ConditionalRegistration();
+
+        public ConditionalRegistration getConditionalRegistration() {
+            return conditionalRegistration;
+        }
+
+        private final AccountPurge accountPurge = new AccountPurge();
+
+        public AccountPurge getAccountPurge() {
+            return accountPurge;
+        }
+
+        public static class AccountPurge {
+            private boolean enabled = true;
+            private Duration checkInterval = Duration.ofHours(1);
+            private Duration retentionPeriod = Duration.ofHours(72);
+            private int failureThreshold = 5;
+            private int batchSize = 100;
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean value) { this.enabled = value; }
+
+            public Duration getCheckInterval() { return checkInterval; }
+            public void setCheckInterval(Duration value) {
+                if (value == null || value.isNegative() || value.isZero()) {
+                    throw new IllegalArgumentException("check interval must be positive");
+                }
+                this.checkInterval = value;
+            }
+
+            public Duration getRetentionPeriod() { return retentionPeriod; }
+            public void setRetentionPeriod(Duration value) {
+                if (value == null || value.isNegative() || value.isZero()) {
+                    throw new IllegalArgumentException("retention period must be positive");
+                }
+                this.retentionPeriod = value;
+            }
+
+            public int getFailureThreshold() { return failureThreshold; }
+            public void setFailureThreshold(int value) {
+                if (value < 1) throw new IllegalArgumentException("failure threshold must be positive");
+                this.failureThreshold = value;
+            }
+
+            public int getBatchSize() { return batchSize; }
+            public void setBatchSize(int value) {
+                if (value < 1) throw new IllegalArgumentException("batch size must be positive");
+                this.batchSize = value;
+            }
+        }
+
+        public static class ConditionalRegistration {
+            private boolean enabled = true;
+            private int minActiveAccounts = 50;
+            private int batchTarget = 5;
+            private Duration cooldown = Duration.ofHours(24);
+            private Duration checkInterval = Duration.ofSeconds(30);
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean value) { this.enabled = value; }
+
+            public int getMinActiveAccounts() { return minActiveAccounts; }
+            public void setMinActiveAccounts(int value) {
+                if (value < 1) throw new IllegalArgumentException("min active accounts must be positive");
+                this.minActiveAccounts = value;
+            }
+
+            public int getBatchTarget() { return batchTarget; }
+            public void setBatchTarget(int value) {
+                if (value < 1) throw new IllegalArgumentException("batch target must be positive");
+                this.batchTarget = value;
+            }
+
+            public Duration getCooldown() { return cooldown; }
+            public void setCooldown(Duration value) {
+                if (value == null || value.isNegative() || value.isZero()) {
+                    throw new IllegalArgumentException("cooldown must be positive");
+                }
+                this.cooldown = value;
+            }
+
+            public Duration getCheckInterval() { return checkInterval; }
+            public void setCheckInterval(Duration value) {
+                if (value == null || value.isNegative() || value.isZero()) {
+                    throw new IllegalArgumentException("check interval must be positive");
+                }
+                this.checkInterval = value;
+            }
+        }
     }
 
     public static class ModelRuntime {
@@ -339,6 +431,42 @@ public class Any2ApiProperties {
         public void setRedisTtl(Duration value) { redisTtl = value; }
         public long getMaximumEntries() { return maximumEntries; }
         public void setMaximumEntries(long value) { maximumEntries = value; }
+    }
+
+    public static class EgressGate {
+        private boolean enabled = true;
+        private int defaultNodeConcurrency = 2;
+        private int defaultProviderConcurrency = 6;
+        private Duration defaultStagger = Duration.ofMillis(300);
+        private java.util.Map<String, Integer> providerConcurrency = new java.util.HashMap<>();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean value) { this.enabled = value; }
+
+        public int getDefaultNodeConcurrency() { return defaultNodeConcurrency; }
+        public void setDefaultNodeConcurrency(int value) {
+            if (value < 1) throw new IllegalArgumentException("default node concurrency must be positive");
+            this.defaultNodeConcurrency = value;
+        }
+
+        public int getDefaultProviderConcurrency() { return defaultProviderConcurrency; }
+        public void setDefaultProviderConcurrency(int value) {
+            if (value < 1) throw new IllegalArgumentException("default provider concurrency must be positive");
+            this.defaultProviderConcurrency = value;
+        }
+
+        public Duration getDefaultStagger() { return defaultStagger; }
+        public void setDefaultStagger(Duration value) {
+            if (value == null || value.isNegative()) {
+                throw new IllegalArgumentException("default stagger must not be negative");
+            }
+            this.defaultStagger = value;
+        }
+
+        public java.util.Map<String, Integer> getProviderConcurrency() { return providerConcurrency; }
+        public void setProviderConcurrency(java.util.Map<String, Integer> value) {
+            if (value != null) this.providerConcurrency = new java.util.HashMap<>(value);
+        }
     }
 
 }

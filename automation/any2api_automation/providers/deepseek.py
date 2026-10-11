@@ -364,7 +364,12 @@ async def _run_registration_browser(
                 RegistrationStage.ACTIVATED.value,
                 RegistrationStage.CREDENTIAL_CAPTURED.value,
             }
-            if accepted or attempt >= attempts:
+            err_str = str(error)
+            is_waf_blocked = any(
+                m in err_str
+                for m in ("The request could not be satisfied", "Request blocked", "403 ERROR")
+            )
+            if accepted or attempt >= attempts or is_waf_blocked:
                 raise
             diagnostic = " ".join(str(error).split())
             if len(diagnostic) > 400:
@@ -795,7 +800,7 @@ def _recover_registered_user(
 
 def _warm_up_hcaptcha(page: Any, base_url: str, *, required: bool = True) -> None:
     try:
-        body = _open_sign_in(page, base_url, timeout_ms=45_000 if not required else 120_000)
+        body = _open_sign_in(page, base_url, timeout_ms=15_000 if not required else 120_000)
     except Exception as error:
         if required:
             raise

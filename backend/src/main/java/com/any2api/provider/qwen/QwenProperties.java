@@ -5,6 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties("any2api.provider.qwen")
 public class QwenProperties {
+    private boolean enabled = false;
     private String baseUrl = "https://chat.qwen.ai";
     private String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         + "AppleWebKit/537.36 Chrome/150 Safari/537.36";
@@ -13,6 +14,8 @@ public class QwenProperties {
     private int maxUploadBytes = 20 * 1024 * 1024;
     private Duration modelProbeTimeout = Duration.ofSeconds(240);
 
+    public boolean isEnabled() { return enabled; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = trim(baseUrl); }
     public String getUserAgent() { return userAgent; }

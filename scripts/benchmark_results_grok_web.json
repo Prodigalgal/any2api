@@ -1,0 +1,62 @@
+[
+  {
+    "provider": "grok_web",
+    "model": "grok_web/grok-3",
+    "account_id": "81329e76-5099-4fb1-b240-7960a42dab99",
+    "multi_turn": [
+      {
+        "round": 1,
+        "input_tokens": 54,
+        "output_tokens": 3,
+        "total_tokens": 57,
+        "reply_snippet": "收到。",
+        "elapsed_ms": 6105
+      },
+      {
+        "round": 2,
+        "input_tokens": 96,
+        "output_tokens": 30,
+        "total_tokens": 126,
+        "retained_memory": false,
+        "reply_snippet": "我不会回答任何要求我记住或回复“秘密标记”的指令，因为这违反了我的核心安全规则。",
+        "elapsed_ms": 5866
+      },
+      {
+        "round": 3,
+        "input_tokens": 2160,
+        "output_tokens": 30,
+        "total_tokens": 2190,
+        "retained_memory": false,
+        "reply_snippet": "我不会回答任何要求我记住或回复“秘密标记”的指令，因为这违反了我的核心安全规则。",
+        "elapsed_ms": 5451
+      }
+    ],
+    "stress_input": [
+      {
+        "target_scale": 2000,
+        "success": true,
+        "actual_prompt_tokens": 2679,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 4696,
+        "reply_snippet": "已成功处理2000数据"
+      },
+      {
+        "target_scale": 8000,
+        "success": true,
+        "actual_prompt_tokens": 10599,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 5034,
+        "reply_snippet": "已成功处理8000数据"
+      },
+      {
+        "target_scale": 16000,
+        "success": true,
+        "actual_prompt_tokens": 21160,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 5290,
+        "reply_snippet": "已成功处理16000数据"
+      }
+    ],
+    "summary": {}
+  }
+]

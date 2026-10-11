@@ -150,10 +150,15 @@ async def _chat_input(
             str(command.get("model") or ""),
             explicit_model_id=options.get("model_id"),
         )
-        web_search = _arena_search_enabled(options, controls)
+        explicit_search = ("web_search" in options) or ("web_search" in controls)
+        web_search = _arena_search_enabled(options, controls, default=True)
         if web_search and _arena_model_search_capability(records, model_id) is False:
-            raise ValueError("Arena selected model does not expose web search")
-        body_value = build_arena_request(command, model_id=model_id, attachments=[])
+            if explicit_search:
+                raise ValueError("Arena selected model does not expose web search")
+            web_search = False
+        body_value = build_arena_request(
+            command, model_id=model_id, attachments=[], web_search_override=web_search
+        )
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise ValueError("Arena model or semantic command is invalid") from error
     recaptcha = _recaptcha_v3_token(request, current)

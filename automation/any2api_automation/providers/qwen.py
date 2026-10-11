@@ -76,7 +76,9 @@ class QwenAutomationProvider(AutomationProvider):
         for attempt in range(1, attempts + 1):
             trace = RegistrationTrace(self.manifest.id)
             try:
-                mail, mailbox, password = await prepare_registration(payload)
+                mail, mailbox, password = await prepare_registration(
+                    payload, default_driver="tempmail_io"
+                )
                 trace.mark(RegistrationStage.MAILBOX_CREATED)
                 await asyncio.sleep(random.uniform(2.0, 4.0))
                 flow_payload = {**payload}

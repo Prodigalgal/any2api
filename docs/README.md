@@ -15,6 +15,7 @@
 
 ## 决策、验收与排查
 
+- [2026-10-08 厂商顶级模型实机压测](reports/PROVIDER_LIMITS_AND_TURNS_BENCHMARK_2026-10-08.md)记录七家厂商单账号隔离实测：单轮输入/输出 Token 极限、多轮会话记忆承接、HTTP 413 载荷边界与客户端超时矩阵。
 - [2026-10-04 WEB 参数、上下文与桌面端](reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md)记录原生字段映射、七家有限输入边界、Arena 历史默认值核对和 Xiaomi 大请求来源。
 
 - [ADR-0007](adr/0007-action-channel-boundaries.md) 和

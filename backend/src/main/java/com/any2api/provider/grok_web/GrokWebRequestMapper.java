@@ -35,7 +35,7 @@ final class GrokWebRequestMapper {
                 + "\n[End of earlier conversation history]\n\n" + current;
         }
         var prompt = tools.inject(current, configuration);
-        var body = payload(prompt, spec.mode());
+        var body = payload(prompt, spec.mode(), shouldDisableSearch(request));
         // Historical assistant replies remain conversation data, outside active native instructions.
         body.put("systemProvidedContext", leading == 0 ? "" : context(request.messages().subList(0, leading)));
         return new Prepared(body, configuration, tools.sieve(configuration));
@@ -141,10 +141,10 @@ final class GrokWebRequestMapper {
         return value.toString();
     }
 
-    private ObjectNode payload(String message, String mode) {
+    private ObjectNode payload(String message, String mode, boolean disableSearch) {
         var payload = mapper.createObjectNode()
             .put("disableMemory", true)
-            .put("disableSearch", false)
+            .put("disableSearch", disableSearch)
             .put("disableSelfHarmShortCircuit", false)
             .put("disableTextFollowUps", false)
             .put("enableImageGeneration", true)
@@ -170,6 +170,21 @@ final class GrokWebRequestMapper {
             .put("screenHeight", 1328).put("screenWidth", 2056)
             .put("viewportHeight", 1083).put("viewportWidth", 2056));
         return payload;
+    }
+
+    private boolean shouldDisableSearch(CanonicalRequest request) {
+        if (request.rawRequest() != null) {
+            var toolChoiceNone = "none".equalsIgnoreCase(
+                request.rawRequest().path("tool_choice").asText(""));
+            if (toolChoiceNone) return true;
+            for (var name : java.util.List.of("web_search", "enable_search", "search")) {
+                var raw = request.rawRequest().path(name);
+                if (raw.isBoolean() && !raw.asBoolean()) return true;
+            }
+        }
+        var option = request.providerOptions().get("web_search");
+        if (option instanceof Boolean bool && !bool) return true;
+        return false;
     }
 
     record Prepared(

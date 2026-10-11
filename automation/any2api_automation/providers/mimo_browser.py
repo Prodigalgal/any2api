@@ -532,7 +532,17 @@ def build_mimo_chat_request(
     effort = str(reasoning.get("effort") or controls.get("reasoning_effort") or "").lower()
     thinking = provider_options.get("thinking", controls.get("thinking"))
     if not isinstance(thinking, bool):
-        thinking = bool(effort and effort not in {"none", "minimal"})
+        thinking = effort not in {"none", "minimal"}
+    tool_choice = str(controls.get("tool_choice") or "").strip().lower()
+    raw_web_search = provider_options.get("web_search", controls.get("web_search"))
+    if not isinstance(raw_web_search, bool):
+        raw_web_search = None
+    default_status = "disabled" if tool_choice == "none" or raw_web_search is False else "enabled"
+    web_search_status = str(
+        provider_options.get("web_search_status")
+        or controls.get("web_search_status")
+        or default_status
+    )
     if uploaded_media is None:
         uploaded_media = command.get("uploadedMedia") or []
     if not isinstance(uploaded_media, list):
@@ -552,11 +562,7 @@ def build_mimo_chat_request(
             "enableThinking": thinking,
             "temperature": _number(generation.get("temperature"), 0.8),
             "topP": _number(generation.get("top_p"), 0.95),
-            "webSearchStatus": str(
-                provider_options.get("web_search_status")
-                or controls.get("web_search_status")
-                or "disabled"
-            ),
+            "webSearchStatus": web_search_status,
             "model": command["model"],
         },
         "multiMedias": uploaded_media,

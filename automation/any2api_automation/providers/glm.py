@@ -274,7 +274,7 @@ async def _run_registration_browser(
     password: str,
     trace: RegistrationTrace,
 ) -> BrowserResult:
-    attempts = flow_max_attempts(payload, settings().glm_registration_browser_attempts, 8)
+    attempts = min(flow_max_attempts(payload, settings().glm_registration_browser_attempts, 8), 2)
     for attempt in range(1, attempts + 1):
         logger.info("GLM registration browser attempt attempt=%s/%s", attempt, attempts)
         try:

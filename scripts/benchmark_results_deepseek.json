@@ -1,0 +1,54 @@
+[
+  {
+    "provider": "deepseek",
+    "model": "deepseek/default",
+    "account_id": "0497ab4a-368a-4e1b-9407-583bc9f4b6b8",
+    "multi_turn": [
+      {
+        "round": 1,
+        "input_tokens": 54,
+        "output_tokens": 9,
+        "total_tokens": 63,
+        "reply_snippet": "收到【SEC_TAG_DEEPSEEK_8866】。",
+        "elapsed_ms": 169804
+      },
+      {
+        "round": 2,
+        "input_tokens": 103,
+        "output_tokens": 65,
+        "total_tokens": 168,
+        "retained_memory": true,
+        "reply_snippet": "第一轮中你给我的秘密标记是：【SEC_TAG_DEEPSEEK_8866】。\n\n量子纠缠是指两个或多个粒子形成一种关联状态，使得对其中一个粒子的测量结果会立即与另一个粒子的结果相关联，即使它们相隔很远",
+        "elapsed_ms": 156622
+      },
+      {
+        "round": 3,
+        "input_tokens": 2201,
+        "output_tokens": 19,
+        "total_tokens": 2220,
+        "retained_memory": true,
+        "reply_snippet": "秘密标记是：【SEC_TAG_DEEPSEEK_8866】。\n\n100 的平方是 10000。",
+        "elapsed_ms": 118691
+      }
+    ],
+    "stress_input": [
+      {
+        "target_scale": 2000,
+        "success": true,
+        "actual_prompt_tokens": 2680,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 5784,
+        "reply_snippet": "已成功处理2000数据"
+      },
+      {
+        "target_scale": 8000,
+        "success": true,
+        "actual_prompt_tokens": 10600,
+        "actual_completion_tokens": 7,
+        "elapsed_ms": 90293,
+        "reply_snippet": "已成功处理8000数据"
+      }
+    ],
+    "summary": {}
+  }
+]

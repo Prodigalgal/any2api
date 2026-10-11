@@ -95,12 +95,17 @@ public final class QwenProvider implements InferenceProvider {
                 ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
                 ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
-            Map.of(RandomModelRole.TOP_TEXT, List.of("qwen3.8-max", "qwen3.8-omni-flash")), true);
+            Map.of(RandomModelRole.TOP_TEXT, List.of("qwen3.8-max", "qwen3.8-omni-flash")), properties.isEnabled());
     }
 
     @Override
     public java.util.Optional<String> scheduledProbeModel() {
-        return java.util.Optional.of("qwen3.8-max");
+        return properties.isEnabled() ? java.util.Optional.of("qwen3.8-max") : java.util.Optional.empty();
+    }
+
+    @Override
+    public boolean scheduledModelProbeEnabled() {
+        return properties.isEnabled();
     }
 
     @Override

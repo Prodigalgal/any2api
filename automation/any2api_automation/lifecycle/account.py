@@ -6,7 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .mail import Mailbox, TempMailClient
+from ..config import settings
+from .mail import BaseMailClient, Mailbox, create_mail_client
 
 
 @dataclass(frozen=True)
@@ -32,20 +33,45 @@ async def prepare_registration(
     payload: dict[str, Any],
     *,
     password_policy: RegistrationPasswordPolicy | None = None,
-) -> tuple[TempMailClient, Mailbox, str]:
-    mail = mail_client(payload)
+    default_driver: str | None = None,
+) -> tuple[BaseMailClient, Mailbox, str]:
+    mail = mail_client(payload, default_driver=default_driver)
     mail_payload = payload.get("mail") or {}
-    mailbox = await mail.create_address(str(mail_payload.get("local_part") or "") or None)
+    local_part = str(mail_payload.get("local_part") or "") or None
+    try:
+        mailbox = await mail.create_address(local_part)
+    except Exception:
+        target_driver = (
+            (mail_payload.get("driver") or mail_payload.get("provider") or default_driver or "")
+            .strip()
+            .lower()
+        )
+        if target_driver in {"tempmail_io", "temp-mail.io", "auto"} or not target_driver:
+            fallback_mail = create_mail_client("mail_tm")
+            mailbox = await fallback_mail.create_address(local_part)
+            mail = fallback_mail
+        else:
+            raise
     policy = password_policy or RegistrationPasswordPolicy(strong_password)
     password = policy.resolve(payload.get("password"))
     return mail, mailbox, password
 
 
-def mail_client(payload: dict[str, Any]) -> TempMailClient:
+def mail_client(payload: dict[str, Any], default_driver: str | None = None) -> BaseMailClient:
     mail_payload = payload.get("mail") or {}
     if not isinstance(mail_payload, dict):
         raise TypeError("mail must be an object")
-    return TempMailClient(
+
+    config = settings()
+    driver = (
+        mail_payload.get("driver")
+        or mail_payload.get("provider")
+        or default_driver
+        or config.mail_driver
+    )
+
+    return create_mail_client(
+        driver=driver,
         base_url=mail_payload.get("base_url"),
         admin_password=mail_payload.get("admin_password"),
         site_password=mail_payload.get("site_password"),

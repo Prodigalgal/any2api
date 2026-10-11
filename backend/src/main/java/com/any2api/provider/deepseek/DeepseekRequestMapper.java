@@ -38,19 +38,20 @@ final class DeepseekRequestMapper {
             "effort", request.rawRequest().path("reasoning_effort").asText("")))
             .trim().toLowerCase();
         if (!effort.isBlank()) return !List.of("none", "minimal").contains(effort);
-        return "expert".equals(request.model());
+        return true;
     }
 
     boolean search(CanonicalRequest request) {
         var option = booleanOption(request, "search_enabled");
         if (option != null) return option;
+        var toolChoiceNone = "none".equalsIgnoreCase(
+            request.rawRequest().path("tool_choice").asText(""));
+        if (toolChoiceNone) return false;
         for (var name : List.of("web_search", "enable_search", "search")) {
             var raw = request.rawRequest().path(name);
             if (raw.isBoolean()) return raw.asBoolean();
         }
-        return request.tools().stream().anyMatch(tool -> List.of(
-            "web_search", "web_search_preview", "search")
-            .contains(tool.path("type").asText("")));
+        return true;
     }
 
     static String prompt(List<JsonNode> messages) {

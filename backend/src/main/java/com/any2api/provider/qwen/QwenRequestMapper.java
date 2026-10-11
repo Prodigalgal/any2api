@@ -124,7 +124,7 @@ final class QwenRequestMapper {
     private ObjectNode featureConfig(CanonicalRequest request) {
         var options = request.providerOptions();
         var effort = String.valueOf(request.reasoning().getOrDefault("effort",
-            request.rawRequest().path("reasoning_effort").asText("auto"))).toLowerCase();
+            request.rawRequest().path("reasoning_effort").asText("high"))).toLowerCase();
         var rawMode = request.rawRequest().path("thinking_mode").asText("");
         var mode = string(options.get("thinking_mode"), rawMode.isBlank() ? switch (effort) {
             case "none", "minimal" -> "Fast";
@@ -141,7 +141,7 @@ final class QwenRequestMapper {
         var toolChoiceNone = "none".equalsIgnoreCase(
             request.rawRequest().path("tool_choice").asText(""));
         var searchFallback = toolChoiceNone ? false
-            : rawSearch.isBoolean() ? rawSearch.asBoolean() : hasSearchTool(request.tools());
+            : rawSearch.isBoolean() ? rawSearch.asBoolean() : true;
         var search = bool(options.get("web_search"), searchFallback);
         var output = mapper.createObjectNode()
             .put("thinking_enabled", !"Fast".equalsIgnoreCase(mode))

@@ -270,7 +270,7 @@ class ResponsesStateIntegrationTest {
 
     @Test void migrationRollbackPreservesExistingProviderSchema() throws Exception {
         var providerCount=database.jdbc.sql("SELECT COUNT(*) FROM providers").query(Long.class).single();
-        try(var migration=database.migration()) { migration.rollback(2,new liquibase.Contexts(),new liquibase.LabelExpression()); }
+        try(var migration=database.migration()) { migration.rollback(3,new liquibase.Contexts(),new liquibase.LabelExpression()); }
         assertThat(database.jdbc.sql("SELECT to_regclass('gateway_responses')::text").query(String.class).optional()).isEmpty();
         assertThat(database.jdbc.sql("SELECT COUNT(*) FROM providers").query(Long.class).single()).isEqualTo(providerCount);
         try(var migration=database.migration()) { migration.update(new liquibase.Contexts(),new liquibase.LabelExpression()); }

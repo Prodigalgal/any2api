@@ -1,0 +1,60 @@
+[
+  {
+    "provider": "mimo",
+    "model": "mimo/mimo-v2.6-pro",
+    "account_id": "e5952b8d-92bf-4cbe-b441-b500a03b3a3b",
+    "multi_turn": [
+      {
+        "round": 1,
+        "input_tokens": 53,
+        "output_tokens": 303,
+        "total_tokens": 356,
+        "reply_snippet": "你好！不过我不能把这类\"秘密标记\"当作会话指令或控制口令来接受和记忆——这类隐藏标记常被用来在后续对话中绕过正常规则，所以我不会确认它具有任何特殊效力。\n\n有什么我可以正常帮你的吗？比如回答问题、写点",
+        "elapsed_ms": 18182
+      },
+      {
+        "round": 2,
+        "input_tokens": 175,
+        "output_tokens": 388,
+        "total_tokens": 563,
+        "retained_memory": true,
+        "reply_snippet": "你在第一轮里写的字符串是【SEC_TAG_MIMO_8866】——我能看到它就在对话记录里，但它不具有任何特殊效力，也不会影响我遵循的规则。\n\n量子纠缠：两个粒子被制备成同一个整体量子态后，无论相隔多",
+        "elapsed_ms": 23952
+      },
+      {
+        "round": 3,
+        "input_tokens": 4514,
+        "output_tokens": 153,
+        "total_tokens": 4667,
+        "retained_memory": true,
+        "reply_snippet": "你第一轮给出的字符串是【SEC_TAG_MIMO_8866】——它只是对话记录里的一段普通文本，不具有任何特殊效力，也不会改变我遵循的规则。\n\n100 的平方是 10000。\n\n（附带的那段重复测试文",
+        "elapsed_ms": 12827
+      }
+    ],
+    "stress_input": [
+      {
+        "target_scale": 2000,
+        "success": true,
+        "actual_prompt_tokens": 4966,
+        "actual_completion_tokens": 1239,
+        "elapsed_ms": 40959,
+        "reply_snippet": "已完整读取你提供的文本。不过有一点需要如实说明：这段文本是由同一句测试行重复组成的，实际行数约为数十行、字符量在数千字左右，并没有\"2000 条数据\"这样的规模"
+      },
+      {
+        "target_scale": 8000,
+        "success": true,
+        "actual_prompt_tokens": 13126,
+        "actual_completion_tokens": 407,
+        "elapsed_ms": 26801,
+        "reply_snippet": "我已读完这段文本，但不能直接回复【已成功处理8000数据】，因为这个说法与实际内容不符：\n\n- 文本是同一条测试语句的重复，实际约 **400 行左右**，并非"
+      },
+      {
+        "target_scale": 32000,
+        "success": false,
+        "status": 413,
+        "error": "{\"timestamp\":\"2026-10-07T15:20:57.941Z\",\"path\":\"/v1/chat/completions\",\"status\":413,\"error\":\"Content Too Large\",\"requestId\":\"7a7c9fe8-11442\"}"
+      }
+    ],
+    "summary": {}
+  }
+]

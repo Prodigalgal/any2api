@@ -571,7 +571,9 @@ def build_glm_command(
     model = str(command["model"])
     effort = _reasoning_effort(command)
     thinking = _thinking_enabled(command, effort)
-    web_search = _boolean_option(command, "web_search", False)
+    tool_choice = str(command.get("controls", {}).get("tool_choice") or "").strip().lower()
+    search_fallback = tool_choice != "none"
+    web_search = _boolean_option(command, "web_search", search_fallback)
     message = {
         "id": current_message_id,
         "parentId": None,

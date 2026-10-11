@@ -27,6 +27,7 @@ public final class OfficialBrowserTransportClient {
     private final String token;
     private final ProviderRuntimeRuleService rules;
     private final ObjectMapper mapper;
+    private final ProviderEgressGate egressGate;
     private final java.util.concurrent.ConcurrentMap<java.net.URI, WebClient> clients =
         new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -34,13 +35,15 @@ public final class OfficialBrowserTransportClient {
         WebClient.Builder builder,
         Any2ApiProperties properties,
         ProviderRuntimeRuleService rules,
-        ObjectMapper mapper
+        ObjectMapper mapper,
+        ProviderEgressGate egressGate
     ) {
         this.builder = builder;
         this.properties = properties;
         this.token = properties.getSecurity().getInternalToken();
         this.rules = rules;
         this.mapper = mapper;
+        this.egressGate = egressGate;
     }
 
     private WebClient clientFor(String providerId) {
@@ -90,33 +93,35 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> runtimeOptions,
         ProviderTransportMode transportMode
     ) {
-        var request = transportMode == ProviderTransportMode.API
-            ? request(providerId, null, operation, semanticCommand, credential, proxyPool,
-                affinityKey, runtimeOptions, transportMode)
-            : runtimePlan(providerId).flatMap(plan -> request(
-                providerId, plan, operation, semanticCommand, credential, proxyPool,
-                affinityKey, runtimeOptions, transportMode));
-        return request
-            .flatMap(value -> {
-                var target = value.has("result") && value.path("result").isObject()
-                    ? value.path("result")
-                    : value;
-                var reports = target.has("runtime_reports")
-                    ? target.path("runtime_reports")
-                    : value.path("runtime_reports");
-                int status;
-                if (target.has("status")) {
-                    status = target.path("status").asInt(502);
-                } else if (target.path("healthy").asBoolean(false)) {
-                    status = 200;
-                } else {
-                    status = 502;
-                }
-                var body = target.path("body").asText("");
-                var credentialPatch = target.path("credential_patch").deepCopy();
-                return acceptReports(providerId, reports)
-                    .thenReturn(new TransportResponse(status, body, credentialPatch));
-            });
+        return egressGate.wrapMono(providerId, proxyPool, affinityKey, () -> {
+            var request = transportMode == ProviderTransportMode.API
+                ? request(providerId, null, operation, semanticCommand, credential, proxyPool,
+                    affinityKey, runtimeOptions, transportMode)
+                : runtimePlan(providerId).flatMap(plan -> request(
+                    providerId, plan, operation, semanticCommand, credential, proxyPool,
+                    affinityKey, runtimeOptions, transportMode));
+            return request
+                .flatMap(value -> {
+                    var target = value.has("result") && value.path("result").isObject()
+                        ? value.path("result")
+                        : value;
+                    var reports = target.has("runtime_reports")
+                        ? target.path("runtime_reports")
+                        : value.path("runtime_reports");
+                    int status;
+                    if (target.has("status")) {
+                        status = target.path("status").asInt(502);
+                    } else if (target.path("healthy").asBoolean(false)) {
+                        status = 200;
+                    } else {
+                        status = 502;
+                    }
+                    var body = target.path("body").asText("");
+                    var credentialPatch = target.path("credential_patch").deepCopy();
+                    return acceptReports(providerId, reports)
+                        .thenReturn(new TransportResponse(status, body, credentialPatch));
+                });
+        });
     }
 
     private Mono<JsonNode> request(
@@ -179,16 +184,18 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> runtimeOptions,
         ProviderTransportMode transportMode
     ) {
-        var stream = transportMode == ProviderTransportMode.API
-            ? stream(providerId, null, operation, semanticCommand, credential, proxyPool,
-                affinityKey, runtimeOptions, transportMode)
-            : runtimePlan(providerId).flatMapMany(plan -> stream(
-                providerId, plan, operation, semanticCommand, credential, proxyPool,
-                affinityKey, runtimeOptions, transportMode));
-        return stream
-            .concatMap(frame -> "runtime_canary".equals(frame.path("type").asText(""))
-                ? acceptReport(providerId, frame).then(Mono.empty())
-                : Mono.just(frame));
+        return egressGate.wrapFlux(providerId, proxyPool, affinityKey, () -> {
+            var stream = transportMode == ProviderTransportMode.API
+                ? stream(providerId, null, operation, semanticCommand, credential, proxyPool,
+                    affinityKey, runtimeOptions, transportMode)
+                : runtimePlan(providerId).flatMapMany(plan -> stream(
+                    providerId, plan, operation, semanticCommand, credential, proxyPool,
+                    affinityKey, runtimeOptions, transportMode));
+            return stream
+                .concatMap(frame -> "runtime_canary".equals(frame.path("type").asText(""))
+                    ? acceptReport(providerId, frame).then(Mono.empty())
+                    : Mono.just(frame));
+        });
     }
 
     private Flux<JsonNode> stream(

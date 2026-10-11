@@ -37,11 +37,15 @@ final class LongcatRequestMapper {
         var agentId = string(options.get("agent_id"),
             request.rawRequest().path("agent_id").asText(mode.agentId()));
         var rawReason = request.rawRequest().path("reason_enabled");
+        if (!rawReason.isBoolean()) rawReason = request.rawRequest().path("enable_thinking");
         var rawSearch = request.rawRequest().path("search_enabled");
+        if (!rawSearch.isBoolean()) rawSearch = request.rawRequest().path("web_search");
+        if (!rawSearch.isBoolean()) rawSearch = request.rawRequest().path("enable_search");
+        if (!rawSearch.isBoolean()) rawSearch = request.rawRequest().path("search");
         var reason = bool(options.get("reason_enabled"), rawReason.isBoolean()
-            ? rawReason.asBoolean() : reasoning(request, mode.reason()));
-        var search = bool(options.get("search_enabled"), rawSearch.isBoolean()
-            ? rawSearch.asBoolean() : mode.search());
+            ? rawReason.asBoolean() : reasoning(request, true));
+        var search = bool(options.get("search_enabled"), bool(options.get("web_search"), rawSearch.isBoolean()
+            ? rawSearch.asBoolean() : !"none".equalsIgnoreCase(request.rawRequest().path("tool_choice").asText(""))));
         var toolPlan = toolProtocol.plan(request);
         var prompt = toolProtocol.appendContract(prompt(request.messages()), toolPlan);
         return new LongcatPreparedRequest(prompt, agentId, reason, search, toolPlan, mapper);

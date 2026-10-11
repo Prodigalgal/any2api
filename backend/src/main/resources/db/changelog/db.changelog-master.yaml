@@ -63,6 +63,8 @@ databaseChangeLog:
       file: db/changelog/releases/031-retire-legacy-grok-channels.sql
   - include:
       file: db/changelog/releases/032-openai-agent-responses.sql
+  - include:
+      file: db/changelog/releases/033-disable-qwen-provider.sql
   - changeSet:
       id: 032-002-tag
       author: any2api

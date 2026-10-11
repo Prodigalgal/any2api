@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     mail_domain: str = ""
     mail_poll_seconds: float = 4.0
     mail_timeout_seconds: int = 240
+    mail_driver: str = "cloudflare"
+    tempmail_io_base_url: str = "https://api.internal.temp-mail.io/api/v3"
+    mail_tm_base_url: str = "https://api.mail.tm"
     provider_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36"
     )

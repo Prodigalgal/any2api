@@ -532,3 +532,50 @@ def test_hcaptcha_post_action_artifact_is_best_effort(monkeypatch) -> None:
             raise RuntimeError("frame replaced")
 
     assert _surface_artifact(ReplacedSurface(), "deepseek-after") == ""
+
+
+def test_solve_pow_finds_correct_answer(monkeypatch) -> None:
+    from any2api_automation.providers.deepseek_browser import (
+        DEEPSEEK_COMPLETION_PATH,
+        build_pow_proof,
+        solve_pow,
+    )
+
+    monkeypatch.setattr("time.time", lambda: 1785338000.0)
+    challenge = {
+        "algorithm": "DeepSeekHashV1",
+        "challenge": "8a0a3bf57c5cfbee04a5ebba999812ada7e987ca00902299a94bcdc5699ac15d",
+        "salt": "84226691b35fac66c866",
+        "expire_at": 1785338327707,
+        "difficulty": 100,
+        "signature": "sig_test_123",
+        "target_path": DEEPSEEK_COMPLETION_PATH,
+    }
+
+    answer = solve_pow(challenge)
+    assert answer == 42
+
+    proof = build_pow_proof(challenge, answer)
+    assert isinstance(proof, str)
+    assert len(proof) > 20
+
+
+def test_solve_pow_raises_when_no_solution_in_range(monkeypatch) -> None:
+    from any2api_automation.providers.deepseek_browser import (
+        DEEPSEEK_COMPLETION_PATH,
+        solve_pow,
+    )
+
+    monkeypatch.setattr("time.time", lambda: 1785338000.0)
+    challenge = {
+        "algorithm": "DeepSeekHashV1",
+        "challenge": "34faae2603ea238bb11d85042a19e8d4e34582f0550733fb7e5062e85a749260",
+        "salt": "84226691b35fac66c866",
+        "expire_at": 1785338327707,
+        "difficulty": 1000,  # Solution is at 122014, outside difficulty range
+        "signature": "sig_test_123",
+        "target_path": DEEPSEEK_COMPLETION_PATH,
+    }
+
+    with pytest.raises(RuntimeError, match="no solution in its search range"):
+        solve_pow(challenge)

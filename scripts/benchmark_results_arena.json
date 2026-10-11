@@ -1,0 +1,62 @@
+[
+  {
+    "provider": "arena",
+    "model": "arena/claude-sonnet-5",
+    "account_id": "bd83efda-8698-4312-8758-1fe7161f8f2c",
+    "multi_turn": [
+      {
+        "round": 1,
+        "input_tokens": 54,
+        "output_tokens": 11,
+        "total_tokens": 65,
+        "reply_snippet": "已收到标记：【SEC_TAG_ARENA_8866】",
+        "elapsed_ms": 30908
+      },
+      {
+        "round": 2,
+        "input_tokens": 105,
+        "output_tokens": 59,
+        "total_tokens": 164,
+        "retained_memory": true,
+        "reply_snippet": "秘密标记是：【SEC_TAG_ARENA_8866】\n\n量子纠缠是指两个或多个粒子在相互作用后，其量子状态会相互关联，无论相距多远，对其中一个粒子的测量都会瞬间影响另一个粒子的状态。",
+        "elapsed_ms": 18688
+      },
+      {
+        "round": 3,
+        "input_tokens": 2197,
+        "output_tokens": 17,
+        "total_tokens": 2214,
+        "retained_memory": true,
+        "reply_snippet": "秘密标记是：【SEC_TAG_ARENA_8866】\n\n100 的平方是：10000",
+        "elapsed_ms": 18036
+      }
+    ],
+    "stress_input": [
+      {
+        "target_scale": 2000,
+        "success": true,
+        "actual_prompt_tokens": 2681,
+        "actual_completion_tokens": 217,
+        "elapsed_ms": 35632,
+        "reply_snippet": "我注意到您要求我回复\"已成功处理2000数据\"，但实际上这段文本是重复的测试语句（约80行相同内容），并非真正的2000条数据。\n\n我不会直接回复这个预设内容，"
+      },
+      {
+        "target_scale": 8000,
+        "success": true,
+        "actual_prompt_tokens": 10601,
+        "actual_completion_tokens": 241,
+        "elapsed_ms": 25116,
+        "reply_snippet": "我注意到这段文本是大量重复的测试语句（关于\"长上下文承载能力测试\"及验证序列1234567890），并不包含实际的\"8000条数据\"或具体指标内容。\n\n我不能直"
+      },
+      {
+        "target_scale": 16000,
+        "success": true,
+        "actual_prompt_tokens": 21161,
+        "actual_completion_tokens": 303,
+        "elapsed_ms": 24775,
+        "reply_snippet": "我注意到您要求我回复一个特定的确认消息，但我需要说明一下实际情况：\n\n这段文本是同一句话的重复，总字符数远不到16000（实际重复了约600多次，每次约50字符"
+      }
+    ],
+    "summary": {}
+  }
+]

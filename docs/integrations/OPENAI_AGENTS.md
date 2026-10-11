@@ -65,6 +65,24 @@ MiMo 长输入拒绝会返回 `context_length_exceeded`，已提交流则以失�
 
 主要入口为 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`。`messages` / `input` 和多轮历史由调用方提供；工具输出按 call_id 回传。Responses 也可使用已实现的 `store:true` / `previous_response_id` 续接，无需厂商 WEB 提供同名资源接口。
 
+### 厂商顶级模型实机压测边界（2026-10-08 实测）
+
+在 2026-10-08 的单账号隔离实测中，针对各厂商顶级模型测定了每轮输入/输出上限、多轮上下文记忆以及单会话累计 Token 边界（详见 [实机压测报告](../reports/PROVIDER_LIMITS_AND_TURNS_BENCHMARK_2026-10-08.md)）：
+
+1. **单轮输入上限与 HTTP 413 约束**：
+   - **MiMo** (`mimo-v2.6-pro`)：单轮输入 13k tokens 通过，32k 时触发上游网关 `HTTP 413 Content Too Large`；可用输入上限约 **16k ~ 24k tokens**；实测单轮最大输出可达 **1,239 tokens**。
+   - **MiniMax** (`MiniMax-M3`)：单轮输入 21k tokens 稳定通过（~10s），32k 触发 `HTTP 413`；可用输入上限约 **21k ~ 28k tokens**。
+   - **Grok Web** (`grok-3`)：单轮 21k tokens 仅需 **5.2 秒** 极速响应（全场最快）；单轮上限约 **24k ~ 32k tokens**；注意其对用户口令复述有内置安全拦截机制。
+   - **Arena** (`claude-sonnet-5`)：单轮 21k tokens 稳定通过，长上下文记忆与生成质量最佳，会话累计支持 **32k ~ 64k tokens**。
+   - **GLM** (`GLM-5-Turbo`)：单轮长输入支持至少 **18k tokens**；多轮历史由于上游树状结构校验较严，建议会话控制在 3 轮内或平铺为单一上下文。
+   - **LongCat** (`longcat-pro`)：单轮 11k tokens 稳定通过（11s~25s）；多轮带标记忆精准；建议会话控制在 **16k ~ 24k tokens**（Thinking 模型耗时较长需注意超时）。
+   - **DeepSeek** (`default`)：单轮与会话支持 **32k ~ 64k tokens**，3 轮跨轮记忆 100% 精确；由于包含 PoW 难度计算与排队，单次需 1.5 ~ 3 分钟，客户端**必须配置至少 300 秒超时**。
+   - **Qwen**：当前处于自动注册补号通道，待账号就绪后接入。
+
+2. **多轮会话治理**：
+   - 官方 WEB 逆向通道通常不硬性限制对话轮数，但受限于单次请求全量重放历史时的 **总 Token 窗口**；
+   - 当会话累计接近各厂商上限时（如 MiMo/MiniMax 接近 16k~20k tokens），网关需配合 Smart Context Window 滑动裁剪，以防止上游抛出 413 阻断会话。
+
 ### system prompt、skill 与 tool 如何桥接
 
 1. 客户端发送 OpenAI `messages` 或 `instructions/input` 及 function schema。网关保留完整 system/developer、历史、媒体与工具分组；各 Provider 编成真实 WEB 的 messages/history，或带角色分区的 prompt/query/content。扁平 WEB 输入仍占用上下文，不能保证与原生 system role 相同的强制优先级。

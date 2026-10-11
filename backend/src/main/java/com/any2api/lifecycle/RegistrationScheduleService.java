@@ -171,10 +171,12 @@ public class RegistrationScheduleService {
         }
         return jdbc.sql("""
             WITH candidates AS (
-                SELECT id FROM registration_schedules
-                WHERE enabled = TRUE AND next_run_at <= CURRENT_TIMESTAMP
-                  AND (lease_expires_at IS NULL OR lease_expires_at < CURRENT_TIMESTAMP)
-                ORDER BY next_run_at, id
+                SELECT schedule.id FROM registration_schedules schedule
+                JOIN providers provider ON provider.id = schedule.provider_id
+                WHERE schedule.enabled = TRUE AND schedule.next_run_at <= CURRENT_TIMESTAMP
+                  AND provider.enabled = TRUE AND provider.installed = TRUE
+                  AND (schedule.lease_expires_at IS NULL OR schedule.lease_expires_at < CURRENT_TIMESTAMP)
+                ORDER BY schedule.next_run_at, schedule.id
                 FOR UPDATE SKIP LOCKED LIMIT :limit
             )
             UPDATE registration_schedules schedule SET

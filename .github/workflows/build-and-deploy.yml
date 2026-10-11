@@ -143,6 +143,9 @@ jobs:
           - component: automation-arena
             context: automation
             file: automation/Dockerfile.arena
+          - component: automation-qwen
+            context: automation
+            file: automation/Dockerfile.qwen
           - component: web
             context: web
             file: web/Dockerfile
@@ -202,7 +205,10 @@ jobs:
               if count != 1:
                   raise SystemExit("expected one GitOps Kustomization")
           suffix = os.environ["IMAGE_SUFFIX"]
-          for component in ("server", "automation", "automation-arena", "web"):
+          components = ["server", "automation", "automation-arena", "web"]
+          if "name: any2api-automation-qwen" in content:
+              components.append("automation-qwen")
+          for component in components:
               pattern = rf"(name: any2api-{component}\n\s+newName: .*\n\s+newTag: ).*"
               content, count = re.subn(pattern, rf"\g<1>{component}-{suffix}", content)
               if count != 1:

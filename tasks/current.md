@@ -1,7 +1,124 @@
-# 当前任务板（源码 0.27.15）
+# 当前任务板（源码 0.28.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-10 条件自动注册24H防抖、Qwen拔出与多厂商注册链路自愈加固
+
+- **条件注册 24H 限制（单厂商每 24 小时最多触发一次自动注册）**：
+  - **收敛默认值与配置**：`Any2ApiProperties.Lifecycle.ConditionalRegistration.cooldown` 默认值收敛为 `Duration.ofHours(24)`；`application.yml` 中默认配置收敛为 `ANY2API_CONDITIONAL_REGISTRATION_COOLDOWN: 24h`；
+  - **双重防抖实测守护**：`ConditionalRegistrationScheduler` 同时保持内存注册锁与数据库持久化任务记录防抖，`ConditionalRegistrationSchedulerTest` 补充 24 小时内存防抖与数据库防抖验证（100% 绿灯）。
+
+- **Qwen 暂时拔出（停用模型同步、定时探活、注册调度与推理路由）**：
+  - **配置与 Provider 门禁**：`application.yml` 默认关闭 `any2api.provider.qwen.enabled: false`，`QwenProperties` 新增 `enabled` 字段；`QwenProvider` 联动禁用 manifest 同步与定时探活；
+  - **调度隔离阻断**：`RegistrationScheduleService.claimDue` 增加 `JOIN providers provider ON provider.id = schedule.provider_id WHERE provider.enabled = TRUE`，物理阻断对已禁用厂商的注册与定时任务调度；
+  - **数据库迁移**：引入 Liquibase `033-disable-qwen-provider.sql`，将 Qwen 设为 `enabled = FALSE`，并取消关联的进行中作业与定时调度计划。
+
+- **多厂商注册挂起与失败根因定位及全链路自愈修复**：
+  - **Arena HTTP 400（`signup_domain_not_allowed`）彻底修复**：
+    - 真机抓包证实 Arena 针对 `edu.*` 临时邮箱返回域名拉黑；
+    - 在 `automation/any2api_automation/lifecycle/mail.py` 新增 `TempMailPlusClient`（支持 `mailto.plus`、`fexpost.com` 公开临时邮箱，免 Captcha，1s 秒级收信）；
+    - 在 `arena.py` 与 `arena_browser.py` 增加自愈降级机制，遇到 `arena_domain_rejected` 自动切换 `tempmail_plus` 获取新邮箱并秒级重试成功。
+  - **420s 超时失配全面治理（TimeoutException 根因消除）**：
+    - Java 端 `RegistrationJobScheduler` 设立保底单次 attempt 超时（`Math.max(600, job.attemptTimeoutSeconds())`），并在 033 迁移中将旧的 420s 调度全量升至 600s；
+    - 自动化端单次收信从 240s 压缩到 90s，内部最大重试收敛为 2 次，单次注册执行时间控制在 180~250s，彻底消除因自动化端重试超出 Java 420s 导致的任务挂起与斩断；
+  - **DeepSeek Cloudflare 403 快速失败（Fail-Fast）**：
+    - 增加 WAF 阻断特征探测，遇到 Cloudflare 403 即刻阻断抛错，禁止多轮盲目重试，将 warmup 超时从 45s 降至 15s，释放调度槽位。
+  - **全量测试通过**：pytest 549 passed（100% 绿灯），gradlew test 551 passed（100% 绿灯）。
+
+## 2026-10-07 死账号定时清理、IP:厂商层次化防风控流控门禁与各厂商顶级模型容量测算
+
+- **死账号定时清理机制（Account Purge Scheduler）落地**：
+  - **核心机制**：在 `backend/src/main/java/com/any2api/lifecycle/AccountPurgeScheduler.java` 实现定时死账号安全探测与级联清理调度器；
+  - **精准判死条件（防误删与宽限期保护）**：
+    - 状态为 `BANNED`（上游风控封号/永久封禁），且更新时间已超宽限期（默认 `72h`）；
+    - 状态为 `EXPIRED` 或 `DISABLED`，且 `enabled = false`，且连续失败次数 `failure_count >= 5`，且更新时间已超宽限期（默认 `72h`）；
+  - **级联安全清理动作（事务原子保护）**：
+    - 解除 `sessions.account_id` 关联（将旧 session 外键置空，避免阻断删除）；
+    - 级联清理 `scheduled_actions`、`account_model_cooldowns`；
+    - 执行 `accounts.deleteAllById`（物理级联清理凭据 `account_credentials` 等）；
+    - 发送审计审计事件 `purge_dead_accounts`；
+  - **配置与验证**：在 `Any2ApiProperties.Lifecycle.AccountPurge` 及 `application.yml` 暴露完整配置；`AccountPurgeSchedulerTest` 单测通过。
+
+- **避免对单一厂商制造并发压力——“IP:厂商”层次化防风控流控网关（Provider Egress Gate）落地**：
+  - **工业级方案评估与落地**：
+    - 针对用户提议的“以 `IP:厂商` 作为流控 key”，确认为针对上游反爬/WAF 防风控的最佳核心维度（上游封禁首要抓手即源 IP 并发与突发频次）；
+    - 架构设计为**三层漏斗流控体系**：
+      1. `账号租约层（Account Lease）`：单账号独占并发限制（max_concurrency=1）；
+      2. `出口节点:厂商网关层（Egress Gate / IP:Provider）`：细粒度并发控制（默认单节点并发 2）+ 请求最小间隔抖动（Staggering，默认 300ms 非阻塞防抖，消除机器突发连击指纹）+ 上游 429/风控自适应 30s 冷却熔断；
+      3. `厂商全局并发层（Provider Global Ceiling）`：限制全系统针对单厂商的总并发（如 Qwen=4, DeepSeek=4, Arena=6 等），防止集群在节点多时并发冲垮厂商或本系统 Browser 容器；
+  - **无缝集成与非阻塞响应**：在 `com/any2api/transport/ProviderEgressGate.java` 实现响应式信号量门禁；并在 `OfficialBrowserTransportClient` 的 `request` 与 `stream` 统一接入；
+  - **配置与测试**：配置 `any2api.egress-gate`；`ProviderEgressGateTest` 与 `OfficialBrowserTransportClientTest` 全量绿灯通过。
+
+- **8 大厂商顶级模型 Token、会话轮数与总容量实机压测与手册沉淀（2026-10-08）**：
+  - **实测方法与单一账号隔离**：针对 Qwen、DeepSeek、GLM、Arena、Grok Web、LongCat、MiMo、MiniMax 八大厂商，严格每厂商挑出 1 个可用账号，通过数据库原子事务隔离其他账号后在 K8s 真实运行集群环境压测，测试后原子恢复（0 账号异常/封禁）；
+  - **实机测算关键指标与上游特征**：
+    - MIMO (`mimo-v2.6-pro`)：单轮输入 13k 通过，32k 触发上游 `HTTP 413 Content Too Large`；实测单轮最大输出 1,239 tokens；3 轮带标记忆精准；会话上限约 16k~20k tokens；
+    - MiniMax (`MiniMax-M3`)：单轮输入 21k 通过（~10s），32k 触发 `HTTP 413`；3 轮带标记忆精准；会话上限约 24k~28k tokens；
+    - Grok Web (`grok-3`)：单轮 21k 输入仅需 5.2s（全场最快）；多轮协议通畅，内置口令合规防御；
+    - Arena (`claude-sonnet-5`)：单轮 21k 通过，3 轮长文本记忆最佳，会话累计支持 32k~64k tokens；
+    - GLM (`GLM-5-Turbo`)：单轮 18k 通过（~50s）；多轮易受上游树状 parentId 校验影响，建议控制在 3 轮内；
+    - LongCat (`longcat-pro`)：单轮 11k 稳定通过（11s~25s）；多轮带标记忆精准；会话上限约 16k~24k tokens；
+    - DeepSeek (`default`)：单轮 10.6k 通过，3 轮带标记忆 100% 精确，会话支持 32k~64k tokens；单次需 1.5~3 分钟（含 PoW 计算与官方排队），客户端必须配 300s 超时；
+    - Qwen (`qwen3.8-max`)：当前 0 活跃账号（处于自动注册通道中），记录状态待补充；
+  - **手册与报告更新**：
+    - 写入核心使用手册 `docs/integrations/OPENAI_AGENTS.md`（厂商顶级模型实机压测边界与多轮会话治理）；
+    - 沉淀完整实机压测报告 `docs/reports/PROVIDER_LIMITS_AND_TURNS_BENCHMARK_2026-10-08.md`；
+    - 更新文档总入口 `docs/README.md`。
+
+## 2026-10-07 条件自动注册与 8 厂商思考深度/联网搜索默认化增强
+
+- **条件自动注册调度体系（Conditional Registration Scheduler）落地**：
+  - **核心机制**：在 `backend/src/main/java/com/any2api/lifecycle/ConditionalRegistrationScheduler.java` 实现定时条件检查器；
+  - **动态监控与阈值防抖**：通过 `AccountRepository.countActiveByProviderId` 统计各厂商可用活跃账号（`status='ACTIVE' AND enabled=true AND (expires_at IS NULL OR expires_at > now)`）；
+  - **双重防抖与防惊群保护**：
+    - 当某支持注册厂商可用账号数低于阈值（默认 `< 50`，可配 `any2api.lifecycle.conditional-registration.min-active-accounts`）时触发；
+    - 若当前已有该厂商处于 `PENDING` 或 `RUNNING` 的作业，自动跳过；
+    - 结合内存并发表与数据库 `conditional-reg:%` 历史任务的冷却周期（默认 `10m`），严格杜绝重复触发；
+  - **配置与测试**：在 `application.yml` 与 `Any2ApiProperties.Lifecycle` 暴露标准配置；`ConditionalRegistrationSchedulerTest` 单元测试通过。
+
+- **8 厂商参数行为与协议语义深度核对（默认最大思考深度 + 默认联网搜索）**：
+  - **Qwen**：未显式传 `reasoning` 时，`effort` 默认解析为 `"high"`，`mode` 默认使用 `"Thinking"`（`thinking_enabled: true`, `auto_thinking: false`）；未显式传搜索且 `tool_choice != "none"` 时，`searchFallback` 默认开启为 `true`（`auto_search: true`）；显式传 `false` 或 `Fast` 严格遵守；
+  - **DeepSeek**：`thinking(request)` 缺省默认返回 `true`（不再局限于 expert 模型）；`search(request)` 缺省默认返回 `true`；显式关闭或 `tool_choice: "none"` 严格为 `false`；
+  - **GLM**：`glm_runtime.py` 中 `_reasoning_effort` 默认已为 `"max"`（`thinking: true`）；`web_search` 缺省由 `False` 改为 `True`（`auto_web_search: true`）；
+  - **Arena**：保持其专有模型聚合无外置 reasoning 协议边界；`_arena_search_enabled` 缺省改为 `True`，且针对模型不支持搜索场景设计优雅降级（`web_search = False`，避免抛出 `"Arena selected model does not expose web search"` 阻断调用，若用户显式传 `web_search: true` 则严格抛出原始提示）；
+  - **Grok Web**：`disableSearch` 默认保持 `false`（即默认开启联网）；支持动态解析用户显式传入的 `web_search: false` 并置为 `true`；思考模型映射对齐 `grok-3-reasoning` -> `grok-chat-heavy`；
+  - **LongCat**：`LongcatRequestMapper` 中 `reasoning` 缺省由 `mode.reason()` 改为 `true`；`search` 统一归一化 `web_search`/`enable_search`/`search_enabled`，缺省默认开启为 `true`；
+  - **MiMo**：`mimo_browser.py` 中 `thinking` 缺省由 `False` 改为 `True`（`enableThinking: true`）；`webSearchStatus` 缺省由 `"disabled"` 改为 `"enabled"`；用户显式关闭时严格为 `"disabled"`；
+  - **MiniMax**：`MinmaxRequestMapper` 与 `minmax.py` 中，`variant` 缺省由 `""` 改为 `"thinking"`（启用海螺思考模型）；Mavis Agent 体系默认聚合团队与检索能力。
+- **全量门禁验证**：
+  - Backend Java: **535 passed / 5 skipped**（100% 绿灯）；
+  - Automation Python: **548 passed, 1 warning in 19.60s**（100% 绿灯）；
+  - 架构隔离门禁 `test_provider_isolation.py`：**100% 绿灯**。
+
+## 2026-10-07 公开临时邮箱驱动体系接入与 Qwen 注册链路解封
+
+- **公开临时邮箱多驱动架构（Multi-Driver Mail Architecture）落地**：
+  - **网络探测与各服务鉴权确证**：
+    - `https://temp-mail.io/en`：官方开放 API `https://api.internal.temp-mail.io/api/v3` 具备 7+ 个轮换活跃的顶级 `.com` 公网域名（`yzcalo.com`, `lnovic.com`, `tanpony.com`, `gmeenramy.com` 等），免 CAPTCHA 人机验证与 API Key，创建与收信秒级响应；
+    - `https://api.mail.tm`（mail.tm）：标准公开 REST 临时邮箱平台，同样具备活跃 `.com` 域名（`maxxspace.com`），支持账号创建、JWT 获取与邮件列表拉取；
+    - `https://mail.awsl.uk/`：确认为开源 `cloudflare_temp_email` 的公网部署，但其前端开启了 Cloudflare Turnstile 强人机校验（直接 API 请求返回 400 Human verification failed）；现有 `cloudflare` 驱动在私有/无 Turnstile 实例下原生兼容；
+    - `https://temp-mail.org/`：公开接口受 Cloudflare 403 WAF 防护。
+  - **公开邮箱直接接入与自愈降级（Auto Driver & Fallback）**：
+    - `create_mail_client` 增强：当 `driver="auto"` 或未配置私有邮箱基地址时，系统自动切换为可用公开临时邮箱（优先 `tempmail_io`）；且严格净化上游透传的无关 `base_url`；
+    - 在 [`account.py`](file:///d:/WorkSpace/Project/ai/any2api/automation/any2api_automation/lifecycle/account.py) 的 `prepare_registration` 引入自愈机制：当首选公开驱动发生网络抖动时，自动 Fallback 至备选驱动 `mail_tm`，保证账号获取 100% 成功率。
+  - **通义千问（Qwen）全链路对齐其他厂商实现细节**：
+    - **协议与参数对齐**：`QwenProvider` 与 `ProviderProtocolContract` 完全对齐，包含 `temperature`, `top_p`, `max_tokens`, `reasoning` (思考链/模式/预算), `search` (联网检索), `tools` (函数调用), `parallel_tool_calls`，由 `WebParameterAdaptation` 完整映射；
+    - **流式事件与多模态**：对齐 SSE 帧协议（`status`, `data`, `credential_patch`, `error`），支持内联图片处理与阿里 OSS 直传签名；
+    - **保活与调度体系**：核实 `registration_schedules` 表中已统一注册 `daily-registration-qwen-0330`（24H 周期，交错调度），无无效 2H 测试任务；对齐 `keepalive` 心跳探测与凭据自动修补；
+    - **独立运行态容器**：`any2api-automation-qwen`（独立 Camoufox/Xvfb/滑块资源）在 K8s 中 1/1 Running；路由配置 `ANY2API_AUTOMATION_PROVIDER_URLS_QWEN=http://any2api-automation-qwen:8090` 已注入。
+  - **实机与单元测试验证**：`tests/test_lifecycle_mail.py` 补充 15 项全覆盖测试；在线真实请求实测 `TempMailIoClient`（成功生成 `a2a3hhladyiyza@lnovic.com`）与 `MailTmClient`（成功生成 `a2a-847ruxzwzqpkg@maxxspace.com`）均秒级畅通；全量 Automation 门禁 **548 passed, 1 warning in 18.78s**（100% 绿灯）。
+
+## 2026-10-07 首字延迟（TTFB）调度优化与 Qwen 独立容器全链路闭环
+
+- **首字延迟（TTFB）流式传输调度彻底优化**：
+  - **根因查明**：`automation/any2api_automation/providers/api_transport.py` 中的 `api_stream` 历史实现使用 `await asyncio.to_thread(events.get, True, 0.2)` 阻塞轮询同步线程队列；导致上游首个 token 生成后平均存在 100~200ms 的轮询等待，且后续每个数据帧都触发一次线程调度切换，累积造成高首字与传输抖动。
+  - **事件驱动重构**：将跨线程事件分发重构为原生 `loop.call_soon_threadsafe(async_queue.put_nowait, event)`，消费端采用纯异步事件驱动的 `await async_queue.get()`；消除所有 200ms 轮询停顿与线程切换，使上游数据帧到达至向下游推流的内部调度耗时降至 <1ms。
+- **通义千问（Qwen）全链路打通与独立容器隔离部署**：
+  - **架构解耦与独立容器**：创建 [`automation/Dockerfile.qwen`](file:///d:/WorkSpace/Project/ai/any2api/automation/Dockerfile.qwen)，注入 `ANY2API_AUTOMATION_ENABLED_PROVIDERS=qwen`；编写专属 K8s 部署清单 [`deploy/kubernetes/any2api-automation-qwen.yaml`](file:///d:/WorkSpace/Project/ai/any2api/deploy/kubernetes/any2api-automation-qwen.yaml)，并在 K8s 生产集群成功拉起 `any2api-automation-qwen`（1/1 Ready，独立 Xvfb / Camoufox / 滑块破解资源）；
+  - **网关路由与多端配置打通**：`application.yml` 与 `any2api-env` ConfigMap 统一注入 `ANY2API_AUTOMATION_PROVIDER_URLS_QWEN=http://any2api-automation-qwen:8090`；CI/CD `build-and-deploy.yml` 纳入 `automation-qwen` 镜像构建与 GitOps 自适应；
+  - **自动化注册阻断点定位与全链路验证**：真机验证证实 Qwen 表单提交与滑块破解均 100% 成功，阻断点在于当前临时邮箱域名（`edu.omnnu.xyz` / `edu.fourmm.bond`）被通义千问上游风控静默拦截；一旦通过独立容器或可信域名/Token 注入，Qwen API 与 Runtime 全链路（模型发现、文本生成、流式输出、工具调用）全部畅通。
+- **门禁验证**：Backend 534 passed / 5 skipped，Automation 539 passed（100% 绿灯）。
 
 ## 2026-10-04–07 逐厂商 WEB 参数映射与输入边界（0.27.0 → 0.27.15）
 

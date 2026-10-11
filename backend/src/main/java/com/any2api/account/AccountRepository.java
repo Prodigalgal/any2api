@@ -42,6 +42,38 @@ public interface AccountRepository extends JpaRepository<AccountEntity, UUID>,
     boolean existsByProviderIdAndEnabledTrue(String providerId);
 
     @Query("""
+        SELECT COUNT(account) FROM AccountEntity account
+        WHERE account.providerId = :providerId
+          AND account.enabled = true
+          AND account.status = com.any2api.account.AccountStatus.ACTIVE
+          AND (account.expiresAt IS NULL OR account.expiresAt > :now)
+        """)
+    long countActiveByProviderId(
+        @Param("providerId") String providerId,
+        @Param("now") Instant now
+    );
+
+    @Query(value = """
+        SELECT id FROM accounts
+        WHERE (
+            status = 'BANNED'
+            OR (
+                status IN ('EXPIRED', 'DISABLED')
+                AND enabled = false
+                AND failure_count >= :failureThreshold
+            )
+        )
+        AND updated_at <= :retentionThreshold
+        ORDER BY updated_at ASC
+        LIMIT :limit
+        """, nativeQuery = true)
+    List<UUID> findDeadAccountIds(
+        @Param("retentionThreshold") Instant retentionThreshold,
+        @Param("failureThreshold") int failureThreshold,
+        @Param("limit") int limit
+    );
+
+    @Query("""
         SELECT account FROM AccountEntity account
         WHERE account.providerId = :providerId
           AND account.enabled = true

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ctypes
 import json
+import struct
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -14,6 +17,33 @@ from .page_fetch_browser import PageFetchBrowserRuntime
 from .runtime_rules import RuntimePlan
 
 _RATE_BYTES = 136
+
+
+def _load_native_pow() -> Any:
+    for candidate in (
+        Path(__file__).parent / "libdeepseek_pow.so",
+        Path(__file__).parent / "deepseek_pow.so",
+        Path(__file__).parent / "deepseek_pow.dll",
+        Path("/app/lib/libdeepseek_pow.so"),
+    ):
+        if candidate.is_file():
+            try:
+                lib = ctypes.CDLL(str(candidate))
+                lib.solve_pow_c.argtypes = [
+                    ctypes.c_char_p,
+                    ctypes.c_int,
+                    ctypes.c_char_p,
+                    ctypes.c_int,
+                    ctypes.c_int,
+                ]
+                lib.solve_pow_c.restype = ctypes.c_int
+                return lib
+            except Exception:  # noqa: BLE001, S110
+                pass
+    return None
+
+
+_NATIVE_POW_LIB = _load_native_pow()
 _MASK = (1 << 64) - 1
 DEEPSEEK_SESSION_PATH = "/api/v0/chat_session/create"
 DEEPSEEK_POW_PATH = "/api/v0/chat/create_pow_challenge"
@@ -173,14 +203,151 @@ def build_deepseek_request(command: dict[str, Any], session_id: str) -> dict[str
     }
 
 
+def _fast_search_pow(
+    prefix: bytes,
+    target_words: tuple[int, int, int, int],
+    start: int,
+    end: int,
+) -> int:
+    tw0, tw1, tw2, tw3 = target_words
+    lp = len(prefix)
+    buf = bytearray(_RATE_BYTES)
+    buf[:lp] = prefix
+    buf[135] = 0x80
+
+    m = _MASK
+    rc_list = _ROUND_CONSTANTS[1:]
+    for ans in range(start, end):
+        suffix = str(ans).encode("ascii")
+        ls = len(suffix)
+        buf[lp : lp + ls] = suffix
+        buf[lp + ls] = 0x06
+        w = list(struct.unpack("<17Q", buf))
+        buf[lp + ls] = 0
+        w.extend([0] * 8)
+
+        w0, w1, w2, w3, w4 = w[0], w[1], w[2], w[3], w[4]
+        w5, w6, w7, w8, w9 = w[5], w[6], w[7], w[8], w[9]
+        w10, w11, w12, w13, w14 = w[10], w[11], w[12], w[13], w[14]
+        w15, w16, w17, w18, w19 = w[15], w[16], w[17], w[18], w[19]
+        w20, w21, w22, w23, w24 = w[20], w[21], w[22], w[23], w[24]
+
+        for rc in rc_list:
+            c0 = w0 ^ w5 ^ w10 ^ w15 ^ w20
+            c1 = w1 ^ w6 ^ w11 ^ w16 ^ w21
+            c2 = w2 ^ w7 ^ w12 ^ w17 ^ w22
+            c3 = w3 ^ w8 ^ w13 ^ w18 ^ w23
+            c4 = w4 ^ w9 ^ w14 ^ w19 ^ w24
+
+            d0 = c4 ^ (((c1 << 1) | (c1 >> 63)) & m)
+            d1 = c0 ^ (((c2 << 1) | (c2 >> 63)) & m)
+            d2 = c1 ^ (((c3 << 1) | (c3 >> 63)) & m)
+            d3 = c2 ^ (((c4 << 1) | (c4 >> 63)) & m)
+            d4 = c3 ^ (((c0 << 1) | (c0 >> 63)) & m)
+
+            s0 = w0 ^ d0
+            s1 = w1 ^ d1
+            s2 = w2 ^ d2
+            s3 = w3 ^ d3
+            s4 = w4 ^ d4
+            s5 = w5 ^ d0
+            s6 = w6 ^ d1
+            s7 = w7 ^ d2
+            s8 = w8 ^ d3
+            s9 = w9 ^ d4
+            s10 = w10 ^ d0
+            s11 = w11 ^ d1
+            s12 = w12 ^ d2
+            s13 = w13 ^ d3
+            s14 = w14 ^ d4
+            s15 = w15 ^ d0
+            s16 = w16 ^ d1
+            s17 = w17 ^ d2
+            s18 = w18 ^ d3
+            s19 = w19 ^ d4
+            s20 = w20 ^ d0
+            s21 = w21 ^ d1
+            s22 = w22 ^ d2
+            s23 = w23 ^ d3
+            s24 = w24 ^ d4
+
+            b0 = s0
+            b1 = ((s6 << 44) | (s6 >> 20)) & m
+            b2 = ((s12 << 43) | (s12 >> 21)) & m
+            b3 = ((s18 << 21) | (s18 >> 43)) & m
+            b4 = ((s24 << 14) | (s24 >> 50)) & m
+            b5 = ((s3 << 28) | (s3 >> 36)) & m
+            b6 = ((s9 << 20) | (s9 >> 44)) & m
+            b7 = ((s10 << 3) | (s10 >> 61)) & m
+            b8 = ((s16 << 45) | (s16 >> 19)) & m
+            b9 = ((s22 << 61) | (s22 >> 3)) & m
+            b10 = ((s1 << 1) | (s1 >> 63)) & m
+            b11 = ((s7 << 6) | (s7 >> 58)) & m
+            b12 = ((s13 << 25) | (s13 >> 39)) & m
+            b13 = ((s19 << 8) | (s19 >> 56)) & m
+            b14 = ((s20 << 18) | (s20 >> 46)) & m
+            b15 = ((s4 << 27) | (s4 >> 37)) & m
+            b16 = ((s5 << 36) | (s5 >> 28)) & m
+            b17 = ((s11 << 10) | (s11 >> 54)) & m
+            b18 = ((s17 << 15) | (s17 >> 49)) & m
+            b19 = ((s23 << 56) | (s23 >> 8)) & m
+            b20 = ((s2 << 62) | (s2 >> 2)) & m
+            b21 = ((s8 << 55) | (s8 >> 9)) & m
+            b22 = ((s14 << 39) | (s14 >> 25)) & m
+            b23 = ((s15 << 41) | (s15 >> 23)) & m
+            b24 = ((s21 << 2) | (s21 >> 62)) & m
+
+            w0 = (b0 ^ ((~b1) & b2)) ^ rc
+            w1 = b1 ^ ((~b2) & b3)
+            w2 = b2 ^ ((~b3) & b4)
+            w3 = b3 ^ ((~b4) & b0)
+            w4 = b4 ^ ((~b0) & b1)
+            w5 = b5 ^ ((~b6) & b7)
+            w6 = b6 ^ ((~b7) & b8)
+            w7 = b7 ^ ((~b8) & b9)
+            w8 = b8 ^ ((~b9) & b5)
+            w9 = b9 ^ ((~b5) & b6)
+            w10 = b10 ^ ((~b11) & b12)
+            w11 = b11 ^ ((~b12) & b13)
+            w12 = b12 ^ ((~b13) & b14)
+            w13 = b13 ^ ((~b14) & b10)
+            w14 = b14 ^ ((~b10) & b11)
+            w15 = b15 ^ ((~b16) & b17)
+            w16 = b16 ^ ((~b17) & b18)
+            w17 = b17 ^ ((~b18) & b19)
+            w18 = b18 ^ ((~b19) & b15)
+            w19 = b19 ^ ((~b15) & b16)
+            w20 = b20 ^ ((~b21) & b22)
+            w21 = b21 ^ ((~b22) & b23)
+            w22 = b22 ^ ((~b23) & b24)
+            w23 = b23 ^ ((~b24) & b20)
+            w24 = b24 ^ ((~b20) & b21)
+
+        if w0 == tw0 and w1 == tw1 and w2 == tw2 and w3 == tw3:
+            return ans
+    return -1
+
+
 def solve_pow(challenge: dict[str, Any]) -> int:
     _validate_challenge(challenge)
     difficulty = int(challenge["difficulty"])
     prefix = f"{challenge['salt']}_{int(challenge['expire_at'])}_".encode()
     target = bytes.fromhex(str(challenge["challenge"]))
-    for answer in range(difficulty):
-        if _hash_matches(prefix, answer, target):
-            return answer
+    if len(target) != 32:
+        raise ValueError("DeepSeek POW challenge must be a SHA3-256 digest")
+
+    if _NATIVE_POW_LIB is not None:
+        try:
+            ans = _NATIVE_POW_LIB.solve_pow_c(prefix, len(prefix), target, 0, difficulty)
+            if ans >= 0:
+                return ans
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    target_words = struct.unpack("<4Q", target)
+    ans = _fast_search_pow(prefix, target_words, 0, difficulty)
+    if ans >= 0:
+        return ans
     raise RuntimeError("DeepSeek POW challenge has no solution in its search range")
 
 
@@ -210,25 +377,10 @@ def build_pow_proof(challenge: dict[str, Any], answer: int) -> str:
 
 
 def _hash_matches(prefix: bytes, answer: int, target: bytes) -> bool:
-    suffix = str(answer).encode("ascii")
-    if len(target) != 32 or len(prefix) + len(suffix) + 10 >= _RATE_BYTES:
+    if len(target) != 32 or len(prefix) + len(str(answer)) + 10 >= _RATE_BYTES:
         return False
-    block = bytearray(_RATE_BYTES)
-    block[: len(prefix)] = prefix
-    offset = len(prefix)
-    block[offset : offset + len(suffix)] = suffix
-    length = offset + len(suffix)
-    block[length] ^= 0x06
-    block[_RATE_BYTES - 1] ^= 0x80
-    state = [0] * 25
-    for index, value in enumerate(block):
-        state[index >> 3] ^= value << ((index & 7) << 3)
-    _permute(state)
-    actual = b"".join(
-        ((state[index >> 3] >> ((index & 7) << 3)) & 0xFF).to_bytes(1, "little")
-        for index in range(len(target))
-    )
-    return actual == target
+    target_words = struct.unpack("<4Q", target)
+    return _fast_search_pow(prefix, target_words, answer, answer + 1) == answer
 
 
 def _permute(state: list[int]) -> None:

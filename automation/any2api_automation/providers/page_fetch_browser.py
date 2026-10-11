@@ -172,6 +172,10 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                 "runtime_reports": reports,
             }
 
+    async def before_stream_request(self, page: Any) -> None:
+        """Hook called immediately before starting a streaming request."""
+        del page
+
     async def stream(
         self,
         credential: dict[str, Any],
@@ -198,6 +202,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
 
             async def execute() -> None:
                 try:
+                    await self.before_stream_request(session.page)
                     await session.page.evaluate(
                         self.stream_request_script(),
                         {

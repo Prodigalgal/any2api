@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.any2api"
-version = "0.27.15"
+version = "0.28.0"
 
 
 java {

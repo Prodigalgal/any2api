@@ -64,7 +64,7 @@ def test_mimo_builds_provider_body_from_semantic_command() -> None:
         "enableThinking": True,
         "temperature": 0.2,
         "topP": 0.95,
-        "webSearchStatus": "disabled",
+        "webSearchStatus": "enabled",
         "model": "mimo-v2.5-pro",
     }
 

@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..config import settings
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
@@ -12,6 +13,7 @@ from ..lifecycle.account import (
     strong_password,
 )
 from ..lifecycle.browser import BrowserContextProfile, BrowserLaunchProfile, run_browser_flow
+from ..lifecycle.mail import create_mail_client
 from ..lifecycle.proxy import proxy_attempt_payload
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import OperationFailure
@@ -75,47 +77,73 @@ class ArenaAutomationProvider(AutomationProvider):
 
     async def register(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace = RegistrationTrace(self.manifest.id)
-        try:
-            mail = mail_client(payload)
-            password = RegistrationPasswordPolicy(
-                strong_password,
-                min_length=8,
-                max_length=64,
-            ).resolve(payload.get("password"))
-            mailbox = await mail.create_address()
-            trace.mark(RegistrationStage.MAILBOX_CREATED)
-            seen_ids = await asyncio.to_thread(mail.message_ids_sync, mailbox)
-            base_url = _allowlisted_base_url(_runtime_option(payload, "base_url"))
-            flow_payload = proxy_attempt_payload(
-                {**payload, "proxy_check_url": base_url},
-                identity=mailbox.address,
-                attempt=1,
-            )
-            flow_payload["strict_proxy_affinity"] = True
-            result = await asyncio.to_thread(
-                run_browser_flow,
-                lambda page, context, backend, proxy_url: register_with_magic_link(
-                    page,
-                    context,
-                    backend,
-                    mail,
-                    mailbox,
-                    seen_ids,
-                    password,
-                    flow_payload,
-                    trace,
-                ),
-                preferred=self.manifest.browser_backend,
-                fallback=self.manifest.fallback_backend,
-                payload=flow_payload,
-                context_profile=self.browser_context_profile(),
-                launch_profile=self.browser_launch_profile(),
-            )
-            return result.response()
-        except OperationFailure:
-            raise
-        except Exception as error:
-            raise trace.failure(error) from error
+        config = settings()
+        # Arena strictly blocks specific educational and custom disposable domains;
+        # default to tempmail_plus when no dedicated mail base is given, or fallback on domain rejection.
+        default_driver = (
+            "tempmail_plus"
+            if not config.mail_api_base and not (payload.get("mail") or {}).get("driver")
+            else "auto"
+        )
+        mail = mail_client(payload, default_driver=default_driver)
+        password = RegistrationPasswordPolicy(
+            strong_password,
+            min_length=8,
+            max_length=64,
+        ).resolve(payload.get("password"))
+
+        attempts = 2
+        last_failure: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                mailbox = await mail.create_address()
+                trace.mark(RegistrationStage.MAILBOX_CREATED)
+                seen_ids = await asyncio.to_thread(mail.message_ids_sync, mailbox)
+                base_url = _allowlisted_base_url(_runtime_option(payload, "base_url"))
+                flow_payload = proxy_attempt_payload(
+                    {**payload, "proxy_check_url": base_url},
+                    identity=mailbox.address,
+                    attempt=attempt,
+                )
+                flow_payload["strict_proxy_affinity"] = True
+                result = await asyncio.to_thread(
+                    run_browser_flow,
+                    lambda page, context, backend, proxy_url, m=mail, mb=mailbox, s_ids=seen_ids, fp=flow_payload: (
+                        register_with_magic_link(
+                            page,
+                            context,
+                            backend,
+                            m,
+                            mb,
+                            s_ids,
+                            password,
+                            fp,
+                            trace,
+                        )
+                    ),
+                    preferred=self.manifest.browser_backend,
+                    fallback=self.manifest.fallback_backend,
+                    payload=flow_payload,
+                    context_profile=self.browser_context_profile(),
+                    launch_profile=self.browser_launch_profile(),
+                )
+                return result.response()
+            except OperationFailure as failure:
+                last_failure = failure
+                if failure.code == "arena_domain_rejected" and attempt < attempts:
+                    # Switch to tempmail_plus which is known to be accepted by Arena
+                    mail = create_mail_client("tempmail_plus")
+                    continue
+                raise
+            except Exception as error:
+                last_failure = error
+                if attempt >= attempts:
+                    raise trace.failure(error) from error
+        if last_failure is not None:
+            if isinstance(last_failure, OperationFailure):
+                raise last_failure
+            raise trace.failure(last_failure) from last_failure
+        raise RuntimeError("Arena registration attempts exhausted")
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
@@ -225,7 +253,7 @@ class ArenaAutomationProvider(AutomationProvider):
             headless=False,
             humanize=True,
             camoufox_os="windows",
-            block_webrtc=True,
+            block_webrtc=False,
         )
 
 

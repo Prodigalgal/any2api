@@ -33,7 +33,8 @@ class OfficialBrowserTransportClientTest {
             WebClient.builder().exchangeStrategies(strategies).exchangeFunction(exchange),
             properties,
             mock(ProviderRuntimeRuleService.class),
-            mapper);
+            mapper,
+            new ProviderEgressGate(properties));
 
         var response = client.request(
                 "arena", "chat", mapper.createObjectNode(), mapper.createObjectNode(),

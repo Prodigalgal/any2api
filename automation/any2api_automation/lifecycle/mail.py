@@ -25,7 +25,161 @@ class Mailbox:
     address_id: int | None = None
 
 
-class TempMailClient:
+class BaseMailClient:
+    """Abstract base for temporary disposable mail clients."""
+
+    def __init__(
+        self,
+        *,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
+    ) -> None:
+        config = settings()
+        self.timeout = float(request_timeout_seconds or 30)
+        self.poll_seconds = float(poll_seconds or config.mail_poll_seconds)
+        self.message_timeout_seconds = float(
+            message_timeout_seconds or min(config.mail_timeout_seconds, 90.0)
+        )
+
+    async def create_address(self, local_part: str | None = None) -> Mailbox:
+        raise NotImplementedError
+
+    async def refresh(self, address: str) -> Mailbox:
+        raise NotImplementedError
+
+    async def wait_for_code(
+        self,
+        mailbox: Mailbox,
+        *,
+        pattern: str = r"(?<!\d)(\d{6})(?!\d)",
+        timeout: float | None = None,
+        predicate: Callable[[dict[str, Any]], bool] | None = None,
+        seen_ids: set[str] | None = None,
+    ) -> str:
+        regex = re.compile(pattern, re.IGNORECASE)
+        return await self._wait(mailbox, regex, timeout, predicate, seen_ids)
+
+    async def wait_for_link(
+        self,
+        mailbox: Mailbox,
+        *,
+        host_pattern: str,
+        timeout: float | None = None,
+        seen_ids: set[str] | None = None,
+    ) -> str:
+        regex = re.compile(rf"https?://[^\s<>'\"]*{host_pattern}[^\s<>'\"]*", re.IGNORECASE)
+        return unescape(await self._wait(mailbox, regex, timeout, None, seen_ids)).rstrip(".,);]")
+
+    def wait_for_code_sync(
+        self,
+        mailbox: Mailbox,
+        *,
+        pattern: str = r"(?<!\d)(\d{6})(?!\d)",
+        timeout: float | None = None,
+        seen_ids: set[str] | None = None,
+    ) -> str:
+        return self._wait_sync(mailbox, re.compile(pattern, re.IGNORECASE), timeout, seen_ids)
+
+    def wait_for_link_sync(
+        self,
+        mailbox: Mailbox,
+        *,
+        host_pattern: str,
+        timeout: float | None = None,
+        seen_ids: set[str] | None = None,
+    ) -> str:
+        regex = re.compile(rf"https?://[^\s<>'\"]*{host_pattern}[^\s<>'\"]*", re.IGNORECASE)
+        return unescape(self._wait_sync(mailbox, regex, timeout, seen_ids)).rstrip(".,);]")
+
+    def message_ids_sync(self, mailbox: Mailbox) -> set[str]:
+        return {
+            str(item.get("id") or item.get("message_id"))
+            for item in self._fetch_mailbox_mails_sync(mailbox)
+            if item.get("id") or item.get("message_id")
+        }
+
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    async def _wait(
+        self,
+        mailbox: Mailbox,
+        regex: re.Pattern[str],
+        timeout: float | None,
+        predicate: Callable[[dict[str, Any]], bool] | None,
+        seen_ids: set[str] | None,
+    ) -> str:
+        deadline = time.monotonic() + float(timeout or self.message_timeout_seconds)
+        seen = set(seen_ids or ())
+        polls = 0
+        max_mail_count = 0
+        last_error = "none"
+        while time.monotonic() < deadline:
+            polls += 1
+            try:
+                mails = await self._fetch_mailbox_mails(mailbox)
+                max_mail_count = max(max_mail_count, len(mails))
+                last_error = "none"
+                for item in mails:
+                    item_id = str(item.get("id") or item.get("message_id") or "")
+                    if item_id and item_id in seen:
+                        continue
+                    if item_id:
+                        seen.add(item_id)
+                    if predicate and not predicate(item):
+                        continue
+                    match = regex.search(_mail_text(item))
+                    if match:
+                        return _match_value(match)
+            except (httpx.HTTPError, ValueError) as error:
+                last_error = type(error).__name__
+            await asyncio.sleep(max(1, self.poll_seconds))
+        raise TimeoutError(
+            "temporary mailbox did not receive the expected message "
+            f"(polls={polls}, max_mails={max_mail_count}, last_error={last_error})"
+        )
+
+    def _wait_sync(
+        self,
+        mailbox: Mailbox,
+        regex: re.Pattern[str],
+        timeout: float | None,
+        seen_ids: set[str] | None,
+    ) -> str:
+        deadline = time.monotonic() + float(timeout or self.message_timeout_seconds)
+        seen = set(seen_ids or ())
+        polls = 0
+        max_mail_count = 0
+        last_error = "none"
+        while time.monotonic() < deadline:
+            polls += 1
+            try:
+                mails = self._fetch_mailbox_mails_sync(mailbox)
+                max_mail_count = max(max_mail_count, len(mails))
+                last_error = "none"
+                for item in mails:
+                    item_id = str(item.get("id") or item.get("message_id") or "")
+                    if item_id and item_id in seen:
+                        continue
+                    if item_id:
+                        seen.add(item_id)
+                    match = regex.search(_mail_text(item))
+                    if match:
+                        return _match_value(match)
+            except (httpx.HTTPError, ValueError) as error:
+                last_error = type(error).__name__
+            time.sleep(max(1, self.poll_seconds))
+        raise TimeoutError(
+            "temporary mailbox did not receive the expected message "
+            f"(polls={polls}, max_mails={max_mail_count}, last_error={last_error})"
+        )
+
+
+class TempMailClient(BaseMailClient):
     """Client for cloudflare_temp_email without leaking mailbox credentials."""
 
     def __init__(
@@ -39,6 +193,11 @@ class TempMailClient:
         poll_seconds: float | None = None,
         message_timeout_seconds: float | None = None,
     ) -> None:
+        super().__init__(
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
         config = settings()
         self.base_url = str(config.mail_api_base if base_url is None else base_url).rstrip("/")
         self.admin_password = str(
@@ -55,9 +214,6 @@ class TempMailClient:
         else:
             domain_values = list(domains or ())
         self.domains = _available_domains(domain_values)
-        self.timeout = float(request_timeout_seconds or 30)
-        self.poll_seconds = float(poll_seconds or config.mail_poll_seconds)
-        self.message_timeout_seconds = float(message_timeout_seconds or config.mail_timeout_seconds)
         if not self.base_url:
             raise ValueError("temporary mail API is not configured")
 
@@ -107,94 +263,11 @@ class TempMailClient:
             raise RuntimeError("temporary mail API did not refresh the mailbox JWT")
         return Mailbox(normalized, jwt, address_id)
 
-    async def wait_for_code(
-        self,
-        mailbox: Mailbox,
-        *,
-        pattern: str = r"(?<!\d)(\d{6})(?!\d)",
-        timeout: float | None = None,
-        predicate: Callable[[dict[str, Any]], bool] | None = None,
-        seen_ids: set[str] | None = None,
-    ) -> str:
-        regex = re.compile(pattern, re.IGNORECASE)
-        return await self._wait(mailbox, regex, timeout, predicate, seen_ids)
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        return await self._list_mails(mailbox.jwt)
 
-    async def wait_for_link(
-        self,
-        mailbox: Mailbox,
-        *,
-        host_pattern: str,
-        timeout: float | None = None,
-        seen_ids: set[str] | None = None,
-    ) -> str:
-        regex = re.compile(rf"https?://[^\s<>'\"]*{host_pattern}[^\s<>'\"]*", re.IGNORECASE)
-        return unescape(await self._wait(mailbox, regex, timeout, None, seen_ids)).rstrip(".,);]")
-
-    def wait_for_code_sync(
-        self,
-        mailbox: Mailbox,
-        *,
-        pattern: str = r"(?<!\d)(\d{6})(?!\d)",
-        timeout: float | None = None,
-        seen_ids: set[str] | None = None,
-    ) -> str:
-        return self._wait_sync(mailbox, re.compile(pattern, re.IGNORECASE), timeout, seen_ids)
-
-    def wait_for_link_sync(
-        self,
-        mailbox: Mailbox,
-        *,
-        host_pattern: str,
-        timeout: float | None = None,
-        seen_ids: set[str] | None = None,
-    ) -> str:
-        regex = re.compile(rf"https?://[^\s<>'\"]*{host_pattern}[^\s<>'\"]*", re.IGNORECASE)
-        return unescape(self._wait_sync(mailbox, regex, timeout, seen_ids)).rstrip(".,);]")
-
-    def message_ids_sync(self, mailbox: Mailbox) -> set[str]:
-        return {
-            str(item.get("id") or item.get("message_id"))
-            for item in self._list_mails_sync(mailbox.jwt)
-            if item.get("id") or item.get("message_id")
-        }
-
-    async def _wait(
-        self,
-        mailbox: Mailbox,
-        regex: re.Pattern[str],
-        timeout: float | None,
-        predicate: Callable[[dict[str, Any]], bool] | None,
-        seen_ids: set[str] | None,
-    ) -> str:
-        deadline = time.monotonic() + float(timeout or self.message_timeout_seconds)
-        seen = set(seen_ids or ())
-        polls = 0
-        max_mail_count = 0
-        last_error = "none"
-        while time.monotonic() < deadline:
-            polls += 1
-            try:
-                mails = await self._list_mails(mailbox.jwt)
-                max_mail_count = max(max_mail_count, len(mails))
-                last_error = "none"
-                for item in mails:
-                    item_id = str(item.get("id") or item.get("message_id") or "")
-                    if item_id and item_id in seen:
-                        continue
-                    if item_id:
-                        seen.add(item_id)
-                    if predicate and not predicate(item):
-                        continue
-                    match = regex.search(_mail_text(item))
-                    if match:
-                        return _match_value(match)
-            except (httpx.HTTPError, ValueError) as error:
-                last_error = type(error).__name__
-            await asyncio.sleep(max(1, self.poll_seconds))
-        raise TimeoutError(
-            "temporary mailbox did not receive the expected message "
-            f"(polls={polls}, max_mails={max_mail_count}, last_error={last_error})"
-        )
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        return self._list_mails_sync(mailbox.jwt)
 
     async def _list_mails(self, jwt: str) -> list[dict[str, Any]]:
         headers = self._headers(jwt=jwt)
@@ -209,41 +282,6 @@ class TempMailClient:
                 data = response.json()
                 return list(data.get("results") or data.get("mails") or [])
         return []
-
-    def _wait_sync(
-        self,
-        mailbox: Mailbox,
-        regex: re.Pattern[str],
-        timeout: float | None,
-        seen_ids: set[str] | None,
-    ) -> str:
-        deadline = time.monotonic() + float(timeout or self.message_timeout_seconds)
-        seen = set(seen_ids or ())
-        polls = 0
-        max_mail_count = 0
-        last_error = "none"
-        while time.monotonic() < deadline:
-            polls += 1
-            try:
-                mails = self._list_mails_sync(mailbox.jwt)
-                max_mail_count = max(max_mail_count, len(mails))
-                last_error = "none"
-                for item in mails:
-                    item_id = str(item.get("id") or item.get("message_id") or "")
-                    if item_id and item_id in seen:
-                        continue
-                    if item_id:
-                        seen.add(item_id)
-                    match = regex.search(_mail_text(item))
-                    if match:
-                        return _match_value(match)
-            except (httpx.HTTPError, ValueError) as error:
-                last_error = type(error).__name__
-            time.sleep(max(1, self.poll_seconds))
-        raise TimeoutError(
-            "temporary mailbox did not receive the expected message "
-            f"(polls={polls}, max_mails={max_mail_count}, last_error={last_error})"
-        )
 
     def _list_mails_sync(self, jwt: str) -> list[dict[str, Any]]:
         headers = self._headers(jwt=jwt)
@@ -288,8 +326,367 @@ class TempMailClient:
         return headers
 
 
+class TempMailIoClient(BaseMailClient):
+    """Client for public temp-mail.io service providing top-level .com domains."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        domain: str | None = None,
+        domains: list[str] | tuple[str, ...] | str | None = None,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+        config = settings()
+        self.base_url = str(config.tempmail_io_base_url if base_url is None else base_url).rstrip(
+            "/"
+        )
+        self.domain = str(
+            config.mail_domain if domain is None and domains is None else domain or ""
+        ).strip()
+        if isinstance(domains, str):
+            domain_values = domains.split(",")
+        else:
+            domain_values = list(domains or ())
+        self.domains = _available_domains(domain_values)
+
+    async def create_address(self, local_part: str | None = None) -> Mailbox:
+        local = local_part or _random_local_part()
+        domain = self.domain or (secrets.choice(self.domains) if self.domains else None)
+        domain = domain or await self._default_domain()
+        body: dict[str, Any] = {"name": local, "domain": domain}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(f"{self.base_url}/email/new", json=body)
+            response.raise_for_status()
+            data = response.json()
+        address = str(data.get("email") or f"{local}@{domain}").strip().lower()
+        token = str(data.get("token") or "").strip()
+        return Mailbox(address=address, jwt=token)
+
+    async def refresh(self, address: str) -> Mailbox:
+        normalized = _validated_address(address)
+        return Mailbox(address=normalized, jwt="")
+
+    async def _default_domain(self) -> str:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}/domains")
+            response.raise_for_status()
+            data = response.json()
+        domain_list = data.get("domains") if isinstance(data, dict) else data
+        domains = _available_domains(
+            [
+                d.get("name")
+                for d in (domain_list or [])
+                if isinstance(d, dict) and d.get("type") == "public"
+            ]
+        )
+        if not domains:
+            domains = ["yzcalo.com", "tanpony.com", "lnovic.com"]
+        return secrets.choice(domains)
+
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}/email/{mailbox.address}/messages")
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data = response.json()
+            return list(data if isinstance(data, list) else data.get("messages") or [])
+
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(f"{self.base_url}/email/{mailbox.address}/messages")
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data = response.json()
+            return list(data if isinstance(data, list) else data.get("messages") or [])
+
+
+class MailTmClient(BaseMailClient):
+    """Client for public mail.tm / mail.gw standard REST service."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        domain: str | None = None,
+        domains: list[str] | tuple[str, ...] | str | None = None,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+        config = settings()
+        self.base_url = str(config.mail_tm_base_url if base_url is None else base_url).rstrip("/")
+        self.domain = str(
+            config.mail_domain if domain is None and domains is None else domain or ""
+        ).strip()
+        if isinstance(domains, str):
+            domain_values = domains.split(",")
+        else:
+            domain_values = list(domains or ())
+        self.domains = _available_domains(domain_values)
+
+    async def create_address(self, local_part: str | None = None) -> Mailbox:
+        local = local_part or _random_local_part()
+        domain = self.domain or (secrets.choice(self.domains) if self.domains else None)
+        domain = domain or await self._default_domain()
+        address = f"{local}@{domain}".lower()
+        password = "P@" + secrets.token_hex(8)
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp_acc = await client.post(
+                f"{self.base_url}/accounts", json={"address": address, "password": password}
+            )
+            resp_acc.raise_for_status()
+            resp_tok = await client.post(
+                f"{self.base_url}/token", json={"address": address, "password": password}
+            )
+            resp_tok.raise_for_status()
+            token = str(resp_tok.json().get("token") or "")
+        return Mailbox(address=address, jwt=token)
+
+    async def refresh(self, address: str) -> Mailbox:
+        normalized = _validated_address(address)
+        return Mailbox(address=normalized, jwt="")
+
+    async def _default_domain(self) -> str:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}/domains")
+            response.raise_for_status()
+            data = response.json()
+        members = data.get("hydra:member") or []
+        domains = _available_domains(
+            [
+                d.get("domain")
+                for d in members
+                if isinstance(d, dict) and d.get("isActive") is not False
+            ]
+        )
+        if not domains:
+            domains = ["maxxspace.com"]
+        return secrets.choice(domains)
+
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        headers = {"Authorization": f"Bearer {mailbox.jwt}"}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}/messages", headers=headers)
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data = response.json()
+            messages = data.get("hydra:member") or []
+            detailed: list[dict[str, Any]] = []
+            for item in messages:
+                msg_id = item.get("id")
+                if msg_id:
+                    detail_resp = await client.get(
+                        f"{self.base_url}/messages/{msg_id}", headers=headers
+                    )
+                    if detail_resp.status_code == 200:
+                        detailed.append(detail_resp.json())
+                        continue
+                detailed.append(item)
+            return detailed
+
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        headers = {"Authorization": f"Bearer {mailbox.jwt}"}
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(f"{self.base_url}/messages", headers=headers)
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data = response.json()
+            messages = data.get("hydra:member") or []
+            detailed: list[dict[str, Any]] = []
+            for item in messages:
+                msg_id = item.get("id")
+                if msg_id:
+                    detail_resp = client.get(f"{self.base_url}/messages/{msg_id}", headers=headers)
+                    if detail_resp.status_code == 200:
+                        detailed.append(detail_resp.json())
+                        continue
+                detailed.append(item)
+            return detailed
+
+
+class TempMailPlusClient(BaseMailClient):
+    """Client for public tempmail.plus service providing @mailto.plus and @fexpost.com domains."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        domain: str | None = None,
+        domains: list[str] | tuple[str, ...] | str | None = None,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+        self.base_url = str(base_url or "https://tempmail.plus/api").rstrip("/")
+        self.domain = str(domain or "").strip()
+        if isinstance(domains, str):
+            domain_values = domains.split(",")
+        else:
+            domain_values = list(domains or ())
+        self.domains = _available_domains(domain_values) or ["mailto.plus", "fexpost.com"]
+
+    async def create_address(self, local_part: str | None = None) -> Mailbox:
+        local = local_part or _random_local_part()
+        domain = self.domain or secrets.choice(self.domains)
+        address = f"{local}@{domain}".lower()
+        return Mailbox(address=address, jwt="")
+
+    async def refresh(self, address: str) -> Mailbox:
+        normalized = _validated_address(address)
+        return Mailbox(address=normalized, jwt="")
+
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(
+                f"{self.base_url}/mails", params={"email": mailbox.address, "limit": 20}
+            )
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data = response.json()
+            mail_list = data.get("mail_list") or []
+            detailed: list[dict[str, Any]] = []
+            for item in mail_list:
+                mail_id = item.get("mail_id")
+                if mail_id:
+                    detail_resp = await client.get(
+                        f"{self.base_url}/mails/{mail_id}", params={"email": mailbox.address}
+                    )
+                    if detail_resp.status_code == 200:
+                        detailed.append(detail_resp.json())
+                        continue
+                detailed.append(item)
+            return detailed
+
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(
+                f"{self.base_url}/mails", params={"email": mailbox.address, "limit": 20}
+            )
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data = response.json()
+            mail_list = data.get("mail_list") or []
+            detailed: list[dict[str, Any]] = []
+            for item in mail_list:
+                mail_id = item.get("mail_id")
+                if mail_id:
+                    detail_resp = client.get(
+                        f"{self.base_url}/mails/{mail_id}", params={"email": mailbox.address}
+                    )
+                    if detail_resp.status_code == 200:
+                        detailed.append(detail_resp.json())
+                        continue
+                detailed.append(item)
+            return detailed
+
+
+def create_mail_client(
+    driver: str | None = None,
+    *,
+    base_url: str | None = None,
+    admin_password: str | None = None,
+    site_password: str | None = None,
+    domain: str | None = None,
+    domains: list[str] | tuple[str, ...] | str | None = None,
+    request_timeout_seconds: float | None = None,
+    poll_seconds: float | None = None,
+    message_timeout_seconds: float | None = None,
+) -> BaseMailClient:
+    normalized = str(driver or "").strip().lower()
+    config = settings()
+    if not normalized or normalized == "auto":
+        if not config.mail_api_base and not base_url:
+            normalized = "tempmail_io"
+        else:
+            normalized = "cloudflare"
+
+    if normalized in {"tempmail_io", "temp-mail.io", "tempmail"}:
+        target_base = (
+            base_url
+            if base_url and ("temp-mail.io" in base_url or "tempmail" in base_url)
+            else None
+        )
+        return TempMailIoClient(
+            base_url=target_base,
+            domain=domain,
+            domains=domains,
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+    if normalized in {"tempmail_plus", "tempmail.plus", "mailto_plus", "mailto.plus"}:
+        target_base = (
+            base_url
+            if base_url and ("tempmail.plus" in base_url or "mailto.plus" in base_url)
+            else None
+        )
+        return TempMailPlusClient(
+            base_url=target_base,
+            domain=domain,
+            domains=domains,
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+    if normalized in {"mail_tm", "mail.tm", "mailtm"}:
+        target_base = (
+            base_url if base_url and ("mail.tm" in base_url or "mail.gw" in base_url) else None
+        )
+        return MailTmClient(
+            base_url=target_base,
+            domain=domain,
+            domains=domains,
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+    return TempMailClient(
+        base_url=base_url,
+        admin_password=admin_password,
+        site_password=site_password,
+        domain=domain,
+        domains=domains,
+        request_timeout_seconds=request_timeout_seconds,
+        poll_seconds=poll_seconds,
+        message_timeout_seconds=message_timeout_seconds,
+    )
+
+
 def _mail_text(item: dict[str, Any]) -> str:
-    parts = [str(item.get(key) or "") for key in ("subject", "text", "html", "raw", "source")]
+    parts = [
+        str(item.get(key) or "")
+        for key in (
+            "subject",
+            "text",
+            "body_text",
+            "html",
+            "body_html",
+            "intro",
+            "raw",
+            "source",
+        )
+    ]
     raw = str(item.get("raw") or "")
     if raw:
         try:

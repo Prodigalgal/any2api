@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     inference_timeout_seconds: int = Field(default=240, ge=30, le=1800)
     inference_first_frame_timeout_seconds: int = Field(default=90, ge=5, le=600)
     browser_cleanup_timeout_seconds: int = 5
+    browser_reaper_enabled: bool = True
+    browser_reaper_interval_seconds: int = 30
+    browser_max_process_lifetime_seconds: int = 600
     registration_proxy_url: str = ""
     registration_use_dynamic_proxy: bool = False
     dynamic_proxy_subscription_url: str = ""

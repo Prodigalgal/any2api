@@ -1,7 +1,31 @@
-# 当前任务板（源码 0.28.0）
+# 当前任务板（源码 0.28.1）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-11 自动化容器孤儿与僵尸进程自动化巡检与自愈机制
+
+- **背景与根因定位**：
+  - 排查下游超时与 Arena 探活全量失败时，在 `any2api-automation-arena` 容器中发现 2 个历史存活超 12 小时的 Camoufox 孤儿进程（PID 6790, 7627），占用高 CPU 导致后续请求卡死满 240s；
+  - 根因为：外部请求超时取消或异常中断时，底层 Playwright/Camoufox 进程与同步执行线程未被 OS 级强制回收，脱离父进程后被 PID 1 (tini) 收养成为孤儿进程并持续在后台死循环运行。
+- **自动化处理与防御机制实现**：
+  - **全局自动化进程清道夫（`BrowserProcessReaper`）**：
+    - 新增 `automation/any2api_automation/lifecycle/process_reaper.py`；
+    - 基于 `/proc` 精准扫描浏览器及 driver 进程（`camoufox-bin`, `firefox`, `patchright`, `node.*cli.js run-driver` 等）；
+    - **规则 A（孤儿进程自愈）**：凡 PPID 为 1（被 init 收养脱离父进程）的浏览器/driver，自动发送 SIGTERM并在 2s 后升级为 SIGKILL 彻底清除；
+    - **规则 B（超期僵尸进程兜底）**：凡存活时间超过 600 秒（10 分钟）的浏览器，判定为卡死进程自动强制回收；
+    - **双时机触发**：容器启动即刻执行一次全面扫描，常驻后台每 30 秒周期性巡检回收；
+    - **可观测性**：在 `/internal/v1/capabilities` 暴露 `process_reaper` 统计数据（`total_sweeps`, `total_orphans_reaped`, `total_stalled_reaped`）。
+  - **会话池退出彻底回收（`OfficialBrowserRuntime` / `MinmaxOfficialBrowserTransport`）**：
+    - 在创建 `OfficialBrowserSession` 时自动登记 `driver_processes`；
+    - 在会话淘汰 `_close_session` 及启动异常时，显式调用 `terminate_residual_browser_process` 强制回收底层子进程。
+  - **流程级硬看门狗（`run_browser_flow`）**：
+    - 在执行用户 flow 时，套上 `browser_operation_deadline`（1.5 倍注册超时，最少 120s）；
+    - 超时未退出时自动触发线程级 SIGKILL 击杀浏览器，打破底层阻塞同步调用，保证必走 `finally` 资源释放。
+- **验证与质量保障**：
+  - 新增 `tests/test_process_reaper.py`（覆盖孤儿判定、超期判定、终止回调、接口暴露等 5 个测试）；
+  - 全量 pytest 554 passed（100% 绿灯）。
+
 
 ## 2026-10-10 条件自动注册24H防抖、Qwen拔出与多厂商注册链路自愈加固
 

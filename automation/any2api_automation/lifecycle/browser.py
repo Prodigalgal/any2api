@@ -333,8 +333,14 @@ def run_browser_flow(
             context = browser.new_context(**resolved_context_profile.options(backend))
             context.set_default_timeout(config.registration_timeout_seconds * 1000)
             page = context.new_page()
+            flow_timeout_seconds = max(120.0, float(config.registration_timeout_seconds) * 1.5)
             try:
-                result = flow(page, context, backend, leased_proxy)
+                with browser_operation_deadline(
+                    browser,
+                    flow_timeout_seconds,
+                    label=f"{backend} flow execution deadline",
+                ):
+                    result = flow(page, context, backend, leased_proxy)
                 execution_context = capture_browser_execution_context(
                     browser,
                     context,

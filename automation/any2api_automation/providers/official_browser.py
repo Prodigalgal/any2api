@@ -17,7 +17,12 @@ from patchright.async_api import async_playwright
 
 from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..config import settings as core_settings
-from ..lifecycle.browser import camoufox_config_from_options
+from ..lifecycle.browser import (
+    _driver_pid,
+    _process_tree,
+    camoufox_config_from_options,
+    terminate_residual_browser_process,
+)
 from ..session_pool import AccountSessionPool, SessionSlot
 from .runtime_rules import (
     RuntimeRule,
@@ -49,6 +54,7 @@ class OfficialBrowserSession:
     playwright: Any | None = None
     camoufox_config: dict[str, Any] | None = None
     browser_lease: BrowserProcessLease | None = None
+    driver_processes: tuple[int, ...] = ()
 
 
 class OfficialBrowserRuntime:
@@ -307,6 +313,8 @@ class OfficialBrowserRuntime:
             context = await browser.new_context(**options)
             await self.configure_context(context, credential)
             page = await context.new_page()
+            driver_pid = _driver_pid(browser) or _driver_pid(playwright)
+            driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
             session = OfficialBrowserSession(
                 key=key,
                 browser=browser,
@@ -325,6 +333,7 @@ class OfficialBrowserRuntime:
                 playwright=playwright,
                 camoufox_config=camoufox_config,
                 browser_lease=browser_lease,
+                driver_processes=driver_processes,
             )
             await self.configure_page(session, credential)
             await page.goto(
@@ -370,8 +379,16 @@ class OfficialBrowserRuntime:
                         if playwright is not None:
                             await playwright.stop()
                     finally:
-                        if browser_lease is not None:
-                            browser_lease.release()
+                        try:
+                            driver_pid = _driver_pid(browser) or _driver_pid(playwright)
+                            if driver_pid:
+                                terminate_residual_browser_process(
+                                    driver_pid,
+                                    label=f"{self.provider_id} session launch cleanup",
+                                )
+                        finally:
+                            if browser_lease is not None:
+                                browser_lease.release()
             raise
 
     async def _close_session(self, session: OfficialBrowserSession) -> None:
@@ -388,8 +405,15 @@ class OfficialBrowserRuntime:
                     if session.playwright is not None:
                         await session.playwright.stop()
                 finally:
-                    if session.browser_lease is not None:
-                        session.browser_lease.release()
+                    try:
+                        if session.driver_processes:
+                            terminate_residual_browser_process(
+                                session.driver_processes,
+                                label=f"{self.provider_id} session cleanup",
+                            )
+                    finally:
+                        if session.browser_lease is not None:
+                            session.browser_lease.release()
 
     def _storage_state(self, execution: dict[str, Any]) -> dict[str, Any] | None:
         state = execution.get("storage_state")

@@ -9,6 +9,7 @@ from .browser_transport import router as browser_transport_router
 from .captcha.api import router as captcha_router
 from .captcha.registry import registry
 from .config import settings
+from .lifecycle.process_reaper import process_reaper
 from .observability import CorrelationLoggingMiddleware
 from .provider_api import router as provider_router
 from .providers import provider_registry, public_provider_manifests
@@ -30,16 +31,18 @@ application_logger.propagate = False
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     application_logger.info("automation_observability_ready")
+    await process_reaper.start()
     try:
         yield
     finally:
+        await process_reaper.stop()
         await provider_registry.close()
         browser_session_manager.close_all()
 
 
 app = FastAPI(
     title="Any2API Automation",
-    version="0.28.0",
+    version="0.28.1",
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
@@ -77,5 +80,6 @@ async def platform_capabilities() -> dict[str, object]:
         "resources": {
             **lanes.snapshot.__dict__,
             "browser_process": browser_process_budget.snapshot().__dict__,
+            "process_reaper": process_reaper.snapshot(),
         },
     }

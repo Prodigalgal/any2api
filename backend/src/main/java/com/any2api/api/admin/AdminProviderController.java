@@ -3,6 +3,7 @@ package com.any2api.api.admin;
 import com.any2api.provider.ProviderRuntimeService;
 import com.any2api.provider.ProviderTransportMode;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,16 +30,25 @@ public class AdminProviderController {
         @PathVariable String providerId,
         @RequestBody StateRequest request
     ) {
-        if (request.enabled() == null && request.transportMode() == null && request.probeModel() == null) {
-            throw new IllegalArgumentException("enabled, transport_mode, or probe_model is required");
+        boolean updateProxy = Boolean.TRUE.equals(request.clearProxyPool())
+            || request.proxyPoolId() != null
+            || Boolean.TRUE.equals(request.updateProxyPool());
+        if (request.enabled() == null && request.transportMode() == null
+            && request.probeModel() == null && !updateProxy) {
+            throw new IllegalArgumentException("enabled, transport_mode, probe_model, or proxy_pool_id is required");
         }
+        var targetProxyPoolId = Boolean.TRUE.equals(request.clearProxyPool()) ? null : request.proxyPoolId();
         return providers.setState(
-            providerId, request.enabled(), request.transportMode(), request.probeModel());
+            providerId, request.enabled(), request.transportMode(), request.probeModel(),
+            targetProxyPoolId, updateProxy);
     }
 
     public record StateRequest(
         Boolean enabled,
         ProviderTransportMode transportMode,
-        String probeModel
+        String probeModel,
+        UUID proxyPoolId,
+        Boolean clearProxyPool,
+        Boolean updateProxyPool
     ) {}
 }

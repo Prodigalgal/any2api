@@ -132,6 +132,7 @@ def proxy_lease(
         return
     subscription = subscription_url.strip() or settings().dynamic_proxy_subscription_url.strip()
     nodes = _parse_nodes(node_urls or []) if node_urls is not None else []
+    node_concurrency = settings().dynamic_proxy_node_concurrency if node_urls else 1
     if not nodes:
         if not subscription:
             raise RuntimeError("dynamic proxy subscription or node list is not configured")
@@ -140,7 +141,7 @@ def proxy_lease(
     attempt_limit = 1 if affinity_key and strict_affinity else settings().dynamic_proxy_max_attempts
     errors: list[str] = []
     for node in nodes[:attempt_limit]:
-        reservation = _NodeReservation.acquire(node)
+        reservation = _NodeReservation.acquire(node, concurrency=node_concurrency)
         if reservation is None:
             errors.append("NodeBusy")
             continue
@@ -217,6 +218,30 @@ class _SingBoxLease:
             self.directory.cleanup()
 
 
+_LUA_ACQUIRE_LEASE = """
+local count = redis.call('SCARD', KEYS[1])
+if count < tonumber(ARGV[1]) then
+    redis.call('SADD', KEYS[1], ARGV[2])
+    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+    return 1
+else
+    return 0
+end
+"""
+
+_LUA_RELEASE_LEASE = """
+if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then
+    redis.call('SREM', KEYS[1], ARGV[1])
+    return 1
+else
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+        return redis.call('DEL', KEYS[1])
+    end
+    return 0
+end
+"""
+
+
 class _NodeReservation:
     def __init__(self, client: redis.Redis | None, key: str, token: str) -> None:
         self.client = client
@@ -224,37 +249,46 @@ class _NodeReservation:
         self.token = token
 
     @classmethod
-    def acquire(cls, node: ProxyNode) -> _NodeReservation | None:
+    def acquire(cls, node: ProxyNode, concurrency: int = 1) -> _NodeReservation | None:
         digest = hashlib.sha256(_node_identity(node).encode()).hexdigest()
         key = f"any2api:proxy-node:{digest}"
         token = secrets.token_urlsafe(24)
+        max_concurrency = max(1, concurrency)
         if not settings().dynamic_proxy_distributed_leases:
             with _local_node_lock:
-                if key in _local_nodes:
+                current_count = sum(1 for k in _local_nodes if k.startswith(f"{key}:"))
+                if current_count >= max_concurrency:
                     return None
-                _local_nodes.add(key)
-            return cls(None, key, token)
+                _local_nodes.add(f"{key}:{token}")
+            return cls(None, f"{key}:{token}", token)
         client = redis.Redis.from_url(settings().redis_url, decode_responses=True)
-        acquired = client.set(
-            key,
-            token,
-            nx=True,
-            ex=max(60, settings().dynamic_proxy_lease_seconds),
+        if max_concurrency == 1:
+            acquired = client.set(
+                key,
+                token,
+                nx=True,
+                ex=max(60, settings().dynamic_proxy_lease_seconds),
+            )
+            return cls(client, key, token) if acquired else None
+        lease_key = f"any2api:proxy-node-leases:{digest}"
+        acquired = bool(
+            client.eval(
+                _LUA_ACQUIRE_LEASE,
+                1,
+                lease_key,
+                max_concurrency,
+                token,
+                max(60, settings().dynamic_proxy_lease_seconds),
+            )
         )
-        return cls(client, key, token) if acquired else None
+        return cls(client, lease_key, token) if acquired else None
 
     def release(self) -> None:
         if self.client is None:
             with _local_node_lock:
                 _local_nodes.discard(self.key)
             return
-        self.client.eval(
-            "if redis.call('get', KEYS[1]) == ARGV[1] then "
-            "return redis.call('del', KEYS[1]) else return 0 end",
-            1,
-            self.key,
-            self.token,
-        )
+        self.client.eval(_LUA_RELEASE_LEASE, 1, self.key, self.token)
 
 
 def _fetch_nodes(url: str) -> list[ProxyNode]:

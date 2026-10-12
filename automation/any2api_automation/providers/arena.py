@@ -229,7 +229,7 @@ class ArenaAutomationProvider(AutomationProvider):
             yield transport_frame("status", status=422)
             yield transport_frame("error", data="Arena semantic command or model is invalid")
         except Exception as error:  # noqa: BLE001 - normalized stream boundary
-            logger.warning("arena_transport_stream_failed error_type=%s", type(error).__name__)
+            logger.warning("arena_transport_stream_failed error_type=%s detail=%s", type(error).__name__, str(error))
             yield transport_frame("status", status=502)
             yield transport_frame("error", data="Arena browser stream failed")
 

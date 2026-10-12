@@ -44,7 +44,7 @@ function TempMailForm({ initial }: { initial: TempMailSettings }) {
         <Stack spacing={2}>
           <TextField label="轮询间隔（秒）" type="number" value={value.pollSeconds} onChange={(event) => setValue({ ...value, pollSeconds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 60, step: 0.5 } }} />
           <TextField label="邮件等待上限（秒）" type="number" value={value.messageTimeoutSeconds} onChange={(event) => setValue({ ...value, messageTimeoutSeconds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 30, max: 1800 } }} />
-          <TextField label="单次请求超时（秒）" type="number" value={value.requestTimeoutSeconds} onChange={(event) => setValue({ ...value, requestTimeoutSeconds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 5, max: 300 } }} />
+          <TextField label="单次请求超时（秒）" type="number" value={value.requestTimeoutSeconds} onChange={(event) => setValue({ ...value, requestTimeoutSeconds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 5, max: 900 } }} />
         </Stack>
       </Box>
     </Box>

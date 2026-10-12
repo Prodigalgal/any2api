@@ -75,6 +75,8 @@ export type ProviderRuntime = {
   fallbackTransportMode: Exclude<ProviderTransportMode, "AUTO"> | null;
   supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">>;
   probeModel?: string;
+  proxyPoolId?: string | null;
+  proxyPoolName?: string | null;
 };
 
 export type ProviderOption = [id: string, label: string];
@@ -572,6 +574,8 @@ export const api = {
       enabled?: boolean;
       transportMode?: ProviderTransportMode;
       probeModel?: string;
+      proxyPoolId?: string | null;
+      clearProxyPool?: boolean;
     }
   ) =>
     adminJson<ProviderRuntime>(
@@ -593,12 +597,12 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify({ accountId: id, modelId }),
-        signal: AbortSignal.timeout(300_000),
+        signal: AbortSignal.timeout(900_000),
       },
     )
     : adminJson<AccountProbeResult>(
       `/api/admin/v1/accounts/${id}/probe`,
-      { method: "POST", signal: AbortSignal.timeout(300_000) },
+      { method: "POST", signal: AbortSignal.timeout(900_000) },
     ),
   deleteAccount: (id: string) => adminJson<void>(
     `/api/admin/v1/accounts/${id}`, { method: "DELETE" },

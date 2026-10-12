@@ -114,7 +114,7 @@ public final class ArenaProvider implements InferenceProvider {
         var configured = properties.getProbeModel();
         return configured != null && !configured.isBlank()
             ? java.util.Optional.of(configured.trim())
-            : java.util.Optional.of("gemini-3.1-flash-lite");
+            : java.util.Optional.of("gemini-3.5-flash-lite");
     }
 
     @Override

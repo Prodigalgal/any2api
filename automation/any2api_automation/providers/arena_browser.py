@@ -474,7 +474,7 @@ def _arena_content(content: Any) -> str:
 
 
 def _arena_search_enabled(
-    options: dict[str, Any], controls: dict[str, Any], default: bool = True
+    options: dict[str, Any], controls: dict[str, Any], default: bool = False
 ) -> bool:
     values: list[bool] = []
     for source, name in ((options, "provider_options.arena.web_search"), (controls, "web_search")):
@@ -846,13 +846,20 @@ def _arena_model_search_capability(records: list[dict[str, Any]], model_id: str)
         metadata = record.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("arena_model_id") != model_id:
             continue
+        rank_by_modality = metadata.get("rank_by_modality")
+        if isinstance(rank_by_modality, dict) and "search" not in rank_by_modality:
+            return False
         capabilities = metadata.get("arena_capabilities") or metadata.get("capabilities")
         if not isinstance(capabilities, dict):
             return None
         output = capabilities.get("outputCapabilities")
-        if not isinstance(output, dict) or "search" not in output:
+        if not isinstance(output, dict):
             return None
-        return _capability_enabled(output.get("search"))
+        if "search" in output:
+            return _capability_enabled(output.get("search"))
+        if "web" in output:
+            return _capability_enabled(output.get("web"))
+        return False
     return None
 
 
@@ -2376,7 +2383,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             options_dict = options if isinstance(options, dict) else {}
             controls_dict = controls if isinstance(controls, dict) else {}
             explicit_search = ("web_search" in options_dict) or ("web_search" in controls_dict)
-            web_search = _arena_search_enabled(options_dict, controls_dict, default=True)
+            web_search = _arena_search_enabled(options_dict, controls_dict, default=False)
             if web_search:
                 search_capability = _arena_model_search_capability(records, arena_model_id)
                 if search_capability is False:

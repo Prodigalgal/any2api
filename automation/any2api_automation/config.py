@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     dynamic_proxy_subscription_url: str = ""
     dynamic_proxy_singbox_path: str = "/usr/local/bin/sing-box"
     dynamic_proxy_max_attempts: int = 5
-    dynamic_proxy_lease_seconds: int = 900
+    dynamic_proxy_lease_seconds: int = 180
+    dynamic_proxy_node_concurrency: int = 8
     dynamic_proxy_distributed_leases: bool = True
     mail_api_base: str = ""
     mail_admin_password: str = ""

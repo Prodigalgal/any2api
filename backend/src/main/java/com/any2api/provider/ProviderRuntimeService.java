@@ -1,11 +1,13 @@
 package com.any2api.provider;
 
 import com.any2api.coordination.PostgresAdvisoryLocks;
+import com.any2api.proxy.ProxyPoolService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,8 +24,12 @@ public class ProviderRuntimeService {
                 WHERE account.provider_id = provider.id AND account.enabled = TRUE
                   AND account.status IN ('ACTIVE', 'DEGRADED')) AS enabled_account_count,
                (SELECT COUNT(*) FROM models model
-                WHERE model.provider_id = provider.id AND model.enabled = TRUE) AS model_count
+                WHERE model.provider_id = provider.id AND model.enabled = TRUE) AS model_count,
+               binding.proxy_pool_id,
+               pool.name AS proxy_pool_name
         FROM providers provider
+        LEFT JOIN provider_proxy_bindings binding ON binding.provider_id = provider.id
+        LEFT JOIN proxy_pools pool ON pool.id = binding.proxy_pool_id
         """;
     private final ProviderRegistry providers;
     private final ProviderInstallationCatalog installations;
@@ -32,6 +38,7 @@ public class ProviderRuntimeService {
     private final ModelCatalogCache modelCatalog;
     private final ProviderTransportModeService transportModes;
     private final ProviderProbeModelService probeModels;
+    private final ProxyPoolService proxyPools;
 
     public ProviderRuntimeService(
         ProviderRegistry providers,
@@ -40,7 +47,8 @@ public class ProviderRuntimeService {
         JdbcClient jdbc,
         ModelCatalogCache modelCatalog,
         ProviderTransportModeService transportModes,
-        ProviderProbeModelService probeModels
+        ProviderProbeModelService probeModels,
+        ProxyPoolService proxyPools
     ) {
         this.providers = providers;
         this.installations = installations;
@@ -49,6 +57,7 @@ public class ProviderRuntimeService {
         this.modelCatalog = modelCatalog;
         this.transportModes = transportModes;
         this.probeModels = probeModels;
+        this.proxyPools = proxyPools;
     }
 
     public List<ProviderRuntimeView> list() {
@@ -69,7 +78,7 @@ public class ProviderRuntimeService {
 
     @Transactional
     public ProviderRuntimeView setEnabled(String providerId, boolean enabled) {
-        return update(providerId, enabled, null, null);
+        return update(providerId, enabled, null, null, null, false);
     }
 
     @Transactional
@@ -77,7 +86,7 @@ public class ProviderRuntimeService {
         String providerId,
         ProviderTransportMode transportMode
     ) {
-        return update(providerId, null, transportMode, null);
+        return update(providerId, null, transportMode, null, null, false);
     }
 
     @Transactional
@@ -96,20 +105,37 @@ public class ProviderRuntimeService {
         ProviderTransportMode transportMode,
         String probeModel
     ) {
-        if (enabled == null && transportMode == null && probeModel == null) {
-            throw new IllegalArgumentException("enabled, transport mode, or probe model is required");
+        return setState(providerId, enabled, transportMode, probeModel, null, false);
+    }
+
+    @Transactional
+    public ProviderRuntimeView setState(
+        String providerId,
+        Boolean enabled,
+        ProviderTransportMode transportMode,
+        String probeModel,
+        UUID proxyPoolId,
+        boolean updateProxyPool
+    ) {
+        if (enabled == null && transportMode == null && probeModel == null && !updateProxyPool) {
+            throw new IllegalArgumentException("enabled, transport mode, probe model, or proxy pool is required");
         }
-        return update(providerId, enabled, transportMode, probeModel);
+        return update(providerId, enabled, transportMode, probeModel, proxyPoolId, updateProxyPool);
     }
 
     private ProviderRuntimeView update(
         String providerId,
         Boolean enabled,
         ProviderTransportMode transportMode,
-        String probeModel
+        String probeModel,
+        UUID proxyPoolId,
+        boolean updateProxyPool
     ) {
         var manifest = providers.requirePlugin(providerId).manifest();
         locks.lockTransaction("provider:" + providerId + ":runtime");
+        if (updateProxyPool) {
+            proxyPools.bindProvider(providerId, proxyPoolId);
+        }
         if (probeModel != null) {
             probeModels.set(providerId, probeModel);
         }
@@ -174,13 +200,15 @@ public class ProviderRuntimeService {
         var mode = transportModes.view(providers.requirePlugin(manifest.id()));
         var probeModel = probeModels.resolveProbeModel(
             manifest.id(), providers.requirePlugin(manifest.id()).scheduledProbeModel()).orElse("");
+        var proxyPoolId = row.getObject("proxy_pool_id", UUID.class);
+        var proxyPoolName = row.getString("proxy_pool_name");
         return new ProviderRuntimeView(
             manifest.id(), manifest.displayName(), manifest.adapterVersion(),
             manifest.defaultModels(), manifest.capabilities(),
             row.getBoolean("installed"), row.getBoolean("enabled"),
             row.getLong("account_count"), row.getLong("enabled_account_count"),
             row.getLong("model_count"), mode.requested(), mode.primary(), mode.fallback(),
-            mode.supported(), probeModel);
+            mode.supported(), probeModel, proxyPoolId, proxyPoolName);
     }
 
     private ProviderRuntimeView runtimeViewWithoutRow(ProviderManifest manifest) {
@@ -190,7 +218,8 @@ public class ProviderRuntimeService {
         return new ProviderRuntimeView(
             manifest.id(), manifest.displayName(), manifest.adapterVersion(),
             manifest.defaultModels(), manifest.capabilities(), false, false, 0, 0, 0,
-            mode.requested(), mode.primary(), mode.fallback(), mode.supported(), probeModel);
+            mode.requested(), mode.primary(), mode.fallback(), mode.supported(), probeModel,
+            null, null);
     }
 
     public record ProviderRuntimeView(
@@ -208,7 +237,9 @@ public class ProviderRuntimeService {
         ProviderTransportMode primaryTransportMode,
         ProviderTransportMode fallbackTransportMode,
         Set<ProviderTransportMode> supportedTransportModes,
-        String probeModel
+        String probeModel,
+        UUID proxyPoolId,
+        String proxyPoolName
     ) {
     }
 }

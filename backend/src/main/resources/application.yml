@@ -88,16 +88,17 @@ any2api:
       batch-size: ${ANY2API_ACCOUNT_PURGE_BATCH_SIZE:100}
   egress-gate:
     enabled: ${ANY2API_EGRESS_GATE_ENABLED:true}
-    default-node-concurrency: ${ANY2API_EGRESS_GATE_NODE_CONCURRENCY:2}
-    default-provider-concurrency: ${ANY2API_EGRESS_GATE_PROVIDER_CONCURRENCY:6}
+    default-node-concurrency: ${ANY2API_EGRESS_GATE_NODE_CONCURRENCY:6}
+    default-provider-concurrency: ${ANY2API_EGRESS_GATE_PROVIDER_CONCURRENCY:12}
+    acquire-timeout: ${ANY2API_EGRESS_GATE_ACQUIRE_TIMEOUT:120s}
     default-stagger: ${ANY2API_EGRESS_GATE_STAGGER:300ms}
     provider-concurrency:
-      qwen: 4
-      deepseek: 4
-      glm: 4
-      arena: 6
-      grok_web: 4
-      longcat: 4
+      qwen: 8
+      deepseek: 8
+      glm: 8
+      arena: 12
+      grok_web: 8
+      longcat: 8
       mimo: 4
       minmax: 4
   observability:

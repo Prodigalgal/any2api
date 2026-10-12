@@ -130,6 +130,30 @@ public class ProxyPoolService {
     }
 
     @Transactional
+    public void bindProvider(String providerId, UUID proxyPoolId) {
+        var id = providerId == null ? "" : providerId.trim();
+        if (id.isBlank()) return;
+        providers.requireInstalled(id);
+        if (proxyPoolId == null) {
+            jdbc.sql("DELETE FROM provider_proxy_bindings WHERE provider_id = :providerId")
+                .param("providerId", id).update();
+            return;
+        }
+        var pool = row(proxyPoolId);
+        var scopes = List.of(
+            ProxyTrafficScope.INFERENCE.name(),
+            ProxyTrafficScope.LIFECYCLE.name(),
+            ProxyTrafficScope.REGISTRATION.name());
+        jdbc.sql("""
+            INSERT INTO provider_proxy_bindings(provider_id, proxy_pool_id, traffic_scopes)
+            VALUES (:providerId, :poolId, :scopes)
+            ON CONFLICT (provider_id) DO UPDATE SET proxy_pool_id = EXCLUDED.proxy_pool_id,
+                updated_at = CURRENT_TIMESTAMP
+            """).param("providerId", id).param("poolId", pool.id())
+            .param("scopes", scopes.toArray(String[]::new)).update();
+    }
+
+    @Transactional
     public ProxyPoolView upsertBootstrapNodePool(String poolName, String source) {
         locks.lockTransaction("proxy-bootstrap:" + name(poolName));
         var existing = jdbc.sql("SELECT id FROM proxy_pools WHERE name = :name")

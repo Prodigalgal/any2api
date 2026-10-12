@@ -257,8 +257,8 @@ public class RuntimeSettingsService {
             if (messageTimeoutSeconds < 30 || messageTimeoutSeconds > 1800) {
                 throw new IllegalArgumentException("mail wait timeout must be between 30 and 1800 seconds");
             }
-            if (requestTimeoutSeconds < 5 || requestTimeoutSeconds > 300) {
-                throw new IllegalArgumentException("mail request timeout must be between 5 and 300 seconds");
+            if (requestTimeoutSeconds < 5 || requestTimeoutSeconds > 900) {
+                throw new IllegalArgumentException("mail request timeout must be between 5 and 900 seconds");
             }
             return new TempMailSettings(base, clean(adminPassword), clean(sitePassword),
                 normalizedDomains, pollSeconds, messageTimeoutSeconds, requestTimeoutSeconds);

@@ -49,6 +49,7 @@ export function Overview() {
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
   const runtime = useQuery({ queryKey: ["admin-providers"], queryFn: api.adminProviders });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const poolsQuery = useQuery({ queryKey: ["proxy-pools"], queryFn: api.proxyPools });
   const rows = groupProviders(runtime.data ?? [], catalog.data?.data ?? [], models.data?.data ?? []);
   const modelRows = models.data?.data ?? [];
   const enabledAccounts = rows.reduce((total, row) => total + row.enabledAccountCount, 0);
@@ -86,6 +87,20 @@ export function Overview() {
     },
   });
 
+  const proxyPoolMutation = useMutation({
+    mutationFn: ({ id, proxyPoolId }: { id: string; proxyPoolId: string | null }) =>
+      api.updateProvider(id, {
+        proxyPoolId: proxyPoolId || null,
+        clearProxyPool: !proxyPoolId,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-providers"] }),
+        queryClient.invalidateQueries({ queryKey: ["proxy-pools"] }),
+      ]);
+    },
+  });
+
   return (
     <PageContainer maxWidth={1520}>
       <PageHeader
@@ -96,7 +111,7 @@ export function Overview() {
             <IconButton
               aria-label="刷新状态"
               onClick={() =>
-                void Promise.all([catalog.refetch(), runtime.refetch(), models.refetch(), health.refetch()])
+                void Promise.all([catalog.refetch(), runtime.refetch(), models.refetch(), health.refetch(), poolsQuery.refetch()])
               }
               sx={{
                 border: `1px solid ${tokens.border}`,
@@ -181,6 +196,7 @@ export function Overview() {
                   <TableCell>健康状态</TableCell>
                   <TableCell>推理通道</TableCell>
                   <TableCell>探活模型</TableCell>
+                  <TableCell>出口代理</TableCell>
                   <TableCell>可用账号</TableCell>
                   <TableCell>绑定模型</TableCell>
                   <TableCell>工具调用</TableCell>
@@ -188,9 +204,9 @@ export function Overview() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {(catalog.isLoading || runtime.isLoading || models.isLoading) && (
+                {(catalog.isLoading || runtime.isLoading || models.isLoading || poolsQuery.isLoading) && (
                   <TableRow>
-                    <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
+                    <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
                       <CircularProgress size={24} thickness={4} />
                     </TableCell>
                   </TableRow>
@@ -258,6 +274,14 @@ export function Overview() {
                         />
                       </TableCell>
                       <TableCell>
+                        <ProxyPoolSelector
+                          row={row}
+                          allPools={poolsQuery.data ?? []}
+                          disabled={proxyPoolMutation.isPending}
+                          onChange={(poolId) => proxyPoolMutation.mutate({ id: row.id, proxyPoolId: poolId })}
+                        />
+                      </TableCell>
+                      <TableCell>
                         <Typography
                           sx={{
                             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -302,7 +326,7 @@ export function Overview() {
                   ))}
                 {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                    <TableCell colSpan={10} align="center" sx={{ py: 6, color: "text.secondary" }}>
                       暂无厂商目录数据
                     </TableCell>
                   </TableRow>
@@ -545,6 +569,8 @@ function groupProviders(
       primaryTransportMode: Exclude<ProviderTransportMode, "AUTO">;
       supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">>;
       probeModel: string;
+      proxyPoolId: string | null;
+      proxyPoolName: string | null;
     }
   >();
   for (const provider of runtime) {
@@ -564,6 +590,8 @@ function groupProviders(
       primaryTransportMode: provider.primaryTransportMode,
       supportedTransportModes: provider.supportedTransportModes,
       probeModel: provider.probeModel || "",
+      proxyPoolId: provider.proxyPoolId || null,
+      proxyPoolName: provider.proxyPoolName || null,
     });
   }
   for (const model of models) {
@@ -806,3 +834,107 @@ function ProbeModelSelector({
     </Box>
   );
 }
+
+function ProxyPoolSelector({
+  row,
+  allPools,
+  disabled,
+  onChange,
+}: {
+  row: { id: string; displayName: string; proxyPoolId?: string | null; proxyPoolName?: string | null };
+  allPools: Array<{ id: string; name: string; enabled: boolean }>;
+  disabled: boolean;
+  onChange: (poolId: string | null) => void;
+}) {
+  const currentPoolId = row.proxyPoolId || "";
+  const currentPool = allPools.find((p) => p.id === currentPoolId);
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+      <Select
+        size="small"
+        value={currentPoolId}
+        disabled={disabled}
+        onChange={(event) => {
+          const val = event.target.value;
+          onChange(val ? String(val) : null);
+        }}
+        sx={{
+          minWidth: 140,
+          maxWidth: 180,
+          height: 32,
+          fontSize: 12,
+          bgcolor: tokens.canvasSubtle,
+          borderRadius: "8px",
+          borderColor: tokens.border,
+          "& .MuiSelect-select": {
+            py: 0.5,
+            px: 1.25,
+            display: "flex",
+            alignItems: "center",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          },
+          "&:hover": {
+            borderColor: tokens.borderStrong,
+          },
+          "&.Mui-focused": {
+            borderColor: tokens.primary.main,
+            boxShadow: `0 0 0 2px ${tokens.primary.light}`,
+          },
+        }}
+        inputProps={{ "aria-label": `${row.displayName} 出口代理` }}
+      >
+        <MenuItem value="" sx={{ fontSize: 12.5, color: "text.secondary" }}>
+          <em>直连出口（无代理）</em>
+        </MenuItem>
+        {allPools.map((pool) => (
+          <MenuItem key={pool.id} value={pool.id} sx={{ fontSize: 12.5 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+              <Box
+                component="span"
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  bgcolor: pool.enabled ? tokens.status.emerald.main : tokens.text.muted,
+                }}
+              />
+              <span>{pool.name}</span>
+            </Box>
+          </MenuItem>
+        ))}
+      </Select>
+      {currentPool ? (
+        <Typography
+          sx={{
+            fontSize: 10.5,
+            color: tokens.status.emerald.text,
+            display: "flex",
+            alignItems: "center",
+            gap: 0.5,
+            pl: 0.25,
+          }}
+        >
+          <Box
+            component="span"
+            sx={{
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              bgcolor: tokens.status.emerald.main,
+              boxShadow: `0 0 4px ${tokens.status.emerald.main}`,
+            }}
+          />
+          节点: {currentPool.name}
+        </Typography>
+      ) : (
+        <Typography sx={{ fontSize: 10.5, color: tokens.text.muted, pl: 0.25 }}>
+          直连集群网络
+        </Typography>
+      )}
+    </Box>
+  );
+}
+

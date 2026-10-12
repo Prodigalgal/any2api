@@ -30,7 +30,6 @@ import reactor.core.scheduler.Schedulers;
 @Component
 public class ProviderEgressGate {
     private static final Logger LOGGER = LoggerFactory.getLogger(ProviderEgressGate.class);
-    private static final Duration ACQUIRE_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration COOLDOWN_DURATION = Duration.ofSeconds(30);
 
     private final Any2ApiProperties properties;
@@ -38,6 +37,7 @@ public class ProviderEgressGate {
     private final ConcurrentMap<String, Semaphore> providerSemaphores = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, AtomicLong> lastRequestTimes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Long> nodeCooldowns = new ConcurrentHashMap<>();
+    private final AtomicLong roundRobinCounter = new AtomicLong(0);
 
     public ProviderEgressGate(Any2ApiProperties properties) {
         this.properties = properties;
@@ -112,14 +112,13 @@ public class ProviderEgressGate {
                 new Semaphore(Math.max(1, properties.getEgressGate().getDefaultNodeConcurrency()), true)
             );
 
-            var timeoutMs = ACQUIRE_TIMEOUT.toMillis();
+            var timeoutMs = properties.getEgressGate().getAcquireTimeout().toMillis();
             if (!providerSem.tryAcquire(timeoutMs, TimeUnit.MILLISECONDS)) {
                 throw new IllegalStateException("provider global concurrency limit exceeded for " + providerId);
             }
 
             try {
                 if (!nodeSem.tryAcquire(timeoutMs, TimeUnit.MILLISECONDS)) {
-                    providerSem.release();
                     throw new IllegalStateException("egress node concurrency limit exceeded for " + compositeKey);
                 }
             } catch (Exception ex) {
@@ -197,7 +196,8 @@ public class ProviderEgressGate {
                 var idx = Math.abs(affinityKey.hashCode()) % nodes.size();
                 return sanitizeNodeAddress(nodes.get(idx));
             }
-            return sanitizeNodeAddress(nodes.get(0));
+            var idx = (int) (Math.abs(roundRobinCounter.getAndIncrement()) % nodes.size());
+            return sanitizeNodeAddress(nodes.get(idx));
         }
 
         if (proxyPool.get("subscription_url") instanceof String sub && !sub.isBlank()) {

@@ -435,9 +435,10 @@ public class Any2ApiProperties {
 
     public static class EgressGate {
         private boolean enabled = true;
-        private int defaultNodeConcurrency = 2;
-        private int defaultProviderConcurrency = 6;
+        private int defaultNodeConcurrency = 6;
+        private int defaultProviderConcurrency = 12;
         private Duration defaultStagger = Duration.ofMillis(300);
+        private Duration acquireTimeout = Duration.ofSeconds(120);
         private java.util.Map<String, Integer> providerConcurrency = new java.util.HashMap<>();
 
         public boolean isEnabled() { return enabled; }
@@ -453,6 +454,14 @@ public class Any2ApiProperties {
         public void setDefaultProviderConcurrency(int value) {
             if (value < 1) throw new IllegalArgumentException("default provider concurrency must be positive");
             this.defaultProviderConcurrency = value;
+        }
+
+        public Duration getAcquireTimeout() { return acquireTimeout; }
+        public void setAcquireTimeout(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("acquire timeout must be positive");
+            }
+            this.acquireTimeout = value;
         }
 
         public Duration getDefaultStagger() { return defaultStagger; }

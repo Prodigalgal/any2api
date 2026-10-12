@@ -13,6 +13,7 @@ import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.ProviderTransportMode;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -90,6 +91,12 @@ public final class GrokWebProvider implements InferenceProvider {
     @Override
     public java.util.Optional<String> scheduledProbeModel() {
         return java.util.Optional.of("grok-3");
+    }
+
+    @Override
+    public ProviderRetryPolicy retryPolicy() {
+        return ProviderRetryPolicy.standardWith(3,
+            "provider_stream_error", "provider_transport_error", "anti_bot_rejected");
     }
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }

@@ -100,7 +100,7 @@ public final class QwenProvider implements InferenceProvider {
 
     @Override
     public java.util.Optional<String> scheduledProbeModel() {
-        return properties.isEnabled() ? java.util.Optional.of("qwen3.8-max") : java.util.Optional.empty();
+        return properties.isEnabled() ? java.util.Optional.of("qwen3.5-flash") : java.util.Optional.empty();
     }
 
     @Override

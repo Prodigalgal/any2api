@@ -47,6 +47,19 @@ class ModelProbeServiceTest {
             }).verifyComplete(), true);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"Max", "claude-3-7-sonnet", "gemini-2.5-pro", "deepseek-r1", "o1-mini", "longcat-thinking"})
+    void rejectsProbingAdvancedModels(String advancedModel) {
+        var service = new ModelProbeService(
+            mock(ProviderRegistry.class),
+            mock(InferenceCoordinator.class),
+            mock(JdbcClient.class),
+            Executors.newSingleThreadExecutor(),
+            mock(ModelCatalogCache.class));
+        StepVerifier.create(service.probe("arena", advancedModel))
+            .verifyComplete();
+    }
+
     private void verifyProbe(Flux<CanonicalEvent> events,
         java.util.function.Consumer<Mono<ModelProbeService.Result>> assertion, boolean persisted) {
         var jdbc = mock(JdbcClient.class);

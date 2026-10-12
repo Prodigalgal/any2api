@@ -73,7 +73,9 @@ public final class ModelProbeScheduler {
                     continue;
                 }
                 var providerId = provider.manifest().id();
-                var preferredModel = provider.scheduledProbeModel().orElse("");
+                var preferredModel = provider.scheduledProbeModel()
+                    .filter(m -> !AdvancedModelProbePolicy.isAdvancedModel(m))
+                    .orElse("");
                 var candidateModel = jdbc.sql("""
                         SELECT model.upstream_id
                         FROM models model
@@ -92,6 +94,19 @@ public final class ModelProbeScheduler {
                             WHERE fresh_probe.provider_id = model.provider_id
                               AND fresh_probe.status = 'READY'
                               AND fresh_probe.probed_at >= :staleBefore
+                          )
+                          AND NOT (
+                            model.upstream_id ILIKE '%max%'
+                            OR model.upstream_id ILIKE '%pro%'
+                            OR model.upstream_id ILIKE '%sonnet%'
+                            OR model.upstream_id ILIKE '%opus%'
+                            OR model.upstream_id ILIKE '%o1%'
+                            OR model.upstream_id ILIKE '%o3%'
+                            OR model.upstream_id ILIKE '%thinking%'
+                            OR model.upstream_id ILIKE '%reasoner%'
+                            OR model.upstream_id ILIKE '%r1%'
+                            OR model.upstream_id ILIKE '%ultra%'
+                            OR model.upstream_id ILIKE '%flagship%'
                           )
                         ORDER BY
                           CASE WHEN model.upstream_id = :preferredModel THEN 0 ELSE 1 END,
@@ -119,7 +134,7 @@ public final class ModelProbeScheduler {
                     .param("staleBefore", PostgresResultValues.timestamp(staleBefore))
                     .query((row, ignored) -> row.getString("upstream_id"))
                     .optional();
-                if (candidateModel.isPresent()) {
+                if (candidateModel.isPresent() && !AdvancedModelProbePolicy.isAdvancedModel(candidateModel.get())) {
                     result.add(new Candidate(providerId, candidateModel.get()));
                     if (result.size() >= batchSize) {
                         break;

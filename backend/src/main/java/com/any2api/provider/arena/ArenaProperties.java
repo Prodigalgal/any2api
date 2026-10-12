@@ -26,7 +26,7 @@ public class ArenaProperties {
     }
 
     private String probeModel = "gemini-3.1-flash-lite";
-    private java.util.List<String> fallbackProbeModels = java.util.List.of("gpt-5.4-mini-high", "Max");
+    private java.util.List<String> fallbackProbeModels = java.util.List.of();
 
     public String getProbeModel() { return probeModel; }
 

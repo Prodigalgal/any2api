@@ -42,6 +42,11 @@ public final class ModelProbeService {
     public Mono<Result> probe(String providerId, String modelId) {
         var normalizedProvider = required(providerId, "provider_id");
         var normalizedModel = required(modelId, "model_id");
+        if (AdvancedModelProbePolicy.isAdvancedModel(normalizedModel)) {
+            log.info("model_probe_rejected_advanced_model provider={} model={}",
+                normalizedProvider, normalizedModel);
+            return Mono.empty();
+        }
         var provider = providers.require(normalizedProvider);
         var request = request(normalizedProvider, normalizedModel);
         var startedAt = System.nanoTime();

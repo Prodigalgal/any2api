@@ -82,7 +82,9 @@ final class InferenceReadinessProbe {
                 if (result.ready() || requestedModel != null || !canFallbackProbeModel(result.errorClass())) {
                     return Mono.just(result);
                 }
-                var fallbackModels = provider.fallbackProbeModels();
+                var fallbackModels = provider.fallbackProbeModels().stream()
+                    .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m))
+                    .toList();
                 if (fallbackModels.isEmpty()) {
                     return Mono.just(result);
                 }
@@ -241,14 +243,21 @@ final class InferenceReadinessProbe {
     }
 
     private static String probeModel(com.any2api.provider.InferenceProvider provider) {
-        var scheduled = provider.scheduledProbeModel();
+        var scheduled = provider.scheduledProbeModel()
+            .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m));
         if (scheduled.isPresent() && !scheduled.get().isBlank()) {
             return scheduled.get().trim();
         }
         var manifest = provider.manifest();
         var preferred = manifest.randomModelPreferences()
-            .getOrDefault(RandomModelRole.TOP_TEXT, List.of());
-        if (!preferred.isEmpty()) return preferred.getFirst();
+            .getOrDefault(RandomModelRole.TOP_TEXT, List.of()).stream()
+            .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m))
+            .findFirst();
+        if (preferred.isPresent()) return preferred.get();
+        var defaultModel = manifest.defaultModels().stream()
+            .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m))
+            .findFirst();
+        if (defaultModel.isPresent()) return defaultModel.get();
         if (!manifest.defaultModels().isEmpty()) return manifest.defaultModels().getFirst();
         throw new IllegalStateException("provider has no model for inference readiness probe");
     }

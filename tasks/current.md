@@ -1,7 +1,33 @@
-# 当前任务板（源码 0.28.5）
+# 当前任务板（源码 0.28.6）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-12 模型探活策略重构与 Arena 动态出口代理打通 (v0.28.6)
+
+- **背景与根因定位**：
+  - 下游调用方反馈：`Arena Max 返回 503 model_unavailable，正在重新探测`；
+  - 排查发现三大缺陷：
+    1. `ArenaProperties.java` 默认将 `fallbackProbeModels` 设为 `["gpt-5.4-mini-high", "Max"]`；当基础模型探活瞬断时，调度器自动回退探活 `Max` 等高阶旗舰模型，触发 upstream reCAPTCHA v2 风控并写入 `model_probe_results(model_id='Max', status='FAILED')`；
+    2. `ModelCatalogCache.java` 的可用性 SQL 未对高级模型做保护隔离，只要存在针对该模型的 FAILED 探活记录，便一票否决将其标记为 UNAVAILABLE，下游请求直接抛出 503；
+    3. `Arena` 在 `provider_proxy_bindings` 中只绑定了 `traffic_scopes = {REGISTRATION}`，导致其实时对话（INFERENCE）和账号探活走的是机房直连 IP，在频繁调用时容易被 Google reCAPTCHA 判定为低信用分而触发 v2 验证码。
+- **架构与代码修复**：
+  - **严禁对高级模型探活（AdvancedModelProbePolicy）**：
+    - 新增 `AdvancedModelProbePolicy.java`，定义高级/旗舰/高耗能模型正则模式（涵盖 `max`, `pro`, `sonnet`, `opus`, `o1`, `o3`, `thinking`, `reasoner`, `r1`, `ultra`, `flagship` 及音视频多模态模型）；
+    - `ModelProbeService.probe`: 增加前置拦截守卫，若请求探测高级模型，直接打印日志并返回 `Mono.empty()`，严禁向 upstream 发送探测请求；
+    - `ModelProbeScheduler.candidates`: SQL 查询在 WHERE 条件中硬编码排除所有高级模型，且 Java 端双重过滤；每个供应商有且仅探测其唯一的轻量基础文本模型，绝不探测高级模型；
+    - `InferenceReadinessProbe`: 移除所有高级模型进入 probeModel 或 fallback 探测列表的路径；
+    - `ArenaProperties.java`: 清空 `fallbackProbeModels` 默认列表；
+    - `QwenProvider.java`: 将 scheduledProbeModel 由 `qwen3.8-max` 修正为基础轻量模型 `qwen3.5-flash`；
+  - **高级模型可用性保护（ModelCatalogCache）**：
+    - 在 `ModelCatalogCache` 的 SQL 中明确规则：高级模型不受自身 probe.status = FAILED 的熔断阻断；只要该供应商有可用账号（available_accounts > 0），且该供应商具备健康证据（真实调用成功或简单文本模型 probe READY），高级模型即视为可用，彻底落实“通常账号可用，模型就能被调用”；
+  - **Arena 出口代理打通与数据清洗**：
+    - 清理数据库 `model_probe_results` 中历史被错误探测的高级模型脏数据（`DELETE 28` 条记录，包含 `Max`）；
+    - 更新 `provider_proxy_bindings`，为 `arena` 开启 `{INFERENCE, LIFECYCLE, REGISTRATION}` 全部流量范围，流量全部由海外代理池出口。
+- **测试与验证**：
+  - `ModelProbeServiceTest`, `ModelProbeSchedulerTest`, `ArenaProtocolTest`, `QwenProtocolTest` 100% 通过；
+  - `tools/compatibility/check_versions.py`: 版本系统 100% 统一至 `v0.28.6` 并验证通过。
+
 
 ## 2026-10-12 DeepSeek 自动化注册全链路打通与风控自愈加固 (v0.28.5)
 

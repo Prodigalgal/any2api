@@ -97,22 +97,37 @@ public class ModelCatalogCache {
                      OR account_runtime.available_accounts = 0 THEN 'UNAVAILABLE'
                    WHEN probe.status = 'FAILED' AND probe.probed_at >= :probeFreshAfter
                      AND (usage_runtime.last_success_at IS NULL
-                       OR probe.probed_at > usage_runtime.last_success_at) THEN 'UNAVAILABLE'
+                       OR probe.probed_at > usage_runtime.last_success_at)
+                     AND NOT (
+                       m.upstream_id ~* '(max|pro|sonnet|opus|o1|o3|thinking|reasoner|r1|ultra|flagship|-image|-video|-i2v|-t2v|-t2i|-edit|flux-|wan-|wan2|veo-|kling-|sora)'
+                     ) THEN 'UNAVAILABLE'
                    WHEN usage_runtime.request_count >= 3
                      AND usage_runtime.success_rate >= :readySuccessRate
                      AND usage_runtime.p95_ms <= :readyP95Ms THEN 'READY'
-                   WHEN usage_runtime.request_count < 3
-                     AND probe.status = 'READY' AND probe.probed_at >= :probeFreshAfter THEN 'READY'
+                   WHEN (
+                       (usage_runtime.request_count < 3 AND probe.status = 'READY' AND probe.probed_at >= :probeFreshAfter)
+                       OR (
+                           m.upstream_id ~* '(max|pro|sonnet|opus|o1|o3|thinking|reasoner|r1|ultra|flagship|-image|-video|-i2v|-t2v|-t2i|-edit|flux-|wan-|wan2|veo-|kling-|sora)'
+                           AND EXISTS (
+                               SELECT 1 FROM model_probe_results provider_probe
+                               WHERE provider_probe.provider_id = m.provider_id
+                                 AND provider_probe.status = 'READY'
+                                 AND provider_probe.probed_at >= :providerProbeFreshAfter
+                           )
+                       )
+                   ) THEN 'READY'
                    WHEN usage_runtime.attempt_count >= 3
                      AND usage_runtime.success_count = 0 THEN 'UNAVAILABLE'
                    ELSE 'DEGRADED'
                END AS runtime_status,
                account_runtime.available_accounts > 0
-                 AND NOT COALESCE(
+                 AND NOT (
                    probe.status = 'FAILED' AND probe.probed_at >= :probeFreshAfter
                      AND (usage_runtime.last_success_at IS NULL
-                       OR probe.probed_at > usage_runtime.last_success_at),
-                   FALSE
+                       OR probe.probed_at > usage_runtime.last_success_at)
+                     AND NOT (
+                       m.upstream_id ~* '(max|pro|sonnet|opus|o1|o3|thinking|reasoner|r1|ultra|flagship|-image|-video|-i2v|-t2v|-t2i|-edit|flux-|wan-|wan2|veo-|kling-|sora)'
+                     )
                  )
                  AND (
                    usage_runtime.success_count > 0

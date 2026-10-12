@@ -57,8 +57,8 @@ class _BrowserReauthenticationRequired(RuntimeError):
 class DeepseekAutomationProvider(AutomationProvider):
     manifest = AutomationProviderManifest(
         id="deepseek",
-        browser_backend="patchright",
-        fallback_backend="camoufox",
+        browser_backend="camoufox",
+        fallback_backend="patchright",
         isolation="process",
         challenge_types=(
             "hcaptcha_area_select",
@@ -157,7 +157,9 @@ class DeepseekAutomationProvider(AutomationProvider):
             )
         status = int(result.get("status") or 502)
         patch = result.get("credential_patch")
-        if status in {401, 403}:
+        body = _decode_json_body(str(result.get("body") or ""))
+        code = int(body.get("code") or 0) if isinstance(body, dict) else 0
+        if status in {401, 403} or code == 40003:
             response: dict[str, Any] = {
                 "healthy": False,
                 "auth_expired": True,
@@ -165,7 +167,6 @@ class DeepseekAutomationProvider(AutomationProvider):
                 "error_class": "deepseek_credentials_rejected",
             }
         else:
-            body = _decode_json_body(str(result.get("body") or ""))
             healthy = _catalog_available(body)
             response = {
                 "healthy": healthy,
@@ -218,9 +219,15 @@ class DeepseekAutomationProvider(AutomationProvider):
                         **{key: value for key, value in event.items() if key != "type"},
                     )
             except Exception as error:  # noqa: BLE001 - normalized stream boundary
-                yield transport_frame(
-                    "error", data=f"official browser stream failed ({type(error).__name__})"
-                )
+                from .api_transport import ApiActionError, _api_error_detail, _api_error_status
+
+                if isinstance(error, ApiActionError):
+                    yield transport_frame("status", status=_api_error_status(error.status))
+                    yield transport_frame("error", data=_api_error_detail(error))
+                else:
+                    yield transport_frame(
+                        "error", data=f"official browser stream failed ({type(error).__name__})"
+                    )
 
     async def close(self) -> None:
         transports = tuple(self._transports.values())
@@ -364,12 +371,7 @@ async def _run_registration_browser(
                 RegistrationStage.ACTIVATED.value,
                 RegistrationStage.CREDENTIAL_CAPTURED.value,
             }
-            err_str = str(error)
-            is_waf_blocked = any(
-                m in err_str
-                for m in ("The request could not be satisfied", "Request blocked", "403 ERROR")
-            )
-            if accepted or attempt >= attempts or is_waf_blocked:
+            if accepted or attempt >= attempts:
                 raise
             diagnostic = " ".join(str(error).split())
             if len(diagnostic) > 400:

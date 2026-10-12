@@ -266,9 +266,10 @@ public final class DeepseekProvider implements InferenceProvider {
                     "anti_bot_rejected", upstream.getMessage(), true,
                     Map.of("status", upstream.status(), "challenge", "provider_verification"));
             }
-            var retryable = upstream.status() >= 500
-                || List.of(408, 409, 425, 429).contains(upstream.status());
-            var type = switch (upstream.status()) {
+            var credentialRejected = !antiBot && ProviderFailureSignals.isCredentialRejected(upstream.status(), message);
+            var retryable = !credentialRejected && (upstream.status() >= 500
+                || List.of(408, 409, 425, 429).contains(upstream.status()));
+            var type = credentialRejected ? "credential_rejected" : switch (upstream.status()) {
                 case 401, 403 -> "credential_rejected";
                 case 429 -> "rate_limited";
                 default -> "provider_upstream_error";

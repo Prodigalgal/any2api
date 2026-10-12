@@ -297,7 +297,7 @@ async def test_reauthentication_falls_back_to_isolated_browser(monkeypatch) -> N
         raise _BrowserReauthenticationRequired
 
     def browser_flow(flow, **kwargs):
-        assert kwargs["preferred"] == "patchright"
+        assert kwargs["preferred"] == "camoufox"
         assert kwargs["payload"]["proxy_check_url"].startswith("https://")
         return BrowserResult(
             external_id="user",

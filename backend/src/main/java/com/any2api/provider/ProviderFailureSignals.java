@@ -27,6 +27,7 @@ public final class ProviderFailureSignals {
         "unauthorized", "login expired", "token expired", "token_expired",
         "invalid token", "invalid_token", "invalid session", "session expired",
         "please log in", "please login", "not logged in", "authentication failed",
+        "code=40003", "40003", "code\":40003", "code\": 40003",
         "code=401", "code\":401", "code\": 401", "status\":401", "status\": 401",
         "\"code\":\"unauthorized\"", "\"code\": \"unauthorized\"");
 

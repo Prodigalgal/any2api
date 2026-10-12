@@ -1,9 +1,25 @@
-# 当前任务板（源码 0.28.2）
+# 当前任务板（源码 0.28.3）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-12 修复进程自动回收版本的发布阻塞
+## 2026-10-12 DeepSeek 全链路凭据失效自愈与 CloudFront WAF 穿透修复 (v0.28.3)
+
+- **背景与根因定位**：
+  - 用户反馈 DeepSeek 全链路无可用账号。排查发现 16 个存量账号 Token 已过期（官方接口返回 `code: 40003`），但错误被包装为普通 `RuntimeError`，导致 HTTP 响应沦为模糊的 `502`；
+  - 后端将其归类为 `provider_upstream_error` 而非 `credential_rejected`，死账号永远维持 `ACTIVE`，调度器反复借出死账号，引发 100% 失败并触发模型熔断（`model_health_backoff`）；
+  - 自动注册/重新认证使用 `preferred="patchright"`（Chromium Headless），直接被 AWS CloudFront 边缘 403 阻断（`Request blocked`），阻断了新账号自动补齐与密码重认证。
+- **架构与代码修复**：
+  - **精准凭据失效错误流转**：
+    - `deepseek_browser.py`: 在 `_require_success` 中当 `code == 40003` 时抛出 `ApiActionError(status=401)`；
+    - `deepseek.py`: 在 `transport_stream` 中透传 `ApiActionError` 真实 HTTP 状态码；在 `keepalive` 中增加 `code == 40003` 过期判定；
+    - `DeepseekProvider.java` / `ProviderFailureSignals.java`: 在 `CREDENTIAL_REJECTED_MARKERS` 与 `classify` 中纳管 `code=40003` / `40003`，精准归类为 `credential_rejected` 并自动触发账号过期与重认证调度；
+  - **浏览器后端与 WAF 穿透优化**：
+    - 将 DeepSeek 的首选浏览器后端切换为 `camoufox`（Firefox 反指纹），成功跑通 AWS WAF 202 Challenge 并正常渲染前端表单与登录接口；
+    - 移除单次 WAF 拦截直接中断注册的过激判定，允许重试与容错；
+    - `DeepseekOfficialProfileRefresher`: 容错处理前端未暴露 `appVersion` 的场景，保留 fallback 配置并将日志调整为 debug 级别。
+
+## 2026-10-12 修复进程自动回收版本的发布阻塞 (v0.28.2)
 
 - 目标：修复 0.28.1 发布在版本契约检查失败的阻塞，使已有进程回收修补可通过 CI/CD 部署。
 - 范围：统一 Backend、WEB、lockfile 和 automation 为新的修补版本 0.28.2；完成 lint、测试、GitOps 和线上容器能力核查。

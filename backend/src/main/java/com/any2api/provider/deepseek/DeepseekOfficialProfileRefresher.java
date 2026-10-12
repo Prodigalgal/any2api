@@ -53,8 +53,8 @@ final class DeepseekOfficialProfileRefresher {
                     log.info("Official DeepSeek client profile refreshed");
                 }
             })
-            .doOnError(error -> log.warn(
-                "Official DeepSeek client profile refresh failed: {}", error.getMessage()))
+            .doOnError(error -> log.debug(
+                "Official DeepSeek client profile refresh retained fallback: {}", error.getMessage()))
             .doFinally(ignored -> refreshing.set(false))
             .onErrorResume(ignored -> Mono.empty())
             .subscribe();

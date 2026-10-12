@@ -491,6 +491,16 @@ def _require_success(result: dict[str, Any], operation: str) -> None:
     data = value.get("data") or {}
     biz_code = int(data.get("biz_code") or 0) if isinstance(data, dict) else -1
     if code != 0 or biz_code != 0:
+        if code == 40003 or (
+            isinstance(data, dict) and "invalid token" in str(data.get("msg", "")).lower()
+        ):
+            from .api_transport import ApiActionError
+
+            raise ApiActionError(
+                f"DeepSeek {operation} authorization expired code={code} biz_code={biz_code}",
+                status=401,
+                body=json.dumps(value),
+            )
         raise RuntimeError(f"DeepSeek {operation} was rejected code={code} biz_code={biz_code}")
 
 

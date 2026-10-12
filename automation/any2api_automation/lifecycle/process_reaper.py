@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
-from dataclasses import dataclass
 import logging
 import os
-from pathlib import Path
 import signal
 import time
+from contextlib import suppress
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ..config import settings

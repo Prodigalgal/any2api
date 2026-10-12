@@ -26,6 +26,7 @@ public final class ModelProbeScheduler {
     private final ExecutorService databaseExecutor;
     private final ModelProbeService probes;
     private final ProviderRegistry providers;
+    private final ProviderProbeModelService probeModels;
     private final int batchSize;
     private final Duration freshness;
 
@@ -34,12 +35,14 @@ public final class ModelProbeScheduler {
         ExecutorService databaseExecutor,
         ModelProbeService probes,
         ProviderRegistry providers,
+        ProviderProbeModelService probeModels,
         Any2ApiProperties properties
     ) {
         this.jdbc = jdbc;
         this.databaseExecutor = databaseExecutor;
         this.probes = probes;
         this.providers = providers;
+        this.probeModels = probeModels;
         this.batchSize = properties.getModelRuntime().getScheduledProbeBatchSize();
         this.freshness = properties.getModelRuntime().getProbeFreshness();
     }
@@ -73,7 +76,9 @@ public final class ModelProbeScheduler {
                     continue;
                 }
                 var providerId = provider.manifest().id();
-                var preferredModel = provider.scheduledProbeModel()
+                var configuredModel = probeModels.configuredProbeModel(providerId)
+                    .filter(m -> !AdvancedModelProbePolicy.isAdvancedModel(m));
+                var preferredModel = configuredModel.or(provider::scheduledProbeModel)
                     .filter(m -> !AdvancedModelProbePolicy.isAdvancedModel(m))
                     .orElse("");
                 var candidateModel = jdbc.sql("""
@@ -87,6 +92,7 @@ public final class ModelProbeScheduler {
                           AND model.enabled = TRUE
                           AND provider.enabled = TRUE
                           AND provider.installed = TRUE
+                          AND (:requireConfigured = FALSE OR model.upstream_id = :preferredModel)
                           AND (probe.probed_at IS NULL
                             OR probe.probed_at < :staleBefore)
                           AND NOT EXISTS (
@@ -131,6 +137,7 @@ public final class ModelProbeScheduler {
                         """)
                     .param("providerId", providerId)
                     .param("preferredModel", preferredModel)
+                    .param("requireConfigured", configuredModel.isPresent())
                     .param("staleBefore", PostgresResultValues.timestamp(staleBefore))
                     .query((row, ignored) -> row.getString("upstream_id"))
                     .optional();

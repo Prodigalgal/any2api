@@ -75,6 +75,17 @@ export function Overview() {
     },
   });
 
+  const probeModelMutation = useMutation({
+    mutationFn: ({ id, probeModel }: { id: string; probeModel: string }) =>
+      api.updateProvider(id, { probeModel }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-providers"] }),
+        queryClient.invalidateQueries({ queryKey: ["models"] }),
+      ]);
+    },
+  });
+
   return (
     <PageContainer maxWidth={1520}>
       <PageHeader
@@ -106,6 +117,7 @@ export function Overview() {
       )}
       {toggle.error && <Alert severity="error" sx={{ mb: 2.5 }}>{toggle.error.message}</Alert>}
       {transportMode.error && <Alert severity="error" sx={{ mb: 2.5 }}>{transportMode.error.message}</Alert>}
+      {probeModelMutation.error && <Alert severity="error" sx={{ mb: 2.5 }}>{probeModelMutation.error.message}</Alert>}
 
       {/* Stripe 标杆级三大核心指标卡片 */}
       <Box
@@ -168,6 +180,7 @@ export function Overview() {
                   <TableCell>接入开关</TableCell>
                   <TableCell>健康状态</TableCell>
                   <TableCell>推理通道</TableCell>
+                  <TableCell>探活模型</TableCell>
                   <TableCell>可用账号</TableCell>
                   <TableCell>绑定模型</TableCell>
                   <TableCell>工具调用</TableCell>
@@ -177,7 +190,7 @@ export function Overview() {
               <TableBody>
                 {(catalog.isLoading || runtime.isLoading || models.isLoading) && (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                    <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                       <CircularProgress size={24} thickness={4} />
                     </TableCell>
                   </TableRow>
@@ -237,6 +250,14 @@ export function Overview() {
                         />
                       </TableCell>
                       <TableCell>
+                        <ProbeModelSelector
+                          row={row}
+                          allModels={modelRows}
+                          disabled={probeModelMutation.isPending}
+                          onChange={(model) => probeModelMutation.mutate({ id: row.id, probeModel: model })}
+                        />
+                      </TableCell>
+                      <TableCell>
                         <Typography
                           sx={{
                             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -281,7 +302,7 @@ export function Overview() {
                   ))}
                 {!catalog.isLoading && !runtime.isLoading && !models.isLoading && rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                    <TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>
                       暂无厂商目录数据
                     </TableCell>
                   </TableRow>
@@ -523,6 +544,7 @@ function groupProviders(
       requestedTransportMode: ProviderTransportMode;
       primaryTransportMode: Exclude<ProviderTransportMode, "AUTO">;
       supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">>;
+      probeModel: string;
     }
   >();
   for (const provider of runtime) {
@@ -541,6 +563,7 @@ function groupProviders(
       requestedTransportMode: provider.requestedTransportMode,
       primaryTransportMode: provider.primaryTransportMode,
       supportedTransportModes: provider.supportedTransportModes,
+      probeModel: provider.probeModel || "",
     });
   }
   for (const model of models) {
@@ -652,5 +675,134 @@ function formatCapability(level?: string) {
 function hasMultimodal(capabilities: Record<string, string>) {
   return ["IMAGE_INPUT", "AUDIO_INPUT", "VIDEO_INPUT", "FILE_INPUT"].some(
     (key) => capabilities[key] === "NATIVE"
+  );
+}
+
+function isAdvancedOrHeavyModel(modelId: string) {
+  const normalized = modelId.toLowerCase();
+  return (
+    normalized.includes("max") ||
+    normalized.includes("pro") ||
+    normalized.includes("sonnet") ||
+    normalized.includes("opus") ||
+    normalized.includes("o1") ||
+    normalized.includes("o3") ||
+    normalized.includes("thinking") ||
+    normalized.includes("reasoner") ||
+    normalized.includes("r1") ||
+    normalized.includes("ultra") ||
+    normalized.includes("flagship") ||
+    normalized.includes("-image") ||
+    normalized.includes("-video") ||
+    normalized.includes("-i2v") ||
+    normalized.includes("-t2v") ||
+    normalized.includes("-t2i") ||
+    normalized.startsWith("flux-") ||
+    normalized.startsWith("wan-") ||
+    normalized.startsWith("wan2") ||
+    normalized.startsWith("veo-") ||
+    normalized.startsWith("kling-") ||
+    normalized.startsWith("sora")
+  );
+}
+
+function ProbeModelSelector({
+  row,
+  allModels,
+  disabled,
+  onChange,
+}: {
+  row: {
+    id: string;
+    displayName: string;
+    probeModel?: string;
+  };
+  allModels: ProviderModel[];
+  disabled: boolean;
+  onChange: (model: string) => void;
+}) {
+  const providerModels = allModels.filter((m) => m.owned_by === row.id);
+  const eligibleModels = providerModels.filter((m) => !isAdvancedOrHeavyModel(m.id));
+  const currentModel = row.probeModel || "";
+
+  const options = [...eligibleModels];
+  if (currentModel && !options.some((m) => m.id === currentModel)) {
+    options.unshift({ id: currentModel } as ProviderModel);
+  }
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+      <Select
+        size="small"
+        variant="outlined"
+        value={currentModel}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as string)}
+        displayEmpty
+        sx={{
+          minWidth: 156,
+          maxWidth: 220,
+          height: 32,
+          fontSize: 12,
+          bgcolor: tokens.canvasSubtle,
+          borderRadius: "8px",
+          borderColor: tokens.border,
+          "& .MuiSelect-select": {
+            py: 0.5,
+            px: 1.25,
+            display: "flex",
+            alignItems: "center",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          },
+          "&:hover": {
+            borderColor: tokens.borderStrong,
+          },
+          "&.Mui-focused": {
+            borderColor: tokens.primary.main,
+            boxShadow: `0 0 0 2px ${tokens.primary.light}`,
+          },
+        }}
+        inputProps={{ "aria-label": `${row.displayName} 探活模型` }}
+      >
+        <MenuItem value="" sx={{ fontSize: 12.5, color: "text.secondary" }}>
+          <em>默认轻量探测（自动）</em>
+        </MenuItem>
+        {options.map((model) => (
+          <MenuItem key={model.id} value={model.id} sx={{ fontSize: 12.5 }}>
+            {model.id}
+          </MenuItem>
+        ))}
+      </Select>
+      {currentModel ? (
+        <Typography
+          sx={{
+            fontSize: 10.5,
+            color: tokens.status.emerald.text,
+            display: "flex",
+            alignItems: "center",
+            gap: 0.5,
+            pl: 0.25,
+          }}
+        >
+          <Box
+            component="span"
+            sx={{
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              bgcolor: tokens.status.emerald.main,
+              boxShadow: `0 0 4px ${tokens.status.emerald.main}`,
+            }}
+          />
+          锁定: {currentModel}
+        </Typography>
+      ) : (
+        <Typography sx={{ fontSize: 10.5, color: tokens.text.muted, pl: 0.25 }}>
+          自动择优轻量模型
+        </Typography>
+      )}
+    </Box>
   );
 }

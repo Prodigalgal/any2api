@@ -34,15 +34,18 @@ final class InferenceReadinessProbe {
     private final ProviderRegistry providers;
     private final ObjectMapper mapper;
     private final ProviderTransportModeService transportModes;
+    private final com.any2api.provider.ProviderProbeModelService probeModels;
 
     InferenceReadinessProbe(
         ProviderRegistry providers,
         ObjectMapper mapper,
-        ProviderTransportModeService transportModes
+        ProviderTransportModeService transportModes,
+        com.any2api.provider.ProviderProbeModelService probeModels
     ) {
         this.providers = providers;
         this.mapper = mapper;
         this.transportModes = transportModes;
+        this.probeModels = probeModels;
     }
 
     Mono<Result> probe(
@@ -242,7 +245,13 @@ final class InferenceReadinessProbe {
                 model, "InferenceProbeIncomplete", safeOutput, durationMs, credentialPatch);
     }
 
-    private static String probeModel(com.any2api.provider.InferenceProvider provider) {
+    private String probeModel(com.any2api.provider.InferenceProvider provider) {
+        var providerId = provider.manifest().id();
+        var custom = probeModels.configuredProbeModel(providerId)
+            .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m));
+        if (custom.isPresent() && !custom.get().isBlank()) {
+            return custom.get().trim();
+        }
         var scheduled = provider.scheduledProbeModel()
             .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m));
         if (scheduled.isPresent() && !scheduled.get().isBlank()) {

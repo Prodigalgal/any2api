@@ -29,11 +29,16 @@ public class AdminProviderController {
         @PathVariable String providerId,
         @RequestBody StateRequest request
     ) {
-        if (request.enabled() == null && request.transportMode() == null) {
-            throw new IllegalArgumentException("enabled or transport_mode is required");
+        if (request.enabled() == null && request.transportMode() == null && request.probeModel() == null) {
+            throw new IllegalArgumentException("enabled, transport_mode, or probe_model is required");
         }
-        return providers.setState(providerId, request.enabled(), request.transportMode());
+        return providers.setState(
+            providerId, request.enabled(), request.transportMode(), request.probeModel());
     }
 
-    public record StateRequest(Boolean enabled, ProviderTransportMode transportMode) {}
+    public record StateRequest(
+        Boolean enabled,
+        ProviderTransportMode transportMode,
+        String probeModel
+    ) {}
 }

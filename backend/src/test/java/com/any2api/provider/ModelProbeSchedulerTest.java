@@ -47,9 +47,10 @@ class ModelProbeSchedulerTest {
         var probeService = mock(ModelProbeService.class);
         when(probeService.probe(eq("test-provider"), eq("test-model"))).thenReturn(reactor.core.publisher.Mono.empty());
 
+        var probeModels = new ProviderProbeModelService(jdbc);
         try (var executor = Executors.newSingleThreadExecutor()) {
             new ModelProbeScheduler(
-                jdbc, executor, probeService, providers, properties)
+                jdbc, executor, probeService, providers, probeModels, properties)
                 .probeStaleModels();
         }
 

@@ -1,7 +1,33 @@
-# 当前任务板（源码 0.28.6）
+# 当前任务板（源码 0.29.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-12 各厂商探活模型 UI 动态选定与持久化配置支持 (v0.29.0)
+
+- **用户需求**：
+  - 各厂商探活模型（Probe Model）可以在 UI 界面（Web 控制台运行概览页）动态选定，不能写死在代码中；
+  - 探活行为只需使用一个账号、选择供应商的一个简单文本模型探活即可，通常账号可用模型就能被调用；严禁对 MAX 等高级/重型模型进行探活。
+- **架构与实现细节**：
+  - **动态模型配置服务（`ProviderProbeModelService`）**：
+    - 探活模型持久化存储于 `providers.config ->> 'probe_model'`（JSONB，无需额外数据库 DDL）；
+    - 内置内存双重缓存（`AtomicReference`）与定时自动刷新；
+    - 严守高级模型防护门禁（`AdvancedModelProbePolicy`），严禁选定或探活 MAX、Pro、Sonnet、Opus、o1、o3、R1、Thinking、Reasoner 等高级模型及多模态生成模型；
+    - 支持校验选定模型必须归属于该 Provider，传递空字符串时安全重置回默认；
+  - **运行时服务与管理端契约扩展**：
+    - `ProviderRuntimeService` / `AdminProviderController`：`PATCH /api/admin/v1/providers/{providerId}` 增加 `probeModel` 参数；
+    - `ProviderRuntimeView` 记录增加 `String probeModel` 响应字段；
+  - **调度与生命周期探测联动**：
+    - `ModelProbeScheduler`：注入 `ProviderProbeModelService`，若用户在 UI 明确指定了探活模型，探活调度仅且必须以该选定模型为目标，彻底杜绝自作主张遍历其他模型；若未配置则回退到基础轻量模型；
+    - `InferenceReadinessProbe`：生命周期健康探测优先使用动态选定的探活模型；
+  - **前端交互（`Overview` 控制台）**：
+    - `web/src/lib/api.ts`：更新 `ProviderRuntime` 与 `updateProvider` API 契约；
+    - `web/src/components/overview.tsx`：表格表头新增“探活模型”列（9 列自适应）；
+    - 实现 `ProbeModelSelector` 组件：下拉选择归属于该 Provider 的轻量文本模型（自动过滤高级/重型模型），支持切换、锁定提示与恢复默认；选择后通过 `updateProvider` 实时生效。
+- **全量验证与版本治理**：
+  - `check_versions.py`：系统统一升级至 `0.29.0`（新增向后兼容能力），契约检查 100% PASS；
+  - Backend：`./gradlew test` 全量通过；新增 `ProviderProbeModelServiceTest` 单元测试覆盖防线与持久化；
+  - Web：`npm run build` Turbopack 生产编译与 TypeScript 类型检查 100% 成功。
 
 ## 2026-10-12 模型探活策略重构与 Arena 动态出口代理打通 (v0.28.6)
 

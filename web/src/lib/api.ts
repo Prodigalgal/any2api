@@ -74,6 +74,7 @@ export type ProviderRuntime = {
   primaryTransportMode: Exclude<ProviderTransportMode, "AUTO">;
   fallbackTransportMode: Exclude<ProviderTransportMode, "AUTO"> | null;
   supportedTransportModes: Array<Exclude<ProviderTransportMode, "AUTO">>;
+  probeModel?: string;
 };
 
 export type ProviderOption = [id: string, label: string];
@@ -565,10 +566,18 @@ export const api = {
     return adminJson<AccountPage>(`/api/admin/v1/accounts/page?${params.toString()}`);
   },
   adminProviders: () => adminJson<ProviderRuntime[]>("/api/admin/v1/providers"),
-  updateProvider: (id: string, body: { enabled?: boolean; transportMode?: ProviderTransportMode }) => adminJson<ProviderRuntime>(
-    `/api/admin/v1/providers/${encodeURIComponent(id)}`,
-    { method: "PATCH", body: JSON.stringify(body) },
-  ),
+  updateProvider: (
+    id: string,
+    body: {
+      enabled?: boolean;
+      transportMode?: ProviderTransportMode;
+      probeModel?: string;
+    }
+  ) =>
+    adminJson<ProviderRuntime>(
+      `/api/admin/v1/providers/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
   importAccount: (body: Record<string, unknown>) => adminJson(
     "/api/admin/v1/accounts/import", { method: "POST", body: JSON.stringify(body) },
   ),

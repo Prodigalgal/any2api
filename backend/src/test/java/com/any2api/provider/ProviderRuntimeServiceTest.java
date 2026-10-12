@@ -43,7 +43,7 @@ class ProviderRuntimeServiceTest {
         var expected = new ProviderRuntimeService.ProviderRuntimeView(
             "alpha", "Alpha", "test-v1", List.of("alpha-model"), manifest.capabilities(),
             true, false, 3, 0, 1, modeView.requested(), modeView.primary(),
-            modeView.fallback(), modeView.supported());
+            modeView.fallback(), modeView.supported(), "");
         when(provider.manifest()).thenReturn(manifest);
         when(registry.requirePlugin("alpha")).thenReturn(provider);
         when(transportModes.view(provider)).thenReturn(modeView);
@@ -53,7 +53,8 @@ class ProviderRuntimeServiceTest {
         when(statement.query(any(RowMapper.class))).thenReturn((JdbcClient.MappedQuerySpec) query);
         when(query.optional()).thenReturn(Optional.of(expected));
         var service = new ProviderRuntimeService(
-            registry, installations, locks, jdbc, mock(ModelCatalogCache.class), transportModes);
+            registry, installations, locks, jdbc, mock(ModelCatalogCache.class), transportModes,
+            new ProviderProbeModelService(jdbc));
 
         TransactionSynchronizationManager.initSynchronization();
         try {

@@ -44,7 +44,8 @@ class ProviderRuntimeBatchIntegrationTest {
             }
             var jdbc = spy(database.jdbc);
             var service = new ProviderRuntimeService(registry, mock(ProviderInstallationCatalog.class),
-                new PostgresAdvisoryLocks(jdbc), jdbc, mock(ModelCatalogCache.class), modes);
+                new PostgresAdvisoryLocks(jdbc), jdbc, mock(ModelCatalogCache.class), modes,
+                new ProviderProbeModelService(jdbc));
             var views = service.list();
 
             assertThat(views).extracting(ProviderRuntimeService.ProviderRuntimeView::id)

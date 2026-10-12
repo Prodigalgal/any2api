@@ -31,7 +31,7 @@ class InferenceReadinessProbeTest {
     void requiresMarkerOutputAndCompletionFromTheSpecificAccount() {
         var probe = new InferenceReadinessProbe(
             ProviderRegistry.allEnabled(List.of(provider(true))), mapper,
-            transportModes());
+            transportModes(), probeModels());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -45,7 +45,7 @@ class InferenceReadinessProbeTest {
     void preservesProviderFailureTypeWhenTheProbeCannotInfer() {
         var probe = new InferenceReadinessProbe(
             ProviderRegistry.allEnabled(List.of(provider(false))), mapper,
-            transportModes());
+            transportModes(), probeModels());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -58,7 +58,7 @@ class InferenceReadinessProbeTest {
     void acceptsAnyNonBlankCompletedResponseForRealtimeAvailability() {
         var probe = new InferenceReadinessProbe(
             ProviderRegistry.allEnabled(List.of(provider(true, "pong"))), mapper,
-            transportModes());
+            transportModes(), probeModels());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -70,7 +70,7 @@ class InferenceReadinessProbeTest {
     void probesTheExplicitlySelectedModel() {
         var probe = new InferenceReadinessProbe(
             ProviderRegistry.allEnabled(List.of(provider(true))), mapper,
-            transportModes());
+            transportModes(), probeModels());
 
         var result = probe.probe(
             new LeasedProviderAccount(
@@ -94,7 +94,7 @@ class InferenceReadinessProbeTest {
                 ProviderTransportMode.AUTO, ProviderTransportMode.API, ProviderTransportMode.RUNTIME));
         var probe = new InferenceReadinessProbe(
             ProviderRegistry.allEnabled(List.of(provider(true, "pong", true))), mapper,
-            transportModes);
+            transportModes, probeModels());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -144,7 +144,7 @@ class InferenceReadinessProbeTest {
         };
 
         var probe = new InferenceReadinessProbe(
-            ProviderRegistry.allEnabled(List.of(fallbackProvider)), mapper, transportModes());
+            ProviderRegistry.allEnabled(List.of(fallbackProvider)), mapper, transportModes(), probeModels());
 
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
@@ -152,6 +152,10 @@ class InferenceReadinessProbeTest {
         assertThat(result.ready()).isTrue();
         assertThat(result.model()).isEqualTo("secondary-model");
         assertThat(result.output()).isEqualTo("fallback ok");
+    }
+
+    private com.any2api.provider.ProviderProbeModelService probeModels() {
+        return new com.any2api.provider.ProviderProbeModelService(org.mockito.Mockito.mock(JdbcClient.class));
     }
 
     private AccountEntity account() {

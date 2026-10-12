@@ -31,6 +31,7 @@ public class ProviderRuntimeService {
     private final JdbcClient jdbc;
     private final ModelCatalogCache modelCatalog;
     private final ProviderTransportModeService transportModes;
+    private final ProviderProbeModelService probeModels;
 
     public ProviderRuntimeService(
         ProviderRegistry providers,
@@ -38,7 +39,8 @@ public class ProviderRuntimeService {
         PostgresAdvisoryLocks locks,
         JdbcClient jdbc,
         ModelCatalogCache modelCatalog,
-        ProviderTransportModeService transportModes
+        ProviderTransportModeService transportModes,
+        ProviderProbeModelService probeModels
     ) {
         this.providers = providers;
         this.installations = installations;
@@ -46,6 +48,7 @@ public class ProviderRuntimeService {
         this.jdbc = jdbc;
         this.modelCatalog = modelCatalog;
         this.transportModes = transportModes;
+        this.probeModels = probeModels;
     }
 
     public List<ProviderRuntimeView> list() {
@@ -66,7 +69,7 @@ public class ProviderRuntimeService {
 
     @Transactional
     public ProviderRuntimeView setEnabled(String providerId, boolean enabled) {
-        return update(providerId, enabled, null);
+        return update(providerId, enabled, null, null);
     }
 
     @Transactional
@@ -74,7 +77,7 @@ public class ProviderRuntimeService {
         String providerId,
         ProviderTransportMode transportMode
     ) {
-        return update(providerId, null, transportMode);
+        return update(providerId, null, transportMode, null);
     }
 
     @Transactional
@@ -83,19 +86,33 @@ public class ProviderRuntimeService {
         Boolean enabled,
         ProviderTransportMode transportMode
     ) {
-        if (enabled == null && transportMode == null) {
-            throw new IllegalArgumentException("enabled or transport mode is required");
+        return setState(providerId, enabled, transportMode, null);
+    }
+
+    @Transactional
+    public ProviderRuntimeView setState(
+        String providerId,
+        Boolean enabled,
+        ProviderTransportMode transportMode,
+        String probeModel
+    ) {
+        if (enabled == null && transportMode == null && probeModel == null) {
+            throw new IllegalArgumentException("enabled, transport mode, or probe model is required");
         }
-        return update(providerId, enabled, transportMode);
+        return update(providerId, enabled, transportMode, probeModel);
     }
 
     private ProviderRuntimeView update(
         String providerId,
         Boolean enabled,
-        ProviderTransportMode transportMode
+        ProviderTransportMode transportMode,
+        String probeModel
     ) {
         var manifest = providers.requirePlugin(providerId).manifest();
         locks.lockTransaction("provider:" + providerId + ":runtime");
+        if (probeModel != null) {
+            probeModels.set(providerId, probeModel);
+        }
         if (transportMode != null) {
             transportModes.set(providers.requirePlugin(providerId), transportMode);
         }
@@ -155,21 +172,25 @@ public class ProviderRuntimeService {
     private ProviderRuntimeView map(ResultSet row, ProviderManifest manifest)
         throws SQLException {
         var mode = transportModes.view(providers.requirePlugin(manifest.id()));
+        var probeModel = probeModels.resolveProbeModel(
+            manifest.id(), providers.requirePlugin(manifest.id()).scheduledProbeModel()).orElse("");
         return new ProviderRuntimeView(
             manifest.id(), manifest.displayName(), manifest.adapterVersion(),
             manifest.defaultModels(), manifest.capabilities(),
             row.getBoolean("installed"), row.getBoolean("enabled"),
             row.getLong("account_count"), row.getLong("enabled_account_count"),
             row.getLong("model_count"), mode.requested(), mode.primary(), mode.fallback(),
-            mode.supported());
+            mode.supported(), probeModel);
     }
 
     private ProviderRuntimeView runtimeViewWithoutRow(ProviderManifest manifest) {
         var mode = transportModes.view(providers.requirePlugin(manifest.id()));
+        var probeModel = probeModels.resolveProbeModel(
+            manifest.id(), providers.requirePlugin(manifest.id()).scheduledProbeModel()).orElse("");
         return new ProviderRuntimeView(
             manifest.id(), manifest.displayName(), manifest.adapterVersion(),
             manifest.defaultModels(), manifest.capabilities(), false, false, 0, 0, 0,
-            mode.requested(), mode.primary(), mode.fallback(), mode.supported());
+            mode.requested(), mode.primary(), mode.fallback(), mode.supported(), probeModel);
     }
 
     public record ProviderRuntimeView(
@@ -186,7 +207,8 @@ public class ProviderRuntimeService {
         ProviderTransportMode requestedTransportMode,
         ProviderTransportMode primaryTransportMode,
         ProviderTransportMode fallbackTransportMode,
-        Set<ProviderTransportMode> supportedTransportModes
+        Set<ProviderTransportMode> supportedTransportModes,
+        String probeModel
     ) {
     }
 }

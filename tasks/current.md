@@ -1,7 +1,28 @@
-# 当前任务板（源码 0.28.4）
+# 当前任务板（源码 0.28.5）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-12 DeepSeek 自动化注册全链路打通与风控自愈加固 (v0.28.5)
+
+- **背景与根因定位**：
+  - 线上批量注册时，DeepSeek 官方返回 `code=0 biz_code=4 msg=EMAIL_DOMAIN_NOT_SUPPORTED`，`mailto.plus` 域名被上游精准识别并拦截；
+  - 域名拒绝关键词未覆盖 `EMAIL_DOMAIN_NOT_SUPPORTED`，导致未触发邮箱轮换并重复提交相同被拒地址；
+  - 日本 Oracle 节点出网时页面为日文（`コードを送信`, `新規登録`, `メール`），英文选择器失灵报错；
+  - 注册重试时并发节点设置了 `strict_proxy_affinity = True`，导致多个并发 worker 锁死在同一节点引发 `NodeBusy` 报错。
+- **架构与代码修复**：
+  - **首选独立域名邮箱驱动**：
+    - `DeepseekAutomationProvider.register`: 默认邮箱驱动升级为 `mail_tm`（提供动态独立的公网域名，如 `@maxxspace.com`, `@tanpony.com`），剥离私有域配置；
+  - **多梯队邮箱自愈轮换**：
+    - `_run_registration_browser`: 关键词全面覆盖 `email_domain_not_supported`, `domain_not_supported`, `not permitted`, `not supported` 等；
+    - 遇到域名拒绝时，按 `mail_tm` -> `tempmail_io` -> `tempmail_plus`（指定备用后缀：fexbox.org, fexbox.ru, fexpost.com 等）多级梯队动态轮换；
+  - **多语言（日/英/中）元素自适应**：
+    - 补充支持 `コードを送信` / `新規登録` / `登録` / `メール` / `验证码` 等国际化表单元素；
+  - **解耦并发代理排他锁**：
+    - 移除注册阶段的 `strict_proxy_affinity = True`，允许从海外代理池平滑分配空闲健康节点，消除 `NodeBusy` 互斥。
+- **测试与版本契约**：
+  - `automation/tests/test_deepseek_protocol.py`: 全量测试通过；
+  - `tools/compatibility/check_versions.py`: 版本系统 100% 统一至 `v0.28.5` 并验证通过。
 
 ## 2026-10-12 DeepSeek 自动化注册公共邮箱适配与重试自愈 (v0.28.4)
 

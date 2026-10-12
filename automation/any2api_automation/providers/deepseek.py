@@ -31,7 +31,13 @@ from ..lifecycle.browser import (
     BrowserResult,
     run_browser_flow,
 )
-from ..lifecycle.mail import BaseMailClient, Mailbox, TempMailPlusClient, create_mail_client
+from ..lifecycle.mail import (
+    BaseMailClient,
+    Mailbox,
+    MailTmClient,
+    TempMailIoClient,
+    create_mail_client,
+)
 from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import correlation_id
@@ -100,7 +106,7 @@ class DeepseekAutomationProvider(AutomationProvider):
                 .lower()
             )
             if not driver or driver in {"cloudflare", "auto"}:
-                mail_payload["driver"] = "tempmail_plus"
+                mail_payload["driver"] = "mail_tm"
                 mail_payload.pop("base_url", None)
                 mail_payload.pop("domain", None)
                 mail_payload.pop("domains", None)
@@ -111,7 +117,7 @@ class DeepseekAutomationProvider(AutomationProvider):
                 password_policy=RegistrationPasswordPolicy(
                     lambda: strong_password(16), min_length=8, max_length=64
                 ),
-                default_driver="tempmail_plus",
+                default_driver="mail_tm",
             )
             trace.mark(RegistrationStage.MAILBOX_CREATED)
             flow_payload = {**reg_payload}
@@ -361,8 +367,6 @@ async def _run_registration_browser(
                 identity=current_mailbox.address,
                 attempt=attempt,
             )
-            if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
-                attempt_payload["strict_proxy_affinity"] = True
             result = await asyncio.to_thread(
                 run_browser_flow,
                 lambda page, context, backend, proxy_url, m=current_mail, mb=current_mailbox: (
@@ -405,13 +409,29 @@ async def _run_registration_browser(
                 diagnostic,
             )
             diag_lower = diagnostic.lower()
-            if "domain is not permitted" in diag_lower or "not permitted" in diag_lower:
+            if any(
+                kw in diag_lower
+                for kw in (
+                    "domain is not permitted",
+                    "not permitted",
+                    "email_domain_not_supported",
+                    "domain_not_supported",
+                    "not supported",
+                    "email_domain",
+                    "domain_rejected",
+                )
+            ):
                 try:
                     logger.info("DeepSeek email domain rejected, rotating disposable mail client")
-                    if isinstance(current_mail, TempMailPlusClient):
-                        current_mail = create_mail_client("mail_tm")
+                    if isinstance(current_mail, MailTmClient):
+                        current_mail = create_mail_client("tempmail_io")
+                    elif isinstance(current_mail, TempMailIoClient):
+                        current_mail = create_mail_client(
+                            "tempmail_plus",
+                            domains=["fexbox.org", "fexbox.ru", "fexpost.com", "mailbox.in.ua"],
+                        )
                     else:
-                        current_mail = create_mail_client("tempmail_plus")
+                        current_mail = create_mail_client("mail_tm")
                     current_mailbox = await current_mail.create_address()
                     logger.info("Rotated to disposable mailbox: %s", current_mailbox.address)
                 except Exception as rotate_err:  # noqa: BLE001
@@ -441,8 +461,12 @@ def _register_browser(
         (
             'input[type="email"]',
             'input[placeholder*="email" i]',
+            'input[placeholder*="mail" i]',
+            'input[placeholder*="メール" i]',
+            'input[placeholder*="邮" i]',
             'input[name*="email" i]',
             'input[autocomplete="email"]',
+            'input:not([type="password"]):not([type="hidden"])',
         ),
     )
     if email is None:
@@ -452,8 +476,12 @@ def _register_browser(
             (
                 'input[type="email"]',
                 'input[placeholder*="email" i]',
+                'input[placeholder*="mail" i]',
+                'input[placeholder*="メール" i]',
+                'input[placeholder*="邮" i]',
                 'input[name*="email" i]',
                 'input[autocomplete="email"]',
+                'input:not([type="password"]):not([type="hidden"])',
             ),
         )
     if email is None:
@@ -485,6 +513,9 @@ def _register_browser(
             '[role="button"]:has-text("Send code")',
             'button:has-text("Send code")',
             '[role="button"]:has-text("发送验证码")',
+            'button:has-text("发送验证码")',
+            '[role="button"]:has-text("コードを送信")',
+            'button:has-text("コードを送信")',
         ),
     )
     if send is None:
@@ -536,14 +567,29 @@ def _register_browser(
     password_fields.nth(1).fill(password)
     code_field = _visible(
         page,
-        ('input[placeholder="Code"]', 'input[autocomplete="one-time-code"]'),
+        (
+            'input[placeholder="Code"]',
+            'input[autocomplete="one-time-code"]',
+            'input[placeholder*="code" i]',
+            'input[placeholder*="コード" i]',
+            'input[placeholder*="验证码" i]',
+        ),
     )
     if code_field is None:
         raise RuntimeError("DeepSeek OTP field is unavailable")
     code_field.fill(otp)
     signup = _visible(
         page,
-        ('[role="button"]:has-text("Sign up")', 'button:has-text("Sign up")'),
+        (
+            '[role="button"]:has-text("Sign up")',
+            'button:has-text("Sign up")',
+            '[role="button"]:has-text("新規登録")',
+            'button:has-text("新規登録")',
+            '[role="button"]:has-text("登録")',
+            'button:has-text("登録")',
+            '[role="button"]:has-text("注册")',
+            'button:has-text("注册")',
+        ),
     )
     if signup is None:
         raise RuntimeError("DeepSeek signup control is unavailable")

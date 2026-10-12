@@ -582,17 +582,17 @@ def test_solve_pow_raises_when_no_solution_in_range(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_register_forces_public_tempmail_plus_driver(monkeypatch) -> None:
+async def test_register_forces_public_mail_tm_driver(monkeypatch) -> None:
     captured_payloads = []
 
     async def fake_prepare(payload, *, password_policy=None, default_driver=None):
         captured_payloads.append((payload, default_driver))
-        return "fake_mail", Mailbox(address="test@mailto.plus", jwt=""), "fake_password"
+        return "fake_mail", Mailbox(address="test@tanpony.com", jwt=""), "fake_password"
 
     async def fake_run_browser(*args, **kwargs):
         return BrowserResult(
             external_id="user_123",
-            email="test@mailto.plus",
+            email="test@tanpony.com",
             credential={"token": "tok_123", "device_id": "dev_123", "birthday_status": "set"},
             metadata={},
             ready_for_inference=False,
@@ -618,8 +618,8 @@ async def test_register_forces_public_tempmail_plus_driver(monkeypatch) -> None:
     assert result["credential"]["token"] == "tok_123"
     assert len(captured_payloads) == 1
     actual_payload, default_driver = captured_payloads[0]
-    assert default_driver == "tempmail_plus"
-    assert actual_payload["mail"]["driver"] == "tempmail_plus"
+    assert default_driver == "mail_tm"
+    assert actual_payload["mail"]["driver"] == "mail_tm"
     assert "base_url" not in actual_payload["mail"]
     assert "domain" not in actual_payload["mail"]
     assert "domains" not in actual_payload["mail"]

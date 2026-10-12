@@ -579,3 +579,47 @@ def test_solve_pow_raises_when_no_solution_in_range(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="no solution in its search range"):
         solve_pow(challenge)
+
+
+@pytest.mark.asyncio
+async def test_register_forces_public_tempmail_plus_driver(monkeypatch) -> None:
+    captured_payloads = []
+
+    async def fake_prepare(payload, *, password_policy=None, default_driver=None):
+        captured_payloads.append((payload, default_driver))
+        return "fake_mail", Mailbox(address="test@mailto.plus", jwt=""), "fake_password"
+
+    async def fake_run_browser(*args, **kwargs):
+        return BrowserResult(
+            external_id="user_123",
+            email="test@mailto.plus",
+            credential={"token": "tok_123", "device_id": "dev_123", "birthday_status": "set"},
+            metadata={},
+            ready_for_inference=False,
+        )
+
+    monkeypatch.setattr("any2api_automation.providers.deepseek.prepare_registration", fake_prepare)
+    monkeypatch.setattr(
+        "any2api_automation.providers.deepseek._run_registration_browser", fake_run_browser
+    )
+
+    provider = DeepseekAutomationProvider()
+    result = await provider.register(
+        {
+            "captcha": {"ai_enabled": False},
+            "mail": {
+                "base_url": "https://apimail.omnnu.xyz",
+                "domains": ["edu.omnnu.xyz"],
+                "domain": "edu.omnnu.xyz",
+            },
+        }
+    )
+
+    assert result["credential"]["token"] == "tok_123"
+    assert len(captured_payloads) == 1
+    actual_payload, default_driver = captured_payloads[0]
+    assert default_driver == "tempmail_plus"
+    assert actual_payload["mail"]["driver"] == "tempmail_plus"
+    assert "base_url" not in actual_payload["mail"]
+    assert "domain" not in actual_payload["mail"]
+    assert "domains" not in actual_payload["mail"]

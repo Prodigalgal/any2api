@@ -31,7 +31,7 @@ from ..lifecycle.browser import (
     BrowserResult,
     run_browser_flow,
 )
-from ..lifecycle.mail import Mailbox, TempMailClient
+from ..lifecycle.mail import BaseMailClient, Mailbox, TempMailPlusClient, create_mail_client
 from ..lifecycle.proxy import proxy_attempt_payload, proxy_lease, proxy_parameters
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import correlation_id
@@ -91,14 +91,30 @@ class DeepseekAutomationProvider(AutomationProvider):
             captcha_policy = CaptchaAiPolicy.from_payload(payload)
             if captcha_policy.enabled and not registry.visual_ai_available(captcha_policy):
                 raise RuntimeError(f"DeepSeek captcha AI mode {captcha_policy.mode} is unavailable")
+
+            reg_payload = dict(payload)
+            mail_payload = dict(payload.get("mail") or {})
+            driver = (
+                str(mail_payload.get("driver") or mail_payload.get("provider") or "")
+                .strip()
+                .lower()
+            )
+            if not driver or driver in {"cloudflare", "auto"}:
+                mail_payload["driver"] = "tempmail_plus"
+                mail_payload.pop("base_url", None)
+                mail_payload.pop("domain", None)
+                mail_payload.pop("domains", None)
+                reg_payload["mail"] = mail_payload
+
             mail, mailbox, password = await prepare_registration(
-                payload,
+                reg_payload,
                 password_policy=RegistrationPasswordPolicy(
                     lambda: strong_password(16), min_length=8, max_length=64
                 ),
+                default_driver="tempmail_plus",
             )
             trace.mark(RegistrationStage.MAILBOX_CREATED)
-            flow_payload = {**payload}
+            flow_payload = {**reg_payload}
             flow_payload.setdefault("proxy_check_url", settings().deepseek_base_url)
             result = await _run_registration_browser(
                 self,
@@ -328,7 +344,7 @@ def _catalog_available(body: dict[str, Any]) -> bool:
 async def _run_registration_browser(
     provider: DeepseekAutomationProvider,
     payload: dict[str, Any],
-    mail: TempMailClient,
+    mail: BaseMailClient,
     mailbox: Mailbox,
     password: str,
     trace: RegistrationTrace,
@@ -336,19 +352,21 @@ async def _run_registration_browser(
 ) -> BrowserResult:
     captcha_policy = captcha_policy or CaptchaAiPolicy()
     attempts = flow_max_attempts(payload, settings().deepseek_registration_browser_attempts)
+    current_mail = mail
+    current_mailbox = mailbox
     for attempt in range(1, attempts + 1):
         try:
             attempt_payload = proxy_attempt_payload(
                 payload,
-                identity=mailbox.address,
+                identity=current_mailbox.address,
                 attempt=attempt,
             )
             if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
                 attempt_payload["strict_proxy_affinity"] = True
             result = await asyncio.to_thread(
                 run_browser_flow,
-                lambda page, context, backend, proxy_url: _register_browser(
-                    page, backend, mail, mailbox, password, trace, captcha_policy
+                lambda page, context, backend, proxy_url, m=current_mail, mb=current_mailbox: (
+                    _register_browser(page, backend, m, mb, password, trace, captcha_policy)
                 ),
                 preferred=provider.manifest.browser_backend,
                 fallback=provider.manifest.fallback_backend,
@@ -386,6 +404,18 @@ async def _run_registration_browser(
                 trace.current,
                 diagnostic,
             )
+            diag_lower = diagnostic.lower()
+            if "domain is not permitted" in diag_lower or "not permitted" in diag_lower:
+                try:
+                    logger.info("DeepSeek email domain rejected, rotating disposable mail client")
+                    if isinstance(current_mail, TempMailPlusClient):
+                        current_mail = create_mail_client("mail_tm")
+                    else:
+                        current_mail = create_mail_client("tempmail_plus")
+                    current_mailbox = await current_mail.create_address()
+                    logger.info("Rotated to disposable mailbox: %s", current_mailbox.address)
+                except Exception as rotate_err:  # noqa: BLE001
+                    logger.warning("Failed to rotate mailbox during retry: %s", rotate_err)
             await asyncio.sleep(random.uniform(2.0, 6.0))
     raise RuntimeError("DeepSeek registration browser attempts were exhausted")
 
@@ -393,7 +423,7 @@ async def _run_registration_browser(
 def _register_browser(
     page: Any,
     backend: str,
-    mail: TempMailClient,
+    mail: BaseMailClient,
     mailbox: Mailbox,
     password: str,
     trace: RegistrationTrace,
@@ -428,6 +458,17 @@ def _register_browser(
         )
     if email is None:
         snapshot = _page_form_snapshot(page)
+        page_text = (snapshot.get("text") or "").lower()
+        page_title = (snapshot.get("title") or "").lower()
+        if "only phone number registration" in page_text:
+            raise RuntimeError("DeepSeek email registration is unavailable for the current egress")
+        if "request could not be satisfied" in page_text or "403" in page_title:
+            raise RuntimeError(
+                "DeepSeek web page was blocked by CloudFront WAF 403 url="
+                + snapshot["url"]
+                + " text="
+                + snapshot["text"]
+            )
         raise RuntimeError(
             "DeepSeek email registration form is unavailable url="
             + snapshot["url"]
@@ -980,5 +1021,14 @@ def _require_success(body: dict[str, Any], operation: str) -> None:
     code = int(body.get("code") or 0)
     data = body.get("data") or {}
     biz_code = int(data.get("biz_code") or 0) if isinstance(data, dict) else -1
+    msg = (
+        body.get("msg")
+        or body.get("message")
+        or (data.get("biz_msg") if isinstance(data, dict) else "")
+        or ""
+    )
     if code != 0 or biz_code != 0:
-        raise RuntimeError(f"DeepSeek {operation} was rejected code={code} biz_code={biz_code}")
+        detail = f"code={code} biz_code={biz_code}"
+        if msg:
+            detail += f" msg={msg}"
+        raise RuntimeError(f"DeepSeek {operation} was rejected {detail}")

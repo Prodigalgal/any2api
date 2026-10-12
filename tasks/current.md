@@ -1,7 +1,25 @@
-# 当前任务板（源码 0.28.3）
+# 当前任务板（源码 0.28.4）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-12 DeepSeek 自动化注册公共邮箱适配与重试自愈 (v0.28.4)
+
+- **背景与根因定位**：
+  - DeepSeek 批量自动注册时，系统全局默认下发自建邮箱系统（`apimail.omnnu.xyz` / `@edu.omnnu.xyz`）；
+  - DeepSeek 官方接口返回 `code: 40003, msg: "This email domain is not permitted. Continue with Google or another provider"`，自建域名被全量拦截；
+  - 注册重试循环中未做域名失效轮换，单邮箱被拒导致整批 5 次尝试全量失败；SPA 渲染时缺乏详细的 CloudFront WAF 403 阻断与地区限制（手机号注册）诊断信息。
+- **架构与代码修复**：
+  - **公共临时邮箱驱动强制适配**：
+    - `DeepseekAutomationProvider.register`: 拦截并过滤自建邮箱配置，默认强制切换为 `tempmail_plus`，剥离私有 `base_url` 与 `domains`，走公共可用邮箱域名（`@mailto.plus` 等）；
+  - **邮箱域名拒绝自愈与动态轮换**：
+    - `_run_registration_browser`: 增加域名拒绝识别（`domain is not permitted`），自动在重试时轮换并创建备用公共临时邮箱客户端（`TempMailPlusClient` 与 `MailTmClient` 互备轮换）；
+  - **SPA 渲染与 WAF 拦截精准诊断**：
+    - `_register_browser`: 在表单探测失败时，精准区分 CloudFront 403 Block 与地区限制，输出结构化诊断错误；
+    - `_require_success`: 补充 upstream 返回的 `msg` / `message` / `biz_msg` 到异常信息中；
+  - **测试与版本治理**：
+    - 新增 `test_register_forces_public_tempmail_plus_driver` 单元测试，全量 555 个 pytest 全部通过；
+    - 统一全组件版本号步进至 `v0.28.4`，版本契约检查 100% 绿灯。
 
 ## 2026-10-12 DeepSeek 全链路凭据失效自愈与 CloudFront WAF 穿透修复 (v0.28.3)
 

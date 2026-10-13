@@ -3,11 +3,13 @@
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-13 MiMo 桌面请求与 Automation 健康修复（0.30.1 候选）
+## 2026-10-13 MiMo 桌面请求与 Automation 健康修复（0.30.1 已发布）
 
-- 当前生产 0.30.0 / `516002a`；MiMo 桌面“你好”实际包含 69,192 字符 system 和31个工具，四次约1.4–1.7s因上下文长度失败。同期7分钟调用来自另一Key，分别归属；客户端与原始输入保持。[调查报告](../docs/reports/MIMO_AND_AUTOMATION_INCIDENT_2026-10-13.md)。
+- 初查生产基线 0.30.0 / `516002a`；MiMo 桌面“你好”实际包含 69,192 字符 system 和31个工具，四次约1.4–1.7s因上下文长度失败。同期7分钟调用来自另一Key，分别归属；客户端与原始输入保持。[调查报告](../docs/reports/MIMO_AND_AUTOMATION_INCIDENT_2026-10-13.md)。
 - Arena 旧Pod因总 ephemeral storage 超过1Gi被驱逐；Automation 08:12一次 exit137/reason Error、历史原因不完整，探针多次3s超时。0.30.1 修复 API SSE 队列背压/取消同步关闭及 reaper 同步扫描阻塞，shutdown等待扫描；Arena overlay request512Mi/limit3Gi，原CPU/内存/探针保持。
-- 旧回归3项失败，修正后相关21/21、Automation全量561、Backend test/bootJar、Web lint/build、Ruff/128 format、版本/JAR通过。候选与生产门禁继续，Qwen排除，高级模型不做健康探活；回滚为0.30.0原四镜像与原资源预算。[执行规格](../docs/requirements/AUTOMATION_STREAM_AND_RESOURCE_HARDENING.md)。
+- 旧回归3项失败，修正后相关21/21、Automation全量561、Backend test/bootJar、Web lint/build、Ruff/128 format、版本/JAR通过。Qwen排除，高级模型不做健康探活；回滚为0.30.0原四镜像与原资源预算。[执行规格](../docs/requirements/AUTOMATION_STREAM_AND_RESOURCE_HARDENING.md)。
+- 用户授权先发稳定性修复；Source `a766ead`、GitOps `a42d1e6`、同一不可变四 digest 已进入生产，版本/API 0.30.1，Argo Synced/Healthy。原七家矩阵39/49保留，五家候选和公网各35/35，对应25次普通调用均成功；候选自有7资源已清理。生产验收期120健康检查全200、最大53ms、无新探针告警。
+- 下一步：按用户要求继续改善稳定性、架构边界和代码整洁，先查 Arena 基础模型 upstream_timeout、DeepSeek empty_model_response/账号状态转换；桌面31工具的超大上下文仍不符合MiMo WEB实际能力，历史exit137根因不完整。
 
 ## 2026-10-12 各厂商探活模型 UI 动态选定与持久化配置支持 (v0.29.0)
 

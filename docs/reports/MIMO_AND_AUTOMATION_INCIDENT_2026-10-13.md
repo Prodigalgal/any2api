@@ -2,7 +2,7 @@
 
 ## 当前基线与改造核对
 
-源码及生产为 `0.30.0` / `516002ab336cfbc5f42f6366ffb5df460777bb34`，Argo 初查 Synced/Healthy。当前 Java/Spring Boot 负责 OpenAI 契约、租约、出口并发、状态和账本；Python/FastAPI 执行 WEB API 与浏览器 Runtime；Next.js 为管理控制台。近期新增注册节流/浏览器清理、高级模型探活保护、动态 probe model，以及代理绑定 UI/出口并发。此次 MiMo 实际通道为 API，公开协议为 Chat Completions。任务板历史源码 0.29.0 不能代替当前部署事实。Qwen 继续不纳入发布验收。
+初查源码及生产基线为 `0.30.0` / `516002ab336cfbc5f42f6366ffb5df460777bb34`，Argo 初查 Synced/Healthy。当前 Java/Spring Boot 负责 OpenAI 契约、租约、出口并发、状态和账本；Python/FastAPI 执行 WEB API 与浏览器 Runtime；Next.js 为管理控制台。近期新增注册节流/浏览器清理、高级模型探活保护、动态 probe model，以及代理绑定 UI/出口并发。此次 MiMo 实际通道为 API，公开协议为 Chat Completions。任务板历史源码 0.29.0 不能代替当前部署事实。Qwen 继续不纳入发布验收。
 
 ## “你好”的实际请求
 
@@ -39,6 +39,25 @@
 
 ## 发布门禁与回滚
 
-当前生产仍为 0.30.0；候选镜像、隔离及生产验收后在本报告追加事实。沿用七家桥接门禁、现有分发 Key、合成请求与失败账本；不进行高级模型健康探活、不修改 probe model、不扩展 Qwen。候选通过后提升同一 digest，并核对资源预算、探针、版本、重启与 SDK/账本结果。
+### 候选与范围例外
+
+- Source `a766eadd0b51838ae35cf582fbde372dd5368f0f`，CI [38339184576](https://github.com/Prodigalgal/any2api/actions/runs/38339184576) 全部质量及镜像构建成功。四个隔离候选版本/digest 一致，Ready、零重启，验收后删除本次拥有的 4 Pod、2 Service、1 ConfigMap。
+- 原七家矩阵 **39/49** 项通过；Grok、GLM、LongCat、MiMo、MiniMax 各 **7/7**，对应 **25 次普通 INFERENCE / 25 attempts / 25 successes**。Arena、DeepSeek 各有两次 `503 model_unavailable`，在上游前拒绝，没有伪造普通推理账本；其依赖步骤未通过，原始失败报告保留。
+- Arena 同时具有 118 个可选账号，但缺少稳定的新鲜模型健康证据；已配置 `gemini-3.5-flash-lite` 的一次显式基础 PROBE 结果为 `upstream_timeout`，240016ms。未对 Sonnet/Max 做健康探活，未修改 probe model。DeepSeek 为 15 EXPIRED + 1 DEGRADED，均 enabled=false；近期自动 keepalive 失败为 `empty_model_response`，注册失败在 form_ready/transport，未修改或重新启用账号。
+- 用户明确选择 **“先发布稳定性修复，再处理两家故障”**。因此此次发布只以五家完整候选验收作为桥接门禁，Arena/DeepSeek 保留故障项，不将七家报告改成成功。Qwen 继续排除。
+
+### 生产发布与验证
+
+- Source 已快进 `main`；[GitOps `a42d1e6`](https://github.com/Prodigalgal/ircs-prod-config/commit/a42d1e642b1b35f1ef7c87429523db7048349a61) 原子更新四个镜像和 Arena storage patch，继承发布前最新 GitOps 父提交，不覆盖其他应用变动。未重建候选制品。
+- 生产四组件安装/API 版本为 **0.30.1**，镜像 suffix `20261013-v0.30.1-release-a766eadd0b51838ae35cf582fbde372dd5368f0f`；实际四 digest 与隔离候选完全相同。Argo **Synced/Healthy**，新 Pod Ready、零重启，公网 healthz/readyz 均 200。
+- Arena 实际 request **512Mi**、limit **3Gi**；CPU 2、memory 3584Mi、三个 probe timeout=3s，RollingUpdate maxSurge=0/maxUnavailable=1 均按原生产契约保持。旧 Evicted Pod 保留。
+- 五家公网官方 SDK **35/35**，Chat/Responses、JSON/SSE、system/skill/早期历史、严格函数、客户端工具结果回传、previous_response_id 和资源读取/自有状态清理通过；对应 **25 次普通 INFERENCE / 25 attempts / 25 successes / 0 failures**，没有 SDK 自动重试。报告 `web-bridge-production-v0301-accepted-five.json` 与 `-ledger.json` 记录精确 request_id。
+- 普通 SDK 验收期间（**11:52:37–11:53:39 UTC+8**），两个新 Automation Pod 的 live/ready 共 **120 次检查全部 200**；共享 Automation 最大 **46.909ms**，Arena 最大 **52.564ms**，新 Pod Warning events 为空。该短窗口不能证明后续高峰或长期临时目录增长不会再次出问题。
+- 公网生产旧版本的最小“你好”合成 Chat/SSE 复测成功：无 system、无工具，首段正文 **25.831s**、完整 **31.437s**，有正常 finish/usage；它不代表桌面 31 工具的完整 Agent 上下文已可被 MiMo WEB 接受。
+- 生产正在服务实时流量；瞬时 concurrent>0 本身不作为发布失败。安装身份、资源和健康检查与精确合成请求账本分别核对，不人为清空用户请求或重置熔断状态。
+
+### 遗留风险与后续优化
+
+继续定位 Arena 上游基础模型超时、DeepSeek 空响应及账号状态转换，按实测协议和异常路径修复。完整桌面 Agent 上下文仍超出 MiMo WEB 能力，客户端 overflow/UI 行为尚未得到实机复现证据；不声称本次运行稳定性补丁解决了该上下文问题。历史 Automation exit137 的唯一根因仍未证明。新的可部署代码或配置候选必须继续占用新版本，不能覆盖 0.30.1 镜像。
 
 直接回滚点为 0.30.0 四镜像 suffix `20261012-v0.30.0-release-516002ab336cfbc5f42f6366ffb5df460777bb34`，并撤回本次 Arena 资源 patch；历史 Failed Pod、重启与探针证据保留。

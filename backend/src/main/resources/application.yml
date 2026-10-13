@@ -90,8 +90,8 @@ any2api:
       arena: 12
       grok_web: 8
       longcat: 8
-      mimo: 4
-      minmax: 4
+      mimo: 12
+      minmax: 12
   observability:
     operation-retention: ${ANY2API_OBSERVABILITY_OPERATION_RETENTION:30d}
     usage-retention: ${ANY2API_OBSERVABILITY_USAGE_RETENTION:90d}

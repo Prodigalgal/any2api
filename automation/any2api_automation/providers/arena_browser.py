@@ -2148,6 +2148,8 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         self._arena_page_path = page_path
         self._arena_me_path = me_path
         self._arena_chat_path = chat_path
+        self._models_cache: dict[str, Any] | None = None
+        self._models_cache_time: float = 0.0
         super().__init__(
             "arena",
             base_url,
@@ -2185,7 +2187,17 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         credential: dict[str, Any],
         proxy_url: str,
         plan: RuntimePlan,
+        *,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and self._models_cache is not None
+            and (now - self._models_cache_time) < 600.0
+        ):
+            return self._models_cache
+
         response = await self.request(
             credential,
             proxy_url,
@@ -2198,12 +2210,16 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         )
         status = int(response.get("status") or 502)
         if status < 200 or status >= 300:
+            if self._models_cache is not None:
+                return self._models_cache
             return response
         try:
             records = parse_arena_models(str(response.get("body") or ""))
         except (TypeError, ValueError):
+            if self._models_cache is not None:
+                return self._models_cache
             return {**response, "status": 502, "body": "Arena model catalog is unavailable"}
-        return {
+        result = {
             **response,
             "body": json.dumps(
                 {"models": records, "source": "arena_direct_page"},
@@ -2211,6 +2227,9 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                 separators=(",", ":"),
             ),
         }
+        self._models_cache = result
+        self._models_cache_time = now
+        return result
 
     async def account_status(
         self,

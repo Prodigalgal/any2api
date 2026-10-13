@@ -619,7 +619,11 @@ async def test_register_forces_public_mail_tm_driver(monkeypatch) -> None:
     assert len(captured_payloads) == 1
     actual_payload, default_driver = captured_payloads[0]
     assert default_driver == "mail_tm"
-    assert actual_payload["mail"]["driver"] == "mail_tm"
-    assert "base_url" not in actual_payload["mail"]
-    assert "domain" not in actual_payload["mail"]
-    assert "domains" not in actual_payload["mail"]
+    assert actual_payload["mail"]["base_url"] == "https://apimail.omnnu.xyz"
+    assert actual_payload["mail"]["domain"] == "edu.omnnu.xyz"
+
+    # Test fallback when no base_url or empty mail is passed
+    captured_payloads.clear()
+    await provider.register({"captcha": {"ai_enabled": False}, "mail": {}})
+    actual_payload2, _ = captured_payloads[0]
+    assert actual_payload2["mail"]["driver"] == "mail_tm"

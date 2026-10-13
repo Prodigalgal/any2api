@@ -35,6 +35,7 @@ from ..lifecycle.mail import (
     BaseMailClient,
     Mailbox,
     MailTmClient,
+    TempMailClient,
     TempMailIoClient,
     create_mail_client,
 )
@@ -105,11 +106,10 @@ class DeepseekAutomationProvider(AutomationProvider):
                 .strip()
                 .lower()
             )
-            if not driver or driver in {"cloudflare", "auto"}:
+            # Preserve explicitly configured mail settings (e.g. self-hosted cloudflare temp mail)
+            # Only fallback to mail_tm if no mail configuration or base_url is present
+            if (not driver or driver == "auto") and not mail_payload.get("base_url"):
                 mail_payload["driver"] = "mail_tm"
-                mail_payload.pop("base_url", None)
-                mail_payload.pop("domain", None)
-                mail_payload.pop("domains", None)
                 reg_payload["mail"] = mail_payload
 
             mail, mailbox, password = await prepare_registration(
@@ -423,16 +423,21 @@ async def _run_registration_browser(
             ):
                 try:
                     logger.info("DeepSeek email domain rejected, rotating disposable mail client")
-                    if isinstance(current_mail, MailTmClient):
+                    if isinstance(current_mail, TempMailClient):
+                        # For self-hosted temp mail, rotate to another address/domain under the self-hosted setup
+                        current_mailbox = await current_mail.create_address()
+                    elif isinstance(current_mail, MailTmClient):
                         current_mail = create_mail_client("tempmail_io")
+                        current_mailbox = await current_mail.create_address()
                     elif isinstance(current_mail, TempMailIoClient):
                         current_mail = create_mail_client(
                             "tempmail_plus",
                             domains=["fexbox.org", "fexbox.ru", "fexpost.com", "mailbox.in.ua"],
                         )
+                        current_mailbox = await current_mail.create_address()
                     else:
                         current_mail = create_mail_client("mail_tm")
-                    current_mailbox = await current_mail.create_address()
+                        current_mailbox = await current_mail.create_address()
                     logger.info("Rotated to disposable mailbox: %s", current_mailbox.address)
                 except Exception as rotate_err:  # noqa: BLE001
                     logger.warning("Failed to rotate mailbox during retry: %s", rotate_err)

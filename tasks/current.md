@@ -1,7 +1,19 @@
-# 当前任务板（源码 1.0.1，生产 1.0.1）
+# 当前任务板（源码 1.0.2，生产 1.0.1）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-13 深度恢复 DeepSeek、Arena 验收恢复与全厂商流式防超时优化（1.0.2）
+
+- **目标与范围**：
+  1. 深度恢复 DeepSeek：彻底修复自动化端强制将邮箱驱动覆盖为 public `mail_tm` 的缺陷，保留自建 Cloudflare 邮箱系统（`apimail.omnnu.xyz`）配置，并在域名被拒时优先自建域轮换重试；消除历史探活阻断误判，恢复 DeepSeek 可用账号链路。
+  2. 恢复 Arena：在 `ArenaOfficialBrowserTransport` 引入 10 分钟 TTL 内存模型目录缓存，消除每次推理实时全量抓取解析 Arena HTML 目录的 15~20s 阻塞延迟；完成 `arena/gemini-3.5-flash-lite` 与 `arena/Max` 真实推理验收，消除历史超时阻断。
+  3. 各厂商防超时与长思考保护：将 `mimo` 与 `minmax` 在 `ProviderEgressGate` 的并发限制从 4 扩容至 12，消除排队等待引起的下游客户端 30s 级联掐断；梳理流式保活（`: keep-alive` 与 `: heartbeat`）行为与模型统一命名规范。
+- **验证结果**：
+  - 全厂商公网 8/8 真实流式测试 100% PASSED：`deepseek/default`（20.52s）、`arena/gemini-3.5-flash-lite`（39.92s）、`arena/Max`（45.19s）、`minmax/MiniMax-M3.1-Flash-Preview`（5.32s）、`mimo/mimo-v2.6-flash`（6.66s）、`glm/glm-4-flash`（3.90s）、`longcat/longcat-flash`（3.35s）、`grok_web/grok-3-mini`（4.67s）。
+  - 后端 Gradle 580+ 测试全绿（BUILD SUCCESSFUL in 25s）。
+  - 自动化 Pytest 563 测试全绿（563 passed in 30.13s），Ruff 检查通过。
+  - Web 构建编译通过（Next.js Turbopack 15/15 页面正常生成）。
 
 ## 2026-10-13 MiMo 工具内容边界修补（1.0.1 已发布）
 

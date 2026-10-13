@@ -211,6 +211,55 @@ class MimoProtocolTest {
     }
 
     @Test
+    void keepsToolLikeJsonInsideNativeParametersAsCallerData() {
+        for (var value : List.of("{\"name\":\"undeclared\",\"arguments\":{}}",
+                "{\"name\":\"review_document\",\"arguments\":{\"batch_number\":11733}}")) {
+            for (var source : parameterSources("batch_number", value)) {
+                var events = strictToolEvents(source, "{\"type\":\"string\"}");
+                assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
+                assertThat(completedArguments(events).path("batch_number").asText()).isEqualTo(value);
+            }
+        }
+    }
+
+    @Test
+    void neverTreatsReasoningExamplesAsExecutableToolCalls() {
+        var source = "<think>Example: {\"name\":\"undeclared\",\"arguments\":{}}</think>"
+            + parameterSources("batch_number", "11733").getFirst();
+        var events = strictToolEvents(source, "{\"type\":\"string\"}");
+        assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
+        assertThat(completedArguments(events).path("batch_number").asText()).isEqualTo("11733");
+    }
+
+    @Test
+    void allowsAnOrdinaryAnswerAfterAToolExampleInReasoning() {
+        var decoder = new MimoEventDecoder("reasoning-example", List.of(
+            new MimoTool("review_document", "", mapper.createObjectNode())), false, true);
+        var source = "<think>" + parameterSources("batch_number", "11733").getFirst()
+            + "</think>ordinary answer";
+        decoder.decode(mapper.writeValueAsString(mapper.createObjectNode().put("type", "text").put("content", source)));
+        var events = decoder.finish();
+        assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance)
+            .noneMatch(CanonicalEvent.ToolCallStarted.class::isInstance)
+            .anyMatch(event -> event instanceof CanonicalEvent.OutputTextDelta text && text.delta().equals("ordinary answer"))
+            .anyMatch(CanonicalEvent.Completed.class::isInstance);
+    }
+
+    @Test
+    void preservesLiteralThinkMarkersInsideToolArguments() {
+        var value = "<think>literal document text</think>";
+        var sources = new java.util.ArrayList<>(parameterSources("batch_number", value));
+        var call = mapper.createObjectNode().put("name", "review_document");
+        call.putObject("arguments").put("batch_number", value);
+        sources.add(mapper.writeValueAsString(call));
+        for (var source : sources) {
+            var events = strictToolEvents(source, "{\"type\":\"string\"}");
+            assertThat(events).noneMatch(CanonicalEvent.Failed.class::isInstance);
+            assertThat(completedArguments(events).path("batch_number").asText()).isEqualTo(value);
+        }
+    }
+
+    @Test
     void preservesDeclaredJsonTypesAndNullableStringsInWebParameters() {
         var cases = List.of(
             List.of("{\"type\":\"integer\"}", "11733"),

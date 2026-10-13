@@ -41,3 +41,7 @@
 工具 JSON 共用批次解码器，拒绝未知工具/重复 ID 整个批次；MiMo 保留两次相同的实际调用并校验禁并行策略，限制待解析缓冲为1Mi字符。LongCat 忽略终态后帧，上游截断在 Chat 中返回 length/content_filter，在 Responses 中保持 incomplete；不将截断伪装为工具成功完成。
 
 本地 Backend 577项（572通过、5按环境条件跳过）、bootJar、源码/JAR/迁移版本契约通过；Automation 563项、Ruff、Web lint/build通过。官方 OpenAI Python 2.54.0 夹具26/26，七家两协议参数组合通过。合成64Ki工具JSON/4100分片的分配从约135MB降至约0.55MB，约99.6%；这不是厂商首字延迟或线上接口延迟测量。本轮没有新增厂商生成探活，生产制品验收独立记录。
+
+1.0.0已发布：Source `86dad456edd1b77b04ea7340ea327ac93ef975ec`、CI `38390578932`、GitOps `cd9ec64456f6ed36cc53a40ae891d351b3325437`。四个生产digest均与候选一致，526个账号均有HISTORICAL预算记录，候选七家14次和公网MiMo两次重复验证均未生成/改变账号状态。两个公网入口的health/ready、目录、匿名Responses OpenAI错误契约通过；模型探活接口404。Qwen保持禁用，Arena超时/DeepSeek账号不足保留。
+
+后续1.0.1仅修补MiMo工具解析的数据边界：原生参数中的JSON及字面思考标签保持数据语义，前置推理示例不作为调用；已解析区域不再被兜底重复识别，PLAIN参数按嵌套/引号分隔。账号预算、迁移034、代理绑定和OpenAI核心契约保持，回滚使用已验证的1.0.0四镜像并保留预算表，避免恢复旧周期探活。

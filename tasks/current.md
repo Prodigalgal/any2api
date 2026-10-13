@@ -1,7 +1,14 @@
-# 当前任务板（源码 1.0.0，生产 0.30.1）
+# 当前任务板（源码 1.0.1，生产 1.0.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-13 MiMo 工具内容边界修补（1.0.1 发布准备）
+
+- **目标/范围**：修复 MiMoML/XML/PLAIN 参数内容被 JSON 兜底再次当作工具调用，及前置推理示例被执行/阻断普通回答的问题；仅修改 MiMoEventDecoder、相关回归和统一版本。保留真实独立调用、禁并行、原始参数和其他厂商映射；不新增厂商生成测试、账号/密钥或数据结构。
+- **实现**：按原有语法读取并遮蔽已识别调用区域，兜底只扫描剩余内容；前置思考区不执行调用，但工具数据中的字面 `<think>` 保留；PLAIN 参数只在 JSON/引号之外分割逗号。
+- **验收/测试**：四个旧失败样例已保存；修正后 MiMo/响应 Guard/Writer 39项通过，bootJar 和源码/JAR/迁移版本校验通过。全量与 SDK 发布门禁继续执行，迁移034仍属于1.0.0；1.0.0不可变制品保持。
+- **1.0.0 运行事实**：Source `86dad45`、CI `38390578932`、GitOps `cd9ec64`，四个生产 digest 与候选完全相同，Ready/0 restart，Argo Synced/Healthy。两个公网入口 health/ready、MiMo目录、匿名 Responses 401/OpenAI JSON通过；526条历史迁入、候选14次/生产2次重复验证均performed=false，原模型探活404。无新增厂商生成验收。
 
 ## 2026-10-13 WEB 桥接细节修缮（并入未发布的 1.0.0）
 
@@ -21,7 +28,7 @@
 - 删除模型探测服务/定时任务、可用性 guard、健康聚合和健康熔断；模型列表保留目录/能力/参数/并发队列，前端移除可用性标记。OpenAI 基础字段与 Chat/Responses 保持，已公开扩展被移除，按 SemVer 占用 1.0.0。[规格](../docs/requirements/ONE_TIME_ACCOUNT_VERIFICATION.md)。
 - Self-hosted Oracle 四节点在生产已绑定七家注册/推理/生命周期范围，Qwen 原禁用保持；修复绑定 upsert 未更新 traffic_scopes。16:55 UTC+8 四节点只读 gstatic 检查均204，无模型生成；不据此声明全部厂商 WEB 可用。
 - DeepSeek HTTP 200/application/json 的 biz_code=5、is_muted=1 已有脱敏实证，改为 account_blocked；40003 改为 credential_rejected，未知拒绝为 provider_upstream_error，不再误报空输出。该修复并入本次发布。
-- 首次领取/并发/失败/取消/重启/历史迁入和重复管理验证及 Spring Repository 接线回归通过，Web build/lint、Automation 563 项与 Ruff 通过；最终 Backend 全量、JAR/版本与 SDK 门禁通过，进入 1.0.0 不可变构建/候选阶段。19:17 UTC+8 只读核查账号仍526个，DeepSeek启用且 ACTIVE/DEGRADED 数量为0；Arena实际推理超时尚未解决。
+- 首次领取/并发/失败/取消/重启/历史迁入和重复管理验证及 Spring Repository 接线回归通过，Web build/lint、Automation 563 项与 Ruff 通过；Backend/JAR/版本、SDK26/26和CI通过。1.0.0已按相同不可变四digest发布，历史526条迁入无额外生成，Qwen禁用保持；DeepSeek启用且ACTIVE/DEGRADED数量为0、Arena推理超时仍保留。
 
 ## 2026-10-13 MiMo 桌面请求与 Automation 健康修复（0.30.1 已发布）
 

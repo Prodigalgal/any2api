@@ -36,6 +36,8 @@ final class MimoEventDecoder {
         "<function_calls?>([\\s\\S]*?)</function_calls?>", Pattern.CASE_INSENSITIVE);
     private static final Pattern PLAIN_CALL = Pattern.compile(
         "TOOL_CALL:\\s*([\\w.-]+)\\s*\\(([^\\n]*)\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern THOUGHT = Pattern.compile(
+        "\\G\\s*<think>[\\s\\S]*?(?:</think>|$)", Pattern.CASE_INSENSITIVE);
 
     private final String requestId;
     private String inputParameter = "input";
@@ -215,7 +217,8 @@ final class MimoEventDecoder {
 
     private void emitTools(String source, List<CanonicalEvent> output) {
         var calls = new ArrayList<ParsedCall>();
-        var matcher = INVOKE.matcher(source);
+        var unparsed = withoutReasoning(source);
+        var matcher = INVOKE.matcher(unparsed);
         while (matcher.find()) {
             var name = matcher.group(1).trim();
             name = resolveName(name);
@@ -226,8 +229,9 @@ final class MimoEventDecoder {
                 putAuto(arguments, name, parameter.group(1), parameter.group(2));
             }
             calls.add(new ParsedCall(name, arguments, new CallGroup(ToolSyntax.MIMOML, 0)));
+            maskRange(unparsed, matcher.start(), matcher.end());
         }
-        var xml = XML_CALL.matcher(source);
+        var xml = XML_CALL.matcher(unparsed);
         while (xml.find()) {
             var function = XML_FUNCTION.matcher(xml.group(1));
             if (!function.find()) continue;
@@ -237,16 +241,14 @@ final class MimoEventDecoder {
             var parameter = XML_PARAMETER.matcher(function.group(2));
             while (parameter.find()) putAuto(arguments, name, parameter.group(1), parameter.group(2));
             calls.add(new ParsedCall(name, arguments, new CallGroup(ToolSyntax.XML, 0)));
+            maskRange(unparsed, xml.start(), xml.end());
         }
-        var tagged = TAGGED_FUNCTION.matcher(source);
+        var tagged = TAGGED_FUNCTION.matcher(unparsed);
         while (tagged.find()) {
             addJsonCalls(tagged.group(1), calls, new CallGroup(ToolSyntax.TAGGED_JSON, 0));
+            maskRange(unparsed, tagged.start(), tagged.end());
         }
-        var candidateIndex = 0;
-        for (var candidate : jsonCandidates(source)) {
-            addJsonCalls(candidate, calls, new CallGroup(ToolSyntax.JSON, candidateIndex++));
-        }
-        var plain = PLAIN_CALL.matcher(source);
+        var plain = PLAIN_CALL.matcher(unparsed);
         while (plain.find()) {
             var name = resolveName(plain.group(1));
             if (name == null) throw new IllegalArgumentException("MiMo emitted an undeclared function tool");
@@ -256,12 +258,17 @@ final class MimoEventDecoder {
                 var parsed = mapper.readTree(raw);
                 if (parsed.isObject()) arguments = (tools.jackson.databind.node.ObjectNode) parsed;
             } catch (RuntimeException ignored) {
-                for (var pair : raw.split(",")) {
+                for (var pair : plainArgumentPairs(raw)) {
                     var parts = pair.split("=", 2);
                     if (parts.length == 2) putAuto(arguments, name, parts[0], parts[1]);
                 }
             }
             calls.add(new ParsedCall(name, arguments, new CallGroup(ToolSyntax.PLAIN, 0)));
+            maskRange(unparsed, plain.start(), plain.end());
+        }
+        var candidateIndex = 0;
+        for (var candidate : jsonCandidates(unparsed.toString())) {
+            addJsonCalls(candidate, calls, new CallGroup(ToolSyntax.JSON, candidateIndex++));
         }
         var occurrences = new java.util.HashMap<CallGroup, java.util.Map<String, Integer>>();
         for (var call : calls) {
@@ -276,6 +283,43 @@ final class MimoEventDecoder {
             output.add(new CanonicalEvent.ToolArgumentsDelta(1, requestId, next(), id, serialized));
             output.add(new CanonicalEvent.ToolCallCompleted(1, requestId, next(), id, serialized));
         }
+    }
+
+    private static void maskRange(StringBuilder source, int from, int to) {
+        // Argument content and reasoning are data; fallback parsers must not execute embedded examples.
+        for (var index = from; index < to; index++) source.setCharAt(index, ' ');
+    }
+
+    private static StringBuilder withoutReasoning(String source) {
+        // MiMo thoughts precede visible output. Tags inside tool values remain literal data.
+        var visible = new StringBuilder(source);
+        var thought = THOUGHT.matcher(source);
+        while (thought.find()) maskRange(visible, thought.start(), thought.end());
+        return visible;
+    }
+
+    private static List<String> plainArgumentPairs(String source) {
+        var pairs = new ArrayList<String>();
+        var start = 0;
+        var nesting = 0;
+        var quoted = false;
+        var escaped = false;
+        for (var index = 0; index < source.length(); index++) {
+            var character = source.charAt(index);
+            if (quoted) {
+                if (escaped) escaped = false;
+                else if (character == '\\') escaped = true;
+                else if (character == '"') quoted = false;
+            } else if (character == '"') quoted = true;
+            else if (character == '{' || character == '[') nesting++;
+            else if (character == '}' || character == ']') nesting--;
+            else if (character == ',' && nesting == 0) {
+                pairs.add(source.substring(start, index));
+                start = index + 1;
+            }
+        }
+        pairs.add(source.substring(start));
+        return pairs;
     }
 
     private List<CanonicalEvent> drainText(String source) {
@@ -397,8 +441,9 @@ final class MimoEventDecoder {
     }
 
     private boolean looksLikeToolSyntax(String source) {
+        var visible = withoutReasoning(source);
         return List.of("<|MiMoML|tool_calls>", "<tool_call>", "<function_call>",
-            "<function_calls>", "TOOL_CALL:").stream().anyMatch(source::contains);
+            "<function_calls>", "TOOL_CALL:").stream().anyMatch(marker -> visible.indexOf(marker) >= 0);
     }
 
     private int partialControlSuffix(String source) {

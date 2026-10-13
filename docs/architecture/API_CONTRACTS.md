@@ -26,7 +26,8 @@ Since 0.26.1, the production firewall permits encoded slashes only within GET mo
 encoded route prefixes and other unsafe paths retain the default rejection. The shared Envoy
 entrypoint currently normalizes `%2F` with a same-origin 307 redirect; clients must follow it or use raw slashes.
 Unknown, disabled-provider and unauthorized model IDs return OpenAI JSON `404 model_not_found`.
-Cataloged but unavailable models remain describable, with `available:false`.
+Since 1.0.0, model descriptions do not predict availability. The `available` extension and
+health/probe/circuit fields are removed; base OpenAI model fields and capability metadata remain.
 
 Random endpoints accept an omitted model or `model=random`. `/random/v1` selects only models carrying
 the provider-owned `top_text` role. `/multimodal-random/v1` selects only models carrying the
@@ -137,7 +138,7 @@ network transfer or the entire HTTP request; critical Redis coordination retains
 Account lease acquisition/renewal resource failures use OpenAI `503 coordination_unavailable`
 with `retryable:true` and a safe message before SSE commits. Once SSE commits, Responses emits
 `response.failed`; Chat emits its error and `[DONE]`. Coordination failures do not grant capacity,
-enter provider credential-error handling or open the model circuit. Failed lease release during
+enter provider credential-error handling or affect model admission history. Failed lease release during
 generation cleanup is logged with request/account context and left to the existing lease TTL;
 it cannot replace an already committed generation terminal. The release service itself still fails.
 
@@ -171,8 +172,8 @@ The Java selection boundary in source version 0.21.0 is:
 | Qwen | API, Runtime | API, Runtime |
 
 The Java declaration controls what a public request can use; a Python binding alone does not make
-that channel selectable or establish live readiness. Provider enablement, accounts, and model health
-remain separate runtime gates.
+that channel selectable or establish live readiness. Provider enablement, permissions, actual
+account eligibility and concurrency remain runtime gates; model health prediction is removed.
 
 The two random route families, `/random/v1/*` and `/multimodal-random/v1/*`, always force `AUTO`
 for the selected account and model, regardless of the calling key's stored mode. The selected
@@ -182,35 +183,43 @@ model, protocol, and feature authorization checks intact.
 
 `GET /v1/models` reads the PostgreSQL runtime catalog and namespaces IDs as
 `provider/upstream-model`. `GET /{provider}/v1/models` returns the same catalog without the namespace.
-Catalog membership and callability are separate: `cataloged` reports discovery, while `available`
-requires a usable account and recent successful inference or a fresh successful probe. The runtime
-state is `READY`, `DEGRADED`, or `UNAVAILABLE`; an open per-model circuit always forces
-`UNAVAILABLE`.
-The inference entry guard reads the same cached catalog and returns `503 model_unavailable` before
-queue or account acquisition when a model is marked unavailable.
+`cataloged` reports discovery only. No generated probe, historical success rate, health freshness,
+or circuit prediction is required before ordinary inference. The real account selection still
+checks credentials, account status, cooldown, tier, permissions and leases. Errors from a real
+request retain the OpenAI error contract. A full concurrency queue returns `429 rate_limited`.
+The catalog query does not aggregate `usage_events`, accounts or `model_probe_results`.
 
 Each model publishes a machine-readable contract and runtime snapshot:
 
 Since 0.27.0, model **retrieval** also returns `parameter_adaptation` (at the root and in
 `capabilities`). Provider-owned mappings distinguish native target fields, boolean thinking
-toggles, configured non-binding output limits and unsupported controls. Detailed mappings are
+toggles and best-effort compatibility controls. Since 1.0.0, standard optional generation controls
+without a declared WEB target use `best_effort_ignore` with `enforced:false`; native mappings stay
+in effect. Detailed mappings are
 not repeated across model list entries. `evidence:adapter_mapping` describes code, not a live
 effectiveness guarantee. `input.limit` with `unit:provider_characters` is separate from token
 limits; unknown WEB input/context boundaries remain unknown. See the [dated parameter/input
 report](../reports/WEB_PARAMETERS_AND_CONTEXT_2026-10-04.md).
 
-Known optional generation controls with JSON `null` behave as omitted; unknown fields and
-explicit unsupported values still fail before generation. A MiMo fixed input-too-long refusal
+Known optional generation controls, nested reasoning controls and provider options with JSON
+`null` behave as omitted. User-authorized WEB compatibility accepts common sampling, output-budget,
+stop, seed, penalty and logprob settings; absent WEB controls are silently omitted from the
+provider-owned request. MiMo output budgets are accepted as hints and are not natively enforced.
+Unsupported reasoning controls use the WEB model default. Native reasoning toggles preserve their
+existing mapping; accepting `xhigh`/`max` does not imply distinct native effort levels. Chat `n:1`
+and text-only modalities are accepted. Unknown options, malformed values and unsupported execution
+features still return typed errors. This compatibility policy retains caller history, instructions,
+tools, required tool choice, strict argument validation and key permissions.
+A MiMo fixed input-too-long refusal
 becomes non-retryable `context_length_exceeded`: non-streaming HTTP 400 with
 `type:invalid_request_error`, or the protocol failure terminal after SSE has started. This is a
-request failure, not a credential failure or model circuit signal. No history/tools are silently
+request failure and is not used to invalidate credentials. No history/tools are silently
 discarded to fit WEB limits.
 
 ```json
 {
   "id": "acme/acme-ultra",
   "cataloged": true,
-  "available": true,
   "supported_parameters": {
     "chat_completions": ["model", "messages", "stream"],
     "responses": ["model", "input", "stream"]
@@ -242,16 +251,9 @@ discarded to fit WEB limits.
   "streaming": true,
   "multimodal": {"input": ["text", "image"], "output": ["text"]},
   "runtime": {
-    "status": "READY",
-    "available_account_count": 4,
-    "quota_limited_account_count": 1,
-    "rolling_request_count": 120,
-    "rolling_attempt_count": 126,
-    "rolling_success_rate": 0.98,
-    "p50_ms": 1830,
-    "p95_ms": 6200,
-    "probe_status": "READY",
-    "circuit_state": "CLOSED"
+    "concurrent": 0,
+    "queue_depth": 0,
+    "bulkhead_rejections": 0
   }
 }
 ```
@@ -263,11 +265,13 @@ known discovered value. Model metadata and provider protocol declarations are me
 synchronization. A provider may override `InferenceProvider.modelContract` when the official catalog
 exposes a provider-specific capability shape.
 
-Before queue admission or account acquisition, the gateway rejects an explicit output budget above
-the effective output limit. Input is conservatively estimated from UTF-8 request bytes; the gateway
-also rejects estimated input above the effective input limit and estimated input plus explicit output
-budget above the effective context limit. It returns `invalid_request_error` and never silently
-truncates a requested limit.
+Before queue admission or account acquisition, WEB compatibility clamps natively mapped output
+budgets to known effective output limits and remaining context budget. WEB transports without an
+output-budget field omit that setting. The original API request remains intact for downstream
+response/state handling. Input is conservatively estimated from UTF-8 provider-request bytes;
+estimated input above an effective input/context limit still returns `invalid_request_error`.
+Unknown limits remain unknown. Compatibility does not claim exact token stopping where the WEB
+transport has no such control.
 
 Common fields enter `CanonicalRequest`; native differences enter:
 
@@ -292,14 +296,14 @@ The current Runtime mappers make that translation explicit:
 
 | Provider | Canonical messages | Generation | Reasoning/search | Tools | Media |
 |---|---|---|---|---|---|
-| Arena | flattened role sections; image/PDF blocks upload in the account page first | unsupported fields rejected before Action | `provider_options.arena.web_search=true` maps to native `modality: "search"` | emulated function contract in prompt | same-session page upload; current declared formats are PNG/JPEG/WebP and PDF |
-| DeepSeek | flattened `prompt` with role sections | unsupported fields rejected before Action | `thinking_enabled`/`search_enabled` booleans | functions emulated; search tools become `search_enabled` | text-only |
+| Arena | flattened role sections; image/PDF blocks upload in the account page first | common controls absent from WEB are omitted | `provider_options.arena.web_search=true` maps to native `modality: "search"` | emulated function contract in prompt | same-session page upload; current declared formats are PNG/JPEG/WebP and PDF |
+| DeepSeek | flattened `prompt` with role sections | common controls absent from WEB are omitted | `thinking_enabled`/`search_enabled` booleans | functions emulated; search tools become `search_enabled` | text-only |
 | GLM | official `chat.history` and completion `messages` | `params.max_tokens`, `temperature`, `top_p` | completion `features.enable_thinking`, `reasoning_effort`, `auto_web_search` | emulated function contract in user context | authenticated image file upload, then official file object |
-| LongCat | flattened `content` with role sections | no output-budget field; unsupported limits rejected | `reasonEnabled`, `searchEnabled`, model-specific `agentId` | function definitions become a provider-local prompt contract | same-session `files` from `/appendix-upload` |
-| MiMo | flattened `query` with system/tool sections | `modelConfig.temperature`, `topP`; output limit is non-binding | `modelConfig.enableThinking`, `webSearchStatus` | function definitions become a provider-local prompt contract | same-session `multiMedias` |
-| MinMax | flattened `content` with role sections | unsupported standard generation fields are rejected | model `variant`, `enable_team`, `worktreeMode` | emulated function contract in prompt | Runtime same-session `attachments`; API currently text-only |
+| LongCat | flattened `content` with role sections | no output-budget field; common unsupported controls omitted | `reasonEnabled`, `searchEnabled`, model-specific `agentId` | function definitions become a provider-local prompt contract | same-session `files` from `/appendix-upload` |
+| MiMo | flattened `query` with system/tool sections | `modelConfig.temperature`, `topP`; output-budget hints omitted | `modelConfig.enableThinking`, `webSearchStatus` | function definitions become a provider-local prompt contract | same-session `multiMedias` |
+| MinMax | flattened `content` with role sections | common controls absent from WEB are omitted | model `variant`, `enable_team`, `worktreeMode` | emulated function contract in prompt | Runtime same-session `attachments`; API currently text-only |
 | Qwen | native message graph with `fid`, parent/children and `files` | native `temperature`, `top_p`, `max_tokens` | `feature_config.thinking_mode`, `thinking_budget`, `auto_search` | functions emulated; search tools use native search | same-session native image upload; live inference excluded |
-| Grok Web | canonical history becomes a gateway session message | unsupported standard generation fields are rejected | selected model mode; reasoning output decoded | emulated function contract in prompt | separate media ops, not chat image-input support |
+| Grok Web | canonical history becomes a gateway session message | common controls absent from WEB are omitted | selected model mode; reasoning output decoded | emulated function contract in prompt | separate media ops, not chat image-input support |
 
 The direct API channel reuses the same semantic command contract but performs the provider's
 HTTP/SSE and upload protocol without creating a browser session. It may extract legal non-empty
@@ -338,8 +342,8 @@ account credential is invalid. The explicit API channel returns that typed failu
 schedule credential reauthentication. `AUTO` may switch to the provider's Runtime flow, where
 the verification and the signed completion remain in the same provider-owned browser context;
 the API channel only forwards an already provider-issued `captcha_verify_param` when the caller
-supplies one. Broad scheduled GLM model probes are disabled because they cannot provide that
-provider verification context; explicit readiness probes and real requests remain available.
+supplies one. No scheduled model generation is issued. The one-time account verification and ordinary
+requests retain the provider verification context.
 
 All API providers use the same conservative failure boundary for known provider verification
 signals. `anti_bot_rejected` is kept distinct from `credential_rejected`, puts the affected
@@ -462,7 +466,7 @@ declaration of PNG, JPEG, WebP, and PDF. The currently unselected Python API bin
 text/search only because
 the current signed uploader and reCAPTCHA escalation are page-owned; audio, video, remote URLs,
 file IDs, and unsupported document MIME types fail closed before either channel. A successful
-model catalog response is not an inference-ready account; Arena still requires a real text probe
+model catalog response is not an inference-ready account; new Arena accounts require their one-time text verification
 after registration.
 
 Only `grok_web` remains code-installed in 0.21.0. The `grok` and `grok_console` provider rows were
@@ -523,10 +527,20 @@ an ordinary registration job when due; schedules never bypass the existing job p
 pipeline. The enable endpoint only changes lifecycle state, while `PUT` replaces the editable plan
 contract.
 
-`POST /api/admin/v1/account-probes` accepts `accountId` and an enabled provider-owned `modelId`, then
-returns readiness, model, bounded upstream text output, duration, completion time, and refreshed
-account state. The legacy account-relative probe endpoint remains compatible and selects the provider
-default model.
+`POST /api/admin/v1/account-probes` accepts `accountId` and an optional enabled provider-owned
+basic `modelId` for the first verification. It returns readiness, model, bounded output, duration,
+completion time, account state, `performed` and `source` (`INITIAL` or `HISTORICAL`). The account-relative
+probe endpoint selects the configured basic model. A committed unique account claim permits at most
+one generation: no model/transport fallback, automatic generation retry or periodic generation.
+Repeated calls return the stored result without acquiring credentials or changing current account
+state. Cached `ready:true` records a past verification, not present account availability. Historical
+record timestamps in the new ledger mark import time; original timestamps remain in account metadata.
+`POST /api/admin/v1/models/probe` is removed. Existing model token policy endpoints remain.
+Non-generating keepalive, login refresh and check-in continue. `scheduleLifecycle:false` preserves the
+explicit opt-out for imports; importing the same existing identity cannot reset its verification budget.
+The former provider `model-probe-timeout` setting is renamed `account-verification-timeout` (default
+120s maximum generation deadline); `providers.config.probe_model` remains compatible configuration for
+new accounts only. Model health/circuit environment settings are retired.
 
 System settings are administered through `GET /api/admin/v1/settings` and typed `PUT` endpoints for
 Temp Mail, registration defaults, and `/settings/provider-keepalive`. Settings are AES-GCM encrypted

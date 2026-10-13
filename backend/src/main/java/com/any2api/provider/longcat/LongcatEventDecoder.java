@@ -32,6 +32,7 @@ final class LongcatEventDecoder {
     }
 
     List<CanonicalEvent> decode(String data) {
+        if (completed) return List.of();
         var output = start();
         if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) return output;
         try {
@@ -154,7 +155,15 @@ final class LongcatEventDecoder {
             complete(output, reason);
             return;
         }
-        var calls = toolProtocol.parse(answer, toolPlan);
+        final List<LongcatToolProtocol.ToolCall> calls;
+        try {
+            calls = toolProtocol.parse(answer, toolPlan);
+        } catch (IllegalArgumentException error) {
+            output.add(new CanonicalEvent.Failed(1, requestId, next(), "tool_call_generation_failed",
+                error.getMessage(), Map.of("retryable", false)));
+            completed = true;
+            return;
+        }
         if (calls.isEmpty()) {
             if (toolPlan.required()) {
                 output.add(new CanonicalEvent.Failed(1, requestId, next(),
@@ -191,7 +200,7 @@ final class LongcatEventDecoder {
             output.add(new CanonicalEvent.ToolCallCompleted(
                 1, requestId, next(), call.id(), call.arguments()));
         }
-        complete(output, "tool_calls");
+        complete(output, "stop".equals(reason) ? "tool_calls" : reason);
     }
 
     private String resolvedAnswer(List<CanonicalEvent> output, String finalText) {

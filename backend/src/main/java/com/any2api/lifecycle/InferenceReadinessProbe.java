@@ -9,7 +9,6 @@ import com.any2api.protocol.CanonicalRequest;
 import com.any2api.provider.ProviderExecutionContext;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ProviderRequestValidation;
-import com.any2api.provider.ProviderTransportFallbackPolicy;
 import com.any2api.provider.ProviderTransportModeService;
 import com.any2api.provider.RandomModelRole;
 import java.time.Duration;
@@ -28,7 +27,6 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 final class InferenceReadinessProbe {
     private static final Duration TIMEOUT = Duration.ofMinutes(2);
-    private static final String MARKER = "ANY2API_PROBE_OK";
     private static final Logger LOGGER = LoggerFactory.getLogger(InferenceReadinessProbe.class);
 
     private final ProviderRegistry providers;
@@ -54,13 +52,18 @@ final class InferenceReadinessProbe {
         long credentialVersion,
         Instant credentialExpiresAt
     ) {
+        return probe(account, credential, credentialVersion, credentialExpiresAt, null);
+    }
+
+    Mono<Result> probe(AccountEntity account, JsonNode credential, long credentialVersion,
+                       Instant credentialExpiresAt, String model) {
         var lease = new AccountLease(
             account.getProviderId(), account.getId(), "readiness-probe", 0,
             Instant.now().plus(TIMEOUT));
         return probe(new LeasedProviderAccount(
             account.getId(), account.getProviderId(), account.getExternalId(), account.getEmail(),
             credentialVersion, credentialExpiresAt, credential, account.getMetadata(), lease),
-            TIMEOUT);
+            providers.require(account.getProviderId()).accountProbeTimeout(), model);
     }
 
     Mono<Result> probe(LeasedProviderAccount account, Duration timeout) {
@@ -76,84 +79,26 @@ final class InferenceReadinessProbe {
             return Mono.error(new IllegalArgumentException("probe timeout must be positive"));
         }
         var provider = providers.require(account.providerId());
-        var transportPlan = transportModes.plan(provider);
+        var model = resolveModel(account.providerId(), requestedModel);
+        var deadline = timeout.compareTo(TIMEOUT) > 0 ? TIMEOUT : timeout;
+        return probeAttempt(provider, account, createProbeRequest(account.providerId(), model),
+            deadline, transportModes.plan(provider).primary());
+    }
+
+    String resolveModel(String providerId, String requestedModel) {
         var model = requestedModel == null || requestedModel.isBlank()
-            ? probeModel(provider) : requestedModel.trim();
-        var request = createProbeRequest(account.providerId(), model);
-        return probeAttemptWithTransportFallback(provider, account, request, timeout, transportPlan)
-            .flatMap(result -> {
-                if (result.ready() || requestedModel != null || !canFallbackProbeModel(result.errorClass())) {
-                    return Mono.just(result);
-                }
-                var fallbackModels = provider.fallbackProbeModels().stream()
-                    .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m))
-                    .toList();
-                if (fallbackModels.isEmpty()) {
-                    return Mono.just(result);
-                }
-                return tryFallbackProbeModels(provider, account, timeout, transportPlan, fallbackModels, result);
-            });
-    }
-
-    private Mono<Result> probeAttemptWithTransportFallback(
-        com.any2api.provider.InferenceProvider provider,
-        LeasedProviderAccount account,
-        CanonicalRequest request,
-        Duration timeout,
-        com.any2api.provider.ProviderTransportModeService.TransportPlan transportPlan
-    ) {
-        return probeAttempt(provider, account, request, timeout, transportPlan.primary())
-            .flatMap(result -> {
-                if (transportPlan.fallback() == null || result.ready()
-                    || !shouldFallbackToRuntime(result.errorClass())) {
-                    return Mono.just(result);
-                }
-                LOGGER.warn(
-                    "Inference readiness API probe failed provider={}, retrying with Runtime: {}",
-                    account.providerId(), result.errorClass());
-                return probeAttempt(
-                    provider, account, request, timeout, transportPlan.fallback())
-                    .map(fallback -> new Result(
-                        fallback.ready(), fallback.model(), fallback.errorClass(),
-                        fallback.output(), fallback.durationMs(),
-                        mergeCredentialPatches(result.credentialPatch(), fallback.credentialPatch())));
-            });
-    }
-
-    private Mono<Result> tryFallbackProbeModels(
-        com.any2api.provider.InferenceProvider provider,
-        LeasedProviderAccount account,
-        Duration timeout,
-        com.any2api.provider.ProviderTransportModeService.TransportPlan transportPlan,
-        List<String> fallbackModels,
-        Result initialResult
-    ) {
-        return Flux.fromIterable(fallbackModels)
-            .filter(fbModel -> !fbModel.equalsIgnoreCase(initialResult.model()))
-            .concatMap(fbModel -> {
-                var req = createProbeRequest(account.providerId(), fbModel);
-                return probeAttemptWithTransportFallback(provider, account, req, timeout, transportPlan)
-                    .map(fbResult -> new Result(
-                        fbResult.ready(),
-                        fbResult.model(),
-                        fbResult.errorClass(),
-                        fbResult.output(),
-                        initialResult.durationMs() + fbResult.durationMs(),
-                        mergeCredentialPatches(initialResult.credentialPatch(), fbResult.credentialPatch())));
-            })
-            .filter(Result::ready)
-            .next()
-            .doOnNext(fbReady -> LOGGER.info(
-                "Inference readiness probe fallback succeeded provider={} initial_model={} fallback_model={}",
-                account.providerId(), initialResult.model(), fbReady.model()))
-            .defaultIfEmpty(initialResult);
+            ? probeModel(providers.require(providerId)) : requestedModel.trim();
+        if (com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(model)) {
+            throw new IllegalArgumentException("initial verification requires a basic text model");
+        }
+        return model;
     }
 
     private CanonicalRequest createProbeRequest(String providerId, String model) {
         var requestId = "probe-" + UUID.randomUUID();
         var message = mapper.createObjectNode()
             .put("role", "user")
-            .put("content", "Hello! Please reply with a short confirmation message.");
+            .put("content", "Reply with OK only.");
         var raw = mapper.createObjectNode()
             .put("model", model)
             .put("stream", false);
@@ -161,14 +106,6 @@ final class InferenceReadinessProbe {
             requestId, CanonicalRequest.Protocol.CHAT_COMPLETIONS,
             providerId, model, false, List.of(message),
             Map.of(), Map.of(), List.of(), Map.of(), raw);
-    }
-
-    private static boolean canFallbackProbeModel(String errorClass) {
-        if (errorClass == null || errorClass.isBlank()) return false;
-        return switch (errorClass) {
-            case "anti_bot_rejected", "rate_limited", "model_unavailable", "provider_upstream_error" -> true;
-            default -> false;
-        };
     }
 
     private Mono<Result> probeAttempt(
@@ -190,8 +127,8 @@ final class InferenceReadinessProbe {
                 return CanonicalEventStream.enforce(
                     request, provider.generate(request, context, account));
             })
-            .timeout(timeout)
             .collectList()
+            .timeout(timeout)
             .map(events -> result(
                 request.model(), events, elapsedMillis(startedAt), context.credentialPatch()))
             .onErrorResume(error -> {
@@ -204,21 +141,6 @@ final class InferenceReadinessProbe {
                     request.model(), failure.type(), "", elapsedMillis(startedAt),
                     context.credentialPatch()));
             });
-    }
-
-    private JsonNode mergeCredentialPatches(JsonNode first, JsonNode second) {
-        var merged = mapper.createObjectNode();
-        if (first != null && first.isObject()) {
-            merged.setAll((tools.jackson.databind.node.ObjectNode) first);
-        }
-        if (second != null && second.isObject()) {
-            merged.setAll((tools.jackson.databind.node.ObjectNode) second);
-        }
-        return merged;
-    }
-
-    private static boolean shouldFallbackToRuntime(String failureType) {
-        return ProviderTransportFallbackPolicy.allowsRuntimeFallback(failureType);
     }
 
     private Result result(
@@ -252,10 +174,10 @@ final class InferenceReadinessProbe {
         if (custom.isPresent() && !custom.get().isBlank()) {
             return custom.get().trim();
         }
-        var scheduled = provider.scheduledProbeModel()
+        var initial = provider.initialVerificationModel()
             .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m));
-        if (scheduled.isPresent() && !scheduled.get().isBlank()) {
-            return scheduled.get().trim();
+        if (initial.isPresent() && !initial.get().isBlank()) {
+            return initial.get().trim();
         }
         var manifest = provider.manifest();
         var preferred = manifest.randomModelPreferences()
@@ -267,7 +189,6 @@ final class InferenceReadinessProbe {
             .filter(m -> !com.any2api.provider.AdvancedModelProbePolicy.isAdvancedModel(m))
             .findFirst();
         if (defaultModel.isPresent()) return defaultModel.get();
-        if (!manifest.defaultModels().isEmpty()) return manifest.defaultModels().getFirst();
         throw new IllegalStateException("provider has no model for inference readiness probe");
     }
 

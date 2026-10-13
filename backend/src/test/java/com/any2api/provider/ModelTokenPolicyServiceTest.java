@@ -67,8 +67,6 @@ class ModelTokenPolicyServiceTest {
         return new ModelCatalogCache.Entry(
             "qwen3-max", "Qwen 3 Max", "qwen", "Qwen",
             effective, discovered, 200_000L, 180_000L, 12_000L,
-            "OFFICIAL", mapper.createObjectNode(), List.of(), 1,
-            true, "READY", 4, 3, 1, 10, 10, 1.0,
-            100, 200, null, null, "READY", null, null);
+            "OFFICIAL", mapper.createObjectNode(), List.of(), 1);
     }
 }

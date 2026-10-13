@@ -38,13 +38,11 @@ class ModelsControllerTest {
         var capabilities = mapper.readTree("{\"tools\":{\"function_calling\":true,\"strict\":true},\"streaming\":true,"
             + "\"parameter_adaptation\":{\"top_p\":{\"mode\":\"mapped\",\"target\":\"modelConfig.topP\"}}}");
         var entry = new ModelCatalogCache.Entry("group/model", "Fixture", "mimo", "MiMo", capabilities,
-            capabilities, null, null, null, "fixture", mapper.createObjectNode(), List.of(), 1, true, "READY",
-            1, 1, 0, 0, 0, 1.0, 0, 0, null, null, "PASSED", null, null);
+            capabilities, null, null, null, "fixture", mapper.createObjectNode(), List.of(), 1);
         var catalog = mock(ModelCatalogCache.class);
         when(catalog.list()).thenReturn(Mono.just(List.of(entry)));
         var runtime = mock(ModelRuntimeGuard.class);
-        when(runtime.callable("mimo", "group/model")).thenReturn(true);
-        when(runtime.snapshot("mimo", "group/model")).thenReturn(new ModelRuntimeGuard.Snapshot(0, 0, "CLOSED", 0, 0));
+        when(runtime.snapshot("mimo", "group/model")).thenReturn(new ModelRuntimeGuard.Snapshot(0, 0, 0));
         var grant = ApiKeyGrant.unrestricted();
         when(authorization.grant(any())).thenReturn(grant);
         when(authorization.current(any())).thenReturn(Optional.of(grant));
@@ -58,7 +56,9 @@ class ModelsControllerTest {
             client.get().uri(URI.create(uri)).exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.object").isEqualTo("model").jsonPath("$.id").isEqualTo("mimo/group/model")
                 .jsonPath("$.owned_by").isEqualTo("mimo").jsonPath("$.capabilities.tools.strict").isEqualTo(true)
-                .jsonPath("$.available").isEqualTo(true).jsonPath("$.runtime.status").isEqualTo("READY")
+                .jsonPath("$.available").doesNotExist().jsonPath("$.runtime.status").doesNotExist()
+                .jsonPath("$.runtime.concurrent").isEqualTo(0).jsonPath("$.runtime.queue_depth").isEqualTo(0)
+                .jsonPath("$.runtime.probe_status").doesNotExist().jsonPath("$.runtime.circuit_state").doesNotExist()
                 .jsonPath("$.parameter_adaptation.top_p.target").isEqualTo("modelConfig.topP");
         }
         client.get().uri(URI.create("/mimo/v1/models/group%2Fmodel")).exchange().expectStatus().isOk()
@@ -70,6 +70,8 @@ class ModelsControllerTest {
         for (var uri : List.of("/v1/models", "/mimo/v1/models")) {
             client.get().uri(uri).exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.data[0].capabilities.tools.strict").isEqualTo(true)
+                .jsonPath("$.data[0].available").doesNotExist()
+                .jsonPath("$.data[0].runtime.rolling_success_rate").doesNotExist()
                 .jsonPath("$.data[0].parameter_adaptation").doesNotExist()
                 .jsonPath("$.data[0].capabilities.parameter_adaptation").doesNotExist();
         }

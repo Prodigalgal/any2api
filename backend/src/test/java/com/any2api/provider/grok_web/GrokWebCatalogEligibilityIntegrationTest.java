@@ -41,7 +41,7 @@ class GrokWebCatalogEligibilityIntegrationTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void basicPoolCannotAdvertisePaidModesEvenWithFreshReadyProbes() throws Exception {
+    void catalogDoesNotPredictAvailabilityFromAccountTiersOrPastProbes() throws Exception {
         try (var database = new InteropDatabase()) {
             seedModels(database);
             account(database, "basic", "basic", "ACTIVE", true);
@@ -60,34 +60,26 @@ class GrokWebCatalogEligibilityIntegrationTest {
             var cache = cache(jdbc, List.of(grok(), mimo()));
 
             var entries = cache.list().block();
+            assertThat(entries).isNotEmpty();
 
-            assertThat(entry(entries, "grok-3").eligibleAccountCount()).isEqualTo(2);
-            assertThat(entry(entries, "grok-imagine-image").availableAccountCount()).isEqualTo(2);
             for (var model : List.of("grok-chat-auto", "grok-chat-expert", "grok-chat-heavy",
                     "grok-3-deepsearch", "grok-imagine-image-quality", "unknown-mode")) {
-                var entry = entry(entries, model);
-                assertThat(entry.eligibleAccountCount()).as(model).isZero();
-                assertThat(entry.availableAccountCount()).as(model).isZero();
-                assertThat(entry.quotaLimitedAccountCount()).as(model).isZero();
-                assertThat(entry.available()).as(model).isFalse();
-                assertThat(entry.runtimeStatus()).as(model).isEqualTo("UNAVAILABLE");
-                assertThat(entry.probeStatus()).as(model).isEqualTo("READY");
+                assertThat(entry(entries, model).providerId()).as(model).isEqualTo("grok_web");
             }
             assertThat(cache.list().block()).isSameAs(entries);
-            // The complete catalog and account eligibility share one database round trip.
+            // Account eligibility is evaluated when a real request acquires an account.
             verify(jdbc, times(1)).sql(anyString());
             database.jdbc.sql("UPDATE accounts SET enabled=FALSE WHERE provider_id='grok_web'").update();
             cache.invalidate().block();
-            var unavailable = cache.list().block();
-            assertThat(entry(unavailable, "grok-3").eligibleAccountCount()).isZero();
-            assertThat(entry(unavailable, "grok-3").available()).isFalse();
-            assertThat(entry(unavailable, "grok-3").runtimeStatus()).isEqualTo("UNAVAILABLE");
+            var refreshed = cache.list().block();
+            assertThat(refreshed).extracting(ModelCatalogCache.Entry::id)
+                .containsExactlyElementsOf(entries.stream().map(ModelCatalogCache.Entry::id).toList());
             verify(jdbc, times(2)).sql(anyString());
         }
     }
 
     @Test
-    void mixedTiersCountOnlyQualifiedCooldownsAndKeepUnrestrictedProviders() throws Exception {
+    void catalogKeepsConfiguredModelsAcrossMixedTiersAndCooldowns() throws Exception {
         try (var database = new InteropDatabase()) {
             seedModels(database);
             var basic = account(database, "basic", null, "ACTIVE", true);
@@ -106,29 +98,10 @@ class GrokWebCatalogEligibilityIntegrationTest {
             var cache = cache(jdbc, List.of(grok(), mimo()));
 
             var entries = cache.list().block();
+            assertThat(entries).isNotEmpty();
 
-            var fast = entry(entries, "grok-3");
-            assertThat(fast.eligibleAccountCount()).isEqualTo(4);
-            assertThat(fast.availableAccountCount()).isEqualTo(4);
-            var auto = entry(entries, "grok-chat-auto");
-            assertThat(auto.eligibleAccountCount()).isEqualTo(2);
-            assertThat(auto.availableAccountCount()).isZero();
-            assertThat(auto.quotaLimitedAccountCount()).isEqualTo(1);
-            assertThat(auto.available()).isFalse();
-            assertThat(auto.runtimeStatus()).isEqualTo("UNAVAILABLE");
-            var heavyEntry = entry(entries, "grok-chat-heavy");
-            assertThat(heavyEntry.eligibleAccountCount()).isEqualTo(1);
-            assertThat(heavyEntry.quotaLimitedAccountCount()).isEqualTo(1);
-            var alias = entry(entries, "grok-3-deepsearch");
-            assertThat(alias.eligibleAccountCount()).isEqualTo(1);
-            assertThat(alias.availableAccountCount()).isZero();
-            assertThat(alias.quotaLimitedAccountCount()).isZero();
-            assertThat(entry(entries, "grok-imagine-image-quality").availableAccountCount()).isEqualTo(2);
             var unrestricted = entry(entries, "fixture");
             assertThat(unrestricted.providerId()).isEqualTo("mimo");
-            assertThat(unrestricted.eligibleAccountCount()).isEqualTo(1);
-            assertThat(unrestricted.availableAccountCount()).isEqualTo(1);
-            assertThat(unrestricted.available()).isTrue();
             cache.list().block();
             verify(jdbc, times(1)).sql(anyString());
         }
@@ -164,10 +137,9 @@ class GrokWebCatalogEligibilityIntegrationTest {
             var cache = cache(jdbc, List.of(mimo()));
 
             var entries = cache.list().block();
+            assertThat(entries).isNotEmpty();
 
             assertThat(entries).hasSize(1);
-            assertThat(entries.getFirst().eligibleAccountCount()).isZero();
-            assertThat(entries.getFirst().available()).isFalse();
             cache.list().block();
             verify(jdbc, times(1)).sql(anyString());
         }
@@ -185,11 +157,10 @@ class GrokWebCatalogEligibilityIntegrationTest {
             var cache = cache(jdbc, List.of(grok(), mimo()));
 
             var entries = cache.list().block();
+            assertThat(entries).isNotEmpty();
 
             assertThat(entries).hasSize(1);
             assertThat(entries.getFirst().providerId()).isEqualTo("mimo");
-            assertThat(entries.getFirst().availableAccountCount()).isEqualTo(1);
-            assertThat(entries.getFirst().available()).isTrue();
             verify(jdbc, times(1)).sql(anyString());
             database.jdbc.sql("UPDATE models SET enabled=FALSE").update();
             cache.invalidate().block();

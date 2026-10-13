@@ -7,7 +7,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
@@ -151,67 +150,8 @@ public class ToolEmulationEngine {
             ? Set.of(plan.choice().label())
             : plan.tools().stream().map(Tool::name).collect(java.util.stream.Collectors.toSet());
 
-        for (var candidate : candidates(text)) {
-            try {
-                var value = mapper.readTree(candidate);
-                var calls = resolveCallsNode(value);
-                if (calls == null) continue;
-
-                var output = new ArrayList<ToolCall>();
-                for (var call : calls) {
-                    var function = call.path("function").isObject()
-                        ? call.path("function") : call;
-                    var name = function.path("name").asText("").trim();
-                    if (!allowed.contains(name)) continue;
-
-                    var arguments = function.path("arguments");
-                    if (arguments.isMissingNode() && function.has("parameters")) {
-                        arguments = function.path("parameters");
-                    }
-                    if (arguments.isTextual()) {
-                        try {
-                            arguments = mapper.readTree(arguments.asText());
-                        } catch (RuntimeException ignored) {
-                            throw new IllegalArgumentException(
-                                "Emulated tool emitted invalid JSON arguments for " + name);
-                        }
-                    }
-                    if (!arguments.isObject()) {
-                        throw new IllegalArgumentException(
-                            "Emulated tool emitted non-object arguments for " + name);
-                    }
-                    var id = call.path("id").asText("").trim();
-                    if (id.isBlank()) {
-                        id = "call_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
-                    }
-                    output.add(new ToolCall(id, name, mapper.writeValueAsString(arguments)));
-                }
-                if (!output.isEmpty()) {
-                    return List.copyOf(output);
-                }
-            } catch (IllegalArgumentException error) {
-                throw error;
-            } catch (RuntimeException ignored) {
-                // Try the next candidate.
-            }
-        }
-        return List.of();
-    }
-
-    private ArrayNode resolveCallsNode(JsonNode value) {
-        if (value.isArray()) {
-            return (ArrayNode) value;
-        }
-        if (value.path("tool_calls").isArray()) {
-            return (ArrayNode) value.path("tool_calls");
-        }
-        if (value.has("function_call")) {
-            return mapper.createArrayNode().add(value.path("function_call"));
-        }
-        if (value.isObject() && value.has("name") && (value.has("arguments") || value.has("parameters"))) {
-            return mapper.createArrayNode().add(value);
-        }
-        return null;
+        return EmulatedToolCallParser.parse(mapper, candidates(text), allowed, "Emulated model").stream()
+            .map(call -> new ToolCall(call.id(), call.name(), call.arguments())).toList();
     }
 
     public Flux<CanonicalEvent> transformStream(String requestId, Plan plan, Flux<CanonicalEvent> upstream) {
@@ -222,7 +162,7 @@ public class ToolEmulationEngine {
             var buffer = new StringBuilder();
             var sequence = new AtomicLong(1000);
             var isBuffering = new AtomicBoolean(true);
-            var toolCallsEmitted = new AtomicBoolean(false);
+            var prefix = new ProsePrefix();
 
             return upstream.concatMap(event -> {
                 if (event instanceof CanonicalEvent.OutputTextDelta delta) {
@@ -233,8 +173,7 @@ public class ToolEmulationEngine {
                                 delta.schemaVersion(), requestId, delta.sequenceNumber(),
                                 "tool_call_generation_failed", "Emulated tool output exceeds capture limit", Map.of()));
                         }
-                        var current = buffer.toString().stripLeading();
-                        if (!plan.required() && looksDefinitelyLikeProse(current)) {
+                        if (!plan.required() && prefix.isProse(buffer)) {
                             isBuffering.set(false);
                             var flushed = buffer.toString();
                             buffer.setLength(0);
@@ -280,10 +219,10 @@ public class ToolEmulationEngine {
                                     completed.schemaVersion(), requestId, sequence.incrementAndGet(),
                                     call.id(), call.arguments()));
                             }
-                            toolCallsEmitted.set(true);
                             toolEvents.add(new CanonicalEvent.Completed(
                                 completed.schemaVersion(), requestId, completed.sequenceNumber(),
-                                "tool_calls"));
+                                Set.of("length", "max_output_tokens", "content_filter").contains(completed.finishReason())
+                                    ? completed.finishReason() : "tool_calls"));
                             return Flux.fromIterable(toolEvents);
                         }
 
@@ -301,12 +240,6 @@ public class ToolEmulationEngine {
                                     completed.schemaVersion(), requestId, sequence.incrementAndGet(), answer),
                                 completed);
                         }
-                    } else if (plan.required() && !toolCallsEmitted.get()) {
-                        return Flux.just(new CanonicalEvent.Failed(
-                            completed.schemaVersion(), requestId, completed.sequenceNumber(),
-                            "tool_call_generation_failed",
-                            "Emulated model did not produce the required function tool call",
-                            Map.of()));
                     }
                     return Flux.just(event);
                 }
@@ -345,16 +278,17 @@ public class ToolEmulationEngine {
         };
     }
 
-    private boolean looksDefinitelyLikeProse(String text) {
-        if (text.isEmpty()) return false;
-        var first = text.charAt(0);
-        if (first == '{' || first == '[' || first == '`' || first == '<') {
-            return false;
+    private static final class ProsePrefix {
+        private int firstContent;
+
+        private boolean isProse(StringBuilder text) {
+            // Inspect each leading character once; tool JSON is copied only when it completes.
+            while (firstContent < text.length() && Character.isWhitespace(text.charAt(firstContent))) firstContent++;
+            if (firstContent == text.length()) return false;
+            var first = text.charAt(firstContent);
+            return first != '{' && first != '[' && first != '`' && first != '<'
+                && text.length() - firstContent >= 15;
         }
-        if (text.startsWith("[TOOL_CALL")) {
-            return false;
-        }
-        return text.length() >= 15;
     }
 
     private List<Tool> normalize(List<JsonNode> rawTools) {

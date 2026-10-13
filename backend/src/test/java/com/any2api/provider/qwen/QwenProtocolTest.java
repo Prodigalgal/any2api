@@ -36,8 +36,7 @@ class QwenProtocolTest {
             new QwenProperties(),
             new ObjectMapper(), new ToolEmulationEngine(new ObjectMapper()));
 
-        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
-        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
     }
 
     @Test

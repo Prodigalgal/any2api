@@ -27,3 +27,12 @@
 ## 本次发布范围调整
 
 七家原矩阵中 Arena/DeepSeek 被既有运行可用性阻断；用户明确授权“先发布稳定性修复，再处理两家故障”。此次 0.30.1 已按五家完整候选和公网验收提升同一 digest，保留七家失败报告、原始 PROBE/普通推理账本及两家故障项。安装版本、GitOps、资源/健康检查和 SDK/账本分别验证。后续稳定性与架构改进优先围绕两家实际故障，保持 OpenAI 契约、账号管理边界和高级模型探活保护。
+
+## DeepSeek 业务拒绝修复（原 0.30.2 本地计划，并入 1.0.0）
+
+- **目标**：修复 HTTP 200 JSON 业务拒绝被当作空 SSE 响应，准确保留上游禁言/凭据拒绝与普通业务错误，停止对此类拒绝进行空响应重试。
+- **依据**：0.30.1 一个现有账号的非持久化合成 API 诊断返回 application/json、code=0、biz_code=5、is_muted=1、mute_until 对应 2026-10-16 08:40:30 UTC+8；只记录协议形状，不保存凭据或正文。该证据不能推断全部账号都被禁言。
+- **范围与边界**：Python DeepSeek API action 传递非 SSE JSON 原帧，Java DeepSeek decoder 解释厂商业务错误并产生现有 Canonical Failed 类型；通用 HTTP transport 不夹带厂商规则。保持成功 SSE、OpenAI 结构、账号管理/高级探活策略；不修改或重新启用账号，不承诺解除上游禁言。
+- **影响文件**：deepseek_api_actions.py、DeepseekEventDecoder.java、相关 Python/Java 回归、统一版本文件、本规格/调查报告和任务板。
+- **验收**：真实 Curl/SSE helper 的 HTTP 200 JSON 不丢失；禁言/40003/普通业务拒绝各仅产生一次明确失败终态，无正文/Completed/empty_model_response；成功 reasoning/answer 与原 SSE 不退化，未识别的业务码不猜测为凭据失效；不得向错误消息反射上游任意正文。
+- **测试和交付**：已保留旧实现失败回归，相关测试及质量门禁通过；0.30.2 未发布，本修复并入 1.0.0，统一遵守不可变制品/版本门禁。运行验收避免额外生成探活，明确 DeepSeek 账号仍不可用；回滚点为已验收 0.30.1 四镜像和资源 patch。

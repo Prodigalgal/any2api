@@ -89,7 +89,7 @@ public final class GrokWebProvider implements InferenceProvider {
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
     @Override
-    public java.util.Optional<String> scheduledProbeModel() {
+    public java.util.Optional<String> initialVerificationModel() {
         return java.util.Optional.of("grok-3");
     }
 

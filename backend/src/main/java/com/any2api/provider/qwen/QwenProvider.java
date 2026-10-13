@@ -99,13 +99,8 @@ public final class QwenProvider implements InferenceProvider {
     }
 
     @Override
-    public java.util.Optional<String> scheduledProbeModel() {
+    public java.util.Optional<String> initialVerificationModel() {
         return properties.isEnabled() ? java.util.Optional.of("qwen3.5-flash") : java.util.Optional.empty();
-    }
-
-    @Override
-    public boolean scheduledModelProbeEnabled() {
-        return properties.isEnabled();
     }
 
     @Override
@@ -119,13 +114,8 @@ public final class QwenProvider implements InferenceProvider {
     }
 
     @Override
-    public Duration modelProbeTimeout() {
-        return properties.getModelProbeTimeout();
-    }
-
-    @Override
     public Duration accountProbeTimeout() {
-        return properties.getModelProbeTimeout();
+        return properties.getAccountVerificationTimeout();
     }
 
     @Override

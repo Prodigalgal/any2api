@@ -110,12 +110,7 @@ class ModelCatalogCacheTest {
         var model = new java.util.LinkedHashMap<String, Object>(java.util.Map.of(
             "id", "fixture", "providerId", "mimo", "metadata", java.util.Map.of("revision", revision),
             "capabilities", java.util.Map.of(), "randomRoles", List.of()));
-        for (var field : List.of("created", "eligibleAccountCount", "availableAccountCount",
-            "quotaLimitedAccountCount", "rollingRequestCount", "rollingAttemptCount", "p50Ms", "p95Ms")) {
-            model.put(field, 0);
-        }
-        model.put("available", true);
-        model.put("rollingSuccessRate", 1.0);
+        model.put("created", 0);
         return new ObjectMapper().writeValueAsString(List.of(model));
     }
 }

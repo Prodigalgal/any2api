@@ -130,6 +130,63 @@ def test_deepseek_json_helper_rejects_redirect_responses() -> None:
         _json_body({"status": 302, "body": '{"code":0}'})
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sse", [False, True])
+async def test_deepseek_completion_preserves_json_rejection_and_sse(monkeypatch, sse) -> None:
+    from contextlib import asynccontextmanager
+
+    import any2api_automation.providers.deepseek_api_actions as module
+    from any2api_automation.providers import api_transport
+
+    body = json.dumps({"code": 0, "data": {"biz_code": 5, "biz_data": {"is_muted": 1}}})
+
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.headers = {"content-type": "text/event-stream" if sse else "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def iter_lines(self):
+            yield b": keepalive"
+            yield b"event: message"
+            yield (("data: " if sse else "") + body).encode()
+
+        def close(self):
+            pass
+
+    class Client(Response):
+        def __init__(self, **kwargs):
+            pass
+
+        def stream(self, *args, **kwargs):
+            return Response()
+
+    @asynccontextmanager
+    async def proxy_lease(*args, **kwargs):
+        yield ""
+
+    async def chat_input(*args, **kwargs):
+        return "/api/v0/chat/completion", "{}", {}
+
+    monkeypatch.setattr(api_transport, "CurlSession", Client)
+    monkeypatch.setattr(module, "transport_proxy_lease", proxy_lease)
+    monkeypatch.setattr(module, "_chat_input", chat_input)
+    request = _request("deepseek", _command("default"), {"token": "test-token"})
+    frames = [
+        json.loads(frame) async for frame in module.DeepseekApiActionHandler().stream(request)
+    ]
+
+    assert [frame["type"] for frame in frames] == ["status", "data"]
+    assert frames[0]["status"] == 200
+    assert frames[1]["data"] == body
+
+
 def test_deepseek_pow_matches_the_official_browser_fixture() -> None:
     from any2api_automation.providers.deepseek_browser import _hash_matches
 

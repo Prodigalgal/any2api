@@ -29,20 +29,17 @@ public final class InferenceTelemetryService {
     private final MeterRegistry meters;
     private final ExecutorService databaseExecutor;
     private final ObjectMapper mapper;
-    private final com.any2api.routing.ModelHealthTracker healthTracker;
 
     public InferenceTelemetryService(
         JdbcClient jdbc,
         MeterRegistry meters,
         ExecutorService databaseExecutor,
-        ObjectMapper mapper,
-        org.springframework.beans.factory.ObjectProvider<com.any2api.routing.ModelHealthTracker> healthTrackers
+        ObjectMapper mapper
     ) {
         this.jdbc = jdbc;
         this.meters = meters;
         this.databaseExecutor = databaseExecutor;
         this.mapper = mapper;
-        this.healthTracker = healthTrackers.getIfAvailable(com.any2api.routing.ModelHealthTracker::new);
     }
 
     public Started start(InferenceTrace request, int attempt) {
@@ -155,9 +152,6 @@ public final class InferenceTelemetryService {
                 usageSource.get(), durationMs, queueMs, accountAcquireMs, ttfbMs,
                 generationMs, error, success, output);
             recordMetricAndLog(snapshot);
-            healthTracker.recordOutcome(
-                request.providerId(), request.model(), snapshot.success(),
-                snapshot.ttfbMs(), snapshot.errorCode());
             try {
                 databaseExecutor.execute(() -> {
                     try {

@@ -37,6 +37,35 @@ import tools.jackson.databind.node.JsonNodeFactory;
 class InferenceCoordinatorTest {
 
     @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void appliesWebCompatibilityToNormalAndPreselectedAccounts(boolean preselected) {
+        var accounts = mock(AccountSelectionService.class);
+        var account = leased("alpha");
+        when(accounts.acquire(eq("alpha"), eq("model"), any())).thenReturn(Mono.just(account));
+        when(accounts.release(account)).thenReturn(Mono.just(true));
+        when(accounts.mergeCredentialPatch(any(), any())).thenReturn(Mono.just(false));
+        when(accounts.reportSuccess(account, "model")).thenReturn(Mono.empty());
+        var provider = spy(new RetryingProvider("tool_call_generation_failed", 0, false));
+        var original = request("alpha", true);
+        var raw = ((tools.jackson.databind.node.ObjectNode) original.rawRequest()).deepCopy()
+            .put("max_completion_tokens", 128_000).put("temperature", 0.7);
+        var request = new CanonicalRequest(original.requestId(), original.protocol(), original.providerId(),
+            original.model(), true, original.messages(), Map.of("max_completion_tokens", 128_000, "temperature", 0.7),
+            Map.of(), original.tools(), original.providerOptions(), raw);
+        var coordinator = coordinator(provider, accounts);
+        var events = (preselected ? coordinator.execute(request, account) : coordinator.execute(request))
+            .collectList().block();
+        assertThat(events).anyMatch(CanonicalEvent.Completed.class::isInstance)
+            .noneMatch(CanonicalEvent.Failed.class::isInstance);
+        var forwarded = org.mockito.ArgumentCaptor.forClass(CanonicalRequest.class);
+        verify(provider).generate(forwarded.capture(), any(), eq(account));
+        assertThat(forwarded.getValue().generation()).isEmpty();
+        assertThat(forwarded.getValue().rawRequest().has("max_completion_tokens")).isFalse();
+        assertThat(request.rawRequest().path("max_completion_tokens").asLong()).isEqualTo(128_000);
+        verify(accounts).release(account);
+    }
+
+    @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"false,0", "true,0", "false,2", "true,2"})
     void persistsEveryAttemptAcrossTransportFallbackWithoutReducingRuntimeRetries(
         boolean stream, int failedRuntimeAttempts
@@ -79,9 +108,7 @@ class InferenceCoordinatorTest {
             List<CanonicalEvent> events;
             try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
                 var telemetry = new InferenceTelemetryService(database.jdbc, meters, executor,
-                    new tools.jackson.databind.ObjectMapper(),
-                    new org.springframework.beans.factory.support.StaticListableBeanFactory()
-                        .getBeanProvider(com.any2api.routing.ModelHealthTracker.class));
+                    new tools.jackson.databind.ObjectMapper());
                 events = coordinator(provider, accounts, transportModes, telemetry)
                     .execute(request("alpha", stream)).collectList().block();
                 org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5))
@@ -544,16 +571,10 @@ class InferenceCoordinatorTest {
             new ModelRuntimeGuard(
                 new Any2ApiProperties(),
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
-            new UsageNormalizer(), callableAvailability(), catalog,
+            new UsageNormalizer(), catalog,
             new ModelRequestLimitGuard(), transportModes,
             new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper()),
             null);
-    }
-
-    private ModelAvailabilityGuard callableAvailability() {
-        var availability = mock(ModelAvailabilityGuard.class);
-        when(availability.requireCallable(anyString(), anyString())).thenReturn(Mono.empty());
-        return availability;
     }
 
     private LeasedProviderAccount leased(String providerId) {

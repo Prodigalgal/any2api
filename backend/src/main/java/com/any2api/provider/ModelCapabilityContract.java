@@ -24,7 +24,7 @@ public record ModelCapabilityContract(
 ) {
     private static final ObjectMapper METADATA_MAPPER = new ObjectMapper();
     private static final List<String> STANDARD_REASONING_LEVELS =
-        List.of("auto", "none", "minimal", "low", "medium", "high");
+        List.of("auto", "none", "minimal", "low", "medium", "high", "xhigh", "max");
 
     public ModelCapabilityContract {
         supportedParameters = supportedParameters == null ? Map.of()

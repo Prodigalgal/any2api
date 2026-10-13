@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("any2api.provider.arena")
 public class ArenaProperties {
     private String baseUrl = "https://arena.ai";
-    private Duration modelProbeTimeout = Duration.ofSeconds(240);
+    private Duration accountVerificationTimeout = Duration.ofSeconds(120);
 
     public String getBaseUrl() { return baseUrl; }
 
@@ -16,17 +16,16 @@ public class ArenaProperties {
         baseUrl = normalized;
     }
 
-    public Duration getModelProbeTimeout() { return modelProbeTimeout; }
+    public Duration getAccountVerificationTimeout() { return accountVerificationTimeout; }
 
-    public void setModelProbeTimeout(Duration value) {
+    public void setAccountVerificationTimeout(Duration value) {
         if (value == null || value.isZero() || value.isNegative()) {
-            throw new IllegalArgumentException("modelProbeTimeout must be positive");
+            throw new IllegalArgumentException("accountVerificationTimeout must be positive");
         }
-        modelProbeTimeout = value;
+        accountVerificationTimeout = value;
     }
 
     private String probeModel = "gemini-3.1-flash-lite";
-    private java.util.List<String> fallbackProbeModels = java.util.List.of();
 
     public String getProbeModel() { return probeModel; }
 
@@ -34,11 +33,4 @@ public class ArenaProperties {
         this.probeModel = value == null ? "" : value.trim();
     }
 
-    public java.util.List<String> getFallbackProbeModels() {
-        return fallbackProbeModels;
-    }
-
-    public void setFallbackProbeModels(java.util.List<String> values) {
-        this.fallbackProbeModels = values == null ? java.util.List.of() : java.util.List.copyOf(values);
-    }
 }

@@ -10,7 +10,6 @@ import com.any2api.coordination.AccountLease;
 import com.any2api.coordination.AccountLeaseService;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ProviderCapability;
-import com.any2api.provider.ModelProbeService;
 import com.any2api.provider.SupportLevel;
 import com.any2api.proxy.ProxyPoolService;
 import com.any2api.proxy.ProxyTrafficScope;
@@ -61,7 +60,7 @@ public class LifecycleScheduler {
     private final OperationEventService observability;
     private final RuntimeSettingsService runtimeSettings;
     private final List<CredentialPropagationPolicy> credentialPropagationPolicies;
-    private final ModelProbeService modelProbes;
+    private final InitialInferenceCheckService initialChecks;
     private final int actionConcurrency;
 
     public LifecycleScheduler(
@@ -78,7 +77,7 @@ public class LifecycleScheduler {
         OperationEventService observability,
         RuntimeSettingsService runtimeSettings,
         List<CredentialPropagationPolicy> credentialPropagationPolicies,
-        ModelProbeService modelProbes,
+        InitialInferenceCheckService initialChecks,
         Any2ApiProperties properties
     ) {
         this.jdbc = jdbc;
@@ -94,7 +93,7 @@ public class LifecycleScheduler {
         this.observability = observability;
         this.runtimeSettings = runtimeSettings;
         this.credentialPropagationPolicies = List.copyOf(credentialPropagationPolicies);
-        this.modelProbes = modelProbes;
+        this.initialChecks = initialChecks;
         this.actionConcurrency = properties.getLifecycle().getActionConcurrency();
     }
 
@@ -305,27 +304,27 @@ public class LifecycleScheduler {
                     ? task.credentialExpiresAt() : result.credentialExpiresAt();
                 var credentialExpired = !"reauthenticate".equals(action.action())
                     && isCredentialExpired(effectiveCredentialExpiry, Instant.now());
-                var readinessRequired = requiresReadinessProbe(
-                    action.action(), task.account().getStatus(), result.healthy(),
-                    dailyCheckinSupported);
-                var probe = !readinessRequired
-                    ? reactor.core.publisher.Mono.just(
-                        InferenceReadinessProbe.Result.notRequired())
-                    : readiness.probe(
-                        task.account(),
-                        mergedCredential(task.credential(), result.credentialPatch()),
-                        task.credentialVersion(), result.credentialExpiresAt() == null
-                            ? task.credentialExpiresAt() : result.credentialExpiresAt());
-                return probe.flatMap(probeResult -> renewOwnership(action, owner, lease)
+                var verification = !requiresInitialVerification(
+                        action.action(), task.account().getStatus(), result.healthy(), dailyCheckinSupported)
+                    ? Mono.just(Verification.notRequired())
+                    : initialChecks.verify(task.account().getId(), () -> {
+                        var model = readiness.resolveModel(action.providerId(), null);
+                        return new InitialInferenceCheckService.Plan(model, () -> readiness.probe(
+                            task.account(), mergedCredential(task.credential(), result.credentialPatch()),
+                            task.credentialVersion(), effectiveCredentialExpiry, model));
+                    }).map(check -> Verification.from(check, action.action(), task.account().getStatus()));
+                return verification.flatMap(check -> {
+                    var probeResult = check.probe();
+                    return renewOwnership(action, owner, lease)
                     .then(reactor.core.publisher.Mono.<Void>fromRunnable(() -> {
                         transactions.executeWithoutResult(ignored ->
                             complete(action, owner, task, result, probeResult,
-                            readinessRequired, dailyCheckinSupported, credentialExpired));
-                    var inferenceReady = (!credentialExpired || probeResult.ready()) && result.healthy() && probeResult.ready()
-                        && (readinessRequired
+                            check.activationVerified(), dailyCheckinSupported, credentialExpired));
+                    var inferenceReady = (!credentialExpired || check.freshReady()) && result.healthy() && probeResult.ready()
+                        && (check.activationVerified()
                             || (task.account().getStatus() == AccountStatus.ACTIVE
                                 && task.account().isEnabled()));
-                    if (credentialExpired && !probeResult.ready()) {
+                    if (credentialExpired && !check.freshReady()) {
                         observability.succeed(observed, "credential_refresh_scheduled");
                     } else if (inferenceReady) {
                         observability.succeed(observed, probeResult.model().isBlank()
@@ -341,7 +340,8 @@ public class LifecycleScheduler {
                             !probeResult.ready() ? "inference_probe" : "lifecycle_operation",
                             readinessFailureDetail(probeResult, result));
                     }
-                }).subscribeOn(Schedulers.boundedElastic())));
+                }).subscribeOn(Schedulers.boundedElastic()));
+                });
             }))
             .doOnError(error -> observability.fail(observed, error))
             .contextWrite(RequestCorrelation.context(context.correlationId()));
@@ -353,13 +353,13 @@ public class LifecycleScheduler {
         AccountTask task,
         LifecycleResult result,
         InferenceReadinessProbe.Result probe,
-        boolean readinessRequired,
+        boolean activationVerified,
         boolean dailyCheckinSupported,
         boolean credentialExpired
     ) {
         var completedAt = Instant.now();
         var clearStaleCredentialExpiry = shouldClearStaleCredentialExpiry(
-            action.action(), result.credentialExpiresAt(), task.credentialExpiresAt(), completedAt, probe.ready());
+            action.action(), result.credentialExpiresAt(), task.credentialExpiresAt(), completedAt, probe.ready() && !probe.model().isBlank());
         var credentialExpiresAt = clearStaleCredentialExpiry
             ? null : result.credentialExpiresAt();
         if (credentialExpiresAt == null && !clearStaleCredentialExpiry) {
@@ -389,25 +389,21 @@ public class LifecycleScheduler {
                 "inference_probe_model", probe.model(),
                 "inference_probe_status", probe.ready() ? "READY" : "FAILED",
                 "inference_probe_error", probe.errorClass(),
-                "inference_readiness_pending", !probe.ready()));
+                "inference_readiness_pending", false));
             accounts.save(task.account());
-        }
-        if (result.healthy() && probe.ready() && !probe.model().isBlank()) {
-            modelProbes.recordReadyEvidence(
-                action.providerId(), probe.model(), task.account().getId(),
-                probe.durationMs(), completedAt);
         }
         if (result.healthy() && "reauthenticate".equals(action.action())) {
             for (var policy : credentialPropagationPolicies) {
                 policy.propagate(task.account(), recoveredCredential, credentialExpiresAt);
             }
         }
-        var effectiveCredentialExpired = !probe.ready() && credentialExpired;
+        var freshReady = probe.ready() && !probe.model().isBlank();
+        var effectiveCredentialExpired = !freshReady && credentialExpired;
         var healthy = !effectiveCredentialExpired && result.healthy() && probe.ready();
-        var inferenceReady = probe.ready() && (readinessRequired
+        var inferenceReady = probe.ready() && (activationVerified
             || (task.account().getStatus() == AccountStatus.ACTIVE && task.account().isEnabled()));
         var authExpired = result.authExpired() || effectiveCredentialExpired;
-        var inferenceCredentialRejected = result.healthy() && readinessRequired
+        var inferenceCredentialRejected = result.healthy() && !probe.model().isBlank()
             && !probe.ready()
             && "credential_rejected".equals(probe.errorClass());
         if (healthy && inferenceReady) {
@@ -628,24 +624,40 @@ public class LifecycleScheduler {
             && isCredentialExpired(storedExpiry, now);
     }
 
-    static boolean requiresReadinessProbe(
+    static boolean requiresInitialVerification(
         String action,
         AccountStatus status,
         boolean operationHealthy
     ) {
-        return requiresReadinessProbe(action, status, operationHealthy, false);
+        return requiresInitialVerification(action, status, operationHealthy, false);
     }
 
-    static boolean requiresReadinessProbe(
+    static boolean requiresInitialVerification(
         String action,
         AccountStatus status,
         boolean operationHealthy,
         boolean dailyCheckinSupported
     ) {
         if (dailyCheckinSupported && "daily_checkin".equals(action)) return false;
-        return operationHealthy && (status == AccountStatus.PENDING
-            || status == AccountStatus.EXPIRED
-            || "reauthenticate".equals(action));
+        return operationHealthy && status != AccountStatus.BANNED && status != AccountStatus.DISABLED;
+    }
+
+    record Verification(InferenceReadinessProbe.Result probe, boolean activationVerified) {
+        static Verification notRequired() {
+            return new Verification(InferenceReadinessProbe.Result.notRequired(), false);
+        }
+
+        static Verification from(InitialInferenceCheckService.Observation check, String action, AccountStatus status) {
+            // Historical failures consume no new quota and never penalize an already active account again.
+            var activate = check.result().ready() && (check.performed()
+                || status == AccountStatus.PENDING || "reauthenticate".equals(action));
+            return new Verification(check.performed() ? check.result()
+                : InferenceReadinessProbe.Result.notRequired(), activate);
+        }
+
+        boolean freshReady() {
+            return probe.ready() && !probe.model().isBlank();
+        }
     }
 
     static String nextAction(

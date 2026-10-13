@@ -360,47 +360,10 @@ public class Any2ApiProperties {
     public static class ModelRuntime {
         private int maxConcurrentRequests = 32;
         private Duration maxQueueWait = Duration.ofSeconds(2);
-        private int circuitSlidingWindow = 20;
-        private int circuitMinimumCalls = 5;
-        private float circuitFailureRateThreshold = 60f;
-        private Duration circuitOpenDuration = Duration.ofSeconds(30);
-        private Duration healthWindow = Duration.ofHours(24);
-        private Duration probeFreshness = Duration.ofMinutes(30);
-        private int scheduledProbeBatchSize = 5;
-        private float readySuccessRateThreshold = 90f;
-        private Duration readyP95Threshold = Duration.ofSeconds(60);
-
         public int getMaxConcurrentRequests() { return maxConcurrentRequests; }
         public void setMaxConcurrentRequests(int value) { maxConcurrentRequests = positive(value, "max concurrent requests"); }
         public Duration getMaxQueueWait() { return maxQueueWait; }
         public void setMaxQueueWait(Duration value) { maxQueueWait = positive(value, "max queue wait"); }
-        public int getCircuitSlidingWindow() { return circuitSlidingWindow; }
-        public void setCircuitSlidingWindow(int value) { circuitSlidingWindow = positive(value, "circuit sliding window"); }
-        public int getCircuitMinimumCalls() { return circuitMinimumCalls; }
-        public void setCircuitMinimumCalls(int value) { circuitMinimumCalls = positive(value, "circuit minimum calls"); }
-        public float getCircuitFailureRateThreshold() { return circuitFailureRateThreshold; }
-        public void setCircuitFailureRateThreshold(float value) {
-            if (value <= 0 || value > 100) throw new IllegalArgumentException("circuit failure rate threshold must be in (0,100]");
-            circuitFailureRateThreshold = value;
-        }
-        public Duration getCircuitOpenDuration() { return circuitOpenDuration; }
-        public void setCircuitOpenDuration(Duration value) { circuitOpenDuration = positive(value, "circuit open duration"); }
-        public Duration getHealthWindow() { return healthWindow; }
-        public void setHealthWindow(Duration value) { healthWindow = positive(value, "health window"); }
-        public Duration getProbeFreshness() { return probeFreshness; }
-        public void setProbeFreshness(Duration value) { probeFreshness = positive(value, "probe freshness"); }
-        public int getScheduledProbeBatchSize() { return scheduledProbeBatchSize; }
-        public void setScheduledProbeBatchSize(int value) { scheduledProbeBatchSize = positive(value, "scheduled probe batch size"); }
-        public float getReadySuccessRateThreshold() { return readySuccessRateThreshold; }
-        public void setReadySuccessRateThreshold(float value) {
-            if (value <= 0 || value > 100) throw new IllegalArgumentException("ready success threshold must be in (0,100]");
-            readySuccessRateThreshold = value;
-        }
-        public Duration getReadyP95Threshold() { return readyP95Threshold; }
-        public void setReadyP95Threshold(Duration value) {
-            readyP95Threshold = positive(value, "ready p95 threshold");
-        }
-
         private static int positive(int value, String name) {
             if (value < 1) throw new IllegalArgumentException(name + " must be positive");
             return value;

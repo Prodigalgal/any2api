@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.any2api"
-version = "0.30.1"
+version = "1.0.0"
 
 
 java {
@@ -30,7 +30,6 @@ dependencies {
     implementation("com.aliyun.oss:aliyun-sdk-oss:3.18.5")
     implementation("com.github.ben-manes.caffeine:caffeine")
     implementation("com.networknt:json-schema-validator:3.0.8")
-    implementation("io.github.resilience4j:resilience4j-circuitbreaker:2.4.0")
     implementation("io.github.resilience4j:resilience4j-bulkhead:2.4.0")
     runtimeOnly("org.postgresql:postgresql")
 

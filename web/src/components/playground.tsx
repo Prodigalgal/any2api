@@ -110,7 +110,6 @@ export function Playground() {
 
   const selectedModel =
     selectedModelOverride ||
-    models.find((m) => m.available)?.id ||
     models[0]?.id ||
     "";
 

@@ -3,7 +3,6 @@ package com.any2api.provider.mimo;
 import com.any2api.account.LeasedProviderAccount;
 import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.CanonicalRequest;
-import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.provider.InferenceProvider;
 import com.any2api.provider.DiscoveredModel;
 import com.any2api.provider.ProviderCapability;
@@ -49,9 +48,9 @@ public final class MimoProvider implements InferenceProvider {
         java.util.Set.of("function")).withParameterMappings(Map.of(
             "temperature", WebParameterAdaptation.mapped("modelConfig.temperature"),
             "top_p", WebParameterAdaptation.mapped("modelConfig.topP"),
-            "max_tokens", WebParameterAdaptation.nonBindingOutputLimit(),
-            "max_completion_tokens", WebParameterAdaptation.nonBindingOutputLimit(),
-            "max_output_tokens", WebParameterAdaptation.nonBindingOutputLimit(),
+            "max_tokens", WebParameterAdaptation.ignoredOutputLimit(),
+            "max_completion_tokens", WebParameterAdaptation.ignoredOutputLimit(),
+            "max_output_tokens", WebParameterAdaptation.ignoredOutputLimit(),
             "reasoning", WebParameterAdaptation.toggle("modelConfig.enableThinking"),
             "search", WebParameterAdaptation.mapped("modelConfig.webSearchStatus")));
     private final OfficialBrowserTransportClient officialTransport;
@@ -97,7 +96,7 @@ public final class MimoProvider implements InferenceProvider {
     }
 
     @Override
-    public java.util.Optional<String> scheduledProbeModel() {
+    public java.util.Optional<String> initialVerificationModel() {
         return java.util.Optional.of("mimo-v2.6-flash");
     }
 
@@ -123,22 +122,6 @@ public final class MimoProvider implements InferenceProvider {
         ProviderRequestValidation.requireStringParameters(request, "web_search_status");
         ProviderRequestValidation.requireReasoningBooleanConsistency(
             request, "thinking", java.util.Set.of("none", "minimal"), "thinking");
-        requireNonBindingOutputLimit(request);
-    }
-
-    private void requireNonBindingOutputLimit(CanonicalRequest request) {
-        for (var field : List.of("max_tokens", "max_completion_tokens", "max_output_tokens")) {
-            if (!(request.generation().get(field) instanceof Number number)) continue;
-            var requested = number.longValue();
-            if (requested < properties.getWebOutputTokenCeiling()) {
-                throw OpenAiRequestException.unsupported(field,
-                    "MiMo Web cannot enforce " + field + " below its "
-                        + properties.getWebOutputTokenCeiling() + " token output ceiling");
-            }
-            // The official Web request has no output-limit field. A ceiling at or above the
-            // provider maximum is non-binding, so omitting it preserves the requested bound.
-            return;
-        }
     }
 
     @Override

@@ -4,7 +4,6 @@ import com.any2api.protocol.CanonicalRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -60,49 +59,8 @@ final class LongcatToolProtocol {
             ? java.util.Set.of(plan.choice().label())
             : plan.tools().stream().map(Tool::name).collect(
                 java.util.stream.Collectors.toSet());
-        for (var candidate : candidates(text)) {
-            try {
-                var value = mapper.readTree(candidate);
-                var calls = value.isArray() ? value
-                    : value.path("tool_calls").isArray() ? value.path("tool_calls")
-                    : value.has("function_call")
-                        ? mapper.createArrayNode().add(value.path("function_call"))
-                    : value.has("name") && (value.has("arguments") || value.has("parameters"))
-                        ? mapper.createArrayNode().add(value) : null;
-                if (calls == null) continue;
-                var output = new ArrayList<ToolCall>();
-                for (var call : calls) {
-                    var function = call.path("function").isObject()
-                        ? call.path("function") : call;
-                    var name = function.path("name").asText("").trim();
-                    if (!allowed.contains(name)) continue;
-                    var arguments = function.has("arguments") ? function.path("arguments")
-                        : function.path("parameters");
-                    if (arguments.isTextual()) {
-                        try { arguments = mapper.readTree(arguments.asText()); }
-                        catch (RuntimeException ignored) {
-                            throw new IllegalArgumentException(
-                                "LongCat emitted invalid JSON tool arguments for " + name);
-                        }
-                    }
-                    if (!arguments.isObject()) {
-                        throw new IllegalArgumentException(
-                            "LongCat emitted non-object tool arguments for " + name);
-                    }
-                    var id = call.path("id").asText("").trim();
-                    if (id.isBlank()) id = "call_" + UUID.randomUUID().toString()
-                        .replace("-", "").substring(0, 24);
-                    output.add(new ToolCall(id, name,
-                        mapper.writeValueAsString(arguments)));
-                }
-                if (!output.isEmpty()) return List.copyOf(output);
-            } catch (IllegalArgumentException error) {
-                throw error;
-            } catch (RuntimeException ignored) {
-                // Try the next bounded JSON candidate.
-            }
-        }
-        return List.of();
+        return com.any2api.provider.EmulatedToolCallParser.parse(mapper, candidates(text), allowed, "LongCat")
+            .stream().map(call -> new ToolCall(call.id(), call.name(), call.arguments())).toList();
     }
 
     private List<Tool> normalize(List<JsonNode> rawTools) {

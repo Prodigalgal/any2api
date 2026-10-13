@@ -108,6 +108,13 @@ public class AccountManagementService {
         if (!preserveExistingState || existing.isEmpty()) {
             account.updateState(command.status(), command.enabled());
         }
+        if (existing.isEmpty() && command.scheduleLifecycle()
+            && account.getStatus() != AccountStatus.BANNED && account.getStatus() != AccountStatus.DISABLED) {
+            account.updateState(AccountStatus.PENDING, false);
+            if (command.status() != AccountStatus.PENDING) {
+                account.mergeMetadata(Map.of("inference_readiness_pending", true));
+            }
+        }
         account = accounts.save(account);
         var credential = credentials.store(
             account, command.providerId(), command.credential(), command.credentialExpiresAt());
@@ -119,7 +126,7 @@ public class AccountManagementService {
         var dailyCheckin = capabilities.getOrDefault(
             ProviderCapability.ACCOUNT_DAILY_CHECKIN, SupportLevel.UNSUPPORTED);
         var inferenceReadinessPending = Boolean.TRUE.equals(
-            command.metadata().get("inference_readiness_pending"));
+            account.getMetadata().get("inference_readiness_pending"));
         if (dailyCheckin != SupportLevel.UNSUPPORTED
             && account.getStatus() != AccountStatus.BANNED) {
             schedules.scheduleDailyCheckin(account.getId(), command.providerId());

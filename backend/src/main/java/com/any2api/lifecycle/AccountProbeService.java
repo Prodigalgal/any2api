@@ -12,7 +12,6 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderFailureDisposition;
 import com.any2api.provider.ProviderRegistry;
 import com.any2api.provider.ModelCatalogCache;
-import com.any2api.provider.ModelProbeService;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -35,7 +34,7 @@ public final class AccountProbeService {
     private final TransactionTemplate transactions;
     private final ExecutorService databaseExecutor;
     private final ModelCatalogCache modelCatalog;
-    private final ModelProbeService modelProbes;
+    private final InitialInferenceCheckService initialChecks;
 
     public AccountProbeService(
         AccountRepository repository,
@@ -47,7 +46,7 @@ public final class AccountProbeService {
         PlatformTransactionManager transactionManager,
         ExecutorService databaseExecutor,
         ModelCatalogCache modelCatalog,
-        ModelProbeService modelProbes
+        InitialInferenceCheckService initialChecks
     ) {
         this.repository = repository;
         this.accounts = accounts;
@@ -58,7 +57,7 @@ public final class AccountProbeService {
         this.transactions = new TransactionTemplate(transactionManager);
         this.databaseExecutor = databaseExecutor;
         this.modelCatalog = modelCatalog;
-        this.modelProbes = modelProbes;
+        this.initialChecks = initialChecks;
     }
 
     public Mono<Result> probe(UUID accountId) {
@@ -66,17 +65,31 @@ public final class AccountProbeService {
     }
 
     public Mono<Result> probe(UUID accountId, String requestedModel) {
-        return Mono.fromCallable(() -> Objects.requireNonNull(transactions.execute(ignored -> {
-                var account = require(accountId);
-                var provider = providers.require(account.getProviderId());
-                if (!provider.manifest().configured()) {
-                    throw new IllegalArgumentException("provider is not configured");
-                }
-                return account.getProviderId();
-            })))
-            .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
-            .flatMap(providerId -> resolveModel(providerId, requestedModel)
-                .flatMap(model -> execute(accountId, providerId, model.orElse(null))));
+        return initialChecks.existing(accountId).flatMap(existing -> {
+            if (existing.isPresent()) return cachedResult(accountId, existing.get());
+            return Mono.fromCallable(() -> {
+                    var account = require(accountId);
+                    if (!providers.require(account.getProviderId()).manifest().configured()) {
+                        throw new IllegalArgumentException("provider is not configured");
+                    }
+                    return account.getProviderId();
+                })
+                .subscribeOn(Schedulers.fromExecutor(databaseExecutor))
+                .flatMap(providerId -> resolveModel(providerId, requestedModel)
+                    .flatMap(model -> execute(accountId, providerId,
+                        readiness.resolveModel(providerId, model.orElse(null)))));
+        });
+    }
+
+    private Mono<Result> cachedResult(UUID accountId, InitialInferenceCheckService.Observation check) {
+        return Mono.fromCallable(() -> publicResult(check, AccountView.from(require(accountId))))
+            .subscribeOn(Schedulers.fromExecutor(databaseExecutor));
+    }
+
+    private static Result publicResult(InitialInferenceCheckService.Observation check, AccountView account) {
+        var result = check.result();
+        return new Result(result.ready(), result.model(), result.errorClass(), result.output(),
+            result.durationMs(), check.completedAt(), account, check.performed(), check.source());
     }
 
     private Mono<java.util.Optional<String>> resolveModel(
@@ -101,16 +114,15 @@ public final class AccountProbeService {
         observability.linkAccount(observed, accountId);
         return Mono.usingWhen(
                 accounts.acquire(accountId),
-                account -> Mono.defer(() -> model == null
-                        ? readiness.probe(
-                            account, providers.require(providerId).accountProbeTimeout())
-                        : readiness.probe(
-                            account, providers.require(providerId).accountProbeTimeout(), model))
-                    .flatMap(result -> accounts.mergeCredentialPatch(
-                            account, result.credentialPatch())
-                        .onErrorReturn(false)
-                        .then(applyDisposition(account, result))
-                        .then(persist(accountId, providerId, result))),
+                account -> initialChecks.verify(accountId, () -> new InitialInferenceCheckService.Plan(
+                        model, () -> readiness.probe(
+                            account, providers.require(providerId).accountProbeTimeout(), model)))
+                    .flatMap(check -> {
+                        if (!check.performed()) return cachedResult(accountId, check);
+                        return accounts.mergeCredentialPatch(account, check.result().credentialPatch())
+                            .then(applyDisposition(account, check.result()))
+                            .then(persist(accountId, check));
+                    }),
                 accounts::release,
                 (account, ignored) -> accounts.release(account),
                 accounts::release)
@@ -137,17 +149,17 @@ public final class AccountProbeService {
     ) {
         if (result.ready()) return Mono.empty();
         return failures.report(account, result.model(), new ProviderFailure(
-            result.errorClass(), result.errorClass(), false, Map.of("source", "manual_probe")));
+            result.errorClass(), result.errorClass(), false, Map.of("source", "initial_verification")));
     }
 
     private Mono<Result> persist(
         UUID accountId,
-        String providerId,
-        InferenceReadinessProbe.Result result
+        InitialInferenceCheckService.Observation check
     ) {
+        var result = check.result();
         return Mono.fromCallable(() -> Objects.requireNonNull(transactions.execute(ignored -> {
                 var account = require(accountId);
-                var completedAt = Instant.now();
+                var completedAt = check.completedAt();
                 account.mergeMetadata(Map.of(
                     "inference_probe_at", completedAt.toString(),
                     "inference_probe_model", result.model(),
@@ -159,14 +171,7 @@ public final class AccountProbeService {
                     account.markSuccess(completedAt);
                 }
                 account = repository.save(account);
-                if (result.ready()) {
-                    modelProbes.recordReadyEvidence(
-                        providerId, result.model(), accountId, result.durationMs(), completedAt);
-                }
-                return new Result(
-                    result.ready(), result.model(), result.errorClass(), result.output(),
-                    result.durationMs(), completedAt,
-                    AccountView.from(account));
+                return publicResult(check, AccountView.from(account));
             })))
             .subscribeOn(Schedulers.fromExecutor(databaseExecutor));
     }
@@ -183,7 +188,9 @@ public final class AccountProbeService {
         String output,
         long durationMs,
         Instant completedAt,
-        AccountView account
+        AccountView account,
+        boolean performed,
+        String source
     ) {
     }
 }

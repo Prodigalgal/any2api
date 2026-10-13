@@ -292,4 +292,42 @@ class ToolEmulationEngineTest {
             raw
         );
     }
+
+    @Test
+    void rejectsTheEntireBatchWhenAFunctionIsUndeclaredOrAnIdIsRepeated() {
+        var tools = mapper.createArrayNode();
+        tools.addObject().put("type", "function").put("name", "inspect");
+        var request = createRequest(tools, mapper.createObjectNode());
+        for (var answer : List.of(
+                "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":{}},{\"name\":\"undeclared\",\"arguments\":{}}]}",
+                "{\"tool_calls\":[{\"id\":\"same\",\"name\":\"inspect\",\"arguments\":{\"x\":1}},{\"id\":\"same\",\"name\":\"inspect\",\"arguments\":{\"x\":2}}]}",
+                "{\"tool_calls\":{\"name\":\"inspect\",\"arguments\":{}}}",
+                "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":\"{} trailing content\"}]}")) {
+            var events = engine.transformStream(request.requestId(), engine.plan(request), Flux.just(
+                new CanonicalEvent.ResponseStarted(1, request.requestId(), 0, "fixture"),
+                new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1, answer),
+                new CanonicalEvent.Completed(1, request.requestId(), 2, "stop"))).collectList().block();
+            assertThat(events).hasSize(2);
+            assertThat(events.getLast()).isInstanceOfSatisfying(CanonicalEvent.Failed.class,
+                failed -> assertThat(failed.errorType()).isEqualTo("tool_call_generation_failed"));
+            assertThat(events).noneMatch(CanonicalEvent.ToolCallStarted.class::isInstance)
+                .noneMatch(CanonicalEvent.OutputTextDelta.class::isInstance);
+        }
+    }
+
+    @Test
+    void preservesOutputTruncationEvenWhenTheLastFunctionArgumentsAreValid() {
+        var tools = mapper.createArrayNode();
+        tools.addObject().put("type", "function").put("name", "inspect");
+        var request = createRequest(tools, mapper.createObjectNode().put("tool_choice", "required"));
+        for (var reason : List.of("length", "max_output_tokens", "content_filter")) {
+            var events = engine.transformStream(request.requestId(), engine.plan(request), Flux.just(
+                new CanonicalEvent.ResponseStarted(1, request.requestId(), 0, "fixture"),
+                new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1,
+                    "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":{}}]}"),
+                new CanonicalEvent.Completed(1, request.requestId(), 2, reason))).collectList().block();
+            assertThat(events.getLast()).isInstanceOfSatisfying(CanonicalEvent.Completed.class,
+                completed -> assertThat(completed.finishReason()).isEqualTo(reason));
+        }
+    }
 }

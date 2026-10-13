@@ -554,11 +554,11 @@ const AccountRow = memo(function AccountRow({
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title={probeSupported ? "立即测活" : "该厂商当前不可用"}>
+          <Tooltip title={probeSupported ? "首次验证 / 查看记录" : "该厂商当前不可用"}>
             <span>
               <IconButton
                 size="small"
-                aria-label="立即测活"
+                aria-label="首次验证 / 查看记录"
                 disabled={!probeSupported}
                 onClick={onProbe}
               >

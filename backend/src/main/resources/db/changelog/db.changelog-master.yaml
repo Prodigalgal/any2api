@@ -71,3 +71,11 @@ databaseChangeLog:
       changes:
         - tagDatabase:
             tag: 0.24.0
+  - include:
+      file: db/changelog/releases/034-initial-inference-check.sql
+  - changeSet:
+      id: 034-003-tag
+      author: any2api
+      changes:
+        - tagDatabase:
+            tag: 1.0.0

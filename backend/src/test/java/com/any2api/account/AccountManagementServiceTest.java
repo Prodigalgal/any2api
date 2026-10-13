@@ -69,6 +69,9 @@ class AccountManagementServiceTest {
         assertThat(first.account().email()).isEqualTo("same@example.com");
         assertThat(second.account().email()).isEqualTo("same@example.com");
         assertThat(first.account().id()).isNotEqualTo(second.account().id());
+        assertThat(first.account().status()).isEqualTo(AccountStatus.PENDING);
+        assertThat(first.account().enabled()).isFalse();
+        assertThat(second.account().status()).isEqualTo(AccountStatus.PENDING);
         assertThat(stored).extracting(AccountEntity::getProviderId)
             .containsExactly("alpha", "beta");
         verify(vault).store(any(), eq("alpha"), any(), any());

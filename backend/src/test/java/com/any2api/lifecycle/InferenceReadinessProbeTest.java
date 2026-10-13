@@ -87,7 +87,7 @@ class InferenceReadinessProbeTest {
     }
 
     @Test
-    void autoProbeFallsBackToRuntimeAfterRetryableApiFailure() {
+    void initialVerificationDoesNotRetryThroughTheFallbackTransport() {
         var transportModes = org.mockito.Mockito.mock(ProviderTransportModeService.class);
         org.mockito.Mockito.when(transportModes.plan(org.mockito.ArgumentMatchers.any()))
             .thenReturn(new ProviderTransportModeService.TransportPlan(
@@ -99,26 +99,22 @@ class InferenceReadinessProbeTest {
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
         assertThat(result).isNotNull();
-        assertThat(result.ready()).isTrue();
-        assertThat(result.output()).isEqualTo("pong");
+        assertThat(result.ready()).isFalse();
+        assertThat(result.errorClass()).isEqualTo("provider_upstream_error");
     }
 
     @Test
-    void fallsBackToSecondaryProbeModelWhenPrimaryEncounteredAntiBot() {
+    void initialVerificationDoesNotTrySecondaryModelsAfterFailure() {
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
         var fallbackProvider = new InferenceProvider() {
             @Override
             public ProviderManifest manifest() {
                 return new ProviderManifest(
-                    "alpha", "Alpha", "test", "1", List.of("primary-model"),
+                    "alpha", "Alpha", "test", "1", List.of("primary-model", "secondary-model"),
                     Map.of(
                         ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                         ProviderCapability.RESPONSES, SupportLevel.NATIVE),
                     Map.of(RandomModelRole.TOP_TEXT, List.of("primary-model")), true);
-            }
-
-            @Override
-            public List<String> fallbackProbeModels() {
-                return List.of("secondary-model");
             }
 
             @Override
@@ -127,6 +123,8 @@ class InferenceReadinessProbeTest {
                 ProviderExecutionContext context,
                 LeasedProviderAccount account
             ) {
+                attempts.incrementAndGet();
+                assertThat(request.messages().getFirst().path("content").asText()).isEqualTo("Reply with OK only.");
                 if ("primary-model".equals(request.model())) {
                     return Flux.just(new CanonicalEvent.Failed(
                         1, request.requestId(), 1, "anti_bot_rejected", "blocked by cloudflare", Map.of()));
@@ -149,13 +147,46 @@ class InferenceReadinessProbeTest {
         var result = probe.probe(account(), mapper.createObjectNode(), 1, null).block();
 
         assertThat(result).isNotNull();
-        assertThat(result.ready()).isTrue();
-        assertThat(result.model()).isEqualTo("secondary-model");
-        assertThat(result.output()).isEqualTo("fallback ok");
+        assertThat(result.ready()).isFalse();
+        assertThat(result.model()).isEqualTo("primary-model");
+        assertThat(result.errorClass()).isEqualTo("anti_bot_rejected");
+        assertThat(attempts).hasValue(1);
     }
 
     private com.any2api.provider.ProviderProbeModelService probeModels() {
         return new com.any2api.provider.ProviderProbeModelService(org.mockito.Mockito.mock(JdbcClient.class));
+    }
+
+    @Test
+    void frequentPartialEventsCannotExtendTheTotalVerificationDeadline() {
+        var slow = org.mockito.Mockito.mock(InferenceProvider.class);
+        org.mockito.Mockito.when(slow.manifest()).thenReturn(provider(true).manifest());
+        org.mockito.Mockito.when(slow.protocolContract()).thenCallRealMethod();
+        org.mockito.Mockito.when(slow.classify(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ProviderFailure("upstream_timeout", "timeout", false, Map.of()));
+        org.mockito.Mockito.when(slow.generate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenAnswer(call -> {
+                CanonicalRequest request = call.getArgument(0);
+                return Flux.concat(Flux.just(new CanonicalEvent.ResponseStarted(1, request.requestId(), 0, "fixture")),
+                    Flux.interval(java.time.Duration.ofMillis(20)).map(index -> new CanonicalEvent.OutputTextDelta(
+                        1, request.requestId(), index + 1, "a")));
+            });
+        var modes = org.mockito.Mockito.mock(ProviderTransportModeService.class);
+        org.mockito.Mockito.when(modes.plan(slow)).thenReturn(new ProviderTransportModeService.TransportPlan(
+            ProviderTransportMode.RUNTIME, ProviderTransportMode.RUNTIME, null));
+        var probe = new InferenceReadinessProbe(ProviderRegistry.allEnabled(List.of(slow)), mapper,
+            modes, probeModels());
+        var source = account();
+        var leased = new LeasedProviderAccount(source.getId(), "alpha", "external", null, 1, null,
+            mapper.createObjectNode(), Map.of(), new com.any2api.coordination.AccountLease(
+                "alpha", source.getId(), "owner", 1, java.time.Instant.now().plusSeconds(10)));
+
+        reactor.test.StepVerifier.withVirtualTime(() -> probe.probe(leased, java.time.Duration.ofMillis(100)))
+            .thenAwait(java.time.Duration.ofMillis(101))
+            .assertNext(result -> {
+                assertThat(result.ready()).isFalse();
+                assertThat(result.errorClass()).isEqualTo("upstream_timeout");
+            }).verifyComplete();
     }
 
     private AccountEntity account() {

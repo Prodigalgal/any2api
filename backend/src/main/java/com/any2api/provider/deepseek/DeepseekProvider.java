@@ -91,7 +91,7 @@ public final class DeepseekProvider implements InferenceProvider {
     @Override public ProviderManifest manifest() { return MANIFEST; }
 
     @Override
-    public java.util.Optional<String> scheduledProbeModel() {
+    public java.util.Optional<String> initialVerificationModel() {
         return java.util.Optional.of("default");
     }
 
@@ -102,9 +102,8 @@ public final class DeepseekProvider implements InferenceProvider {
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
-    @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
 
-    @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
+    @Override public Duration accountProbeTimeout() { return properties.getAccountVerificationTimeout(); }
 
     @Override
     public void validate(CanonicalRequest request) {

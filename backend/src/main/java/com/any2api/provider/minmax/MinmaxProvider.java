@@ -86,7 +86,7 @@ public final class MinmaxProvider implements InferenceProvider {
     }
 
     @Override
-    public java.util.Optional<String> scheduledProbeModel() {
+    public java.util.Optional<String> initialVerificationModel() {
         return java.util.Optional.of("MiniMax-M3.1-Flash-Preview");
     }
 

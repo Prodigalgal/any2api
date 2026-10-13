@@ -40,9 +40,8 @@ class GlmProviderTest {
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
-        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
-        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
-        assertThatThrownBy(() -> properties.setModelProbeTimeout(Duration.ZERO))
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
+        assertThatThrownBy(() -> properties.setAccountVerificationTimeout(Duration.ZERO))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("must be positive");
     }
@@ -193,6 +192,6 @@ class GlmProviderTest {
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
-        assertThat(provider.scheduledModelProbeEnabled()).isTrue();
+        assertThat(provider.initialVerificationModel()).isPresent();
     }
 }

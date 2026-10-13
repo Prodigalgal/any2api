@@ -32,11 +32,15 @@ public final class ProviderRequestValidation {
             protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
                 ? CHAT_PLATFORM_PARAMETERS : RESPONSES_PLATFORM_PARAMETERS);
         accepted.addAll(contract.parameters(protocol));
+        accepted.addAll(WebParameterAdaptation.compatibilityParameters());
+        accepted.addAll(Set.of("reasoning", "reasoning_effort"));
         return List.copyOf(accepted);
     }
 
     public static void requireKnownOptions(CanonicalRequest request, Set<String> allowed) {
-        var unknown = request.providerOptions().keySet().stream()
+        var names = new java.util.TreeSet<>(request.providerOptions().keySet());
+        request.rawRequest().path("provider_options").path(request.providerId()).propertyNames().forEach(names::add);
+        var unknown = names.stream()
             .filter(key -> !allowed.contains(key))
             .sorted()
             .toList();
@@ -532,6 +536,7 @@ public final class ProviderRequestValidation {
         var reasoning = request.rawRequest().path("reasoning");
         if (!reasoning.isObject()) return;
         reasoning.propertyNames().forEach(field -> {
+            if (Set.of("effort", "summary").contains(field) && reasoning.path(field).isNull()) return;
             if (!contract.reasoningParameters().contains(field)
                 && !(request.protocol() == CanonicalRequest.Protocol.RESPONSES && "summary".equals(field))) {
                 throw OpenAiRequestException.unsupported(
@@ -540,6 +545,7 @@ public final class ProviderRequestValidation {
                         + request.providerId() + ": " + field);
             }
             if (Set.of("effort", "summary").contains(field)
+                && !reasoning.path(field).isNull()
                 && !reasoning.path(field).isTextual()) {
                 throw OpenAiRequestException.invalid(
                     "reasoning." + field, "reasoning." + field + " must be a string");

@@ -113,7 +113,7 @@ public class CanonicalRequestParser {
             }
         }
         var reasoning = raw.path("reasoning").isObject()
-            ? objectMapper.convertValue(raw.path("reasoning"), new TypeReference<Map<String, Object>>() {})
+            ? nonNullFields(raw.path("reasoning"))
             : Map.<String, Object>of();
         var tools = OpenAiToolBridge.functions(raw.path("tools"));
         if (protocol == CanonicalRequest.Protocol.RESPONSES && raw.path("text").hasNonNull("verbosity")) {
@@ -310,9 +310,13 @@ public class CanonicalRequestParser {
                 "provider_options." + providerId,
                 "provider_options." + providerId + " must be an object");
         }
-        return Map.copyOf(objectMapper.convertValue(
-            own,
-            new TypeReference<Map<String, Object>>() {}));
+        return nonNullFields(own);
+    }
+
+    private Map<String, Object> nonNullFields(JsonNode value) {
+        Map<String, Object> fields = objectMapper.convertValue(value, new TypeReference<Map<String, Object>>() {});
+        fields.values().removeIf(java.util.Objects::isNull);
+        return Map.copyOf(fields);
     }
 
     private void validateShape(CanonicalRequest.Protocol protocol, ObjectNode raw) {
@@ -351,6 +355,20 @@ public class CanonicalRequestParser {
         if (!effort.isMissingNode() && !effort.isNull() && !effort.isTextual()) {
             throw OpenAiRequestException.invalid(
                 "reasoning.effort", "reasoning.effort must be a string");
+        }
+        var summary = raw.path("reasoning").path("summary");
+        if (!summary.isMissingNode() && !summary.isNull()
+            && (!summary.isTextual() || !Set.of("auto", "concise", "detailed", "none").contains(summary.asText()))) {
+            throw OpenAiRequestException.invalid("reasoning.summary", "unsupported reasoning summary mode");
+        }
+        var stop = raw.path("stop");
+        if (!stop.isMissingNode() && !stop.isNull() && !stop.isTextual()) {
+            if (!stop.isArray() || stop.size() > 4) {
+                throw OpenAiRequestException.invalid("stop", "stop must be a string or at most four strings");
+            }
+            for (var sequence : stop) {
+                if (!sequence.isTextual()) throw OpenAiRequestException.invalid("stop", "stop sequences must be strings");
+            }
         }
         if (protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS
             && raw.has("messages") && !raw.path("messages").isArray()) {
@@ -395,11 +413,11 @@ public class CanonicalRequestParser {
         var nestedEffort = raw.path("reasoning").path("effort");
         for (var effort : List.of(flatEffort, nestedEffort)) {
             if (effort.isTextual() && !Set.of(
-                "auto", "none", "minimal", "low", "medium", "high")
+                "auto", "none", "minimal", "low", "medium", "high", "xhigh", "max")
                 .contains(effort.asText().trim().toLowerCase())) {
                 throw OpenAiRequestException.invalid(
                     "reasoning_effort",
-                    "reasoning effort must be one of auto, none, minimal, low, medium, high");
+                    "reasoning effort must be one of auto, none, minimal, low, medium, high, xhigh, max");
             }
         }
         if (flatEffort.isTextual() && nestedEffort.isTextual()

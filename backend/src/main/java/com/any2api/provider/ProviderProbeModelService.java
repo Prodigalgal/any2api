@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
- * Manages dynamically configured probe models per provider without hardcoding in source.
+ * Manages the basic model used once for each newly stored account.
  * Persisted in providers.config JSON and cached in memory.
  */
 @Service

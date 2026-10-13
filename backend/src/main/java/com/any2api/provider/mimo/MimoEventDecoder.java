@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 import tools.jackson.databind.ObjectMapper;
 
 final class MimoEventDecoder {
+    private static final int MAX_TOOL_CAPTURE_CHARACTERS = 1 << 20;
     private static final int MAX_PARAMETER_TYPE_DEPTH = 32;
     private static final int MAX_PARAMETER_TYPE_NODES = 2048;
     private static final String LENGTH_REJECTION = "Sorry, the text you sent is too long! "
@@ -78,7 +79,15 @@ final class MimoEventDecoder {
             if (event.path("type").asText("").equals("text")) {
                 var text = event.path("content").asText("");
                 if (!text.isEmpty() && !INTERNAL_TOKENS.contains(text.trim())) {
-                    buffer.append(text.replace("\0", ""));
+                    var normalized = text.replace("\0", "");
+                    if (!tools.isEmpty() && normalized.length() > MAX_TOOL_CAPTURE_CHARACTERS - buffer.length()) {
+                        output.add(new CanonicalEvent.Failed(1, requestId, next(), "tool_call_generation_failed",
+                            "MiMo tool output exceeds capture limit", java.util.Map.of("retryable", false)));
+                        buffer.setLength(0);
+                        completed = true;
+                        return output;
+                    }
+                    buffer.append(normalized);
                     if (tools.isEmpty() && !pendingLengthRejection()) output.addAll(drain(false));
                 }
             } else if (event.has("promptTokens") && !usageEmitted) {
@@ -106,7 +115,15 @@ final class MimoEventDecoder {
         if (tools.isEmpty()) {
             output.addAll(drain(true));
         } else {
-            emitTools(buffer.toString(), output);
+            try {
+                emitTools(buffer.toString(), output);
+            } catch (IllegalArgumentException error) {
+                output.add(new CanonicalEvent.Failed(1, requestId, next(), "tool_call_generation_failed",
+                    error.getMessage(), java.util.Map.of("retryable", false)));
+                buffer.setLength(0);
+                completed = true;
+                return output;
+            }
             if (!parallelToolCalls && emittedCalls.size() > 1) {
                 output.removeIf(event -> event instanceof CanonicalEvent.ToolCallStarted
                     || event instanceof CanonicalEvent.ToolArgumentsDelta
@@ -202,34 +219,37 @@ final class MimoEventDecoder {
         while (matcher.find()) {
             var name = matcher.group(1).trim();
             name = resolveName(name);
-            if (name == null) continue;
+            if (name == null) throw new IllegalArgumentException("MiMo emitted an undeclared function tool");
             var arguments = mapper.createObjectNode();
             var parameter = PARAMETER.matcher(matcher.group(2));
             while (parameter.find()) {
                 putAuto(arguments, name, parameter.group(1), parameter.group(2));
             }
-            calls.add(new ParsedCall(name, arguments));
+            calls.add(new ParsedCall(name, arguments, new CallGroup(ToolSyntax.MIMOML, 0)));
         }
         var xml = XML_CALL.matcher(source);
         while (xml.find()) {
             var function = XML_FUNCTION.matcher(xml.group(1));
             if (!function.find()) continue;
             var name = resolveName(function.group(1));
-            if (name == null) continue;
+            if (name == null) throw new IllegalArgumentException("MiMo emitted an undeclared function tool");
             var arguments = mapper.createObjectNode();
             var parameter = XML_PARAMETER.matcher(function.group(2));
             while (parameter.find()) putAuto(arguments, name, parameter.group(1), parameter.group(2));
-            calls.add(new ParsedCall(name, arguments));
+            calls.add(new ParsedCall(name, arguments, new CallGroup(ToolSyntax.XML, 0)));
         }
         var tagged = TAGGED_FUNCTION.matcher(source);
         while (tagged.find()) {
-            addJsonCalls(tagged.group(1), calls);
+            addJsonCalls(tagged.group(1), calls, new CallGroup(ToolSyntax.TAGGED_JSON, 0));
         }
-        jsonCandidates(source).forEach(candidate -> addJsonCalls(candidate, calls));
+        var candidateIndex = 0;
+        for (var candidate : jsonCandidates(source)) {
+            addJsonCalls(candidate, calls, new CallGroup(ToolSyntax.JSON, candidateIndex++));
+        }
         var plain = PLAIN_CALL.matcher(source);
         while (plain.find()) {
             var name = resolveName(plain.group(1));
-            if (name == null) continue;
+            if (name == null) throw new IllegalArgumentException("MiMo emitted an undeclared function tool");
             var arguments = mapper.createObjectNode();
             var raw = plain.group(2).trim();
             try {
@@ -241,11 +261,16 @@ final class MimoEventDecoder {
                     if (parts.length == 2) putAuto(arguments, name, parts[0], parts[1]);
                 }
             }
-            calls.add(new ParsedCall(name, arguments));
+            calls.add(new ParsedCall(name, arguments, new CallGroup(ToolSyntax.PLAIN, 0)));
         }
+        var occurrences = new java.util.HashMap<CallGroup, java.util.Map<String, Integer>>();
         for (var call : calls) {
             var serialized = mapper.writeValueAsString(call.arguments());
-            if (!emittedCalls.add(call.name() + ":" + serialized)) continue;
+            var signature = call.name() + ":" + serialized;
+            var ordinal = occurrences.computeIfAbsent(call.group(), ignored -> new java.util.HashMap<>())
+                .merge(signature, 1, Integer::sum);
+            // Multiple syntaxes can describe one call; equal calls within a batch are independent invocations.
+            if (!emittedCalls.add(signature + "\0" + ordinal)) continue;
             var id = "call_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
             output.add(new CanonicalEvent.ToolCallStarted(1, requestId, next(), id, call.name()));
             output.add(new CanonicalEvent.ToolArgumentsDelta(1, requestId, next(), id, serialized));
@@ -287,25 +312,12 @@ final class MimoEventDecoder {
         return null;
     }
 
-    private void addJsonCalls(String source, List<ParsedCall> calls) {
-        try {
-            var value = mapper.readTree(source.trim());
-            var values = value.isArray() ? value
-                : value.path("tool_calls").isArray() ? value.path("tool_calls")
-                : mapper.createArrayNode().add(value);
-            for (var item : values) {
-                var function = item.path("function").isObject()
-                    ? item.path("function") : item;
-                var name = resolveName(function.path("name").asText(""));
-                if (name == null) continue;
-                var arguments = function.path("arguments");
-                if (arguments.isTextual()) arguments = mapper.readTree(arguments.asText());
-                calls.add(new ParsedCall(name, arguments.isObject()
-                    ? (tools.jackson.databind.node.ObjectNode) arguments
-                    : mapper.createObjectNode()));
-            }
-        } catch (RuntimeException ignored) {
-            // Other supported tool syntaxes may still match this response.
+    private void addJsonCalls(String source, List<ParsedCall> calls, CallGroup group) {
+        var allowed = tools.stream().map(MimoTool::name).collect(java.util.stream.Collectors.toSet());
+        for (var call : com.any2api.provider.EmulatedToolCallParser.parse(
+                mapper, List.of(source.trim()), allowed, this::resolveName, "MiMo")) {
+            calls.add(new ParsedCall(call.name(),
+                (tools.jackson.databind.node.ObjectNode) mapper.readTree(call.arguments()), group));
         }
     }
 
@@ -411,5 +423,7 @@ final class MimoEventDecoder {
 
     private long next() { return sequence++; }
 
-    private record ParsedCall(String name, tools.jackson.databind.node.ObjectNode arguments) {}
+    private enum ToolSyntax { MIMOML, XML, TAGGED_JSON, JSON, PLAIN }
+    private record CallGroup(ToolSyntax syntax, int candidateIndex) {}
+    private record ParsedCall(String name, tools.jackson.databind.node.ObjectNode arguments, CallGroup group) {}
 }

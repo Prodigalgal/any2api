@@ -41,6 +41,7 @@ import {
   type ProviderTransportMode,
 } from "@/lib/api";
 import { PageContainer, PageHeader, DataSurface } from "@/components/page-layout";
+import { isInitialVerificationModel } from "@/lib/model-policy";
 import { tokens } from "@/theme/theme";
 
 export function Overview() {
@@ -153,16 +154,16 @@ export function Overview() {
         <StatusMetricCard
           label="已接入厂商"
           value={`${rows.filter((row) => row.enabled).length} / ${rows.length}`}
-          caption={`${rows.filter((row) => row.available).length} 家可用供流`}
+          caption={`${rows.filter((row) => row.available).length} 家有启用账号`}
           Icon={LayersOutlined}
           healthy={rows.some((row) => row.available)}
         />
         <StatusMetricCard
-          label="可路由模型总数"
-          value={`${modelRows.filter((model) => model.available).length} / ${modelRows.length}`}
+          label="已编目模型总数"
+          value={`${modelRows.length}`}
           caption="当前全网开放的模型目录"
           Icon={HubOutlined}
-          healthy={modelRows.some((model) => model.available)}
+          healthy={modelRows.length > 0}
         />
       </Box>
 
@@ -193,9 +194,9 @@ export function Overview() {
                 <TableRow>
                   <TableCell>厂商名称</TableCell>
                   <TableCell>接入开关</TableCell>
-                  <TableCell>健康状态</TableCell>
+                  <TableCell>账号供流</TableCell>
                   <TableCell>推理通道</TableCell>
-                  <TableCell>探活模型</TableCell>
+                  <TableCell>首次验证模型</TableCell>
                   <TableCell>出口代理</TableCell>
                   <TableCell>可用账号</TableCell>
                   <TableCell>绑定模型</TableCell>
@@ -366,12 +367,9 @@ export function Overview() {
                 status={modelRows.length.toLocaleString("zh-CN")}
               />
               <ResourceRow
-                name="运行时不可用"
-                detail="经实时健康探针判定"
-                status={modelRows
-                  .filter((model) => model.runtime.status === "UNAVAILABLE")
-                  .length.toLocaleString("zh-CN")}
-                highlight={modelRows.some((model) => model.runtime.status === "UNAVAILABLE")}
+                name="等待并发槽位"
+                detail="当前排队请求数量"
+                status={modelRows.reduce((total, model) => total + model.runtime.queue_depth, 0).toLocaleString("zh-CN")}
               />
             </Stack>
           </Paper>
@@ -396,7 +394,7 @@ export function Overview() {
             <Box sx={{ p: 2 }}>
               <Stack spacing={1.5}>
                 <Protection label="确定性抖动 (Deterministic Jitter)" />
-                <Protection label="厂商级自适应熔断 (Circuit Breaker)" />
+                <Protection label="模型并发上限与排队保护" />
                 <Protection label="账号统一分布式租约 (Unified Lease)" />
                 <Protection label="到期队列 generation 去重防护" />
               </Stack>
@@ -583,7 +581,7 @@ function groupProviders(
       enabled: provider.enabled,
       accountCount: provider.accountCount,
       enabledAccountCount: provider.enabledAccountCount,
-      available: false,
+      available: provider.enabled && provider.enabledAccountCount > 0,
       models: provider.enabled ? [] : provider.defaultModels,
       capabilities: active?.capabilities ?? provider.capabilities,
       requestedTransportMode: provider.requestedTransportMode,
@@ -597,7 +595,6 @@ function groupProviders(
   for (const model of models) {
     const current = rows.get(model.owned_by);
     if (!current) continue;
-    current.available ||= model.available;
     current.models.push(model.id.includes("/") ? model.id.split("/").slice(1).join("/") : model.id);
   }
   return [...rows.values()];
@@ -706,34 +703,6 @@ function hasMultimodal(capabilities: Record<string, string>) {
   );
 }
 
-function isAdvancedOrHeavyModel(modelId: string) {
-  const normalized = modelId.toLowerCase();
-  return (
-    normalized.includes("max") ||
-    normalized.includes("pro") ||
-    normalized.includes("sonnet") ||
-    normalized.includes("opus") ||
-    normalized.includes("o1") ||
-    normalized.includes("o3") ||
-    normalized.includes("thinking") ||
-    normalized.includes("reasoner") ||
-    normalized.includes("r1") ||
-    normalized.includes("ultra") ||
-    normalized.includes("flagship") ||
-    normalized.includes("-image") ||
-    normalized.includes("-video") ||
-    normalized.includes("-i2v") ||
-    normalized.includes("-t2v") ||
-    normalized.includes("-t2i") ||
-    normalized.startsWith("flux-") ||
-    normalized.startsWith("wan-") ||
-    normalized.startsWith("wan2") ||
-    normalized.startsWith("veo-") ||
-    normalized.startsWith("kling-") ||
-    normalized.startsWith("sora")
-  );
-}
-
 function ProbeModelSelector({
   row,
   allModels,
@@ -750,12 +719,12 @@ function ProbeModelSelector({
   onChange: (model: string) => void;
 }) {
   const providerModels = allModels.filter((m) => m.owned_by === row.id);
-  const eligibleModels = providerModels.filter((m) => !isAdvancedOrHeavyModel(m.id));
+  const eligibleModels = providerModels.filter((m) => isInitialVerificationModel(m.id));
   const currentModel = row.probeModel || "";
 
-  const options = [...eligibleModels];
+  const options = eligibleModels.map((model) => ({ id: model.id.startsWith(`${row.id}/`) ? model.id.slice(row.id.length + 1) : model.id }));
   if (currentModel && !options.some((m) => m.id === currentModel)) {
-    options.unshift({ id: currentModel } as ProviderModel);
+    options.unshift({ id: currentModel });
   }
 
   return (
@@ -792,10 +761,10 @@ function ProbeModelSelector({
             boxShadow: `0 0 0 2px ${tokens.primary.light}`,
           },
         }}
-        inputProps={{ "aria-label": `${row.displayName} 探活模型` }}
+        inputProps={{ "aria-label": `${row.displayName} 首次验证模型` }}
       >
         <MenuItem value="" sx={{ fontSize: 12.5, color: "text.secondary" }}>
-          <em>默认轻量探测（自动）</em>
+          <em>默认轻量首次验证</em>
         </MenuItem>
         {options.map((model) => (
           <MenuItem key={model.id} value={model.id} sx={{ fontSize: 12.5 }}>

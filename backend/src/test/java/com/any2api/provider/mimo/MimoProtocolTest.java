@@ -22,6 +22,43 @@ class MimoProtocolTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void boundsPendingToolOutputAndStopsAfterTheFailure() {
+        var decoder = new MimoEventDecoder("bounded", List.of(new MimoTool(
+            "inspect", "", mapper.createObjectNode().put("type", "object"))), false, true);
+        var events = decoder.decode(mapper.writeValueAsString(Map.of(
+            "type", "text", "content", "{" + "x".repeat(1 << 20))));
+        assertThat(events).hasSize(2);
+        assertThat(events.getLast()).isInstanceOfSatisfying(CanonicalEvent.Failed.class,
+            failed -> assertThat(failed.errorType()).isEqualTo("tool_call_generation_failed"));
+        assertThat(events).noneMatch(CanonicalEvent.OutputTextDelta.class::isInstance);
+        assertThat(decoder.finish()).isEmpty();
+        assertThat(decoder.decode("{\"type\":\"text\",\"content\":\"late\"}")).isEmpty();
+    }
+
+    @Test
+    void preservesTwoIdenticalInvocationsAndEnforcesTheParallelPolicy() {
+        var json = "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":{}},{\"name\":\"inspect\",\"arguments\":{}}]}";
+        var invoke = "<|MiMoML|invoke name='inspect'></|MiMoML|invoke>";
+        for (var source : List.of(json, "<|MiMoML|tool_calls>" + invoke + invoke + "</|MiMoML|tool_calls>")) {
+            for (var parallel : List.of(true, false)) {
+                var decoder = new MimoEventDecoder("same-arguments", List.of(new MimoTool(
+                    "inspect", "", mapper.createObjectNode().put("type", "object"))), true, parallel);
+                decoder.decode(mapper.writeValueAsString(Map.of("type", "text", "content", source)));
+                var events = decoder.finish();
+                if (parallel) {
+                    assertThat(events).filteredOn(CanonicalEvent.ToolCallStarted.class::isInstance).hasSize(2);
+                    assertThat(events.stream().filter(CanonicalEvent.ToolCallStarted.class::isInstance)
+                        .map(CanonicalEvent.ToolCallStarted.class::cast).map(CanonicalEvent.ToolCallStarted::toolCallId).toList())
+                        .doesNotHaveDuplicates();
+                } else {
+                    assertThat(events.getLast()).isInstanceOf(CanonicalEvent.Failed.class);
+                    assertThat(events).noneMatch(CanonicalEvent.ToolCallStarted.class::isInstance);
+                }
+            }
+        }
+    }
+
+    @Test
     void turnsTheExactWebLengthRejectionIntoOneRequestFailureAcrossChunkBoundaries() {
         var rejection = "Sorry, the text you sent is too long! I suggest you simplify the content "
             + "appropriately or send it in parts. Thank you for your understanding.";
@@ -268,7 +305,7 @@ class MimoProtocolTest {
     }
 
     @Test
-    void acceptsOnlyOutputLimitsThatCannotConstrainTheOfficialWebModel() {
+    void acceptsOutputLimitHintsWithoutClaimingNativeWebEnforcement() {
         var provider = new MimoProvider(
             mock(OfficialBrowserTransportClient.class),
             new OfficialBrowserSemanticCommandFactory(mapper),
@@ -286,9 +323,7 @@ class MimoProtocolTest {
 
         assertThat(provider.protocolContract().chatParameters()).contains("max_tokens");
         assertThatCode(() -> provider.validate(nonBinding)).doesNotThrowAnyException();
-        assertThatThrownBy(() -> provider.validate(binding))
-            .isInstanceOf(OpenAiRequestException.class)
-            .hasMessageContaining("below its 65536 token output ceiling");
+        assertThatCode(() -> provider.validate(binding)).doesNotThrowAnyException();
     }
 
     @Test

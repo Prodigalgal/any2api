@@ -74,7 +74,7 @@ public final class AgentInteropServer {
 
     @RestController static class FixtureControl {
         @GetMapping("/__fixture/health") public Map<String,Object> health() {
-            return Map.of("status","ready","upstream","fixture","version","0.30.1");
+            return Map.of("status","ready","upstream","fixture","version","1.0.0");
         }
         @GetMapping("/__fixture/requests") public List<Map<String,Object>> requests() { return List.copyOf(REQUESTS); }
         @PostMapping("/__fixture/shutdown") public Map<String,Boolean> shutdown() {
@@ -104,13 +104,11 @@ public final class AgentInteropServer {
             var models = List.of("fixture", "fixture-codex", "fixture-codex-image").stream().map(model -> {
                 var capabilities = mapper.valueToTree(provider.modelContract(new DiscoveredModel(model, model, Map.of())).asMap());
                 return new ModelCatalogCache.Entry(model, model, "mimo", "MiMo", capabilities, capabilities,
-                    null, null, null, "fixture", mapper.createObjectNode(), List.of(), 1, true, "READY",
-                    1, 1, 0, 0, 0, 1.0, 0, 0, null, null, "PASSED", null, null);
+                    null, null, null, "fixture", mapper.createObjectNode(), List.of(), 1);
             }).toList();
             when(catalog.list()).thenReturn(Mono.just(models));
             var runtimeGuard = mock(ModelRuntimeGuard.class);
-            when(runtimeGuard.callable(any(), any())).thenReturn(true);
-            when(runtimeGuard.snapshot(any(), any())).thenReturn(new ModelRuntimeGuard.Snapshot(0, 0, "CLOSED", 0, 0));
+            when(runtimeGuard.snapshot(any(), any())).thenReturn(new ModelRuntimeGuard.Snapshot(0, 0, 0));
             var coordinator = mock(InferenceCoordinator.class);
             when(coordinator.execute(any(CanonicalRequest.class),any(UUID.class),any(ProviderTransportMode.class)))
                 .thenAnswer(call -> fixture(call.getArgument(0),provider,mimoMapper,mapper));
@@ -149,7 +147,8 @@ public final class AgentInteropServer {
             if (!List.of("fixture","fixture-codex","fixture-codex-image").contains(request.model())) {
                 throw OpenAiRequestException.invalid("model","unknown fixture model route");
             }
-            var safe = OpenAiToolBridge.forProvider(new SmartContextWindowManager(mapper).guard(request,null));
+            var compatible = com.any2api.provider.WebParameterAdaptation.prepare(request, provider.protocolContract(), null);
+            var safe = OpenAiToolBridge.forProvider(new SmartContextWindowManager(mapper).guard(compatible,null));
             ProviderRequestValidation.requireSupportedRequest(safe,provider.manifest(),provider.protocolContract());
             provider.validate(safe);
             var prepared = requestMapper.prepare(safe);

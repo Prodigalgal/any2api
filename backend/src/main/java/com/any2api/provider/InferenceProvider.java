@@ -45,36 +45,13 @@ public interface InferenceProvider {
         return ProviderTransportMode.AUTO;
     }
 
-    default Duration modelProbeTimeout() {
-        return Duration.ofSeconds(45);
-    }
-
-    /**
-     * Whether the framework may issue broad scheduled probes for this provider's catalog.
-     * Provider-native anti-abuse or billing constraints may opt out; explicit admin probes,
-     * lifecycle readiness probes, and real request evidence remain available.
-     */
-    default boolean scheduledModelProbeEnabled() {
-        return true;
-    }
-
-    /**
-     * Primary representative model to probe for scheduled health checks.
-     * When set, scheduled probe only tests this single model per provider to conserve quota and avoid anti-bot triggers.
-     */
-    default Optional<String> scheduledProbeModel() {
+    /** Basic text model used once after an account is stored. */
+    default Optional<String> initialVerificationModel() {
         var preferred = manifest().randomModelPreferences()
             .getOrDefault(RandomModelRole.TOP_TEXT, List.of());
         if (!preferred.isEmpty()) return Optional.of(preferred.getFirst());
         if (!manifest().defaultModels().isEmpty()) return Optional.of(manifest().defaultModels().getFirst());
         return Optional.empty();
-    }
-
-    /**
-     * Optional secondary models to probe when the primary model triggers anti-bot or rate limiting during readiness checks.
-     */
-    default List<String> fallbackProbeModels() {
-        return List.of();
     }
 
     default Duration accountProbeTimeout() {

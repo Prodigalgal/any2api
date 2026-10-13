@@ -25,6 +25,42 @@ import tools.jackson.databind.ObjectMapper;
 
 class LongcatProtocolTest {
     @Test
+    void ignoresTrailingFramesAfterSuccessOrFailure() {
+        var mapper = new ObjectMapper();
+        var protocol = new LongcatToolProtocol(mapper);
+        var request = new CanonicalRequest("late", CanonicalRequest.Protocol.RESPONSES, "longcat", "longcat-flash",
+            true, List.of(mapper.createObjectNode().put("role", "user").put("content", "hello")),
+            Map.of(), Map.of(), List.of(), Map.of(), mapper.createObjectNode());
+        for (var terminal : List.of("{\"event\":{\"type\":\"finish\",\"finalContent\":\"done\"}}",
+                "{\"code\":123,\"message\":\"failure\"}")) {
+            var decoder = new LongcatEventDecoder("late", false, protocol.plan(request), protocol);
+            assertThat(decoder.decode(terminal)).anyMatch(event -> event instanceof CanonicalEvent.Completed
+                || event instanceof CanonicalEvent.Failed);
+            assertThat(decoder.decode("{\"event\":{\"type\":\"content\",\"content\":\"late\"}}")).isEmpty();
+            assertThat(decoder.finish()).isEmpty();
+        }
+    }
+
+    @Test
+    void rejectsAnInvalidToolBatchWithoutPublishingAPartialInvocation() {
+        var mapper = new ObjectMapper();
+        var protocol = new LongcatToolProtocol(mapper);
+        var raw = mapper.createObjectNode().put("tool_choice", "required");
+        var tools = List.<tools.jackson.databind.JsonNode>of(mapper.createObjectNode()
+            .put("type", "function").put("name", "inspect"));
+        var request = new CanonicalRequest("batch", CanonicalRequest.Protocol.RESPONSES, "longcat", "longcat-flash",
+            true, List.of(mapper.createObjectNode().put("role", "user").put("content", "hello")),
+            Map.of(), Map.of(), tools, Map.of(), raw);
+        var decoder = new LongcatEventDecoder("batch", false, protocol.plan(request), protocol);
+        var answer = "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":{}},{\"name\":\"undeclared\",\"arguments\":{}}]}";
+        var events = decoder.decode(mapper.writeValueAsString(Map.of("event", Map.of(
+            "type", "finish", "finalContent", answer))));
+        assertThat(events.getLast()).isInstanceOfSatisfying(CanonicalEvent.Failed.class,
+            failed -> assertThat(failed.errorType()).isEqualTo("tool_call_generation_failed"));
+        assertThat(events).noneMatch(CanonicalEvent.ToolCallStarted.class::isInstance);
+    }
+
+    @Test
     void allowsLongRunningReasoningProbesWithoutRemovingTheDeadline() {
         var mapper = new ObjectMapper();
         var toolProtocol = new LongcatToolProtocol(mapper);
@@ -34,14 +70,13 @@ class LongcatProtocolTest {
             new OfficialBrowserSemanticCommandFactory(mapper),
             mock(ProxyPoolService.class), properties, toolProtocol, mapper);
 
-        assertThat(provider.modelProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
-        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(240));
+        assertThat(provider.accountProbeTimeout()).isEqualTo(Duration.ofSeconds(120));
         assertThat(provider.manifest().capabilities())
             .containsEntry(ProviderCapability.IMAGE_INPUT, SupportLevel.NATIVE)
             .containsEntry(ProviderCapability.FILE_INPUT, SupportLevel.NATIVE);
         assertThat(provider.manifest().randomModelPreferences())
             .containsEntry(RandomModelRole.TOP_MULTIMODAL, List.of("longcat-pro"));
-        assertThatThrownBy(() -> properties.setModelProbeTimeout(Duration.ZERO))
+        assertThatThrownBy(() -> properties.setAccountVerificationTimeout(Duration.ZERO))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("must be positive");
     }
@@ -243,7 +278,8 @@ class LongcatProtocolTest {
                 assertThat(call.arguments()).isEqualTo("{\"path\":\"demo.txt\"}");
             });
         }
-        assertThat(tools.parse("{\"name\":\"other\",\"arguments\":{}}", plan)).isEmpty();
+        assertThatThrownBy(() -> tools.parse("{\"name\":\"other\",\"arguments\":{}}", plan))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("undeclared");
         assertThatThrownBy(() -> tools.parse("{\"name\":\"inspect\",\"arguments\":[]}", plan))
             .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("non-object");
     }

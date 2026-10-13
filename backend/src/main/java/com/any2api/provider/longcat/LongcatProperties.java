@@ -11,7 +11,7 @@ public class LongcatProperties {
     private String requestedWith = "XMLHttpRequest";
     private String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         + "AppleWebKit/537.36 Chrome/131 Safari/537.36";
-    private Duration modelProbeTimeout = Duration.ofSeconds(240);
+    private Duration accountVerificationTimeout = Duration.ofSeconds(120);
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = trim(baseUrl); }
@@ -23,13 +23,13 @@ public class LongcatProperties {
     public void setRequestedWith(String requestedWith) { this.requestedWith = requestedWith; }
     public String getUserAgent() { return userAgent; }
     public void setUserAgent(String userAgent) { this.userAgent = userAgent; }
-    public Duration getModelProbeTimeout() { return modelProbeTimeout; }
-    public void setModelProbeTimeout(Duration modelProbeTimeout) {
-        if (modelProbeTimeout == null || modelProbeTimeout.isZero()
-            || modelProbeTimeout.isNegative()) {
-            throw new IllegalArgumentException("modelProbeTimeout must be positive");
+    public Duration getAccountVerificationTimeout() { return accountVerificationTimeout; }
+    public void setAccountVerificationTimeout(Duration accountVerificationTimeout) {
+        if (accountVerificationTimeout == null || accountVerificationTimeout.isZero()
+            || accountVerificationTimeout.isNegative()) {
+            throw new IllegalArgumentException("accountVerificationTimeout must be positive");
         }
-        this.modelProbeTimeout = modelProbeTimeout;
+        this.accountVerificationTimeout = accountVerificationTimeout;
     }
 
     private static String trim(String value) {

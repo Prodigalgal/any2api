@@ -1,7 +1,27 @@
-# 当前任务板（源码 0.30.1）
+# 当前任务板（源码 1.0.0，生产 0.30.1）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-13 WEB 桥接细节修缮（并入未发布的 1.0.0）
+
+- **目标**：修复常用 Chat/Responses 到 WEB 的参数、工具及流式边界，保留厂家已有映射和执行方式。
+- **范围**：嵌套可选 null 的规范化与未知选项错误；工具批次的未知名称/重复 ID 校验；上游截断终态保留；工具 JSON 缓冲复制成本及 MiMo 缓冲边界；LongCat 终态之后的附加帧。
+- **非目标**：新增协议簇、扩大 Qwen 发布范围、改变系统提示/技能/历史内容、周期模型生成探活或重置账号。
+- **影响文件**：CanonicalRequestParser、ProviderRequestValidation、CanonicalEventStream、ToolEmulationEngine、LongCat 工具/事件解码器、MiMo 事件解码器及相关回归。
+- **验收**：可选 null 不造成 500，未知字段仍明确报错；工具调用不静默丢弃或相互覆盖，截断不伪装成功；普通 SSE 保持增量交付；缓冲有上限，取消/终态不泄漏后续内容。
+- **测试**：先记录旧实现失败回归，再执行相关及全量 Backend、版本/JAR门禁、官方 SDK 本地夹具；使用合成长参数测量分配成本，不新增厂商生成探活。
+- **用户补充的兼容策略**：下游按 OpenAI 使用；允许后端静默适配常用可选生成控制。保留原始请求，按厂商已声明映射传递，WEB 无对应字段时省略；已知原生输出上限取可接受值。工具/系统提示/结构化输出、权限、账号状态及真实输入长度仍执行各自语义和校验。
+- **本地完成**：null 规范化、工具批次整体验证/重复 ID、MiMo 相同调用保留及 1Mi 字符边界、LongCat 终态隔离、Chat/Responses 截断状态均修复。兼容处理覆盖普通/已选账号/随机路由；七家两协议控制组合回归通过，MiMo 小输出预算不再拒绝。
+- **验证**：Backend 577 项（572 通过、5 环境条件跳过）、bootJar 和源码/JAR/迁移版本契约通过；官方 OpenAI Python 2.54.0 本地夹具 26/26（原 22 项加四项常用控制/流式组合）。64Ki 工具 JSON/4100 分片的每次分配从约135MB降至约0.55MB，约99.6%；仅代表本地桥接成本。本轮无新增厂商生成请求。
+
+## 2026-10-13 账号一次验证、移除模型可用性判定与统一代理（1.0.0 发布准备）
+
+- 按用户新要求新增 PostgreSQL `account_inference_checks` 唯一预算，入库后只用一条短消息验证一次。历史证据迁入不发生成；重复管理验证不激活/禁用账号，保活/刷新/签到保留非生成动作。首次失败不换模型或通道、不自动重复生成。
+- 删除模型探测服务/定时任务、可用性 guard、健康聚合和健康熔断；模型列表保留目录/能力/参数/并发队列，前端移除可用性标记。OpenAI 基础字段与 Chat/Responses 保持，已公开扩展被移除，按 SemVer 占用 1.0.0。[规格](../docs/requirements/ONE_TIME_ACCOUNT_VERIFICATION.md)。
+- Self-hosted Oracle 四节点在生产已绑定七家注册/推理/生命周期范围，Qwen 原禁用保持；修复绑定 upsert 未更新 traffic_scopes。16:55 UTC+8 四节点只读 gstatic 检查均204，无模型生成；不据此声明全部厂商 WEB 可用。
+- DeepSeek HTTP 200/application/json 的 biz_code=5、is_muted=1 已有脱敏实证，改为 account_blocked；40003 改为 credential_rejected，未知拒绝为 provider_upstream_error，不再误报空输出。该修复并入本次发布。
+- 首次领取/并发/失败/取消/重启/历史迁入和重复管理验证及 Spring Repository 接线回归通过，Web build/lint、Automation 563 项与 Ruff 通过；最终 Backend 全量、JAR/版本与 SDK 门禁通过，进入 1.0.0 不可变构建/候选阶段。19:17 UTC+8 只读核查账号仍526个，DeepSeek启用且 ACTIVE/DEGRADED 数量为0；Arena实际推理超时尚未解决。
 
 ## 2026-10-13 MiMo 桌面请求与 Automation 健康修复（0.30.1 已发布）
 

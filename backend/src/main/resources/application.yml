@@ -63,15 +63,6 @@ any2api:
   model-runtime:
     max-concurrent-requests: ${ANY2API_MODEL_MAX_CONCURRENCY:32}
     max-queue-wait: ${ANY2API_MODEL_MAX_QUEUE_WAIT:2s}
-    circuit-sliding-window: ${ANY2API_MODEL_CIRCUIT_WINDOW:20}
-    circuit-minimum-calls: ${ANY2API_MODEL_CIRCUIT_MIN_CALLS:5}
-    circuit-failure-rate-threshold: ${ANY2API_MODEL_CIRCUIT_FAILURE_RATE:60}
-    circuit-open-duration: ${ANY2API_MODEL_CIRCUIT_OPEN_DURATION:30s}
-    health-window: ${ANY2API_MODEL_HEALTH_WINDOW:24h}
-    probe-freshness: ${ANY2API_MODEL_PROBE_FRESHNESS:30m}
-    scheduled-probe-batch-size: ${ANY2API_MODEL_PROBE_BATCH_SIZE:5}
-    ready-success-rate-threshold: ${ANY2API_MODEL_READY_SUCCESS_RATE:90}
-    ready-p95-threshold: ${ANY2API_MODEL_READY_P95:60s}
   lifecycle:
     action-concurrency: ${ANY2API_LIFECYCLE_ACTION_CONCURRENCY:2}
     conditional-registration:
@@ -154,7 +145,7 @@ any2api:
       platform: ${ANY2API_PROVIDER_DEEPSEEK_PLATFORM:web}
       locale: ${ANY2API_PROVIDER_DEEPSEEK_LOCALE:en_US}
       timezone-offset-seconds: ${ANY2API_PROVIDER_DEEPSEEK_TIMEZONE_OFFSET_SECONDS:32400}
-      model-probe-timeout: ${ANY2API_PROVIDER_DEEPSEEK_MODEL_PROBE_TIMEOUT:240s}
+      account-verification-timeout: ${ANY2API_PROVIDER_DEEPSEEK_ACCOUNT_VERIFICATION_TIMEOUT:120s}
     grok-web:
       base-url: ${ANY2API_PROVIDER_GROK_WEB_BASE_URL:https://grok.com}
       accounts-base-url: ${ANY2API_PROVIDER_GROK_WEB_ACCOUNTS_BASE_URL:https://accounts.x.ai}
@@ -169,18 +160,18 @@ any2api:
       source: ${ANY2API_PROVIDER_QWEN_SOURCE:web}
       request-version: ${ANY2API_PROVIDER_QWEN_REQUEST_VERSION:2.1}
       max-upload-bytes: ${ANY2API_PROVIDER_QWEN_MAX_UPLOAD_BYTES:20971520}
-      model-probe-timeout: ${ANY2API_PROVIDER_QWEN_MODEL_PROBE_TIMEOUT:240s}
+      account-verification-timeout: ${ANY2API_PROVIDER_QWEN_ACCOUNT_VERIFICATION_TIMEOUT:120s}
     glm:
       base-url: ${ANY2API_PROVIDER_GLM_BASE_URL:https://chat.z.ai}
-      model-probe-timeout: ${ANY2API_PROVIDER_GLM_MODEL_PROBE_TIMEOUT:240s}
+      account-verification-timeout: ${ANY2API_PROVIDER_GLM_ACCOUNT_VERIFICATION_TIMEOUT:120s}
     arena:
       base-url: ${ANY2API_PROVIDER_ARENA_BASE_URL:https://arena.ai}
-      model-probe-timeout: ${ANY2API_PROVIDER_ARENA_MODEL_PROBE_TIMEOUT:240s}
+      account-verification-timeout: ${ANY2API_PROVIDER_ARENA_ACCOUNT_VERIFICATION_TIMEOUT:120s}
     longcat:
       base-url: ${ANY2API_PROVIDER_LONGCAT_BASE_URL:https://longcat.chat}
       app-key: ${ANY2API_PROVIDER_LONGCAT_APP_KEY:fe_com.sankuai.friday.fe.longcat}
       requested-with: ${ANY2API_PROVIDER_LONGCAT_REQUESTED_WITH:XMLHttpRequest}
-      model-probe-timeout: ${ANY2API_PROVIDER_LONGCAT_MODEL_PROBE_TIMEOUT:240s}
+      account-verification-timeout: ${ANY2API_PROVIDER_LONGCAT_ACCOUNT_VERIFICATION_TIMEOUT:120s}
     minmax:
       base-url: ${ANY2API_PROVIDER_MINMAX_BASE_URL:https://agent.minimax.io}
       stream-base-url: ${ANY2API_PROVIDER_MINMAX_STREAM_BASE_URL:https://agent-stream.minimax.io}

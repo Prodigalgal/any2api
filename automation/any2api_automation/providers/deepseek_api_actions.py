@@ -76,6 +76,7 @@ class DeepseekApiActionHandler:
                 proxy_url=proxy_url,
                 timeout_seconds=300,
                 impersonate=str(current.get("browser_profile") or "chrome146"),
+                include_unprefixed_lines=True,
             ):
                 event_type = str(event.get("type") or "error")
                 yield _frame(

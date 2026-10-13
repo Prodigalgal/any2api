@@ -17,6 +17,21 @@ class CanonicalEventStreamTest {
         Map.of(), Map.of(), List.of(), Map.of(), JsonNodeFactory.instance.objectNode());
 
     @Test
+    void rejectsReusingAnIdAfterThePreviousCallHasCompleted() {
+        var events = Flux.<CanonicalEvent>just(
+            new CanonicalEvent.ResponseStarted(1, "request-id", 0, "fixture"),
+            new CanonicalEvent.ToolCallStarted(1, "request-id", 1, "same", "inspect"),
+            new CanonicalEvent.ToolCallCompleted(1, "request-id", 2, "same", "{}"),
+            new CanonicalEvent.ToolCallStarted(1, "request-id", 3, "same", "inspect"),
+            new CanonicalEvent.ToolCallCompleted(1, "request-id", 4, "same", "{\"x\":1}"),
+            new CanonicalEvent.Completed(1, "request-id", 5, "tool_calls"));
+        StepVerifier.create(CanonicalEventStream.enforce(request, events)).expectNextCount(3)
+            .expectErrorSatisfies(error -> assertThat(error)
+                .isInstanceOf(CanonicalProtocolException.class).hasMessageContaining("duplicate_tool_call_started"))
+            .verify();
+    }
+
+    @Test
     void acceptsACompleteOrderedEventStream() {
         Flux<CanonicalEvent> events = Flux.just(
             new CanonicalEvent.ResponseStarted(1, "request-id", 0, "resp-1"),

@@ -105,8 +105,6 @@ public class ModelsController {
         result.put("name", model.displayName());
         result.put("provider_name", model.providerName());
         result.put("cataloged", true);
-        result.put("available", model.available()
-            && runtimeGuard.callable(model.providerId(), model.id()));
         var capabilities = model.capabilities();
         if (!detailed && capabilities.isObject()) {
             // Provider mappings are fetched once for the selected model, not repeated across large catalogs.
@@ -136,27 +134,9 @@ public class ModelsController {
     private Map<String, Object> runtime(ModelCatalogCache.Entry model) {
         var guard = runtimeGuard.snapshot(model.providerId(), model.id());
         var runtime = new LinkedHashMap<String, Object>();
-        runtime.put("status", "OPEN".equals(guard.circuitState())
-            || "FORCED_OPEN".equals(guard.circuitState())
-            ? "UNAVAILABLE" : model.runtimeStatus());
-        runtime.put("eligible_account_count", model.eligibleAccountCount());
-        runtime.put("available_account_count", model.availableAccountCount());
-        runtime.put("quota_limited_account_count", model.quotaLimitedAccountCount());
-        runtime.put("rolling_request_count", model.rollingRequestCount());
-        runtime.put("rolling_attempt_count", model.rollingAttemptCount());
-        runtime.put("rolling_success_rate", model.rollingSuccessRate());
-        runtime.put("p50_ms", model.p50Ms());
-        runtime.put("p95_ms", model.p95Ms());
-        runtime.put("last_attempt_at", model.lastAttemptAt());
-        runtime.put("last_success_at", model.lastSuccessAt());
-        runtime.put("probe_status", model.probeStatus());
-        runtime.put("probe_error", model.probeError());
-        runtime.put("probed_at", model.probedAt());
         runtime.put("concurrent", guard.concurrent());
         runtime.put("queue_depth", guard.queueDepth());
-        runtime.put("circuit_state", guard.circuitState());
         runtime.put("bulkhead_rejections", guard.bulkheadRejections());
-        runtime.put("circuit_rejections", guard.circuitRejections());
         return runtime;
     }
 

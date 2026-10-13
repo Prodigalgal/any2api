@@ -15,7 +15,7 @@ public class DeepseekProperties {
     private String clientVersion = "2.3.0";
     private String locale = "en_US";
     private int timezoneOffsetSeconds = 32400;
-    private Duration modelProbeTimeout = Duration.ofSeconds(240);
+    private Duration accountVerificationTimeout = Duration.ofSeconds(120);
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String value) { baseUrl = trimUrl(value); }
@@ -37,12 +37,12 @@ public class DeepseekProperties {
     public void setLocale(String value) { locale = value == null ? "" : value.trim(); }
     public int getTimezoneOffsetSeconds() { return timezoneOffsetSeconds; }
     public void setTimezoneOffsetSeconds(int value) { timezoneOffsetSeconds = value; }
-    public Duration getModelProbeTimeout() { return modelProbeTimeout; }
-    public void setModelProbeTimeout(Duration value) {
+    public Duration getAccountVerificationTimeout() { return accountVerificationTimeout; }
+    public void setAccountVerificationTimeout(Duration value) {
         if (value == null || value.isZero() || value.isNegative()) {
-            throw new IllegalArgumentException("modelProbeTimeout must be positive");
+            throw new IllegalArgumentException("accountVerificationTimeout must be positive");
         }
-        modelProbeTimeout = value;
+        accountVerificationTimeout = value;
     }
 
     synchronized boolean applyOfficialVersion(String value) {

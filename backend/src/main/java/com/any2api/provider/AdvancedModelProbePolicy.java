@@ -21,6 +21,8 @@ public final class AdvancedModelProbePolicy {
         if (modelId == null || modelId.isBlank()) {
             return false;
         }
-        return ADVANCED_MODEL_PATTERN.matcher(modelId.trim()).matches();
+        var normalized = modelId.trim().substring(modelId.trim().lastIndexOf('/') + 1)
+            .replaceFirst("(?i)^minimax-", "");
+        return ADVANCED_MODEL_PATTERN.matcher(normalized).matches();
     }
 }

@@ -237,6 +237,6 @@ class ArenaProtocolTest {
             mock(OfficialBrowserTransportClient.class),
             mock(OfficialBrowserSemanticCommandFactory.class), new ToolEmulationEngine(new ObjectMapper()));
 
-        assertThat(provider.scheduledModelProbeEnabled()).isTrue();
+        assertThat(provider.initialVerificationModel()).isPresent();
     }
 }

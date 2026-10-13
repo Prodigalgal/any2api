@@ -55,7 +55,7 @@ class ResponsesStateIntegrationTest {
         assertThat(database.store(mapper).find("resp_database",ResponsesService.owner(grant)).orElseThrow().response()).isEqualTo(body);
         assertThat(store.find("resp_database",ResponsesService.owner(grant(InteropDatabase.OTHER_KEY)))).isEmpty();
         assertThat(database.jdbc.sql("SELECT tag FROM databasechangelog WHERE tag IS NOT NULL ORDER BY orderexecuted DESC LIMIT 1")
-            .query(String.class).single()).isEqualTo("0.24.0");
+            .query(String.class).single()).isEqualTo("1.0.0");
     }
 
     @Test void completesStoredToolLoopWithPaginationDeletionAndExpiry() {
@@ -270,7 +270,10 @@ class ResponsesStateIntegrationTest {
 
     @Test void migrationRollbackPreservesExistingProviderSchema() throws Exception {
         var providerCount=database.jdbc.sql("SELECT COUNT(*) FROM providers").query(Long.class).single();
-        try(var migration=database.migration()) { migration.rollback(3,new liquibase.Contexts(),new liquibase.LabelExpression()); }
+        var changes = database.jdbc.sql("SELECT COUNT(*) FROM databasechangelog WHERE orderexecuted >= "
+            + "(SELECT orderexecuted FROM databasechangelog WHERE id='032-001-owned-responses')")
+            .query(Integer.class).single();
+        try(var migration=database.migration()) { migration.rollback(changes,new liquibase.Contexts(),new liquibase.LabelExpression()); }
         assertThat(database.jdbc.sql("SELECT to_regclass('gateway_responses')::text").query(String.class).optional()).isEmpty();
         assertThat(database.jdbc.sql("SELECT COUNT(*) FROM providers").query(Long.class).single()).isEqualTo(providerCount);
         try(var migration=database.migration()) { migration.update(new liquibase.Contexts(),new liquibase.LabelExpression()); }

@@ -3,7 +3,6 @@ package com.any2api.protocol;
 import com.any2api.account.AccountUnavailableException;
 import com.any2api.coordination.CoordinationUnavailableException;
 import com.any2api.provider.ModelRuntimeGuard;
-import com.any2api.provider.ModelAvailabilityGuard;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -74,13 +73,8 @@ public class OpenAiResponseWriter {
         }
         if (error instanceof ModelRuntimeGuard.ModelRuntimeRejectedException rejected) {
             return new CanonicalEvent.Failed(
-                1, request.requestId(), 1, "model_unavailable", rejected.reason(),
+                1, request.requestId(), 1, "rate_limited", rejected.reason(),
                 Map.of("exception", error.getClass().getSimpleName(), "retryable", true));
-        }
-        if (error instanceof ModelAvailabilityGuard.ModelUnavailableException) {
-            return new CanonicalEvent.Failed(
-                1, request.requestId(), 1, "model_unavailable", error.getMessage(),
-                Map.of("exception", error.getClass().getSimpleName(), "retryable", false));
         }
         return new CanonicalEvent.Failed(
             1, request.requestId(), 1, "gateway_execution_error", "gateway execution failed",
@@ -163,6 +157,12 @@ public class OpenAiResponseWriter {
             return exchange.getResponse().writeWith(Mono.just(
                 exchange.getResponse().bufferFactory().wrap(bytes)));
         });
+    }
+
+    private static String chatFinishReason(String reason, boolean hasTools) {
+        if ("max_output_tokens".equals(reason)) return "length";
+        if (hasTools && !"length".equals(reason) && !"content_filter".equals(reason)) return "tool_calls";
+        return reason;
     }
 
     private interface EventRenderer {
@@ -255,9 +255,8 @@ public class OpenAiResponseWriter {
             }
             if (event instanceof CanonicalEvent.Completed completed) {
                 var frames = new ArrayList<String>();
-                frames.add(data(chunk(mapper.createObjectNode(), toolIndexes.isEmpty()
-                    || Set.of("length", "content_filter").contains(completed.finishReason())
-                    ? completed.finishReason() : "tool_calls")));
+                frames.add(data(chunk(mapper.createObjectNode(),
+                    chatFinishReason(completed.finishReason(), !toolIndexes.isEmpty()))));
                 if (includeUsage) {
                     var payload = chunk(mapper.createObjectNode(), null);
                     payload.set("choices", mapper.createArrayNode());
@@ -597,7 +596,7 @@ public class OpenAiResponseWriter {
             }
             var choice = mapper.createObjectNode()
                 .put("index", 0)
-                .put("finish_reason", tools.isEmpty() || incomplete() ? finishReason : "tool_calls")
+                .put("finish_reason", chatFinishReason(finishReason, !tools.isEmpty()))
                 .set("message", message);
             var payload = mapper.createObjectNode()
                 .put("id", responseId.replace("resp_", "chatcmpl_"))

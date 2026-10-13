@@ -27,6 +27,7 @@ public final class CanonicalEventStream {
     private static final class State {
         private final String requestId;
         private final Set<String> openTools = new HashSet<>();
+        private final Set<String> toolIds = new HashSet<>();
         private long sequence = Long.MIN_VALUE;
         private boolean started;
         private boolean terminal;
@@ -62,7 +63,8 @@ public final class CanonicalEventStream {
                     || tool.name() == null || tool.name().isBlank()) {
                     fail("invalid_tool_call_started");
                 }
-                if (!openTools.add(tool.toolCallId())) fail("duplicate_tool_call_started");
+                if (!toolIds.add(tool.toolCallId())) fail("duplicate_tool_call_started");
+                openTools.add(tool.toolCallId());
             } else if (event instanceof CanonicalEvent.ToolArgumentsDelta arguments) {
                 if (!openTools.contains(arguments.toolCallId())) {
                     fail("tool_arguments_before_start");

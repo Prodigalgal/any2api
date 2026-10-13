@@ -9,7 +9,6 @@ import com.any2api.protocol.CanonicalRequestParser;
 import com.any2api.protocol.OpenAiRequestException;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderRegistry;
-import com.any2api.provider.ModelRuntimeGuard;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.RandomModelRole;
 import com.any2api.provider.SupportLevel;
@@ -34,8 +33,6 @@ public class RandomInferenceRouter {
     private final AccountSelectionService accounts;
     private final CanonicalRequestParser parser;
     private final ExecutorService databaseExecutor;
-    private final ModelRuntimeGuard runtimeGuard;
-    private final ModelHealthTracker healthTracker;
     private final Object shuffleLock = new Object();
     private final Map<String, ArrayDeque<String>> providerBags = new HashMap<>();
 
@@ -44,17 +41,13 @@ public class RandomInferenceRouter {
         ProviderRegistry providers,
         AccountSelectionService accounts,
         CanonicalRequestParser parser,
-        ExecutorService databaseExecutor,
-        ModelRuntimeGuard runtimeGuard,
-        ModelHealthTracker healthTracker
+        ExecutorService databaseExecutor
     ) {
         this.catalog = catalog;
         this.providers = providers;
         this.accounts = accounts;
         this.parser = parser;
         this.databaseExecutor = databaseExecutor;
-        this.runtimeGuard = runtimeGuard;
-        this.healthTracker = healthTracker == null ? new ModelHealthTracker() : healthTracker;
     }
 
     public Mono<RandomSelection> select(
@@ -122,7 +115,6 @@ public class RandomInferenceRouter {
         var byProvider = new LinkedHashMap<String, List<CanonicalRequest>>();
         for (var route : catalog.installedModels(role)) {
             if (!grant.allowsModel(route.providerId(), route.modelId())) continue;
-            if (!runtimeGuard.callable(route.providerId(), route.modelId())) continue;
             var provider = providers.require(route.providerId());
             if (provider.manifest().capabilities()
                 .getOrDefault(capability, SupportLevel.UNSUPPORTED)
@@ -134,7 +126,9 @@ public class RandomInferenceRouter {
             var canonical = parser.parseCandidate(
                 protocol, new ResolvedRoute(route.providerId(), route.modelId()), raw, requestId);
             try {
-                var validationRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(canonical);
+                var compatible = com.any2api.provider.WebParameterAdaptation.prepare(
+                    canonical, provider.protocolContract(), null);
+                var validationRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(compatible);
                 ProviderRequestValidation.requireSupportedRequest(
                     validationRequest, provider.manifest(), provider.protocolContract());
                 provider.validate(validationRequest);
@@ -150,18 +144,9 @@ public class RandomInferenceRouter {
         }
         var candidates = new ArrayList<CanonicalRequest>();
         var providerIds = byProvider.keySet().stream().sorted().toList();
-        for (var providerId : providerOrder(role, providerIds, byProvider)) {
+        for (var providerId : providerOrder(role, providerIds)) {
             var models = new ArrayList<>(byProvider.get(providerId));
             Collections.shuffle(models);
-            // Health and latency aware prioritization: sort models by score descending
-            models.sort((m1, m2) -> {
-                double s1 = healthTracker.healthScore(m1.providerId(), m1.model());
-                double s2 = healthTracker.healthScore(m2.providerId(), m2.model());
-                if (Math.abs(s1 - s2) > 0.15) {
-                    return Double.compare(s2, s1);
-                }
-                return 0;
-            });
             candidates.addAll(models);
         }
         return candidates;
@@ -169,8 +154,7 @@ public class RandomInferenceRouter {
 
     private List<String> providerOrder(
         RandomModelRole role,
-        List<String> providerIds,
-        Map<String, List<CanonicalRequest>> byProvider
+        List<String> providerIds
     ) {
         var key = role.catalogValue() + ":" + String.join(",", providerIds);
         String preferred;
@@ -179,12 +163,6 @@ public class RandomInferenceRouter {
             if (bag.isEmpty()) {
                 var shuffled = new ArrayList<>(providerIds);
                 Collections.shuffle(shuffled);
-                // Deprioritize providers where all models are cooling
-                shuffled.sort((p1, p2) -> {
-                    boolean c1 = isProviderAllCooling(p1, byProvider.get(p1));
-                    boolean c2 = isProviderAllCooling(p2, byProvider.get(p2));
-                    return Boolean.compare(c1, c2);
-                });
                 bag.addAll(shuffled);
             }
             preferred = bag.removeFirst();
@@ -192,20 +170,10 @@ public class RandomInferenceRouter {
         var remaining = new ArrayList<>(providerIds);
         remaining.remove(preferred);
         Collections.shuffle(remaining);
-        remaining.sort((p1, p2) -> {
-            boolean c1 = isProviderAllCooling(p1, byProvider.get(p1));
-            boolean c2 = isProviderAllCooling(p2, byProvider.get(p2));
-            return Boolean.compare(c1, c2);
-        });
         var ordered = new ArrayList<String>();
         ordered.add(preferred);
         ordered.addAll(remaining);
         return ordered;
-    }
-
-    private boolean isProviderAllCooling(String providerId, List<CanonicalRequest> requests) {
-        if (requests == null || requests.isEmpty()) return false;
-        return requests.stream().allMatch(r -> healthTracker.isCooling(r.providerId(), r.model()));
     }
 
     public static void requireRandomModel(ObjectNode request) {

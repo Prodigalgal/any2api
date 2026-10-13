@@ -2,11 +2,15 @@ package com.any2api.provider.deepseek;
 
 import com.any2api.protocol.CanonicalEvent;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 final class DeepseekEventDecoder {
+    private static final int CREDENTIAL_REJECTED_CODE = 40003;
+    private static final int ACCOUNT_MUTED_BIZ_CODE = 5;
     private final String requestId;
     private final ObjectMapper mapper;
     private long sequence;
@@ -22,6 +26,7 @@ final class DeepseekEventDecoder {
     }
 
     List<CanonicalEvent> decode(String data) {
+        if (completed) return List.of();
         var output = start();
         if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) return output;
         final JsonNode event;
@@ -30,10 +35,10 @@ final class DeepseekEventDecoder {
         } catch (RuntimeException error) {
             throw new DeepseekUpstreamException(502, "DeepSeek emitted invalid SSE JSON");
         }
-        var bizCode = event.path("data").path("biz_code").asInt(0);
-        if (bizCode != 0) {
-            throw new DeepseekUpstreamException(400,
-                "DeepSeek stream rejected the request (biz_code=" + bizCode + ")");
+        var failure = upstreamFailure(event);
+        if (failure != null) {
+            output.add(failure);
+            return output;
         }
         var response = event.path("v").path("response");
         if (response.isObject()) {
@@ -67,6 +72,36 @@ final class DeepseekEventDecoder {
         }
         completed = true;
         return output;
+    }
+
+    private CanonicalEvent.Failed upstreamFailure(JsonNode event) {
+        var code = event.path("code").asInt(0);
+        if (code != 0) {
+            return reject(code == CREDENTIAL_REJECTED_CODE ? "credential_rejected" : "provider_upstream_error",
+                "DeepSeek rejected the request (code=" + code + ")",
+                Map.of("upstream_code", code, "retryable", false));
+        }
+        var business = event.path("data");
+        var bizCode = business.path("biz_code").asInt(0);
+        if (bizCode == 0) return null;
+        var detail = new HashMap<String, Object>();
+        detail.put("upstream_biz_code", bizCode);
+        detail.put("retryable", false);
+        var muted = bizCode == ACCOUNT_MUTED_BIZ_CODE
+            && business.path("biz_data").path("is_muted").asInt(0) == 1;
+        if (muted) {
+            var mutedUntil = business.path("biz_data").path("mute_until").asLong(0);
+            if (mutedUntil > 0) detail.put("upstream_muted_until_epoch_seconds", mutedUntil);
+        }
+        return reject(muted ? "account_blocked" : "provider_upstream_error",
+            muted ? "DeepSeek account is temporarily muted by upstream"
+                : "DeepSeek rejected the request (biz_code=" + bizCode + ")",
+            Map.copyOf(detail));
+    }
+
+    private CanonicalEvent.Failed reject(String errorType, String message, Map<String, Object> detail) {
+        completed = true;
+        return new CanonicalEvent.Failed(1, requestId, next(), errorType, message, detail);
     }
 
     private void emitFragments(JsonNode fragments, List<CanonicalEvent> output) {

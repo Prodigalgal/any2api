@@ -18,6 +18,39 @@ class OpenAiResponseWriterTest {
     private final OpenAiResponseWriter writer = new OpenAiResponseWriter(mapper);
 
     @ParameterizedTest
+    @EnumSource(CanonicalRequest.Protocol.class)
+    void keepsAnEmulatedToolResponseIncompleteWhenTheUpstreamTruncates(CanonicalRequest.Protocol protocol) {
+        for (var stream : List.of(true, false)) {
+            for (var reason : List.of("length", "max_output_tokens", "content_filter")) {
+                var request = request(protocol, stream);
+                var engine = new com.any2api.provider.ToolEmulationEngine(mapper);
+                var tool = mapper.createObjectNode().put("type", "function").put("name", "inspect");
+                var withTools = new CanonicalRequest(request.requestId(), request.protocol(), request.providerId(),
+                    request.model(), stream, request.messages(), request.generation(), request.reasoning(), List.of(tool),
+                    request.providerOptions(), mapper.createObjectNode().put("tool_choice", "required"));
+                var events = engine.transformStream(request.requestId(), engine.plan(withTools), Flux.just(
+                    new CanonicalEvent.ResponseStarted(1, request.requestId(), 0, "fixture"),
+                    new CanonicalEvent.OutputTextDelta(1, request.requestId(), 1,
+                        "{\"tool_calls\":[{\"name\":\"inspect\",\"arguments\":{}}]}"),
+                    new CanonicalEvent.Completed(1, request.requestId(), 2, reason)));
+                var exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/responses").build());
+                writer.write(withTools, events, exchange).block();
+                var body = exchange.getResponse().getBodyAsString().block();
+                if (protocol == CanonicalRequest.Protocol.CHAT_COMPLETIONS) {
+                    assertThat(body).contains("\"finish_reason\":\""
+                        + ("max_output_tokens".equals(reason) ? "length" : reason) + "\"");
+                } else if (stream) {
+                    assertThat(body).contains("event: response.incomplete\n");
+                } else {
+                    assertThat(mapper.readTree(body).path("status").asText()).isEqualTo("incomplete");
+                    assertThat(mapper.readTree(body).path("incomplete_details").path("reason").asText())
+                        .isEqualTo("content_filter".equals(reason) ? "content_filter" : "max_output_tokens");
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
     @EnumSource(value = CanonicalRequest.Protocol.class, names = {"CHAT_COMPLETIONS", "RESPONSES"})
     void preservesUpstreamTimeoutStatusAndJsonBeforeSseStarts(CanonicalRequest.Protocol protocol) {
         for (boolean stream : List.of(false, true)) {

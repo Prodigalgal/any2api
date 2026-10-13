@@ -2,16 +2,12 @@ package com.any2api.provider;
 
 import com.any2api.cache.LayeredJsonCache;
 import com.any2api.config.Any2ApiProperties;
-import com.any2api.persistence.PostgresResultValues;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -25,158 +21,13 @@ import tools.jackson.databind.ObjectMapper;
 public class ModelCatalogCache {
     private final ProviderRegistry providers;
     private volatile DecodedCatalog decodedCatalog;
-    private static final String QUOTA_COOLDOWN_REASON_PATTERN = "(rate|quota|limit|credit|balance)";
     private static final String MODEL_QUERY = """
-        WITH eligible_accounts AS MATERIALIZED (
-            SELECT id, provider_id,
-                   CASE WHEN provider_id IN (:restrictedProviderIds) THEN metadata END AS account_metadata
-            FROM accounts
-            WHERE enabled = TRUE AND status IN ('ACTIVE', 'DEGRADED')
-              AND (cooldown_until IS NULL OR cooldown_until <= CURRENT_TIMESTAMP)
-              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-        ), provider_accounts AS (
-            SELECT provider_id, COUNT(*) AS eligible_accounts
-            FROM eligible_accounts GROUP BY provider_id
-        ), model_cooldowns AS (
-            SELECT account.provider_id, cooldown.model_id,
-                   COUNT(DISTINCT account.id) AS cooled_accounts,
-                   COUNT(DISTINCT account.id) FILTER (
-                       WHERE cooldown.reason ~* :quotaReasonPattern
-                   ) AS quota_limited_accounts
-            FROM eligible_accounts account
-            JOIN account_model_cooldowns cooldown
-              ON cooldown.account_id = account.id AND cooldown.provider_id = account.provider_id
-            WHERE cooldown.cooldown_until > CURRENT_TIMESTAMP
-            GROUP BY account.provider_id, cooldown.model_id
-        ), restricted_account_snapshot AS (
-            SELECT jsonb_build_object(
-                'accounts', COALESCE((
-                    SELECT jsonb_agg(jsonb_build_object(
-                        'id', id, 'provider_id', provider_id, 'metadata', account_metadata))
-                    FROM eligible_accounts WHERE provider_id IN (:restrictedProviderIds)
-                ), '[]'::jsonb),
-                'cooldowns', COALESCE((
-                    SELECT jsonb_agg(jsonb_build_object(
-                        'account_id', cooldown.account_id, 'provider_id', cooldown.provider_id,
-                        'model_id', cooldown.model_id,
-                        'quota_limited', cooldown.reason ~* :quotaReasonPattern))
-                    FROM eligible_accounts account
-                    JOIN account_model_cooldowns cooldown
-                      ON cooldown.account_id = account.id AND cooldown.provider_id = account.provider_id
-                    WHERE account.provider_id IN (:restrictedProviderIds)
-                      AND cooldown.cooldown_until > CURRENT_TIMESTAMP
-                ), '[]'::jsonb)
-            ) AS account_snapshot
-        )
-        SELECT m.upstream_id, m.display_name, m.provider_id,
-               p.display_name AS provider_name,
+        SELECT m.upstream_id, m.display_name, m.provider_id, p.display_name AS provider_name,
                m.capabilities::text AS discovered_capabilities,
-               m.max_context_tokens_override,
-               m.max_input_tokens_override,
-               m.max_output_tokens_override,
-               m.catalog_source, m.metadata::text, m.random_roles, m.fetched_at,
-               account_runtime.eligible_accounts,
-               account_runtime.available_accounts,
-               account_runtime.quota_limited_accounts,
-               usage_runtime.request_count,
-               usage_runtime.attempt_count,
-               usage_runtime.success_count,
-               usage_runtime.success_rate,
-               usage_runtime.p50_ms,
-               usage_runtime.p95_ms,
-               usage_runtime.last_attempt_at,
-               usage_runtime.last_success_at,
-               probe.status AS probe_status,
-               probe.error_class AS probe_error,
-               probe.probed_at,
-               CASE WHEN ROW_NUMBER() OVER (ORDER BY m.provider_id, m.upstream_id) = 1
-                    THEN (SELECT account_snapshot::text FROM restricted_account_snapshot)
-               END AS account_snapshot,
-               CASE
-                   WHEN account_runtime.eligible_accounts = 0
-                     OR account_runtime.available_accounts = 0 THEN 'UNAVAILABLE'
-                   WHEN probe.status = 'FAILED' AND probe.probed_at >= :probeFreshAfter
-                     AND (usage_runtime.last_success_at IS NULL
-                       OR probe.probed_at > usage_runtime.last_success_at)
-                     AND NOT (
-                       m.upstream_id ~* '(max|pro|sonnet|opus|o1|o3|thinking|reasoner|r1|ultra|flagship|-image|-video|-i2v|-t2v|-t2i|-edit|flux-|wan-|wan2|veo-|kling-|sora)'
-                     ) THEN 'UNAVAILABLE'
-                   WHEN usage_runtime.request_count >= 3
-                     AND usage_runtime.success_rate >= :readySuccessRate
-                     AND usage_runtime.p95_ms <= :readyP95Ms THEN 'READY'
-                   WHEN (
-                       (usage_runtime.request_count < 3 AND probe.status = 'READY' AND probe.probed_at >= :probeFreshAfter)
-                       OR (
-                           m.upstream_id ~* '(max|pro|sonnet|opus|o1|o3|thinking|reasoner|r1|ultra|flagship|-image|-video|-i2v|-t2v|-t2i|-edit|flux-|wan-|wan2|veo-|kling-|sora)'
-                           AND EXISTS (
-                               SELECT 1 FROM model_probe_results provider_probe
-                               WHERE provider_probe.provider_id = m.provider_id
-                                 AND provider_probe.status = 'READY'
-                                 AND provider_probe.probed_at >= :providerProbeFreshAfter
-                           )
-                       )
-                   ) THEN 'READY'
-                   WHEN usage_runtime.attempt_count >= 3
-                     AND usage_runtime.success_count = 0 THEN 'UNAVAILABLE'
-                   ELSE 'DEGRADED'
-               END AS runtime_status,
-               account_runtime.available_accounts > 0
-                 AND NOT (
-                   probe.status = 'FAILED' AND probe.probed_at >= :probeFreshAfter
-                     AND (usage_runtime.last_success_at IS NULL
-                       OR probe.probed_at > usage_runtime.last_success_at)
-                     AND NOT (
-                       m.upstream_id ~* '(max|pro|sonnet|opus|o1|o3|thinking|reasoner|r1|ultra|flagship|-image|-video|-i2v|-t2v|-t2i|-edit|flux-|wan-|wan2|veo-|kling-|sora)'
-                     )
-                 )
-                 AND (
-                   usage_runtime.success_count > 0
-                   OR (probe.status = 'READY' AND probe.probed_at >= :probeFreshAfter)
-                   OR EXISTS (
-                       SELECT 1 FROM model_probe_results provider_probe
-                       WHERE provider_probe.provider_id = m.provider_id
-                         AND provider_probe.status = 'READY'
-                         AND provider_probe.probed_at >= :providerProbeFreshAfter
-                   )
-                 ) AS available
+               m.max_context_tokens_override, m.max_input_tokens_override, m.max_output_tokens_override,
+               m.catalog_source, m.metadata::text, m.random_roles, m.fetched_at
         FROM models m
         JOIN providers p ON p.id = m.provider_id
-        LEFT JOIN provider_accounts ON provider_accounts.provider_id = m.provider_id
-        LEFT JOIN model_cooldowns
-          ON model_cooldowns.provider_id = m.provider_id AND model_cooldowns.model_id = m.upstream_id
-        CROSS JOIN LATERAL (
-            SELECT COALESCE(provider_accounts.eligible_accounts, 0) AS eligible_accounts,
-                   COALESCE(provider_accounts.eligible_accounts, 0)
-                     - COALESCE(model_cooldowns.cooled_accounts, 0) AS available_accounts,
-                   COALESCE(model_cooldowns.quota_limited_accounts, 0) AS quota_limited_accounts
-        ) account_runtime
-        LEFT JOIN LATERAL (
-            SELECT COUNT(*) AS request_count,
-                   COALESCE(SUM(usage.attempt_count), 0) AS attempt_count,
-                   COUNT(*) FILTER (WHERE usage.success) AS success_count,
-                   COALESCE(AVG(CASE WHEN usage.success THEN 1.0 ELSE 0.0 END), 0.0)
-                       AS success_rate,
-                   COALESCE(ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP
-                       (ORDER BY usage.duration_ms)), 0)::BIGINT AS p50_ms,
-                   COALESCE(ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP
-                       (ORDER BY usage.duration_ms)), 0)::BIGINT AS p95_ms,
-                   MAX(usage.created_at) AS last_attempt_at,
-                   MAX(usage.created_at) FILTER (WHERE usage.success) AS last_success_at
-            FROM (
-                SELECT logical.request_id,
-                       (ARRAY_AGG(logical.success ORDER BY logical.attempt DESC))[1] AS success,
-                       COUNT(*) AS attempt_count,
-                       SUM(logical.duration_ms) AS duration_ms,
-                       MAX(logical.created_at) AS created_at
-                FROM usage_events logical
-                WHERE logical.provider_id = m.provider_id
-                  AND logical.model_id = m.upstream_id
-                  AND logical.created_at >= :windowStart
-                GROUP BY logical.request_id
-            ) usage
-        ) usage_runtime ON TRUE
-        LEFT JOIN model_probe_results probe
-          ON probe.provider_id = m.provider_id AND probe.model_id = m.upstream_id
         WHERE m.enabled = TRUE AND p.installed = TRUE AND p.enabled = TRUE
         ORDER BY m.provider_id, m.upstream_id
         """;
@@ -184,10 +35,6 @@ public class ModelCatalogCache {
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
     private final LayeredJsonCache cache;
-    private final java.time.Duration healthWindow;
-    private final java.time.Duration probeFreshness;
-    private final double readySuccessRate;
-    private final long readyP95Ms;
 
     public ModelCatalogCache(
         JdbcClient jdbc,
@@ -202,12 +49,8 @@ public class ModelCatalogCache {
         var policy = properties.getCache().getModelCatalog();
         // Isolate compressed snapshots from older processes during rolling releases.
         this.cache = new LayeredJsonCache(
-            redis, "any2api:cache:model-catalog:v8", policy.getLocalTtl(),
+            redis, "any2api:cache:model-catalog:v9", policy.getLocalTtl(),
             policy.getRedisTtl(), policy.getMaximumEntries(), properties.getCache().getRedisAccessTimeout());
-        this.healthWindow = properties.getModelRuntime().getHealthWindow();
-        this.probeFreshness = properties.getModelRuntime().getProbeFreshness();
-        this.readySuccessRate = properties.getModelRuntime().getReadySuccessRateThreshold() / 100.0;
-        this.readyP95Ms = properties.getModelRuntime().getReadyP95Threshold().toMillis();
     }
 
     public Mono<List<Entry>> list() {
@@ -244,82 +87,7 @@ public class ModelCatalogCache {
     }
 
     private List<Entry> load() {
-        var now = Instant.now();
-        var policies = accountPolicies();
-        return jdbc.sql(MODEL_QUERY)
-            .param("restrictedProviderIds", policies.isEmpty() ? List.of("") : policies.keySet())
-            .param("quotaReasonPattern", QUOTA_COOLDOWN_REASON_PATTERN)
-            .param("windowStart", PostgresResultValues.timestamp(now.minus(healthWindow)))
-            .param("probeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness)))
-            .param("providerProbeFreshAfter", PostgresResultValues.timestamp(now.minus(probeFreshness.multipliedBy(4))))
-            .param("readySuccessRate", readySuccessRate)
-            .param("readyP95Ms", readyP95Ms)
-            .query(new CatalogRowMapper(policies)).list();
-    }
-
-    private Map<String, ModelAccountPolicy> accountPolicies() {
-        var policies = new java.util.LinkedHashMap<String, ModelAccountPolicy>();
-        for (var provider : providers.plugins()) {
-            provider.modelAccountPolicy().ifPresent(policy -> policies.put(provider.manifest().id(), policy));
-        }
-        return policies;
-    }
-
-    private AccountAvailability accountAvailability(String serialized, Map<String, ModelAccountPolicy> policies) {
-        var snapshot = readJson(serialized);
-        var profiles = new java.util.LinkedHashMap<String, List<ProviderAccountProfile>>();
-        for (var account : snapshot.path("accounts")) {
-            var accountProfile = new ProviderAccountProfile(UUID.fromString(account.path("id").asString()),
-                mapper.convertValue(account.path("metadata"),
-                    new tools.jackson.core.type.TypeReference<Map<String, Object>>() { }));
-            profiles.computeIfAbsent(account.path("provider_id").asString(), ignored -> new java.util.ArrayList<>())
-                .add(accountProfile);
-        }
-        var cooldowns = new java.util.HashMap<CooldownKey, Boolean>();
-        for (var cooldown : snapshot.path("cooldowns")) {
-            cooldowns.put(new CooldownKey(UUID.fromString(cooldown.path("account_id").asString()),
-                cooldown.path("provider_id").asString(), cooldown.path("model_id").asString()),
-                cooldown.path("quota_limited").asBoolean(false));
-        }
-        return new AccountAvailability(policies, profiles, cooldowns);
-    }
-
-    private final class CatalogRowMapper implements RowMapper<Entry> {
-        private final Map<String, ModelAccountPolicy> policies;
-        private AccountAvailability accounts;
-
-        private CatalogRowMapper(Map<String, ModelAccountPolicy> policies) {
-            this.policies = policies;
-        }
-
-        @Override
-        public Entry mapRow(ResultSet result, int rowNumber) throws SQLException {
-            // Ship and decode the account snapshot once; never multiply it by the model count.
-            if (rowNumber == 0) accounts = accountAvailability(result.getString("account_snapshot"), policies);
-            return row(result, rowNumber, accounts);
-        }
-    }
-
-    private record CooldownKey(UUID accountId, String providerId, String modelId) {}
-    private record AccountRuntime(long eligible, long available, long quotaLimited) {}
-    private record AccountAvailability(
-        Map<String, ModelAccountPolicy> policies,
-        Map<String, List<ProviderAccountProfile>> profiles,
-        Map<CooldownKey, Boolean> cooldowns
-    ) {
-        Optional<AccountRuntime> runtime(String providerId, String modelId) {
-            var policy = policies.get(providerId);
-            if (policy == null) return Optional.empty();
-            long eligible = 0, available = 0, quotaLimited = 0;
-            for (var account : profiles.getOrDefault(providerId, List.of())) {
-                if (!policy.supports(modelId, account)) continue;
-                eligible++;
-                var cooldown = cooldowns.get(new CooldownKey(account.accountId(), providerId, modelId));
-                if (cooldown == null) available++;
-                else if (cooldown) quotaLimited++;
-            }
-            return Optional.of(new AccountRuntime(eligible, available, quotaLimited));
-        }
+        return jdbc.sql(MODEL_QUERY).query(this::row).list();
     }
 
     private synchronized Mono<List<Entry>> decode(String value) {
@@ -338,7 +106,7 @@ public class ModelCatalogCache {
 
     private record DecodedCatalog(String serialized, Mono<List<Entry>> entries) {}
 
-    private Entry row(ResultSet result, int rowNumber, AccountAvailability accounts) throws SQLException {
+    private Entry row(ResultSet result, int rowNumber) throws SQLException {
         var fetchedAt = result.getObject("fetched_at", java.time.OffsetDateTime.class);
         var discoveredCapabilities = readJson(result.getString("discovered_capabilities"));
         var maxContextTokensOverride = nullableLong(result, "max_context_tokens_override");
@@ -348,10 +116,6 @@ public class ModelCatalogCache {
         var upstreamId = result.getString("upstream_id");
         var displayName = result.getString("display_name");
         var metadata = readJson(result.getString("metadata"));
-        var accountRuntime = accounts.runtime(providerId, upstreamId).orElse(new AccountRuntime(
-            result.getLong("eligible_accounts"), result.getLong("available_accounts"),
-            result.getLong("quota_limited_accounts")));
-        var accountsAvailable = accountRuntime.eligible() > 0 && accountRuntime.available() > 0;
         var currentCapabilities = mapper.valueToTree(providers.requirePlugin(providerId)
             .modelContract(new DiscoveredModel(upstreamId, displayName, mapper.convertValue(metadata,
                 new tools.jackson.core.type.TypeReference<java.util.Map<String, Object>>() { })))
@@ -373,22 +137,7 @@ public class ModelCatalogCache {
             result.getString("catalog_source"),
             metadata,
             List.of((String[]) result.getArray("random_roles").getArray()),
-            fetchedAt == null ? Instant.now().getEpochSecond() : fetchedAt.toEpochSecond(),
-            accountsAvailable && result.getBoolean("available"),
-            accountsAvailable ? result.getString("runtime_status") : "UNAVAILABLE",
-            accountRuntime.eligible(),
-            accountRuntime.available(),
-            accountRuntime.quotaLimited(),
-            result.getLong("request_count"),
-            result.getLong("attempt_count"),
-            result.getDouble("success_rate"),
-            result.getLong("p50_ms"),
-            result.getLong("p95_ms"),
-            PostgresResultValues.instant(result, "last_attempt_at"),
-            PostgresResultValues.instant(result, "last_success_at"),
-            result.getString("probe_status"),
-            result.getString("probe_error"),
-            PostgresResultValues.instant(result, "probed_at"));
+            fetchedAt == null ? Instant.now().getEpochSecond() : fetchedAt.toEpochSecond());
     }
 
     private JsonNode readJson(String value) {
@@ -443,21 +192,6 @@ public class ModelCatalogCache {
         String catalogSource,
         JsonNode metadata,
         List<String> randomRoles,
-        long created,
-        boolean available,
-        String runtimeStatus,
-        long eligibleAccountCount,
-        long availableAccountCount,
-        long quotaLimitedAccountCount,
-        long rollingRequestCount,
-        long rollingAttemptCount,
-        double rollingSuccessRate,
-        long p50Ms,
-        long p95Ms,
-        Instant lastAttemptAt,
-        Instant lastSuccessAt,
-        String probeStatus,
-        String probeError,
-        Instant probedAt
+        long created
     ) {}
 }

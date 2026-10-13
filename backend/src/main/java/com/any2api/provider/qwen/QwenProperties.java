@@ -12,7 +12,7 @@ public class QwenProperties {
     private String source = "web";
     private String requestVersion = "2.1";
     private int maxUploadBytes = 20 * 1024 * 1024;
-    private Duration modelProbeTimeout = Duration.ofSeconds(240);
+    private Duration accountVerificationTimeout = Duration.ofSeconds(120);
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -29,13 +29,13 @@ public class QwenProperties {
         if (maxUploadBytes < 1) throw new IllegalArgumentException("maxUploadBytes must be positive");
         this.maxUploadBytes = maxUploadBytes;
     }
-    public Duration getModelProbeTimeout() { return modelProbeTimeout; }
-    public void setModelProbeTimeout(Duration modelProbeTimeout) {
-        if (modelProbeTimeout == null || modelProbeTimeout.isZero()
-            || modelProbeTimeout.isNegative()) {
-            throw new IllegalArgumentException("modelProbeTimeout must be positive");
+    public Duration getAccountVerificationTimeout() { return accountVerificationTimeout; }
+    public void setAccountVerificationTimeout(Duration accountVerificationTimeout) {
+        if (accountVerificationTimeout == null || accountVerificationTimeout.isZero()
+            || accountVerificationTimeout.isNegative()) {
+            throw new IllegalArgumentException("accountVerificationTimeout must be positive");
         }
-        this.modelProbeTimeout = modelProbeTimeout;
+        this.accountVerificationTimeout = accountVerificationTimeout;
     }
     private static String trim(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;

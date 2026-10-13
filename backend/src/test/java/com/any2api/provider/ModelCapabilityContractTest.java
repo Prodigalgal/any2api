@@ -9,14 +9,16 @@ import org.junit.jupiter.api.Test;
 
 class ModelCapabilityContractTest {
     @Test
-    void outputOnlyReasoningDoesNotAdvertiseUnsupportedEffortControls() {
+    void acceptsReasoningHintsWithoutInventingNativeEffortLevels() {
         var manifest = new ProviderManifest("alpha", "Alpha", "test", "1", List.of(),
             Map.of(ProviderCapability.REASONING, SupportLevel.NATIVE), true);
         var contract = ModelCapabilityContract.from(manifest, ProviderProtocolContract.strict(),
             new DiscoveredModel("alpha-model", "Alpha Model", Map.of()));
         assertThat(contract.reasoning()).isTrue();
         assertThat(contract.reasoningLevels()).isEmpty();
-        assertThat(contract.supportedParameters().get("responses")).doesNotContain("reasoning");
+        assertThat(contract.supportedParameters().get("responses")).contains("reasoning");
+        assertThat(contract.parameterAdaptation().get("reasoning"))
+            .isEqualTo(Map.of("mode", "best_effort_ignore", "target", "", "evidence", "adapter_mapping", "enforced", false));
     }
     @Test
     void combinesProviderProtocolAndOfficialModelMetadata() {
@@ -43,7 +45,7 @@ class ModelCapabilityContractTest {
         assertThat(value.maxContextTokens()).isEqualTo(131072);
         assertThat(value.maxOutputTokens()).isEqualTo(8192);
         assertThat(value.streaming()).isTrue();
-        assertThat(value.reasoningLevels()).contains("low", "medium", "high");
+        assertThat(value.reasoningLevels()).contains("low", "medium", "high", "xhigh", "max");
         assertThat(value.tools().types()).containsExactly("function");
         assertThat(value.multimodal().input()).containsExactly("text", "image");
         assertThat(value.supportedParameters().get("chat_completions"))

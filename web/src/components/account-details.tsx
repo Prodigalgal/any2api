@@ -107,7 +107,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
 
   const value = detail.data;
   const account = value.account;
-  const readiness = stringMetadata(account.metadata, "inference_probe_status") || "未探测";
+  const readiness = stringMetadata(account.metadata, "inference_probe_status") || "未验证";
 
   return (
     <PageContainer maxWidth={1480}>
@@ -138,7 +138,7 @@ export function AccountDetails({ accountId }: { accountId: string }) {
                 </IconButton>
               </span>
             </Tooltip>
-            <Tooltip title={probeSupported ? "执行账号测活" : "该厂商当前不可用"}>
+            <Tooltip title={probeSupported ? "首次验证 / 查看记录" : "该厂商当前不可用"}>
               <span>
                 <Button
                   variant="contained"
@@ -228,17 +228,17 @@ export function AccountDetails({ accountId }: { accountId: string }) {
         </DataSurface>
 
         <DataSurface>
-          <SectionHeader title="凭据与探针" />
+          <SectionHeader title="凭据与首次验证" />
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" } }}>
             <DetailField label="凭据状态" value={value.credential.configured ? "已配置" : "未配置"} />
             <DetailField label="凭据版本" value={value.credential.configured ? `v${value.credential.version}` : "-"} mono />
             <DetailField label="凭据类型" value={value.credential.type || "-"} mono />
             <DetailField label="凭据到期" value={formatTime(value.credential.expiresAt, "长期")} />
-            <DetailField label="探针模型" value={stringMetadata(account.metadata, "inference_probe_model") || "-"} mono />
-            <DetailField label="探针时间" value={formatTime(stringMetadata(account.metadata, "inference_probe_at"))} />
+            <DetailField label="验证模型" value={stringMetadata(account.metadata, "inference_probe_model") || "-"} mono />
+            <DetailField label="验证时间" value={formatTime(stringMetadata(account.metadata, "inference_probe_at"))} />
           </Box>
           <Box sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: "divider" }}>
-            <Typography color="text.secondary" sx={{ mb: 0.5, fontSize: 11.5 }}>最近探针错误</Typography>
+            <Typography color="text.secondary" sx={{ mb: 0.5, fontSize: 11.5 }}>首次验证错误</Typography>
             <Typography sx={{ minHeight: 20, color: stringMetadata(account.metadata, "inference_probe_error") ? "error.main" : "text.secondary", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
               {stringMetadata(account.metadata, "inference_probe_error") || "无"}
             </Typography>

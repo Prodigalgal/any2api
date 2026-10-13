@@ -199,7 +199,7 @@ public class ProviderRuntimeService {
         throws SQLException {
         var mode = transportModes.view(providers.requirePlugin(manifest.id()));
         var probeModel = probeModels.resolveProbeModel(
-            manifest.id(), providers.requirePlugin(manifest.id()).scheduledProbeModel()).orElse("");
+            manifest.id(), providers.requirePlugin(manifest.id()).initialVerificationModel()).orElse("");
         var proxyPoolId = row.getObject("proxy_pool_id", UUID.class);
         var proxyPoolName = row.getString("proxy_pool_name");
         return new ProviderRuntimeView(
@@ -214,7 +214,7 @@ public class ProviderRuntimeService {
     private ProviderRuntimeView runtimeViewWithoutRow(ProviderManifest manifest) {
         var mode = transportModes.view(providers.requirePlugin(manifest.id()));
         var probeModel = probeModels.resolveProbeModel(
-            manifest.id(), providers.requirePlugin(manifest.id()).scheduledProbeModel()).orElse("");
+            manifest.id(), providers.requirePlugin(manifest.id()).initialVerificationModel()).orElse("");
         return new ProviderRuntimeView(
             manifest.id(), manifest.displayName(), manifest.adapterVersion(),
             manifest.defaultModels(), manifest.capabilities(), false, false, 0, 0, 0,

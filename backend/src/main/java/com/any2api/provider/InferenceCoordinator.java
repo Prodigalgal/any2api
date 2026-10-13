@@ -31,7 +31,6 @@ public class InferenceCoordinator {
     private final InferenceTelemetryService telemetry;
     private final ModelRuntimeGuard runtime;
     private final UsageNormalizer usage;
-    private final ModelAvailabilityGuard availability;
     private final ModelCatalogCache catalog;
     private final ModelRequestLimitGuard requestLimits;
     private final ProviderTransportModeService transportModes;
@@ -45,7 +44,6 @@ public class InferenceCoordinator {
         InferenceTelemetryService telemetry,
         ModelRuntimeGuard runtime,
         UsageNormalizer usage,
-        ModelAvailabilityGuard availability,
         ModelCatalogCache catalog,
         ModelRequestLimitGuard requestLimits,
         ProviderTransportModeService transportModes,
@@ -58,7 +56,6 @@ public class InferenceCoordinator {
         this.telemetry = telemetry;
         this.runtime = runtime;
         this.usage = usage;
-        this.availability = availability;
         this.catalog = catalog;
         this.requestLimits = requestLimits;
         this.transportModes = transportModes;
@@ -82,10 +79,6 @@ public class InferenceCoordinator {
         return execute(request, apiKeyId, requestedTransportMode, "INFERENCE");
     }
 
-    public Flux<CanonicalEvent> executeProbe(CanonicalRequest request) {
-        return execute(request, null, null, "PROBE");
-    }
-
     private Flux<CanonicalEvent> execute(
         CanonicalRequest request,
         UUID apiKeyId,
@@ -98,7 +91,8 @@ public class InferenceCoordinator {
             : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
-            var safeRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(contextManager.guard(request, modelCapabilities));
+            var compatible = WebParameterAdaptation.prepare(request, provider.protocolContract(), modelCapabilities);
+            var safeRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(contextManager.guard(compatible, modelCapabilities));
             validateRequest(safeRequest, provider, modelCapabilities);
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
                 safeRequest, entry.capabilities()));
@@ -106,10 +100,8 @@ public class InferenceCoordinator {
                 safeRequest, provider, accountLease(safeRequest, provider), false, 1, apiKeyId,
                 requestKind, admission.queueMs(), transportPlan.primary(),
                 transportPlan.fallback(), modelCapabilities));
-            var liveEvents = "PROBE".equals(requestKind) ? execution
-                : availability.requireCallable(safeRequest.providerId(), safeRequest.model())
-                    .thenMany(execution);
-            if (promptCache == null || !promptCache.isEligibleForCache(safeRequest) || "PROBE".equals(requestKind)) {
+            var liveEvents = execution;
+            if (promptCache == null || !promptCache.isEligibleForCache(safeRequest)) {
                 return liveEvents;
             }
             return promptCache.get(safeRequest, apiKeyId)
@@ -124,13 +116,6 @@ public class InferenceCoordinator {
         com.any2api.account.LeasedProviderAccount account
     ) {
         return execute(request, account, null, null, "INFERENCE");
-    }
-
-    public Flux<CanonicalEvent> executeProbe(
-        CanonicalRequest request,
-        com.any2api.account.LeasedProviderAccount account
-    ) {
-        return execute(request, account, null, null, "PROBE");
     }
 
     public Flux<CanonicalEvent> execute(
@@ -168,7 +153,8 @@ public class InferenceCoordinator {
             : transportModes.plan(provider, requestedTransportMode);
         return catalog.find(request.providerId(), request.model()).flatMapMany(model -> {
             var modelCapabilities = model.map(ModelCatalogCache.Entry::capabilities).orElse(null);
-            var safeRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(contextManager.guard(request, modelCapabilities));
+            var compatible = WebParameterAdaptation.prepare(request, provider.protocolContract(), modelCapabilities);
+            var safeRequest = com.any2api.protocol.OpenAiToolBridge.forProvider(contextManager.guard(compatible, modelCapabilities));
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
                 safeRequest, entry.capabilities()));
             var execution = runtime.execute(safeRequest, admission ->
@@ -177,12 +163,8 @@ public class InferenceCoordinator {
                         transportPlan.primary(), transportPlan.fallback(), modelCapabilities))
                 .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
                     error -> accounts.release(account).thenMany(Flux.error(error)));
-            var liveEvents = "PROBE".equals(requestKind) ? execution
-                : availability.requireCallable(safeRequest.providerId(), safeRequest.model())
-                    .thenMany(execution)
-                    .onErrorResume(ModelAvailabilityGuard.ModelUnavailableException.class,
-                        error -> accounts.release(account).thenMany(Flux.error(error)));
-            if (promptCache == null || !promptCache.isEligibleForCache(safeRequest) || "PROBE".equals(requestKind)) {
+            var liveEvents = execution;
+            if (promptCache == null || !promptCache.isEligibleForCache(safeRequest)) {
                 return liveEvents;
             }
             return promptCache.get(safeRequest, apiKeyId)

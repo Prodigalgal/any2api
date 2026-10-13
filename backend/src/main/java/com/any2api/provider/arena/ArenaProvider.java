@@ -110,16 +110,11 @@ public final class ArenaProvider implements InferenceProvider {
     }
 
     @Override
-    public java.util.Optional<String> scheduledProbeModel() {
+    public java.util.Optional<String> initialVerificationModel() {
         var configured = properties.getProbeModel();
         return configured != null && !configured.isBlank()
             ? java.util.Optional.of(configured.trim())
             : java.util.Optional.of("gemini-3.5-flash-lite");
-    }
-
-    @Override
-    public List<String> fallbackProbeModels() {
-        return properties.getFallbackProbeModels();
     }
 
     @Override
@@ -129,9 +124,8 @@ public final class ArenaProvider implements InferenceProvider {
 
     @Override public ProviderProtocolContract protocolContract() { return PROTOCOL; }
 
-    @Override public Duration modelProbeTimeout() { return properties.getModelProbeTimeout(); }
 
-    @Override public Duration accountProbeTimeout() { return properties.getModelProbeTimeout(); }
+    @Override public Duration accountProbeTimeout() { return properties.getAccountVerificationTimeout(); }
 
     @Override
     public void validateCredential(JsonNode credential) {

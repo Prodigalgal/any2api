@@ -87,22 +87,22 @@ class LifecycleSchedulerTest {
     }
 
     @Test
-    void probesRecoveredAndExplicitlyReauthenticatedAccounts() {
-        assertEquals(true, LifecycleScheduler.requiresReadinessProbe(
+    void checksTheOnceOnlyBudgetForAllHealthyImportedAccounts() {
+        assertEquals(true, LifecycleScheduler.requiresInitialVerification(
             "reauthenticate", AccountStatus.ACTIVE, true));
-        assertEquals(true, LifecycleScheduler.requiresReadinessProbe(
+        assertEquals(true, LifecycleScheduler.requiresInitialVerification(
             "reauthenticate", AccountStatus.EXPIRED, true));
-        assertEquals(false, LifecycleScheduler.requiresReadinessProbe(
+        assertEquals(true, LifecycleScheduler.requiresInitialVerification(
             "keepalive", AccountStatus.ACTIVE, true));
     }
 
     @Test
     void dailyCheckinRunsBeforeInferenceReadinessForMinmax() {
-        assertEquals(false, LifecycleScheduler.requiresReadinessProbe(
+        assertEquals(false, LifecycleScheduler.requiresInitialVerification(
             "daily_checkin", AccountStatus.PENDING, true, true));
-        assertEquals(true, LifecycleScheduler.requiresReadinessProbe(
+        assertEquals(true, LifecycleScheduler.requiresInitialVerification(
             "reauthenticate", AccountStatus.EXPIRED, true, true));
-        assertEquals(true, LifecycleScheduler.requiresReadinessProbe(
+        assertEquals(true, LifecycleScheduler.requiresInitialVerification(
             "keepalive", AccountStatus.PENDING, true, true));
     }
 

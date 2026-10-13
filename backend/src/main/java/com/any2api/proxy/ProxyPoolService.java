@@ -148,6 +148,7 @@ public class ProxyPoolService {
             INSERT INTO provider_proxy_bindings(provider_id, proxy_pool_id, traffic_scopes)
             VALUES (:providerId, :poolId, :scopes)
             ON CONFLICT (provider_id) DO UPDATE SET proxy_pool_id = EXCLUDED.proxy_pool_id,
+                traffic_scopes = EXCLUDED.traffic_scopes,
                 updated_at = CURRENT_TIMESTAMP
             """).param("providerId", id).param("poolId", pool.id())
             .param("scopes", scopes.toArray(String[]::new)).update();

@@ -16,6 +16,45 @@ class CanonicalRequestParserTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
+    void nullableNestedControlsBehaveAsOmittedAndKeepTheOriginalInput(boolean responses) {
+        var raw = mapper.createObjectNode().put("model", "mimo/mimo-v2.6");
+        if (responses) raw.put("input", "hello");
+        else raw.putArray("messages").addObject().put("role", "user").put("content", "hello");
+        raw.putObject("reasoning").putNull("effort").putNull("summary");
+        raw.putObject("provider_options").putObject("mimo").putNull("thinking");
+        var original = raw.deepCopy();
+        var request = parser.parse(responses ? CanonicalRequest.Protocol.RESPONSES
+            : CanonicalRequest.Protocol.CHAT_COMPLETIONS, new ResolvedRoute("mimo", "mimo-v2.6"), raw);
+        assertThat(request.reasoning()).isEmpty();
+        assertThat(request.providerOptions()).isEmpty();
+        com.any2api.provider.ProviderRequestValidation.requireKnownOptions(request, java.util.Set.of("thinking"));
+        var contract = new com.any2api.provider.ProviderProtocolContract(
+            java.util.Map.of("thinking", com.any2api.provider.ProviderProtocolContract.OptionType.BOOLEAN),
+            java.util.Set.of("reasoning"), java.util.Set.of("reasoning"), java.util.Set.of(),
+            java.util.Set.of("effort", "summary"));
+        com.any2api.provider.ProviderRequestValidation.requireSupportedRequest(request,
+            new com.any2api.provider.ProviderManifest("mimo", "MiMo", "fixture", "1", java.util.List.of(),
+                java.util.Map.of(com.any2api.provider.ProviderCapability.CHAT_COMPLETIONS,
+                    com.any2api.provider.SupportLevel.NATIVE, com.any2api.provider.ProviderCapability.RESPONSES,
+                    com.any2api.provider.SupportLevel.NATIVE, com.any2api.provider.ProviderCapability.REASONING,
+                    com.any2api.provider.SupportLevel.NATIVE), true), contract);
+        assertThat(request.rawRequest()).isEqualTo(original);
+        assertThat(raw).isEqualTo(original);
+    }
+
+    @Test
+    void unknownNullableProviderOptionStillReturnsATypedClientError() {
+        var raw = mapper.createObjectNode().put("input", "hello");
+        raw.putObject("provider_options").putObject("mimo").putNull("typo");
+        var request = parser.parse(CanonicalRequest.Protocol.RESPONSES,
+            new ResolvedRoute("mimo", "mimo-v2.6"), raw);
+        assertThatThrownBy(() -> com.any2api.provider.ProviderRequestValidation.requireKnownOptions(
+            request, java.util.Set.of("thinking")))
+            .isInstanceOf(OpenAiRequestException.class).hasMessageContaining("typo");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
     void normalizesAssistantToolReplayWithNullOrMissingContent(boolean explicitNull) {
         var raw = mapper.createObjectNode().put("model", "qwen/qwen3.7-plus");
         var messages = raw.putArray("messages");
@@ -183,16 +222,15 @@ class CanonicalRequestParserTest {
             .hasMessageContaining("cannot be supplied together");
     }
 
-    @Test
-    void rejectsReasoningEffortAbovePublishedHighMaximum() {
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"xhigh", "max"})
+    void acceptsCurrentOpenAiReasoningEffortLevels(String effort) {
         var raw = mapper.createObjectNode()
             .put("model", "qwen/qwen3.7-plus")
-            .put("reasoning_effort", "max");
+            .put("reasoning_effort", effort);
         raw.putArray("messages").addObject().put("role", "user").put("content", "hello");
 
-        assertThatThrownBy(() -> parser.parse(
-            CanonicalRequest.Protocol.CHAT_COMPLETIONS, route, raw))
-            .isInstanceOf(OpenAiRequestException.class)
-            .hasMessageContaining("must be one of");
+        assertThat(parser.parse(CanonicalRequest.Protocol.CHAT_COMPLETIONS, route, raw)
+            .rawRequest().path("reasoning_effort").asText()).isEqualTo(effort);
     }
 }

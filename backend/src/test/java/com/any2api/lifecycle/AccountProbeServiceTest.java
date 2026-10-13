@@ -2,7 +2,6 @@ package com.any2api.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
@@ -17,7 +16,6 @@ import com.any2api.account.LeasedProviderAccount;
 import com.any2api.coordination.AccountLease;
 import com.any2api.observability.OperationEventService;
 import com.any2api.provider.InferenceProvider;
-import com.any2api.provider.ModelProbeService;
 import com.any2api.provider.ProviderCapability;
 import com.any2api.provider.ProviderFailureDisposition;
 import com.any2api.provider.ProviderManifest;
@@ -41,9 +39,32 @@ class AccountProbeServiceTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void repeatedManagementCheckReturnsHistoryWithoutGenerationOrReactivation() {
+        try (var fixture = fixture(AccountStatus.PENDING, false)) {
+            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class), any(String.class)))
+                .thenReturn(Mono.just(InferenceReadinessProbe.Result.ready("alpha-top")));
+            var first = fixture.service().probe(fixture.account().getId()).block();
+            assertThat(first.performed()).isTrue();
+            fixture.account().updateState(AccountStatus.DISABLED, false);
+
+            var repeated = fixture.service().probe(fixture.account().getId(), "claude-sonnet").block();
+
+            assertThat(repeated.performed()).isFalse();
+            assertThat(repeated.ready()).isTrue();
+            assertThat(repeated.account().status()).isEqualTo(AccountStatus.DISABLED);
+            assertThat(repeated.account().enabled()).isFalse();
+            assertThat(repeated.completedAt()).isEqualTo(first.completedAt());
+            org.mockito.Mockito.verify(fixture.accounts(), org.mockito.Mockito.times(1))
+                .acquire(fixture.account().getId());
+            org.mockito.Mockito.verify(fixture.readiness(), org.mockito.Mockito.times(1))
+                .probe(eq(fixture.leased()), any(Duration.class), any(String.class));
+        }
+    }
+
+    @Test
     void failedRealtimeProbeDoesNotPreemptivelyDisableOrPendTheAccount() {
         try (var fixture = fixture(AccountStatus.ACTIVE, true)) {
-            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class)))
+            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class), any(String.class)))
                 .thenAnswer(ignored -> {
                     assertThat(fixture.account().getStatus()).isEqualTo(AccountStatus.ACTIVE);
                     assertThat(fixture.account().isEnabled()).isTrue();
@@ -75,7 +96,7 @@ class AccountProbeServiceTest {
     @Test
     void successfulRealtimeProbeActivatesOnlyAfterReceivingModelOutput() {
         try (var fixture = fixture(AccountStatus.PENDING, false)) {
-            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class)))
+            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class), any(String.class)))
                 .thenReturn(Mono.just(InferenceReadinessProbe.Result.ready("alpha-top")));
 
             var result = fixture.service().probe(fixture.account().getId()).block();
@@ -88,9 +109,6 @@ class AccountProbeServiceTest {
             assertThat(fixture.account().getMetadata())
                 .containsEntry("inference_probe_status", "READY")
                 .containsEntry("inference_readiness_pending", false);
-            verify(fixture.modelProbes()).recordReadyEvidence(
-                eq("alpha"), eq("alpha-top"), eq(fixture.account().getId()),
-                anyLong(), any(Instant.class));
             verify(fixture.observability()).succeed(
                 any(OperationEventService.Started.class), eq("inference_probe_ready"));
         }
@@ -101,7 +119,7 @@ class AccountProbeServiceTest {
         try (var fixture = fixture(
                 AccountStatus.ACTIVE, true, "extended", Duration.ofSeconds(90))) {
             when(fixture.readiness().probe(
-                    eq(fixture.leased()), eq(Duration.ofSeconds(90))))
+                    eq(fixture.leased()), eq(Duration.ofSeconds(90)), eq("extended-top")))
                 .thenReturn(Mono.just(InferenceReadinessProbe.Result.ready("extended-top")));
 
             var result = fixture.service().probe(fixture.account().getId()).block();
@@ -109,7 +127,7 @@ class AccountProbeServiceTest {
             assertThat(result).isNotNull();
             assertThat(result.ready()).isTrue();
             verify(fixture.readiness()).probe(
-                fixture.leased(), Duration.ofSeconds(90));
+                fixture.leased(), Duration.ofSeconds(90), "extended-top");
         }
     }
 
@@ -117,7 +135,7 @@ class AccountProbeServiceTest {
     void cancelledRealtimeProbeClosesItsRunningOperationEvent() throws Exception {
         try (var fixture = fixture(AccountStatus.ACTIVE, true)) {
             var subscribed = new CountDownLatch(1);
-            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class)))
+            when(fixture.readiness().probe(eq(fixture.leased()), any(Duration.class), any(String.class)))
                 .thenReturn(Mono.<InferenceReadinessProbe.Result>never()
                     .doOnSubscribe(ignored -> subscribed.countDown()));
 
@@ -172,7 +190,27 @@ class AccountProbeServiceTest {
             .thenReturn(mock(TransactionStatus.class));
         var executor = Executors.newVirtualThreadPerTaskExecutor();
         var modelCatalog = mock(com.any2api.provider.ModelCatalogCache.class);
-        var modelProbes = mock(ModelProbeService.class);
+        var records = new java.util.concurrent.ConcurrentHashMap<java.util.UUID, InitialInferenceCheckRepository.Check>();
+        var checksRepository = mock(InitialInferenceCheckRepository.class);
+        when(checksRepository.find(any())).thenAnswer(call -> Optional.ofNullable(records.get(call.getArgument(0))));
+        when(checksRepository.claim(any(), any())).thenAnswer(call -> {
+            java.util.UUID id = call.getArgument(0);
+            var check = new InitialInferenceCheckRepository.Check(id, java.util.UUID.randomUUID(), "RUNNING", "INITIAL",
+                call.getArgument(1), "", "", 0, Instant.now(), null);
+            var previous = records.putIfAbsent(id, check);
+            return new InitialInferenceCheckRepository.Claim(previous == null ? check : previous, previous == null);
+        });
+        when(checksRepository.complete(any(), any())).thenAnswer(call -> {
+            InitialInferenceCheckRepository.Check check = call.getArgument(0);
+            InferenceReadinessProbe.Result result = call.getArgument(1);
+            var completed = new InitialInferenceCheckRepository.Check(check.accountId(), check.claimToken(),
+                result.ready() ? "READY" : "FAILED", "INITIAL", result.model(), result.errorClass(), result.output(),
+                result.durationMs(), check.startedAt(), Instant.now());
+            records.put(check.accountId(), completed);
+            return completed;
+        });
+        when(readiness.resolveModel(eq(providerId), any())).thenReturn(providerId + "-top");
+        var initialChecks = new InitialInferenceCheckService(checksRepository, executor);
         var service = new AccountProbeService(
             repository,
             accounts,
@@ -184,9 +222,9 @@ class AccountProbeServiceTest {
             transactionManager,
             executor,
             modelCatalog,
-            modelProbes);
+            initialChecks);
         return new Fixture(
-            service, repository, accounts, failures, readiness, observability, modelProbes,
+            service, repository, accounts, failures, readiness, observability, checksRepository,
             account, leased, executor);
     }
 
@@ -211,7 +249,7 @@ class AccountProbeServiceTest {
         ProviderFailureDisposition failures,
         InferenceReadinessProbe readiness,
         OperationEventService observability,
-        ModelProbeService modelProbes,
+        InitialInferenceCheckRepository checksRepository,
         AccountEntity account,
         LeasedProviderAccount leased,
         java.util.concurrent.ExecutorService executor

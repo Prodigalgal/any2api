@@ -2,7 +2,6 @@ export type ProviderModel = {
   id: string;
   owned_by: string;
   provider_name: string;
-  available: boolean;
   cataloged: boolean;
   capabilities: Record<string, unknown>;
   supported_parameters: Record<string, string[]>;
@@ -15,23 +14,9 @@ export type ProviderModel = {
   streaming: boolean;
   multimodal: { input: string[]; output: string[] };
   runtime: {
-    status: "READY" | "DEGRADED" | "UNAVAILABLE";
-    eligible_account_count: number;
-    available_account_count: number;
-    quota_limited_account_count: number;
-    rolling_request_count: number;
-    rolling_attempt_count: number;
-    rolling_success_rate: number;
-    p50_ms: number;
-    p95_ms: number;
-    last_attempt_at: string | null;
-    last_success_at: string | null;
-    probe_status: string | null;
-    probe_error: string | null;
-    probed_at: string | null;
     concurrent: number;
     queue_depth: number;
-    circuit_state: string;
+    bulkhead_rejections: number;
   };
 };
 
@@ -144,8 +129,10 @@ export type AccountProbeResult = {
   errorClass: string;
   output: string;
   durationMs: number;
-  completedAt: string;
+  completedAt: string | null;
   account: Account;
+  performed: boolean;
+  source: "INITIAL" | "HISTORICAL";
 };
 
 export type AccountActivationResult = {

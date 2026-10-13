@@ -177,3 +177,83 @@ def test_capabilities_endpoint_includes_reaper_stats():
     assert "total_sweeps" in reaper_info
     assert "total_orphans_reaped" in reaper_info
     assert "total_stalled_reaped" in reaper_info
+
+
+@pytest.mark.asyncio
+async def test_startup_sweep_keeps_health_responsive(tmp_path: Path, monkeypatch):
+    import asyncio
+    import time
+
+    from httpx import ASGITransport, AsyncClient
+
+    reaper = BrowserProcessReaper(proc_path=tmp_path)
+
+    def slow_sweep(**kwargs):
+        time.sleep(0.25)
+        return 0
+
+    monkeypatch.setattr(reaper, "sweep", slow_sweep)
+    started = time.monotonic()
+    starting = asyncio.create_task(reaper.start())
+    try:
+        await asyncio.sleep(0)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/health/live")
+        assert response.status_code == 200
+        assert time.monotonic() - started < 0.15
+    finally:
+        await starting
+        await reaper.stop()
+
+
+@pytest.mark.asyncio
+async def test_periodic_sweep_keeps_health_responsive_and_shutdown_waits(
+    tmp_path: Path, monkeypatch
+):
+    import asyncio
+    import importlib
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from httpx import ASGITransport, AsyncClient
+
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    reaper = BrowserProcessReaper(proc_path=tmp_path)
+
+    def slow_sweep(**kwargs):
+        entered.set()
+        release.wait(timeout=2)
+        finished.set()
+        return 0
+
+    monkeypatch.setattr(reaper, "sweep", slow_sweep)
+    monkeypatch.setattr(
+        importlib.import_module("any2api_automation.lifecycle.process_reaper"),
+        "settings",
+        lambda: SimpleNamespace(browser_reaper_interval_seconds=5),
+    )
+    reaper._task = asyncio.create_task(reaper._run_loop())
+    stopping = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 7)
+        started = time.monotonic()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/health/live")
+        assert response.status_code == 200
+        assert time.monotonic() - started < 0.15
+        stopping = asyncio.create_task(reaper.stop())
+        await asyncio.sleep(0.01)
+        assert not stopping.done()
+        assert not finished.is_set()
+    finally:
+        release.set()
+        if stopping is not None:
+            await stopping
+        else:
+            await reaper.stop()
+    assert finished.is_set()
+    assert reaper._task is None
+    assert reaper._sweep_task is None

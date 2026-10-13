@@ -373,3 +373,198 @@ async def test_api_stream_treats_redirect_as_an_upstream_failure(monkeypatch) ->
     assert events[0]["type"] == "status"
     assert events[0]["status"] == 302
     assert events[1]["type"] == "error"
+
+
+def _install_stream_response(monkeypatch, response, exited=None) -> None:
+    class Stream:
+        def __enter__(self):
+            return response
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            if exited is not None:
+                exited.set()
+            return False
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return Stream()
+
+    monkeypatch.setattr(api_transport, "CurlSession", Client)
+
+
+@pytest.mark.asyncio
+async def test_api_stream_backpressure_preserves_burst_and_end(monkeypatch) -> None:
+    import asyncio
+
+    event_count = 1500
+    queue_filled = asyncio.Event()
+    queue_type = asyncio.Queue
+
+    class ObservedQueue(queue_type):
+        def put_nowait(self, item):
+            super().put_nowait(item)
+            if self.full():
+                queue_filled.set()
+
+    monkeypatch.setattr(api_transport.asyncio, "Queue", ObservedQueue)
+
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.headers = {"content-type": "text/event-stream"}
+
+        def iter_lines(self):
+            for index in range(event_count):
+                yield f"data: {index}".encode()
+
+    _install_stream_response(monkeypatch, Response())
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    callback_errors = []
+    loop.set_exception_handler(lambda _, context: callback_errors.append(context.get("exception")))
+    received = []
+
+    async def consume():
+        async for event in api_transport.api_stream("https://arena.ai", "POST", "/api/stream"):
+            if event["type"] == "status":
+                await asyncio.wait_for(queue_filled.wait(), timeout=2)
+            elif event["type"] == "data":
+                received.append(event["data"])
+
+    try:
+        try:
+            await asyncio.wait_for(consume(), timeout=5)
+        except TimeoutError:
+            pytest.fail(
+                f"SSE burst lost termination: received={len(received)}/{event_count}; "
+                f"callback_errors={len(callback_errors)}"
+            )
+        assert received == [str(index) for index in range(event_count)]
+        assert callback_errors == []
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+
+@pytest.mark.asyncio
+async def test_slow_api_stream_close_keeps_health_responsive(monkeypatch) -> None:
+    import asyncio
+    import threading
+    import time
+
+    from httpx import ASGITransport, AsyncClient
+
+    from any2api_automation.main import app
+
+    closed = threading.Event()
+    exited = threading.Event()
+
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.headers = {"content-type": "text/event-stream"}
+
+        def iter_lines(self):
+            yield b"data: first"
+            closed.wait(timeout=2)
+
+        def close(self):
+            time.sleep(0.25)
+            closed.set()
+
+    _install_stream_response(monkeypatch, Response(), exited)
+    stream = api_transport.api_stream("https://arena.ai", "POST", "/api/stream")
+    assert (await anext(stream))["type"] == "status"
+    assert (await anext(stream))["data"] == "first"
+    started = time.monotonic()
+    closing = asyncio.create_task(stream.aclose())
+    try:
+        await asyncio.sleep(0)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/health/live")
+        assert response.status_code == 200
+        assert time.monotonic() - started < 0.15
+    finally:
+        await closing
+        closed.set()
+    assert await asyncio.to_thread(exited.wait, 1)
+
+
+@pytest.mark.asyncio
+async def test_api_stream_cancellation_unblocks_saturated_producer(monkeypatch) -> None:
+    import asyncio
+    import threading
+
+    queue_filled = asyncio.Event()
+    exited = threading.Event()
+    closed = threading.Event()
+    queue_type = asyncio.Queue
+
+    class ObservedQueue(queue_type):
+        def put_nowait(self, item):
+            super().put_nowait(item)
+            if self.full():
+                queue_filled.set()
+
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.headers = {"content-type": "text/event-stream"}
+
+        def iter_lines(self):
+            for index in range(1500):
+                yield f"data: {index}".encode()
+
+        def close(self):
+            closed.set()
+
+    monkeypatch.setattr(api_transport.asyncio, "Queue", ObservedQueue)
+    _install_stream_response(monkeypatch, Response(), exited)
+    stream = api_transport.api_stream("https://arena.ai", "POST", "/api/stream")
+    assert (await anext(stream))["type"] == "status"
+    await asyncio.wait_for(queue_filled.wait(), timeout=2)
+    await asyncio.wait_for(stream.aclose(), timeout=2)
+    assert closed.is_set()
+    assert await asyncio.to_thread(exited.wait, 1)
+
+
+@pytest.mark.asyncio
+async def test_api_stream_close_failure_still_stops_producer(monkeypatch) -> None:
+    import asyncio
+    import threading
+
+    released = threading.Event()
+    exited = threading.Event()
+
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.headers = {"content-type": "text/event-stream"}
+
+        def iter_lines(self):
+            yield b"data: first"
+            released.wait(timeout=2)
+
+        def close(self):
+            released.set()
+            raise RuntimeError("synthetic close failure")
+
+    _install_stream_response(monkeypatch, Response(), exited)
+    stream = api_transport.api_stream("https://arena.ai", "POST", "/api/stream")
+    assert (await anext(stream))["type"] == "status"
+    assert (await anext(stream))["data"] == "first"
+    with pytest.raises(RuntimeError, match="synthetic close failure"):
+        await stream.aclose()
+    assert await asyncio.to_thread(exited.wait, 1)

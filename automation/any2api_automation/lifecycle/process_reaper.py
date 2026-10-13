@@ -56,6 +56,7 @@ class BrowserProcessReaper:
         self._proc_path = proc_path or Path("/proc")
         self._stats = ReaperStats()
         self._task: asyncio.Task[None] | None = None
+        self._sweep_task: asyncio.Task[int] | None = None
 
     @property
     def stats(self) -> ReaperStats:
@@ -215,9 +216,10 @@ class BrowserProcessReaper:
         if not settings().browser_reaper_enabled:
             return
 
-        # Perform one sweep immediately at startup
-        with suppress(Exception):
-            self.sweep()
+        try:
+            await self._sweep_async()
+        except Exception as exc:  # noqa: BLE001 - the periodic loop can recover
+            logger.warning("process reaper startup sweep failed: %s", type(exc).__name__)
 
         self._task = asyncio.create_task(self._run_loop())
 
@@ -228,13 +230,31 @@ class BrowserProcessReaper:
             with suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        if self._sweep_task is not None:
+            try:
+                await self._sweep_task
+            except Exception as exc:  # noqa: BLE001 - preserve subsequent resource cleanup
+                logger.warning("process reaper shutdown sweep failed: %s", type(exc).__name__)
+            finally:
+                self._sweep_task = None
+
+    async def _sweep_async(self) -> int:
+        # Killing residual processes includes blocking filesystem reads and grace waits.
+        # Shield the worker so shutdown can await it before closing browser resources.
+        task = asyncio.create_task(asyncio.to_thread(self.sweep))
+        self._sweep_task = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done():
+                self._sweep_task = None
 
     async def _run_loop(self) -> None:
         interval = max(5, settings().browser_reaper_interval_seconds)
         while True:
             try:
                 await asyncio.sleep(interval)
-                self.sweep()
+                await self._sweep_async()
             except asyncio.CancelledError:
                 break
             except Exception as exc:  # noqa: BLE001

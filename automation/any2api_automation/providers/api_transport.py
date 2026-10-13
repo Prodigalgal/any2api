@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import re
 import threading
-import time
 from collections.abc import AsyncIterator, Iterable, Mapping
 from http.cookies import CookieError, SimpleCookie
 from typing import Any
@@ -359,16 +359,27 @@ async def api_stream(
     response_holder: list[Any] = [None]
 
     def publish(event: dict[str, Any] | object) -> bool:
-        while not stop.is_set():
-            try:
-                loop.call_soon_threadsafe(async_queue.put_nowait, event)
-                return True
-            except asyncio.QueueFull:
-                time.sleep(0.005)
-                continue
-            except RuntimeError:
-                return False
-        return False
+        if stop.is_set():
+            return False
+        pending_put = async_queue.put(event)
+        try:
+            submitted = asyncio.run_coroutine_threadsafe(pending_put, loop)
+        except RuntimeError:
+            pending_put.close()
+            return False
+        try:
+            while not stop.is_set():
+                try:
+                    submitted.result(timeout=0.1)
+                    return True
+                except concurrent.futures.TimeoutError:
+                    continue
+                except concurrent.futures.CancelledError:
+                    return False
+            return False
+        finally:
+            if not submitted.done():
+                submitted.cancel()
 
     def worker() -> None:
         try:
@@ -451,11 +462,13 @@ async def api_stream(
         stop.set()
         response = response_holder[0]
         close = getattr(response, "close", None)
-        if callable(close):
-            close()
-        if not task.done():
-            task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        try:
+            if callable(close):
+                await asyncio.to_thread(close)
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 def api_action_bindings(

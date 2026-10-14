@@ -212,6 +212,7 @@ export type RegistrationJob = {
   proxyPolicy: RegistrationProxyPolicy;
   headless: boolean;
   mailDomain: string;
+  mailProvider?: string | null;
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
   attempts: number;
@@ -276,6 +277,7 @@ export type RegistrationJobFormValue = {
   proxyPolicy: RegistrationProxyPolicy;
   headless: boolean;
   mailDomain: string | null;
+  mailProvider?: string | null;
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
   idempotencyKey?: string | null;

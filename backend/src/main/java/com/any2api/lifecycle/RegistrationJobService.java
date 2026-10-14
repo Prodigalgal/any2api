@@ -27,6 +27,8 @@ public class RegistrationJobService {
     private static final int MAX_ROUND_INTERVAL_SECONDS = 86400;
     private static final Set<String> JOB_STATUSES = Set.of(
         "PENDING", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED");
+    private static final Set<String> SUPPORTED_MAIL_PROVIDERS = Set.of(
+        "auto", "random", "cloudflare", "tempmail_io", "tempmail_plus", "mail_tm");
 
     private final JdbcClient jdbc;
     private final ProviderRegistry providers;
@@ -63,6 +65,9 @@ public class RegistrationJobService {
         request.put("headless", normalized.headless());
         if (normalized.mailDomain() != null && !normalized.mailDomain().isBlank()) {
             request.put("mail_domain", normalized.mailDomain());
+        }
+        if (normalized.mailProvider() != null && !normalized.mailProvider().isBlank()) {
+            request.put("mail_provider", normalized.mailProvider());
         }
         var key = normalized.idempotencyKey() == null || normalized.idempotencyKey().isBlank()
             ? "registration:" + normalized.providerId() + ":" + UUID.randomUUID()
@@ -143,6 +148,11 @@ public class RegistrationJobService {
             command.aiCaptchaMode() == null ? defaults.aiCaptchaMode() : command.aiCaptchaMode());
         var mailDomain = command.mailDomain() == null || command.mailDomain().isBlank()
             ? null : command.mailDomain().trim().toLowerCase();
+        var mailProvider = command.mailProvider() == null || command.mailProvider().isBlank()
+            ? null : command.mailProvider().trim().toLowerCase();
+        if (mailProvider != null && !SUPPORTED_MAIL_PROVIDERS.contains(mailProvider)) {
+            throw new IllegalArgumentException("unsupported mail provider: " + mailProvider);
+        }
         var idempotencyKey = command.idempotencyKey() == null
             || command.idempotencyKey().isBlank()
             ? null : command.idempotencyKey().trim();
@@ -150,7 +160,7 @@ public class RegistrationJobService {
             providerId, target, attempts, concurrency,
             attemptIntervalSeconds, roundIntervalSeconds, attemptTimeoutSeconds,
             flowMaxAttempts, maxConsecutiveFailureBatches, proxyPolicy, headless,
-            mailDomain, captcha.aiEnabled(), captcha.aiMode(), idempotencyKey);
+            mailDomain, mailProvider, captcha.aiEnabled(), captcha.aiMode(), idempotencyKey);
     }
 
     static int effectiveMaxAttempts(
@@ -257,6 +267,7 @@ public class RegistrationJobService {
             proxyPolicy(request.path("proxy_policy").asText("PROVIDER_DEFAULT")),
             request.path("headless").asBoolean(true),
             request.path("mail_domain").asText(""),
+            request.path("mail_provider").asText(""),
             captcha.aiEnabled(), captcha.aiMode(),
             row.getInt("attempts"), row.getInt("success_count"), row.getInt("failure_count"),
             row.getBoolean("cancel_requested"), row.getString("last_error_class"),
@@ -274,6 +285,7 @@ public class RegistrationJobService {
         Integer roundIntervalSeconds, Integer attemptTimeoutSeconds,
         Integer flowMaxAttempts, Integer maxConsecutiveFailureBatches,
         RegistrationProxyPolicy proxyPolicy, Boolean headless, String mailDomain,
+        String mailProvider,
         Boolean aiCaptchaEnabled,
         RegistrationCaptchaPolicy.AiMode aiCaptchaMode, String idempotencyKey
     ) {
@@ -283,11 +295,26 @@ public class RegistrationJobService {
             }
         }
 
+        public CreateCommand(
+            String providerId, Integer target, Integer maxAttempts,
+            Integer concurrency, Integer attemptIntervalSeconds,
+            Integer roundIntervalSeconds, Integer attemptTimeoutSeconds,
+            Integer flowMaxAttempts, Integer maxConsecutiveFailureBatches,
+            RegistrationProxyPolicy proxyPolicy, Boolean headless, String mailDomain,
+            Boolean aiCaptchaEnabled,
+            RegistrationCaptchaPolicy.AiMode aiCaptchaMode, String idempotencyKey
+        ) {
+            this(providerId, target, maxAttempts, concurrency, attemptIntervalSeconds,
+                roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
+                maxConsecutiveFailureBatches, proxyPolicy, headless, mailDomain, null,
+                aiCaptchaEnabled, aiCaptchaMode, idempotencyKey);
+        }
+
         public CreateCommand withIdempotencyKey(String value) {
             return new CreateCommand(
                 providerId, target, maxAttempts, concurrency, attemptIntervalSeconds,
                 roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
-                maxConsecutiveFailureBatches, proxyPolicy, headless, mailDomain,
+                maxConsecutiveFailureBatches, proxyPolicy, headless, mailDomain, mailProvider,
                 aiCaptchaEnabled, aiCaptchaMode, value);
         }
     }

@@ -22,7 +22,7 @@ import {
 } from "@/components/registration-job-form";
 import { RegistrationSchedules } from "@/components/registration-schedules";
 import {
-  captchaModeLabel, registrationJobStatusLabel, registrationProxyPolicyLabel,
+  captchaModeLabel, registrationJobStatusLabel, registrationMailProviderLabel, registrationProxyPolicyLabel,
 } from "@/components/registration-labels";
 
 const activeStatuses = new Set(["PENDING", "RUNNING"]);
@@ -156,7 +156,7 @@ function RegistrationJobsPanel({ providers, settings, settingsLoading }: {
                   <TableCell>{job.attempts} / {job.maxAttempts}</TableCell>
                   <TableCell>
                     <Typography sx={{ fontSize: 11.5 }}>{job.concurrency} 并发 · 每邮箱 {job.flowMaxAttempts} 个流程</Typography>
-                    <Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{registrationProxyPolicyLabel(job.proxyPolicy)} · {job.headless ? "无界面浏览器" : "可视浏览器"}</Typography>
+                    <Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{registrationProxyPolicyLabel(job.proxyPolicy)} · {job.headless ? "无界面浏览器" : "可视浏览器"} · {registrationMailProviderLabel(job.mailProvider)}</Typography>
                   </TableCell>
                   <TableCell><Chip size="small" variant="outlined" color={job.aiCaptchaEnabled ? "primary" : "default"} label={job.aiCaptchaEnabled ? captchaModeLabel(job.aiCaptchaMode) : "已关闭"} /></TableCell>
                   <TableCell>

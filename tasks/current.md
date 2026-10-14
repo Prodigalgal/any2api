@@ -1,7 +1,16 @@
-# 当前任务板（源码 1.0.2，生产 1.0.2）
+# 当前任务板（源码 1.1.0，生产 1.0.2）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-14 厂商注册支持 UI 自选邮箱供应商与随机轮换、统一邮箱调度推断（1.1.0）
+
+- **目标与范围**：
+  1. 厂商注册 UI 自选邮箱供应商：在注册任务创建与定时计划表单中增加“邮箱供应商”下拉控件，支持用户选择默认（自建优先）、随机供应商（自建与公共随机轮换）、自建临时邮箱（Cloudflare）、Temp-Mail.io（公共）、TempMail.plus（公共）；与邮箱域名联动，选择公共供应商时动态提示由供应商分配；在任务列表展示对应供应商标识。
+  2. 调度与后端透传：`RegistrationJobRequest`、`RegistrationJobService`、`RegistrationJobView`、`RegistrationJobScheduler` 与 `RuntimeSettingsService` 扩展支持 `mailProvider`，将 `driver` 规范化校验并安全注入自动化任务 payload。
+  3. 自动化端随机驱动支持：`create_mail_client` 扩展支持 `random` / `shuffle` 驱动，动态从当前可用自建与公共邮箱源中加密随机选取；彻底根除 DeepSeek 注册历史硬编码 `mail_tm` 的缺陷。
+  4. 全端版本三段式同步递增至 `1.1.0`（`backend`、`automation`、`web`、`package-lock.json`）。
+  5. 保持全量单元测试与构建门禁通过（Backend `./gradlew test --rerun`、Automation `pytest`、Web `next build`）。
 
 ## 2026-10-14 深度恢复 DeepSeek、Arena 验收恢复与全厂商流式防超时优化（1.0.2 已发布）
 

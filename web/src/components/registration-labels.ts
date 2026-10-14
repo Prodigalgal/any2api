@@ -39,3 +39,18 @@ export function intervalLabel(minutes: number | null) {
   if (minutes % 60 === 0) return `每 ${minutes / 60} 小时`;
   return `每 ${minutes} 分钟`;
 }
+
+const mailProviderLabels: Record<string, string> = {
+  auto: "默认（自建优先）",
+  random: "随机供应商",
+  cloudflare: "自建邮箱",
+  tempmail_io: "Temp-Mail.io",
+  tempmail_plus: "TempMail.plus",
+  mail_tm: "Mail.tm",
+};
+
+export function registrationMailProviderLabel(provider: string | null | undefined) {
+  if (!provider) return "默认（自建优先）";
+  return mailProviderLabels[provider.toLowerCase()] ?? provider;
+}
+

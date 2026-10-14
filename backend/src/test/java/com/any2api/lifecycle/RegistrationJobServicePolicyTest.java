@@ -38,4 +38,30 @@ class RegistrationJobServicePolicyTest {
         assertThat(policy.aiEnabled()).isFalse();
         assertThat(policy.aiMode()).isEqualTo(RegistrationCaptchaPolicy.AiMode.EXTERNAL);
     }
+
+    @Test
+    void requestMapsMailProviderToCommand() {
+        var request = new com.any2api.api.admin.RegistrationJobRequest(
+            "deepseek", 1, 3, 1, 0, 5, 2100, 3, 5,
+            RegistrationProxyPolicy.PROVIDER_DEFAULT, true, "edu.omnnu.xyz", "cloudflare",
+            true, RegistrationCaptchaPolicy.AiMode.INTERNAL, "test-key");
+
+        var command = request.toCommand(null);
+
+        assertThat(command.mailProvider()).isEqualTo("cloudflare");
+        assertThat(command.mailDomain()).isEqualTo("edu.omnnu.xyz");
+    }
+
+    @Test
+    void requestDefaultConstructorMaintainsCompatibility() {
+        var request = new com.any2api.api.admin.RegistrationJobRequest(
+            "deepseek", 1, 3, 1, 0, 5, 2100, 3, 5,
+            RegistrationProxyPolicy.PROVIDER_DEFAULT, true, "edu.omnnu.xyz",
+            true, RegistrationCaptchaPolicy.AiMode.INTERNAL, "test-key");
+
+        var command = request.toCommand(null);
+
+        assertThat(command.mailProvider()).isNull();
+    }
 }
+

@@ -582,7 +582,7 @@ def test_solve_pow_raises_when_no_solution_in_range(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_register_forces_public_mail_tm_driver(monkeypatch) -> None:
+async def test_register_preserves_mail_configuration(monkeypatch) -> None:
     captured_payloads = []
 
     async def fake_prepare(payload, *, password_policy=None, default_driver=None):
@@ -618,12 +618,13 @@ async def test_register_forces_public_mail_tm_driver(monkeypatch) -> None:
     assert result["credential"]["token"] == "tok_123"
     assert len(captured_payloads) == 1
     actual_payload, default_driver = captured_payloads[0]
-    assert default_driver == "mail_tm"
+    assert default_driver is None
     assert actual_payload["mail"]["base_url"] == "https://apimail.omnnu.xyz"
     assert actual_payload["mail"]["domain"] == "edu.omnnu.xyz"
 
-    # Test fallback when no base_url or empty mail is passed
+    # Test when no base_url or empty mail is passed, default_driver is not forced to mail_tm
     captured_payloads.clear()
     await provider.register({"captcha": {"ai_enabled": False}, "mail": {}})
-    actual_payload2, _ = captured_payloads[0]
-    assert actual_payload2["mail"]["driver"] == "mail_tm"
+    actual_payload2, default_driver2 = captured_payloads[0]
+    assert default_driver2 is None
+    assert actual_payload2["mail"] == {}

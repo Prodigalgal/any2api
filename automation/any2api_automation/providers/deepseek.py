@@ -99,28 +99,14 @@ class DeepseekAutomationProvider(AutomationProvider):
             if captcha_policy.enabled and not registry.visual_ai_available(captcha_policy):
                 raise RuntimeError(f"DeepSeek captcha AI mode {captcha_policy.mode} is unavailable")
 
-            reg_payload = dict(payload)
-            mail_payload = dict(payload.get("mail") or {})
-            driver = (
-                str(mail_payload.get("driver") or mail_payload.get("provider") or "")
-                .strip()
-                .lower()
-            )
-            # Preserve explicitly configured mail settings (e.g. self-hosted cloudflare temp mail)
-            # Only fallback to mail_tm if no mail configuration or base_url is present
-            if (not driver or driver == "auto") and not mail_payload.get("base_url"):
-                mail_payload["driver"] = "mail_tm"
-                reg_payload["mail"] = mail_payload
-
             mail, mailbox, password = await prepare_registration(
-                reg_payload,
+                payload,
                 password_policy=RegistrationPasswordPolicy(
                     lambda: strong_password(16), min_length=8, max_length=64
                 ),
-                default_driver="mail_tm",
             )
             trace.mark(RegistrationStage.MAILBOX_CREATED)
-            flow_payload = {**reg_payload}
+            flow_payload = {**payload}
             flow_payload.setdefault("proxy_check_url", settings().deepseek_base_url)
             result = await _run_registration_browser(
                 self,
@@ -436,7 +422,7 @@ async def _run_registration_browser(
                         )
                         current_mailbox = await current_mail.create_address()
                     else:
-                        current_mail = create_mail_client("mail_tm")
+                        current_mail = create_mail_client("tempmail_io")
                         current_mailbox = await current_mail.create_address()
                     logger.info("Rotated to disposable mailbox: %s", current_mailbox.address)
                 except Exception as rotate_err:  # noqa: BLE001

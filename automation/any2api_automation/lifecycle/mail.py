@@ -620,6 +620,11 @@ def create_mail_client(
             normalized = "tempmail_io"
         else:
             normalized = "cloudflare"
+    elif normalized in {"random", "shuffle"}:
+        candidates = ["tempmail_io", "tempmail_plus"]
+        if config.mail_api_base or base_url:
+            candidates.append("cloudflare")
+        normalized = secrets.choice(candidates)
 
     if normalized in {"tempmail_io", "temp-mail.io", "tempmail"}:
         target_base = (

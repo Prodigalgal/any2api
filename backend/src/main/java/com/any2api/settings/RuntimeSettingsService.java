@@ -127,6 +127,14 @@ public class RuntimeSettingsService {
     }
 
     public void applyMailSettings(Map<String, Object> payload, String domainOverride) {
+        applyMailSettings(payload, domainOverride, null);
+    }
+
+    public void applyMailSettings(
+        Map<String, Object> payload,
+        String domainOverride,
+        String providerOverride
+    ) {
         var current = tempMail();
         var mail = new LinkedHashMap<String, Object>();
         mail.put("base_url", current.apiBase());
@@ -142,6 +150,9 @@ public class RuntimeSettingsService {
                 throw new IllegalArgumentException("registration mail domain is not configured");
             }
             mail.put("domain", normalized);
+        }
+        if (providerOverride != null && !providerOverride.isBlank()) {
+            mail.put("driver", providerOverride.trim().toLowerCase());
         }
         payload.put("mail", mail);
     }

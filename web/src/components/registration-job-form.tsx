@@ -41,6 +41,7 @@ export function registrationJobDefaults(
     proxyPolicy: existing?.proxyPolicy ?? defaults?.proxyPolicy ?? "PROVIDER_DEFAULT",
     headless: existing?.headless ?? defaults?.headless ?? true,
     mailDomain: existing?.mailDomain ?? null,
+    mailProvider: existing?.mailProvider ?? "auto",
     aiCaptchaEnabled: existing?.aiCaptchaEnabled ?? defaults?.aiCaptchaEnabled ?? true,
     aiCaptchaMode: existing?.aiCaptchaMode ?? defaults?.aiCaptchaMode ?? "INTERNAL",
     idempotencyKey: null,
@@ -174,9 +175,33 @@ export function RegistrationJobFields({
         </TextField>
         <TextField
           select
+          label="邮箱供应商"
+          value={value.mailProvider ?? "auto"}
+          onChange={(event) => {
+            const nextProvider = event.target.value;
+            patch({
+              mailProvider: nextProvider,
+              ...(nextProvider !== "auto" && nextProvider !== "cloudflare" ? { mailDomain: null } : {}),
+            });
+          }}
+        >
+          <MenuItem value="auto">默认（自建优先）</MenuItem>
+          <MenuItem value="random">随机供应商（自建与公共轮换）</MenuItem>
+          <MenuItem value="cloudflare">自建临时邮箱（Cloudflare）</MenuItem>
+          <MenuItem value="tempmail_io">Temp-Mail.io（公共）</MenuItem>
+          <MenuItem value="tempmail_plus">TempMail.plus（公共）</MenuItem>
+        </TextField>
+        <TextField
+          select
           label="邮箱域名"
+          disabled={value.mailProvider !== "auto" && value.mailProvider !== "cloudflare"}
           value={value.mailDomain ?? ""}
           onChange={(event) => patch({ mailDomain: event.target.value || null })}
+          helperText={
+            value.mailProvider !== "auto" && value.mailProvider !== "cloudflare"
+              ? "由选定公共供应商动态分配"
+              : undefined
+          }
         >
           <MenuItem value="">随机可用域名</MenuItem>
           {(settings?.tempMail.domains ?? []).map((domain) => (

@@ -316,3 +316,16 @@ def test_tempmail_plus_create_and_fetch_mails(monkeypatch) -> None:
 
     link = asyncio.run(client.wait_for_link(mailbox, host_pattern=r"arena\.ai", timeout=5))
     assert link == "https://arena.ai/nextjs-api/callback/email?token=sec_abc123"
+
+
+def test_create_mail_client_random_driver() -> None:
+    from any2api_automation.lifecycle.mail import (
+        TempMailClient,
+        TempMailIoClient,
+        TempMailPlusClient,
+        create_mail_client,
+    )
+
+    client = create_mail_client("random", base_url="https://apimail.test.example")
+    assert isinstance(client, (TempMailClient, TempMailIoClient, TempMailPlusClient))
+

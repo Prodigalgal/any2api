@@ -135,7 +135,7 @@ public class RegistrationJobScheduler {
             return Mono.fromRunnable(() -> finalizeBatch(job, owner, List.of()));
         }
         var payload = registrationPayload(job.request(), mapper);
-        runtimeSettings.applyMailSettings(payload, job.mailDomain());
+        runtimeSettings.applyMailSettings(payload, job.mailDomain(), job.mailProvider());
         var proxy = proxyPools.runtimeForProvider(
             job.providerId(), ProxyTrafficScope.REGISTRATION);
         if (job.proxyPolicy() == RegistrationProxyPolicy.REQUIRED_POOL && proxy.isEmpty()) {
@@ -404,6 +404,7 @@ public class RegistrationJobScheduler {
             }
         }
         String mailDomain() { return request.path("mail_domain").asText(""); }
+        String mailProvider() { return request.path("mail_provider").asText(null); }
     }
 
     private record Attempt(

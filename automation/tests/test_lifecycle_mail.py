@@ -392,7 +392,10 @@ def test_guerrillamail_create_and_fetch_mails(monkeypatch) -> None:
             data = kwargs.get("data") or {}
             if data.get("f") == "set_email_user":
                 return FakeResponse(
-                    {"email_addr": f"{data.get('email_user')}@sharklasers.com", "sid_token": "sid_123"}
+                    {
+                        "email_addr": f"{data.get('email_user')}@sharklasers.com",
+                        "sid_token": "sid_123",
+                    }
                 )
             raise NotImplementedError(data)
 

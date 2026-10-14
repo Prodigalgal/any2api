@@ -958,9 +958,7 @@ def create_mail_client(
             message_timeout_seconds=message_timeout_seconds,
         )
     if normalized in {"guerrillamail", "guerrilla", "guerrilla_mail"}:
-        target_base = (
-            base_url if base_url and ("guerrillamail" in base_url) else None
-        )
+        target_base = base_url if base_url and ("guerrillamail" in base_url) else None
         return GuerrillaMailClient(
             base_url=target_base,
             domain=domain,
@@ -970,9 +968,7 @@ def create_mail_client(
             message_timeout_seconds=message_timeout_seconds,
         )
     if normalized in {"maildrop", "maildrop_cc", "maildrop.cc"}:
-        target_base = (
-            base_url if base_url and ("maildrop" in base_url) else None
-        )
+        target_base = base_url if base_url and ("maildrop" in base_url) else None
         return MaildropClient(
             base_url=target_base,
             domain=domain,
@@ -982,9 +978,7 @@ def create_mail_client(
             message_timeout_seconds=message_timeout_seconds,
         )
     if normalized in {"tempmail_lol", "tempmail.lol", "tempmaillol"}:
-        target_base = (
-            base_url if base_url and ("tempmail.lol" in base_url) else None
-        )
+        target_base = base_url if base_url and ("tempmail.lol" in base_url) else None
         return TempMailLolClient(
             base_url=target_base,
             domain=domain,

@@ -601,6 +601,303 @@ class TempMailPlusClient(BaseMailClient):
             return detailed
 
 
+class GuerrillaMailClient(BaseMailClient):
+    """Client for public Guerrilla Mail service."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        domain: str | None = None,
+        domains: list[str] | tuple[str, ...] | str | None = None,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds or 3.0,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+        self.base_url = str(base_url or "https://api.guerrillamail.com/ajax.php").rstrip("/")
+
+    async def create_address(self, local_part: str | None = None) -> Mailbox:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(self.base_url, params={"f": "get_email_address"})
+            resp.raise_for_status()
+            data = resp.json()
+            sid = str(data.get("sid_token") or "")
+            addr = str(data.get("email_addr") or "").strip().lower()
+            if local_part:
+                user_clean = re.sub(r"[^a-zA-Z0-9_.-]", "", local_part)
+                if user_clean:
+                    user_resp = await client.post(
+                        self.base_url,
+                        data={"f": "set_email_user", "email_user": user_clean, "sid_token": sid},
+                    )
+                    if user_resp.status_code == 200:
+                        user_data = user_resp.json()
+                        addr = str(user_data.get("email_addr") or addr).strip().lower()
+            return Mailbox(address=addr, jwt=sid)
+
+    async def refresh(self, address: str) -> Mailbox:
+        normalized = _validated_address(address)
+        return Mailbox(address=normalized, jwt="")
+
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        sid = mailbox.jwt
+        if not sid:
+            return []
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(
+                self.base_url, params={"f": "check_email", "seq": "0", "sid_token": sid}
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            raw_list = data.get("list") or []
+            detailed: list[dict[str, Any]] = []
+            for item in raw_list:
+                msg_id = item.get("mail_id")
+                if msg_id and not item.get("mail_body"):
+                    detail_resp = await client.get(
+                        self.base_url,
+                        params={"f": "fetch_email", "email_id": msg_id, "sid_token": sid},
+                    )
+                    if detail_resp.status_code == 200:
+                        item = detail_resp.json()
+                item_dict = dict(item)
+                item_dict["id"] = str(msg_id or item.get("mail_id") or "")
+                item_dict["subject"] = item.get("mail_subject") or ""
+                item_dict["text"] = item.get("mail_body") or item.get("mail_excerpt") or ""
+                item_dict["html"] = item.get("mail_body") or ""
+                detailed.append(item_dict)
+            return detailed
+
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        sid = mailbox.jwt
+        if not sid:
+            return []
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(
+                self.base_url, params={"f": "check_email", "seq": "0", "sid_token": sid}
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            raw_list = data.get("list") or []
+            detailed: list[dict[str, Any]] = []
+            for item in raw_list:
+                msg_id = item.get("mail_id")
+                if msg_id and not item.get("mail_body"):
+                    detail_resp = client.get(
+                        self.base_url,
+                        params={"f": "fetch_email", "email_id": msg_id, "sid_token": sid},
+                    )
+                    if detail_resp.status_code == 200:
+                        item = detail_resp.json()
+                item_dict = dict(item)
+                item_dict["id"] = str(msg_id or item.get("mail_id") or "")
+                item_dict["subject"] = item.get("mail_subject") or ""
+                item_dict["text"] = item.get("mail_body") or item.get("mail_excerpt") or ""
+                item_dict["html"] = item.get("mail_body") or ""
+                detailed.append(item_dict)
+            return detailed
+
+
+class MaildropClient(BaseMailClient):
+    """Client for public maildrop.cc GraphQL service."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        domain: str | None = None,
+        domains: list[str] | tuple[str, ...] | str | None = None,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+        self.base_url = str(base_url or "https://api.maildrop.cc/graphql").rstrip("/")
+
+    async def create_address(self, local_part: str | None = None) -> Mailbox:
+        local = re.sub(r"[^a-z0-9]", "", str(local_part or _random_local_part()).lower())
+        if not local:
+            local = "a2a" + secrets.token_hex(4)
+        address = f"{local}@maildrop.cc"
+        return Mailbox(address=address, jwt="")
+
+    async def refresh(self, address: str) -> Mailbox:
+        normalized = _validated_address(address)
+        return Mailbox(address=normalized, jwt="")
+
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        user = mailbox.address.split("@")[0].lower()
+        inbox_query = "query($m: String!) { inbox(mailbox: $m) { id headerfrom subject date } }"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                self.base_url,
+                json={"query": inbox_query, "variables": {"m": user}},
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json().get("data") or {}
+            inbox = data.get("inbox") or []
+            detailed: list[dict[str, Any]] = []
+            for item in inbox:
+                msg_id = item.get("id")
+                if msg_id:
+                    msg_query = (
+                        "query($m: String!, $id: String!) { "
+                        "message(mailbox: $m, id: $id) { id headerfrom subject date data html } }"
+                    )
+                    detail_resp = await client.post(
+                        self.base_url,
+                        json={"query": msg_query, "variables": {"m": user, "id": msg_id}},
+                    )
+                    if detail_resp.status_code == 200:
+                        msg_data = (detail_resp.json().get("data") or {}).get("message")
+                        if msg_data:
+                            detailed.append(
+                                {
+                                    "id": str(msg_data.get("id") or msg_id),
+                                    "subject": msg_data.get("subject") or "",
+                                    "text": msg_data.get("data") or "",
+                                    "html": msg_data.get("html") or "",
+                                    "from": msg_data.get("headerfrom") or "",
+                                }
+                            )
+                            continue
+                detailed.append(item)
+            return detailed
+
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        user = mailbox.address.split("@")[0].lower()
+        inbox_query = "query($m: String!) { inbox(mailbox: $m) { id headerfrom subject date } }"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(
+                self.base_url,
+                json={"query": inbox_query, "variables": {"m": user}},
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json().get("data") or {}
+            inbox = data.get("inbox") or []
+            detailed: list[dict[str, Any]] = []
+            for item in inbox:
+                msg_id = item.get("id")
+                if msg_id:
+                    msg_query = (
+                        "query($m: String!, $id: String!) { "
+                        "message(mailbox: $m, id: $id) { id headerfrom subject date data html } }"
+                    )
+                    detail_resp = client.post(
+                        self.base_url,
+                        json={"query": msg_query, "variables": {"m": user, "id": msg_id}},
+                    )
+                    if detail_resp.status_code == 200:
+                        msg_data = (detail_resp.json().get("data") or {}).get("message")
+                        if msg_data:
+                            detailed.append(
+                                {
+                                    "id": str(msg_data.get("id") or msg_id),
+                                    "subject": msg_data.get("subject") or "",
+                                    "text": msg_data.get("data") or "",
+                                    "html": msg_data.get("html") or "",
+                                    "from": msg_data.get("headerfrom") or "",
+                                }
+                            )
+                            continue
+                detailed.append(item)
+            return detailed
+
+
+class TempMailLolClient(BaseMailClient):
+    """Client for public tempmail.lol tokenized API."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        domain: str | None = None,
+        domains: list[str] | tuple[str, ...] | str | None = None,
+        request_timeout_seconds: float | None = None,
+        poll_seconds: float | None = None,
+        message_timeout_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds or 3.5,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+        self.base_url = str(base_url or "https://api.tempmail.lol").rstrip("/")
+
+    async def create_address(self, local_part: str | None = None) -> Mailbox:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(f"{self.base_url}/generate")
+            resp.raise_for_status()
+            data = resp.json()
+            address = str(data.get("address") or "").strip().lower()
+            token = str(data.get("token") or "").strip()
+            return Mailbox(address=address, jwt=token)
+
+    async def refresh(self, address: str) -> Mailbox:
+        normalized = _validated_address(address)
+        return Mailbox(address=normalized, jwt="")
+
+    async def _fetch_mailbox_mails(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        token = mailbox.jwt
+        if not token:
+            return []
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(f"{self.base_url}/auth/{token}")
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            emails = data.get("email") or data.get("emails") or []
+            if isinstance(emails, dict):
+                emails = [emails]
+            items: list[dict[str, Any]] = []
+            for idx, item in enumerate(emails):
+                items.append(
+                    {
+                        "id": str(item.get("id") or idx),
+                        "subject": item.get("subject") or "",
+                        "text": item.get("body") or item.get("text") or "",
+                        "html": item.get("html") or "",
+                        "from": item.get("from") or "",
+                    }
+                )
+            return items
+
+    def _fetch_mailbox_mails_sync(self, mailbox: Mailbox) -> list[dict[str, Any]]:
+        token = mailbox.jwt
+        if not token:
+            return []
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(f"{self.base_url}/auth/{token}")
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            emails = data.get("email") or data.get("emails") or []
+            if isinstance(emails, dict):
+                emails = [emails]
+            items: list[dict[str, Any]] = []
+            for idx, item in enumerate(emails):
+                items.append(
+                    {
+                        "id": str(item.get("id") or idx),
+                        "subject": item.get("subject") or "",
+                        "text": item.get("body") or item.get("text") or "",
+                        "html": item.get("html") or "",
+                        "from": item.get("from") or "",
+                    }
+                )
+            return items
+
+
 def create_mail_client(
     driver: str | None = None,
     *,
@@ -621,7 +918,13 @@ def create_mail_client(
         else:
             normalized = "cloudflare"
     elif normalized in {"random", "shuffle"}:
-        candidates = ["tempmail_io", "tempmail_plus"]
+        candidates = [
+            "tempmail_io",
+            "tempmail_plus",
+            "guerrillamail",
+            "maildrop",
+            "tempmail_lol",
+        ]
         if config.mail_api_base or base_url:
             candidates.append("cloudflare")
         normalized = secrets.choice(candidates)
@@ -647,6 +950,42 @@ def create_mail_client(
             else None
         )
         return TempMailPlusClient(
+            base_url=target_base,
+            domain=domain,
+            domains=domains,
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+    if normalized in {"guerrillamail", "guerrilla", "guerrilla_mail"}:
+        target_base = (
+            base_url if base_url and ("guerrillamail" in base_url) else None
+        )
+        return GuerrillaMailClient(
+            base_url=target_base,
+            domain=domain,
+            domains=domains,
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+    if normalized in {"maildrop", "maildrop_cc", "maildrop.cc"}:
+        target_base = (
+            base_url if base_url and ("maildrop" in base_url) else None
+        )
+        return MaildropClient(
+            base_url=target_base,
+            domain=domain,
+            domains=domains,
+            request_timeout_seconds=request_timeout_seconds,
+            poll_seconds=poll_seconds,
+            message_timeout_seconds=message_timeout_seconds,
+        )
+    if normalized in {"tempmail_lol", "tempmail.lol", "tempmaillol"}:
+        target_base = (
+            base_url if base_url and ("tempmail.lol" in base_url) else None
+        )
+        return TempMailLolClient(
             base_url=target_base,
             domain=domain,
             domains=domains,

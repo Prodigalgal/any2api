@@ -28,7 +28,16 @@ public class RegistrationJobService {
     private static final Set<String> JOB_STATUSES = Set.of(
         "PENDING", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED");
     private static final Set<String> SUPPORTED_MAIL_PROVIDERS = Set.of(
-        "auto", "random", "cloudflare", "tempmail_io", "tempmail_plus", "mail_tm");
+        "auto",
+        "random",
+        "cloudflare",
+        "tempmail_io",
+        "tempmail_plus",
+        "mail_tm",
+        "guerrillamail",
+        "maildrop",
+        "tempmail_lol"
+    );
 
     private final JdbcClient jdbc;
     private final ProviderRegistry providers;

@@ -320,11 +320,204 @@ def test_tempmail_plus_create_and_fetch_mails(monkeypatch) -> None:
 
 def test_create_mail_client_random_driver() -> None:
     from any2api_automation.lifecycle.mail import (
+        GuerrillaMailClient,
+        MaildropClient,
         TempMailClient,
         TempMailIoClient,
+        TempMailLolClient,
         TempMailPlusClient,
         create_mail_client,
     )
 
     client = create_mail_client("random", base_url="https://apimail.test.example")
-    assert isinstance(client, (TempMailClient, TempMailIoClient, TempMailPlusClient))
+    assert isinstance(
+        client,
+        (
+            TempMailClient,
+            TempMailIoClient,
+            TempMailPlusClient,
+            GuerrillaMailClient,
+            MaildropClient,
+            TempMailLolClient,
+        ),
+    )
+
+
+def test_guerrillamail_create_and_fetch_mails(monkeypatch) -> None:
+    import asyncio
+
+    from any2api_automation.lifecycle.mail import GuerrillaMailClient, create_mail_client
+
+    class FakeResponse:
+        def __init__(self, data: dict | list, status_code: int = 200) -> None:
+            self._data = data
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return self._data
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            pass
+
+        async def get(self, url: str, **kwargs) -> FakeResponse:
+            params = kwargs.get("params") or {}
+            f = params.get("f")
+            if f == "get_email_address":
+                return FakeResponse({"email_addr": "init@sharklasers.com", "sid_token": "sid_123"})
+            if f == "check_email":
+                return FakeResponse(
+                    {
+                        "list": [
+                            {
+                                "mail_id": 999,
+                                "mail_subject": "DeepSeek Code",
+                                "mail_body": "Your verification code is 839201 for DeepSeek.",
+                            }
+                        ]
+                    }
+                )
+            raise NotImplementedError(f)
+
+        async def post(self, url: str, **kwargs) -> FakeResponse:
+            data = kwargs.get("data") or {}
+            if data.get("f") == "set_email_user":
+                return FakeResponse(
+                    {"email_addr": f"{data.get('email_user')}@sharklasers.com", "sid_token": "sid_123"}
+                )
+            raise NotImplementedError(data)
+
+    monkeypatch.setattr("any2api_automation.lifecycle.mail.httpx.AsyncClient", FakeAsyncClient)
+
+    client = create_mail_client("guerrillamail")
+    assert isinstance(client, GuerrillaMailClient)
+
+    mailbox = asyncio.run(client.create_address("mycustomuser"))
+    assert mailbox.address == "mycustomuser@sharklasers.com"
+    assert mailbox.jwt == "sid_123"
+
+    code = asyncio.run(client.wait_for_code(mailbox, timeout=5))
+    assert code == "839201"
+
+
+def test_maildrop_create_and_fetch_mails(monkeypatch) -> None:
+    import asyncio
+
+    from any2api_automation.lifecycle.mail import MaildropClient, create_mail_client
+
+    class FakeResponse:
+        def __init__(self, data: dict, status_code: int = 200) -> None:
+            self._data = data
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return self._data
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            pass
+
+        async def post(self, url: str, **kwargs) -> FakeResponse:
+            body = kwargs.get("json") or {}
+            query = body.get("query", "")
+            if "inbox(mailbox:" in query:
+                return FakeResponse({"data": {"inbox": [{"id": "m123", "subject": "Verify"}]}})
+            if "message(mailbox:" in query:
+                return FakeResponse(
+                    {
+                        "data": {
+                            "message": {
+                                "id": "m123",
+                                "subject": "Verify your email",
+                                "data": "Click to verify: https://arena.ai/verify?token=tok_9988",
+                                "html": "<p>Click</p>",
+                            }
+                        }
+                    }
+                )
+            raise NotImplementedError(query)
+
+    monkeypatch.setattr("any2api_automation.lifecycle.mail.httpx.AsyncClient", FakeAsyncClient)
+
+    client = create_mail_client("maildrop")
+    assert isinstance(client, MaildropClient)
+
+    mailbox = asyncio.run(client.create_address("arena-tester"))
+    assert mailbox.address == "arenatester@maildrop.cc"
+
+    link = asyncio.run(client.wait_for_link(mailbox, host_pattern=r"arena\.ai", timeout=5))
+    assert link == "https://arena.ai/verify?token=tok_9988"
+
+
+def test_tempmail_lol_create_and_fetch_mails(monkeypatch) -> None:
+    import asyncio
+
+    from any2api_automation.lifecycle.mail import TempMailLolClient, create_mail_client
+
+    class FakeResponse:
+        def __init__(self, data: dict, status_code: int = 200) -> None:
+            self._data = data
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return self._data
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            pass
+
+        async def get(self, url: str, **_kwargs) -> FakeResponse:
+            if url.endswith("/generate"):
+                return FakeResponse({"address": "testuser@lolmail.com", "token": "lol_token_abc"})
+            if "/auth/lol_token_abc" in url:
+                return FakeResponse(
+                    {
+                        "emails": [
+                            {
+                                "id": "e1",
+                                "subject": "DeepSeek Auth",
+                                "body": "Your code is 654321.",
+                            }
+                        ]
+                    }
+                )
+            raise NotImplementedError(url)
+
+    monkeypatch.setattr("any2api_automation.lifecycle.mail.httpx.AsyncClient", FakeAsyncClient)
+
+    client = create_mail_client("tempmail_lol")
+    assert isinstance(client, TempMailLolClient)
+
+    mailbox = asyncio.run(client.create_address())
+    assert mailbox.address == "testuser@lolmail.com"
+    assert mailbox.jwt == "lol_token_abc"
+
+    code = asyncio.run(client.wait_for_code(mailbox, timeout=5))
+    assert code == "654321"

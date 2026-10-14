@@ -190,6 +190,9 @@ export function RegistrationJobFields({
           <MenuItem value="cloudflare">自建临时邮箱（Cloudflare）</MenuItem>
           <MenuItem value="tempmail_io">Temp-Mail.io（公共）</MenuItem>
           <MenuItem value="tempmail_plus">TempMail.plus（公共）</MenuItem>
+          <MenuItem value="guerrillamail">Guerrilla Mail（公共）</MenuItem>
+          <MenuItem value="maildrop">Maildrop（公共）</MenuItem>
+          <MenuItem value="tempmail_lol">TempMail.lol（公共）</MenuItem>
         </TextField>
         <TextField
           select

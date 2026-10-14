@@ -46,6 +46,9 @@ const mailProviderLabels: Record<string, string> = {
   cloudflare: "自建邮箱",
   tempmail_io: "Temp-Mail.io",
   tempmail_plus: "TempMail.plus",
+  guerrillamail: "Guerrilla Mail",
+  maildrop: "Maildrop",
+  tempmail_lol: "TempMail.lol",
   mail_tm: "Mail.tm",
 };
 

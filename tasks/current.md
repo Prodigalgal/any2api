@@ -1,7 +1,24 @@
-# 当前任务板（源码 1.1.0，生产 1.1.0）
+# 当前任务板（源码 1.2.0，生产 1.1.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-14 接入更多公开临时邮箱服务（Guerrilla Mail、Maildrop、TempMail.lol）并扩充随机池（1.2.0 待发布）
+
+- **目标与范围**：
+  1. 接入 3 个主流稳定、免认证且公开透明的临时邮箱服务：
+     - **Guerrilla Mail (`guerrillamail`)**：基于标准 API `https://api.guerrillamail.com/ajax.php`，支持自定义邮箱前缀、会话保持与完整正文抓取；
+     - **Maildrop (`maildrop`)**：基于官方开源 GraphQL API `https://api.maildrop.cc/graphql`，免会话、免 token，即查即用；
+     - **TempMail.lol (`tempmail_lol`)**：基于现代 Token 化 API `https://api.tempmail.lol`，动态生成地址与免密收信。
+  2. 扩充自动化端随机池：`create_mail_client("random")` 候选池由 2 个扩展为 5 个（`tempmail_io`、`tempmail_plus`、`guerrillamail`、`maildrop`、`tempmail_lol`），并结合自建源动态轮换，极大增强防封禁与高可用性。
+  3. 后端服务白名单校验扩充：`RegistrationJobService.java` 中的 `SUPPORTED_MAIL_PROVIDERS` 纳入新供应商 ID。
+  4. 前端表单与多语言标签支持：`registration-labels.ts` 与 `registration-job-form.tsx` 增加新供应商的中文选项与公共动态分配提示。
+  5. 全端版本由 `1.1.0` 递增至 `1.2.0`，版本契约检查严格通过（`tools/compatibility/check_versions.py` PASS）。
+- **验证门禁**：
+  - 后端 Gradle 测试通过（BUILD SUCCESSFUL in 1m 55s）；
+  - 自动化 Pytest 567 项全绿通过（567 passed in 22.48s）；
+  - Web 构建编译通过（Next.js Turbopack 15/15 页面生成成功）。
+
 
 ## 2026-10-14 厂商注册支持 UI 自选邮箱供应商与随机轮换、统一邮箱调度推断（1.1.0 已发布）
 

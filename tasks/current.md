@@ -1,9 +1,9 @@
-# 当前任务板（源码 1.2.0，生产 1.1.0）
+# 当前任务板（源码 1.2.0，生产 1.2.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-14 接入更多公开临时邮箱服务（Guerrilla Mail、Maildrop、TempMail.lol）并扩充随机池（1.2.0 待发布）
+## 2026-10-14 接入更多公开临时邮箱服务（Guerrilla Mail、Maildrop、TempMail.lol）并扩充随机池（1.2.0 已发布）
 
 - **目标与范围**：
   1. 接入 3 个主流稳定、免认证且公开透明的临时邮箱服务：
@@ -14,6 +14,12 @@
   3. 后端服务白名单校验扩充：`RegistrationJobService.java` 中的 `SUPPORTED_MAIL_PROVIDERS` 纳入新供应商 ID。
   4. 前端表单与多语言标签支持：`registration-labels.ts` 与 `registration-job-form.tsx` 增加新供应商的中文选项与公共动态分配提示。
   5. 全端版本由 `1.1.0` 递增至 `1.2.0`，版本契约检查严格通过（`tools/compatibility/check_versions.py` PASS）。
+- **发布与运行态**：
+  - **发布事实**：Source `ffdcb59`、CI `38593435255`（全绿，包含后端、自动化、Web 质量门禁与全镜像构建）、GitOps commit `542609c`（`deploy(any2api): 20261014-v1.2.0-release-ffdcb59b0a18d518b283cb7c527ae2cd853c1fbf`）；四个新 Pod（`automation-867bd559dd-jlmsh`、`automation-arena-7679c64cd8-4ns9m`、`server-57b7cbbd84-dp6v9`、`web-678644b5dd-lk7cz`）均 1/1 Running、0 restart，ArgoCD `Synced/Healthy`。
+  - **生产集群验证**：
+    1. 容器内多邮箱驱动及随机轮换全量实测通过：`guerrillamail`（`jegmhyuf@guerrillamailblock.com`）、`maildrop`（`a2ayhg31oii3ubp@maildrop.cc`）、`tempmail_lol`（`thera1e6bef@yeh.nexushint.com`）、`random`（`a2aiusjyhr5fow8i5@ruutukf.com`）均成功秒级创建邮箱；
+    2. 后端核心健康探针：公网 `https://any2api.mnnu.eu.org/actuator/health` 响应正常（`{"status":"UP"}`）；
+    3. Web 控制台：`/login` 页面返回 HTTP 200 正常渲染。
 - **验证门禁**：
   - 后端 Gradle 测试通过（BUILD SUCCESSFUL in 1m 55s）；
   - 自动化 Pytest 567 项全绿通过（567 passed in 22.48s）；

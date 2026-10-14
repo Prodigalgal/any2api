@@ -1,9 +1,9 @@
-# 当前任务板（源码 1.1.0，生产 1.0.2）
+# 当前任务板（源码 1.1.0，生产 1.1.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-14 厂商注册支持 UI 自选邮箱供应商与随机轮换、统一邮箱调度推断（1.1.0）
+## 2026-10-14 厂商注册支持 UI 自选邮箱供应商与随机轮换、统一邮箱调度推断（1.1.0 已发布）
 
 - **目标与范围**：
   1. 厂商注册 UI 自选邮箱供应商：在注册任务创建与定时计划表单中增加“邮箱供应商”下拉控件，支持用户选择默认（自建优先）、随机供应商（自建与公共随机轮换）、自建临时邮箱（Cloudflare）、Temp-Mail.io（公共）、TempMail.plus（公共）；与邮箱域名联动，选择公共供应商时动态提示由供应商分配；在任务列表展示对应供应商标识。
@@ -11,6 +11,11 @@
   3. 自动化端随机驱动支持：`create_mail_client` 扩展支持 `random` / `shuffle` 驱动，动态从当前可用自建与公共邮箱源中加密随机选取；彻底根除 DeepSeek 注册历史硬编码 `mail_tm` 的缺陷。
   4. 全端版本三段式同步递增至 `1.1.0`（`backend`、`automation`、`web`、`package-lock.json`）。
   5. 保持全量单元测试与构建门禁通过（Backend `./gradlew test --rerun`、Automation `pytest`、Web `next build`）。
+- **发布与运行态**：
+  - **发布事实**：Source `6355b7e`、CI `38569854133`（全绿，包含后端、自动化、Web 质量门禁与全镜像构建）、GitOps commit `157b12b`（`deploy(any2api): 20261014-v1.1.0-release-6355b7e612ba58d154c918a0f1009fd7e52869ec`）；四个新 Pod（`server-7b4cf7d9df-8rjlc`、`automation-5c54768b59-ksb25`、`automation-arena-69c46f9c4c-6slfs`、`web-5cf867bf5f-cdnjd`）均 1/1 Running、0 restart，ArgoCD `Synced/Healthy`。
+  - **生产集群验证**：
+    1. 容器内多邮箱驱动及随机轮换全量通过：实测 `random`、`cloudflare`、`tempmail_io`、`tempmail_plus` 均成功秒级创建邮箱并取得有效 JWT。
+    2. 全厂商公网流式推理连通性验证：`minmax/MiniMax-M3.1-Flash-Preview`（9.59s，8 chunks）、`mimo/mimo-v2.6-flash`（60.84s，174 chunks）、`glm/glm-4-flash`（38.77s，20 chunks）、`longcat/longcat-flash`（18.09s，12 chunks）、`arena/gemini-3.5-flash-lite`（144.86s，118 chunks）全部流式输出成功；保活任务均正常推进。
 
 ## 2026-10-14 深度恢复 DeepSeek、Arena 验收恢复与全厂商流式防超时优化（1.0.2 已发布）
 

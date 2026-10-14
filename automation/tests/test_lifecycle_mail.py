@@ -328,4 +328,3 @@ def test_create_mail_client_random_driver() -> None:
 
     client = create_mail_client("random", base_url="https://apimail.test.example")
     assert isinstance(client, (TempMailClient, TempMailIoClient, TempMailPlusClient))
-

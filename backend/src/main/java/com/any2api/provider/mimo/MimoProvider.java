@@ -92,7 +92,7 @@ public final class MimoProvider implements InferenceProvider {
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
             Map.of(
                 RandomModelRole.TOP_TEXT, List.of("mimo-v2.6-flash", "mimo-v2.6-pro"),
-                RandomModelRole.TOP_MULTIMODAL, List.of("mimo-v2.5")), true);
+                RandomModelRole.TOP_MULTIMODAL, List.of("mimo-v2.6-flash", "mimo-v2.6-pro")), true);
     }
 
     @Override

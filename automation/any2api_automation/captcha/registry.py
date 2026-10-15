@@ -896,12 +896,25 @@ class SolverRegistry:
             return []
         internal: _VisualTransport | None = None
         if config.java_base_url.strip() and config.public_api_key.strip():
-            internal = _VisualTransport(
-                "internal",
-                f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions",
-                config.public_api_key.strip(),
-                "random",
-            )
+            selected_model = (
+                policy.internal_model
+                or config.captcha_ai_internal_model
+                or ""
+            ).strip()
+            if selected_model and selected_model.lower() != "random":
+                internal = _VisualTransport(
+                    "internal",
+                    f"{config.java_base_url.rstrip('/')}/v1/chat/completions",
+                    config.public_api_key.strip(),
+                    selected_model,
+                )
+            else:
+                internal = _VisualTransport(
+                    "internal",
+                    f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions",
+                    config.public_api_key.strip(),
+                    "random",
+                )
         external: _VisualTransport | None = None
         if (
             config.captcha_ai_api_base.strip()

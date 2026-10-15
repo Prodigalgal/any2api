@@ -215,6 +215,7 @@ export type RegistrationJob = {
   mailProvider?: string | null;
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
+  aiInternalModel?: string | null;
   attempts: number;
   successCount: number;
   failureCount: number;
@@ -280,6 +281,7 @@ export type RegistrationJobFormValue = {
   mailProvider?: string | null;
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
+  aiInternalModel?: string | null;
   idempotencyKey?: string | null;
 };
 
@@ -442,6 +444,7 @@ export type RegistrationDefaults = {
   headless: boolean;
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
+  aiInternalModel: string;
 };
 
 export type SystemSettings = {

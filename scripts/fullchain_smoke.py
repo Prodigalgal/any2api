@@ -227,7 +227,7 @@ DEFAULT_MODELS = {
     "deepseek": {"text": "default", "image": None},
     "glm": {"text": "glm-5.2", "image": "glm-4.6v"},
     "longcat": {"text": "longcat-pro", "image": "longcat-pro"},
-    "mimo": {"text": "mimo-v2.5-pro", "image": "mimo-v2.5"},
+    "mimo": {"text": "mimo-v2.6-flash", "image": "mimo-v2.6-flash"},
     "minmax": {"text": "MiniMax-M3", "image": "MiniMax-M3"},
     "qwen": {"text": "qwen3.7-plus", "image": "qwen3.7-plus"},
     "arena": {"text": "Max", "image": "claude-sonnet-4-6"},

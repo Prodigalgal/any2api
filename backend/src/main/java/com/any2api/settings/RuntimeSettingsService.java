@@ -290,14 +290,30 @@ public class RuntimeSettingsService {
         RegistrationProxyPolicy proxyPolicy,
         boolean headless,
         boolean aiCaptchaEnabled,
-        RegistrationCaptchaPolicy.AiMode aiCaptchaMode
+        RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
+        String aiInternalModel
     ) {
+        public RegistrationDefaults(
+            int target, int maxAttempts, int concurrency,
+            int attemptIntervalSeconds, int roundIntervalSeconds,
+            int attemptTimeoutSeconds, int flowMaxAttempts,
+            int maxConsecutiveFailureBatches,
+            RegistrationProxyPolicy proxyPolicy, boolean headless,
+            boolean aiCaptchaEnabled,
+            RegistrationCaptchaPolicy.AiMode aiCaptchaMode
+        ) {
+            this(target, maxAttempts, concurrency, attemptIntervalSeconds,
+                roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
+                maxConsecutiveFailureBatches, proxyPolicy, headless,
+                aiCaptchaEnabled, aiCaptchaMode, "");
+        }
+
         public static RegistrationDefaults standard() {
             // More browser flow retries and a short interval between mailbox
             // identities reduce same-IP ban/challenge collisions.
             return new RegistrationDefaults(1, 5, 1, 45, 8, 2100, 5, 8,
                 RegistrationProxyPolicy.PROVIDER_DEFAULT, true, true,
-                RegistrationCaptchaPolicy.AiMode.INTERNAL);
+                RegistrationCaptchaPolicy.AiMode.INTERNAL, "");
         }
 
         public RegistrationDefaults normalized() {
@@ -316,7 +332,8 @@ public class RuntimeSettingsService {
                 maxConsecutiveFailureBatches,
                 proxyPolicy == null ? RegistrationProxyPolicy.PROVIDER_DEFAULT : proxyPolicy,
                 headless, aiCaptchaEnabled,
-                aiCaptchaMode == null ? RegistrationCaptchaPolicy.AiMode.INTERNAL : aiCaptchaMode);
+                aiCaptchaMode == null ? RegistrationCaptchaPolicy.AiMode.INTERNAL : aiCaptchaMode,
+                aiInternalModel == null ? "" : aiInternalModel.trim());
         }
 
     }

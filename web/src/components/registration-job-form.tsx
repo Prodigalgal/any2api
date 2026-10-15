@@ -44,6 +44,7 @@ export function registrationJobDefaults(
     mailProvider: existing?.mailProvider ?? "auto",
     aiCaptchaEnabled: existing?.aiCaptchaEnabled ?? defaults?.aiCaptchaEnabled ?? true,
     aiCaptchaMode: existing?.aiCaptchaMode ?? defaults?.aiCaptchaMode ?? "INTERNAL",
+    aiInternalModel: existing?.aiInternalModel ?? defaults?.aiInternalModel ?? "",
     idempotencyKey: null,
   };
 }
@@ -251,6 +252,25 @@ export function RegistrationJobFields({
           <ToggleButton value="EXTERNAL">外部服务</ToggleButton>
         </ToggleButtonGroup>
       </Stack>
+      {value.aiCaptchaEnabled && value.aiCaptchaMode !== "EXTERNAL" && (
+        <TextField
+          select
+          label="内部过码模型"
+          size="small"
+          value={value.aiInternalModel || ""}
+          onChange={(event) => patch({ aiInternalModel: event.target.value })}
+          helperText="指定内部用于视觉验证码多模态求解的模型（默认按内部随机池轮转）"
+          sx={{ maxWidth: { xs: "100%", sm: 400 } }}
+        >
+          <MenuItem value="">系统默认（TOP_MULTIMODAL 随机池）</MenuItem>
+          <MenuItem value="mimo/mimo-v2.6-flash">MiMo 2.6 Flash（推荐·极速视觉）</MenuItem>
+          <MenuItem value="mimo/mimo-v2.6-pro">MiMo 2.6 Pro（深度多模态推理）</MenuItem>
+          <MenuItem value="mimo/mimo-v2.5">MiMo 2.5（旧版兼容）</MenuItem>
+          {value.aiInternalModel && !["", "mimo/mimo-v2.6-flash", "mimo/mimo-v2.6-pro", "mimo/mimo-v2.5"].includes(value.aiInternalModel) && (
+            <MenuItem value={value.aiInternalModel}>{value.aiInternalModel}</MenuItem>
+          )}
+        </TextField>
+      )}
     </Stack>
   );
 }

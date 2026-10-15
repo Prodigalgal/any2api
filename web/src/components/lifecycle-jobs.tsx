@@ -158,7 +158,14 @@ function RegistrationJobsPanel({ providers, settings, settingsLoading }: {
                     <Typography sx={{ fontSize: 11.5 }}>{job.concurrency} 并发 · 每邮箱 {job.flowMaxAttempts} 个流程</Typography>
                     <Typography color="text.secondary" sx={{ fontSize: 10.5 }}>{registrationProxyPolicyLabel(job.proxyPolicy)} · {job.headless ? "无界面浏览器" : "可视浏览器"} · {registrationMailProviderLabel(job.mailProvider)}</Typography>
                   </TableCell>
-                  <TableCell><Chip size="small" variant="outlined" color={job.aiCaptchaEnabled ? "primary" : "default"} label={job.aiCaptchaEnabled ? captchaModeLabel(job.aiCaptchaMode) : "已关闭"} /></TableCell>
+                  <TableCell>
+                    <Chip size="small" variant="outlined" color={job.aiCaptchaEnabled ? "primary" : "default"} label={job.aiCaptchaEnabled ? captchaModeLabel(job.aiCaptchaMode) : "已关闭"} />
+                    {job.aiCaptchaEnabled && job.aiInternalModel ? (
+                      <Typography color="text.secondary" sx={{ fontSize: 10.5, mt: 0.5, fontFamily: "ui-monospace, monospace" }}>
+                        {job.aiInternalModel}
+                      </Typography>
+                    ) : null}
+                  </TableCell>
                   <TableCell>
                     <Typography sx={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>启动 {job.attemptIntervalSeconds ?? 0} 秒</Typography>
                     <Typography color="text.secondary" sx={{ fontSize: 10.5 }}>轮次 {job.roundIntervalSeconds ?? 5} 秒</Typography>

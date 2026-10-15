@@ -1,7 +1,25 @@
-# 当前任务板（源码 1.3.0，生产 1.3.0）
+# 当前任务板（源码 1.4.0，生产 1.3.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-15 升级内部多模态过码模型至 MiMo 2.6 系列，开放 UI 界面与全局默认内部过码模型选择（1.4.0 待发布）
+
+- **目标与范围**：
+  1. **升级系统内部多模态视觉过码模型为 MiMo 2.6 系列**：
+     - 将 `MimoProvider.java` 的 `RandomModelRole.TOP_MULTIMODAL` 模型列表从旧版单体 `mimo-v2.5` 升级为具备高精度多模态理解能力的 `List.of("mimo-v2.6-flash", "mimo-v2.6-pro")`，使内部 `/multimodal-random/v1/chat/completions` 优先派发最新 2.6 系列模型；
+     - 自动化端 `_visual_transports` 机制支持精确调度：当未显式指定模型时保持兼容走 `/multimodal-random/v1/chat/completions`，当配置了具体内部模型时，直接定向请求后端的 `/v1/chat/completions`，消除随机轮转中的 502/长延迟影响；
+     - 保持自动化端核心代码无任何硬编码 Provider ID，严格符合架构分层隔离标准。
+  2. **UI 界面支持自定义选择内部过码模型**：
+     - 在 Web UI 新建/修改注册任务表单（`registration-job-form.tsx`）中，当启用 AI 验证码且来源为内置服务（或自动）时，提供“内部过码模型”选择器：支持选择系统默认（TOP_MULTIMODAL 随机池）、`mimo/mimo-v2.6-flash`（推荐·极速视觉）、`mimo/mimo-v2.6-pro`（深度多模态推理）、`mimo/mimo-v2.5`（旧版兼容）或自定义已注册模型；
+     - 在系统设置页面（`system-settings.tsx`）中同步开放“默认内部过码模型”配置项，全局新建任务默认带入；
+     - 在注册任务列表（`lifecycle-jobs.tsx`）中展示实际指定的内部过码模型标签。
+  3. **数据流与全端版本对齐**：
+     - `RegistrationCaptchaPolicy`、`CreateRegistrationJobCommand`、`RegistrationJobView`、`RegistrationDefaults`、`CaptchaAiPolicy` 增加 `aiInternalModel` 字段与 wire 编解码；
+     - 遵循 `AGENTS.md` 版本规则，向后兼容特性扩展按次版本递增 `1.3.0 -> 1.4.0`；
+     - 全端统一提升：`backend` 1.4.0、`automation` 1.4.0 (`uv.lock` 严格同步)、`web` 1.4.0 (`package-lock.json` 同步)；
+     - 后端 Gradle 单元测试通过、Web Next.js 生产打包成功、自动化端 pytest 全部 569 项通过、Ruff / ESlint 校验全绿。
+
 
 ## 2026-10-15 优化自动化端注册挑战交互，独立拆分 DeepSeek 自动化容器与微服务路由（1.3.0 已发布）
 

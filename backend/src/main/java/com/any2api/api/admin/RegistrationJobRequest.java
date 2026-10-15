@@ -20,6 +20,7 @@ public record RegistrationJobRequest(
     String mailProvider,
     Boolean aiCaptchaEnabled,
     RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
+    String aiInternalModel,
     String idempotencyKey
 ) {
     public RegistrationJobRequest(
@@ -42,7 +43,31 @@ public record RegistrationJobRequest(
         this(providerId, target, maxAttempts, concurrency, attemptIntervalSeconds,
             roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
             maxConsecutiveFailureBatches, proxyPolicy, headless, mailDomain, null,
-            aiCaptchaEnabled, aiCaptchaMode, idempotencyKey);
+            aiCaptchaEnabled, aiCaptchaMode, null, idempotencyKey);
+    }
+
+    public RegistrationJobRequest(
+        String providerId,
+        Integer target,
+        Integer maxAttempts,
+        Integer concurrency,
+        Integer attemptIntervalSeconds,
+        Integer roundIntervalSeconds,
+        Integer attemptTimeoutSeconds,
+        Integer flowMaxAttempts,
+        Integer maxConsecutiveFailureBatches,
+        RegistrationProxyPolicy proxyPolicy,
+        Boolean headless,
+        String mailDomain,
+        String mailProvider,
+        Boolean aiCaptchaEnabled,
+        RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
+        String idempotencyKey
+    ) {
+        this(providerId, target, maxAttempts, concurrency, attemptIntervalSeconds,
+            roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
+            maxConsecutiveFailureBatches, proxyPolicy, headless, mailDomain, mailProvider,
+            aiCaptchaEnabled, aiCaptchaMode, null, idempotencyKey);
     }
 
     public RegistrationJobService.CreateCommand toCommand(String overrideIdempotencyKey) {
@@ -50,7 +75,7 @@ public record RegistrationJobRequest(
             providerId, target, maxAttempts, concurrency, attemptIntervalSeconds,
             roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
             maxConsecutiveFailureBatches, proxyPolicy, headless, mailDomain, mailProvider,
-            aiCaptchaEnabled, aiCaptchaMode,
+            aiCaptchaEnabled, aiCaptchaMode, aiInternalModel,
             overrideIdempotencyKey == null ? idempotencyKey : overrideIdempotencyKey);
     }
 }

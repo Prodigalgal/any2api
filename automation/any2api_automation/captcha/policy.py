@@ -12,6 +12,7 @@ CaptchaAiMode = Literal["auto", "internal", "external"]
 class CaptchaAiPolicy:
     enabled: bool = True
     mode: CaptchaAiMode = "internal"
+    internal_model: str = ""
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> CaptchaAiPolicy:
@@ -26,7 +27,12 @@ class CaptchaAiPolicy:
         mode = str(raw.get("ai_mode") or "internal").strip().lower()
         if mode not in {"auto", "internal", "external"}:
             raise ValueError("captcha ai_mode is unsupported")
-        return cls(enabled=enabled, mode=cast(CaptchaAiMode, mode))
+        internal_model = str(
+            raw.get("ai_internal_model")
+            or raw.get("internal_model")
+            or ""
+        ).strip()
+        return cls(enabled=enabled, mode=cast(CaptchaAiMode, mode), internal_model=internal_model)
 
 
 _current_policy: ContextVar[CaptchaAiPolicy | None] = ContextVar(

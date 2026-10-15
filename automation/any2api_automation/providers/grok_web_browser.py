@@ -448,7 +448,7 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
 
     async def wait_until_ready(self, page: Any, rule: Any) -> None:
         del rule
-        await asyncio.to_thread(_wait_for_challenge_if_present, page, 15)
+        await _wait_for_challenge_if_present(page, 15)
 
     async def _select_session(
         self,
@@ -785,18 +785,18 @@ def _visible(page: Any, selectors: tuple[str, ...], timeout_ms: int = 5_000) -> 
     return None
 
 
-def _wait_for_challenge_if_present(page: Any, max_wait_seconds: int = 15) -> None:
+async def _wait_for_challenge_if_present(page: Any, max_wait_seconds: int = 15) -> None:
     try:
         deadline = time.monotonic() + max_wait_seconds
         while time.monotonic() < deadline:
             challenge_frame = page.locator(
                 'iframe[src*="cloudflare" i], iframe[src*="turnstile" i]'
             ).first
-            if not challenge_frame.is_visible():
+            if not await challenge_frame.is_visible():
                 break
-            page.wait_for_timeout(1000)
-    except Exception:  # noqa: BLE001,S110 - challenge wait fallback
-        pass
+            await page.wait_for_timeout(1000)
+    except Exception as error:  # noqa: BLE001
+        logger.debug("challenge check error ignored: %s", error)
 
 
 def _extract_xai_code(client: Any, mailbox: Mailbox, timeout_seconds: float = 60.0) -> str:

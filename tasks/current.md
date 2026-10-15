@@ -1,7 +1,22 @@
-# 当前任务板（源码 1.4.2，生产 1.4.2）
+# 当前任务板（源码 1.4.3，生产 1.4.2 -> 1.4.3 构建发布中）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-15 修复 DeepSeek 注册验证码中断根因并对比双代理池注册效果（1.4.3 待发布/构建中）
+
+### 目标与范围
+1. **彻底修复 DeepSeek 注册流程中验证码等待被误判为终态失败的根因**：
+   - DeepSeek 注册页面点击“发送验证码”时，官方接口首先返回 `code: 0, data: {biz_code: 2}, msg: RECAPTCHA_VERIFY_FAILED` 作为触发出码信号；
+   - 修复前直接将非成功响应计入失败响应列表，导致 `challenge.solve` 的 `aborted` 条件在出码第一时刻触发并直接抛出异常，未能进入 hCaptcha 解题弹窗；
+   - 新增 `_is_terminal_code_failure` 精确判定函数，排除 `code == 0 && biz_code == 2` 的出码信号，仅对真实的业务错误（如频率受限、手机号限制等）触发中断。
+2. **清理历史失效账号与对比双代理池注册表现**：
+   - 彻底清除已拉黑封禁的 16 个 DeepSeek 历史账号；
+   - 对比测试 `Self-hosted Oracle` 与 `CF Dynamic Overseas` 两个代理池对 DeepSeek 注册的网络连通性、CloudFront WAF 拦截率、hCaptcha 触发率及邮件验证码成功率；
+   - 挑选最优代理池发起注册并激活新账号。
+3. **全端版本对齐（1.4.3）**：
+   - 全端（backend `build.gradle.kts`、web `package.json` 及 `package-lock.json`、automation `pyproject.toml`、`uv.lock`、`main.py`）统一对齐至 `1.4.3`；
+   - `check_versions.py` 契约检查通过，Automation 测试与 Ruff 检查通过。
 
 ## 2026-10-15 修复 Arena/MinMax 底层传输异常、根除 Grok Cloudflare 403 重试风暴并优化 DeepSeek 验证码透传（1.4.2 已发布）
 

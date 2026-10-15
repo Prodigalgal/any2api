@@ -532,6 +532,17 @@ def _register_browser(
             except Exception:  # noqa: BLE001 - ignore unparseable or transient responses
                 failed_code_responses.append((response, {}))
 
+    def _is_terminal_code_failure(body: dict[str, Any]) -> bool:
+        if not body:
+            return False
+        code = int(body.get("code") or 0)
+        data = body.get("data") or {}
+        biz_code = int(data.get("biz_code") or 0) if isinstance(data, dict) else -1
+        # biz_code == 2 indicates captcha verification is required, not a terminal failure
+        if code == 0 and biz_code == 2:
+            return False
+        return code != 0 or biz_code != 0
+
     page.on("response", observe_code_response)
     try:
         send.click()
@@ -539,23 +550,23 @@ def _register_browser(
             challenge.solve(
                 page,
                 completed=lambda: bool(successful_code_responses),
-                aborted=lambda: bool(failed_code_responses),
+                aborted=lambda: any(_is_terminal_code_failure(b) for _, b in failed_code_responses),
                 ai_policy=captcha_policy,
             )
         except Exception as error:
-            if failed_code_responses:
-                _, last_body = failed_code_responses[-1]
-                if last_body:
-                    _require_success(last_body, "email verification")
+            terminal_failures = [
+                b for _, b in failed_code_responses if _is_terminal_code_failure(b)
+            ]
+            if terminal_failures:
+                _require_success(terminal_failures[-1], "email verification")
             if not successful_code_responses:
                 raise RuntimeError(
                     "DeepSeek hCaptcha failed "
                     f"type={type(error).__name__} diagnostic={challenge.last_diagnostic}"
                 ) from error
-        if failed_code_responses and not successful_code_responses:
-            _, last_body = failed_code_responses[-1]
-            if last_body:
-                _require_success(last_body, "email verification")
+        terminal_failures = [b for _, b in failed_code_responses if _is_terminal_code_failure(b)]
+        if terminal_failures and not successful_code_responses:
+            _require_success(terminal_failures[-1], "email verification")
         if not successful_code_responses:
             retry_deadline = time.monotonic() + 10
             while not successful_code_responses and time.monotonic() < retry_deadline:
@@ -571,7 +582,10 @@ def _register_browser(
     finally:
         page.remove_listener("response", observe_code_response)
     if not successful_code_responses:
-        if failed_code_responses:
+        terminal_failures = [b for _, b in failed_code_responses if _is_terminal_code_failure(b)]
+        if terminal_failures:
+            _require_success(terminal_failures[-1], "email verification")
+        elif failed_code_responses:
             _, last_body = failed_code_responses[-1]
             if last_body:
                 _require_success(last_body, "email verification")

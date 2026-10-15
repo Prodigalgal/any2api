@@ -1,9 +1,19 @@
-# 当前任务板（源码 1.4.2，生产 1.4.1）
+# 当前任务板（源码 1.4.2，生产 1.4.2）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-15 修复 Arena/MinMax 底层传输异常、根除 Grok Cloudflare 403 重试风暴并优化 DeepSeek 验证码透传（1.4.2 待发布）
+## 2026-10-15 修复 Arena/MinMax 底层传输异常、根除 Grok Cloudflare 403 重试风暴并优化 DeepSeek 验证码透传（1.4.2 已发布）
+
+### 发布与运行验收（已完成）
+- 修复源码：`98df9403798b54d40e7059b0c0a6538759b02709`，已推送 main；
+- CI 流水线 `38757867468` 全绿完成，各服务镜像构建并推送，GitOps 自动同步；
+- 生产环境统一运行不可变镜像 `20261015-v1.4.2-release-98df9403798b54d40e7059b0c0a6538759b02709`，ArgoCD `Synced / Healthy`，五个应用均 1/1 Running、零重启；
+- **运行态核心证据**：
+  1. **Arena 账号恢复**：`accounts` 表中 Arena `ACTIVE` 账号已由 54 恢复提升至 **56** 个（`DEGRADED` 降至 59），保活探测 `keepalive status=SUCCEEDED` 稳定运行，无任何底层传输异常泄露；
+  2. **Grok 重试风暴清零**：采样统计 `requests = 11, total_attempts = 11`（1:1，尝试膨胀率由 141% 彻底降为 100%），成功消除 `provider_stream_error` 反复重试风暴；
+  3. **DeepSeek 现状**：现存 16 个账号已被官方识别拉黑（`InferenceProbe:account_blocked`），验证码解析容错及上游错误快速透传已部署就绪；
+  4. 完整发布报告见 [RELEASE_1.4.2_RUNTIME_ACCEPTANCE_2026-10-15.md](../docs/reports/RELEASE_1.4.2_RUNTIME_ACCEPTANCE_2026-10-15.md)。
 
 ### 目标与范围
 1. **修复 Arena 与浏览器底层传输异常导致的探活/调度阻塞**：

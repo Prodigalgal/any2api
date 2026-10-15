@@ -1,6 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: any2api-automation
+spec:
+  template:
+    spec:
+      containers:
+        - name: automation
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+              ephemeral-storage: 512Mi
+            limits:
+              cpu: "1"
+              memory: 3Gi
+              ephemeral-storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: any2api-automation-arena
 spec:
   template:
@@ -9,8 +28,12 @@ spec:
         - name: automation-arena
           resources:
             requests:
+              cpu: 200m
+              memory: 1Gi
               ephemeral-storage: 512Mi
             limits:
+              cpu: "1.5"
+              memory: 3584Mi
               ephemeral-storage: 3Gi
 ---
 apiVersion: apps/v1
@@ -24,6 +47,10 @@ spec:
         - name: automation-deepseek
           resources:
             requests:
+              cpu: 200m
+              memory: 1Gi
               ephemeral-storage: 512Mi
             limits:
+              cpu: "1.5"
+              memory: 3584Mi
               ephemeral-storage: 3Gi

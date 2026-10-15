@@ -55,7 +55,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
       - name: automation-deepseek
-        image: docker.io/speedproxy/any2api:automation-20261014-v1.2.0-release-ffdcb59b0a18d518b283cb7c527ae2cd853c1fbf
+        image: any2api-automation-deepseek
         imagePullPolicy: IfNotPresent
         env:
         - name: ANY2API_AUTOMATION_ENABLED_PROVIDERS
@@ -77,7 +77,7 @@ spec:
             memory: 1Gi
             ephemeral-storage: 512Mi
           limits:
-            cpu: "2"
+            cpu: "1.5"
             memory: 3584Mi
             ephemeral-storage: 3Gi
         securityContext:

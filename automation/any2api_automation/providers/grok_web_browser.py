@@ -105,8 +105,12 @@ _STREAM_REQUEST = r"""async request => {
     try { session = JSON.parse(sessionText); } catch (_) { session = {}; }
     const userId = String(session?.session?.userId || '').trim();
     if (!sessionResponse.ok || !userId) {
+      const isCloudflare = sessionResponse.status === 403
+        || /just a moment|challenges\.cloudflare\.com|turnstile/i.test(sessionText);
       await fail(sessionResponse.ok ? 401 : sessionResponse.status,
-        sessionText || 'Grok Web session is not authenticated');
+        isCloudflare
+          ? 'Grok Web anti-bot challenge blocked session: ' + sessionText.slice(0, 500)
+          : sessionText || 'Grok Web session is not authenticated');
       return;
     }
     const websocketUrl = new URL('/ws/mgw/?uid=' + encodeURIComponent(userId), location.href);
@@ -222,9 +226,7 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
             allowed_domain_suffixes=("grok.com", "x.ai"),
             identity_fields=("sso", "sso-rw", "sso_rw", "cookies", "cookie", "email"),
             require_build_assets=False,
-            # Chat uses same-origin fetch and WebSocket; the full UI adds unrelated
-            # assets and hydration to every cold account session.
-            page_url=base_url.rstrip("/") + "/api/auth/session",
+            page_url=base_url,
         )
         self._stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 
@@ -445,7 +447,8 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
         )
 
     async def wait_until_ready(self, page: Any, rule: Any) -> None:
-        del page, rule
+        del rule
+        await asyncio.to_thread(_wait_for_challenge_if_present, page, 15)
 
     async def _select_session(
         self,

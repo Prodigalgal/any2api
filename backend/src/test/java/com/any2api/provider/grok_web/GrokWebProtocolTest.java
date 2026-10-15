@@ -536,6 +536,12 @@ class GrokWebProtocolTest {
         assertThat(classifier.classify(new GrokWebEventDecoder.GrokWebStreamException(
             "7", "Something went wrong")).type())
             .isEqualTo("anti_bot_rejected");
+        assertThat(classifier.classify(new GrokWebEventDecoder.GrokWebStreamException(
+            "http_403", "<!DOCTYPE html><title>Just a moment...</title>")).type())
+            .isEqualTo("anti_bot_rejected");
+        assertThat(classifier.classify(new GrokWebEventDecoder.GrokWebStreamException(
+            "http_403", "<!DOCTYPE html><title>Just a moment...</title>")).retryable())
+            .isFalse();
         assertThat(classifier.classify(new BrowserTransportClient.BrowserTransportException(
             403, "permission-denied: request rejected by policy")).type())
             .isEqualTo("permission_or_egress_denied");

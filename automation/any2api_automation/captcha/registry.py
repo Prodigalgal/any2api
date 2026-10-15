@@ -636,14 +636,35 @@ class SolverRegistry:
     def _parse_visual_actions(self, image: bytes, content: str) -> list[VisualAction]:
         try:
             marker = re.search(r"ACTIONS\s*=", content, re.IGNORECASE)
-            if marker is None:
-                self._diagnostics.visual = "response_without_actions"
-                return []
-            source = content[marker.end() :].lstrip()
+            if marker is not None:
+                source = content[marker.end() :].lstrip()
+            else:
+                array_match = re.search(r"\[\s*\{", content)
+                if array_match is None:
+                    self._diagnostics.visual = "response_without_actions"
+                    return []
+                source = content[array_match.start() :].lstrip()
+
+            source = re.sub(r"^```(?:json)?\s*", "", source, flags=re.IGNORECASE)
+            source = re.sub(r"\s*```.*$", "", source, flags=re.DOTALL)
+            source = source.strip()
+
             try:
                 decoded, _ = json.JSONDecoder().raw_decode(source)
             except json.JSONDecodeError:
-                decoded = ast.literal_eval(source)
+                try:
+                    decoded = ast.literal_eval(source)
+                except (ValueError, SyntaxError):
+                    start_idx = source.find("[")
+                    end_idx = source.rfind("]")
+                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                        sub = source[start_idx : end_idx + 1]
+                        try:
+                            decoded = json.loads(sub)
+                        except (ValueError, SyntaxError):
+                            decoded = ast.literal_eval(sub)
+                    else:
+                        raise
             decoded = self._normalize_visual_actions(decoded)
             if not 1 <= len(decoded) <= 9:
                 self._diagnostics.visual = "invalid_action_count"

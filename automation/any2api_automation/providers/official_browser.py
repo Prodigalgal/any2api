@@ -368,16 +368,22 @@ class OfficialBrowserRuntime:
             try:
                 if context is not None:
                     await context.close()
+            except Exception as error:  # noqa: BLE001
+                self.logger.debug("browser launch context cleanup ignored: %s", error)
             finally:
                 try:
                     if browser_manager is not None:
                         await browser_manager.__aexit__(None, None, None)
                     elif browser is not None:
                         await browser.close()
+                except Exception as error:  # noqa: BLE001
+                    self.logger.debug("browser launch browser cleanup ignored: %s", error)
                 finally:
                     try:
                         if playwright is not None:
                             await playwright.stop()
+                    except Exception as error:  # noqa: BLE001
+                        self.logger.debug("browser launch playwright cleanup ignored: %s", error)
                     finally:
                         try:
                             driver_pid = _driver_pid(browser) or _driver_pid(playwright)
@@ -386,6 +392,8 @@ class OfficialBrowserRuntime:
                                     driver_pid,
                                     label=f"{self.provider_id} session launch cleanup",
                                 )
+                        except Exception as error:  # noqa: BLE001
+                            self.logger.debug("browser launch process cleanup ignored: %s", error)
                         finally:
                             if browser_lease is not None:
                                 browser_lease.release()
@@ -394,16 +402,22 @@ class OfficialBrowserRuntime:
     async def _close_session(self, session: OfficialBrowserSession) -> None:
         try:
             await session.context.close()
+        except Exception as error:  # noqa: BLE001
+            self.logger.debug("browser context close ignored: %s", error)
         finally:
             try:
                 if session.browser_manager is not None:
                     await session.browser_manager.__aexit__(None, None, None)
-                else:
+                elif session.browser is not None:
                     await session.browser.close()
+            except Exception as error:  # noqa: BLE001
+                self.logger.debug("browser close ignored: %s", error)
             finally:
                 try:
                     if session.playwright is not None:
                         await session.playwright.stop()
+                except Exception as error:  # noqa: BLE001
+                    self.logger.debug("playwright stop ignored: %s", error)
                 finally:
                     try:
                         if session.driver_processes:
@@ -411,6 +425,8 @@ class OfficialBrowserRuntime:
                                 session.driver_processes,
                                 label=f"{self.provider_id} session cleanup",
                             )
+                    except Exception as error:  # noqa: BLE001
+                        self.logger.debug("process termination ignored: %s", error)
                     finally:
                         if session.browser_lease is not None:
                             session.browser_lease.release()

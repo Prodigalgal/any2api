@@ -48,8 +48,14 @@ final class GrokWebFailureClassifier {
                 return new ProviderFailure("rate_limited", "Grok Web model quota is exhausted",
                     true, Map.of("code", stream.code(), "channel", "web"));
             }
-            if ("7".equals(stream.code()) || message.toLowerCase().contains("anti-bot")) {
-                return new ProviderFailure("anti_bot_rejected", stream.getMessage(), true,
+            var lower = message.toLowerCase();
+            if ("7".equals(stream.code())
+                || lower.contains("anti-bot")
+                || lower.contains("just a moment")
+                || lower.contains("challenges.cloudflare.com")
+                || lower.contains("turnstile")
+                || "http_403".equals(stream.code())) {
+                return new ProviderFailure("anti_bot_rejected", stream.getMessage(), false,
                     Map.of("code", stream.code(), "channel", "web"));
             }
             return new ProviderFailure("provider_stream_error", stream.getMessage(), true,

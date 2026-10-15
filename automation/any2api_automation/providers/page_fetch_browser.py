@@ -202,24 +202,39 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
 
             async def execute() -> None:
                 try:
-                    await self.before_stream_request(session.page)
-                    await session.page.evaluate(
-                        self.stream_request_script(),
-                        {
-                            "requestId": request_id,
-                            "url": self._endpoint(selection, target_path),
-                            "method": method,
-                            "headers": _headers(headers),
-                            "body": body,
-                            "timeoutMs": timeout_ms
-                            or selection.rules.canary_timeout_seconds * 1000,
-                        },
-                    )
+                    effective_timeout_seconds = (
+                        (timeout_ms / 1000.0)
+                        if timeout_ms
+                        else max(
+                            float(selection.rules.canary_timeout_seconds),
+                            float(core_settings().inference_timeout_seconds),
+                        )
+                    ) + 10.0
+                    async with asyncio.timeout(effective_timeout_seconds):
+                        await self.before_stream_request(session.page)
+                        await session.page.evaluate(
+                            self.stream_request_script(),
+                            {
+                                "requestId": request_id,
+                                "url": self._endpoint(selection, target_path),
+                                "method": method,
+                                "headers": _headers(headers),
+                                "body": body,
+                                "timeoutMs": timeout_ms
+                                or selection.rules.canary_timeout_seconds * 1000,
+                            },
+                        )
                 except Exception as error:  # noqa: BLE001 - stream boundary
                     self._logger.warning(
                         "official_browser_stream_failed error_type=%s reason=%s",
                         type(error).__name__,
                         _error_reason(error),
+                    )
+                    await queue.put(
+                        {
+                            "type": "status",
+                            "status": 504 if isinstance(error, TimeoutError) else 502,
+                        }
                     )
                     await queue.put(
                         {

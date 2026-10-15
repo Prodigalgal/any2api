@@ -539,14 +539,23 @@ def _register_browser(
             challenge.solve(
                 page,
                 completed=lambda: bool(successful_code_responses),
+                aborted=lambda: bool(failed_code_responses),
                 ai_policy=captcha_policy,
             )
         except Exception as error:
+            if failed_code_responses:
+                _, last_body = failed_code_responses[-1]
+                if last_body:
+                    _require_success(last_body, "email verification")
             if not successful_code_responses:
                 raise RuntimeError(
                     "DeepSeek hCaptcha failed "
                     f"type={type(error).__name__} diagnostic={challenge.last_diagnostic}"
                 ) from error
+        if failed_code_responses and not successful_code_responses:
+            _, last_body = failed_code_responses[-1]
+            if last_body:
+                _require_success(last_body, "email verification")
         if not successful_code_responses:
             retry_deadline = time.monotonic() + 10
             while not successful_code_responses and time.monotonic() < retry_deadline:

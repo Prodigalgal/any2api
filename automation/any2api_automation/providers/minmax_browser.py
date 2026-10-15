@@ -1016,16 +1016,22 @@ class MinmaxOfficialBrowserTransport:
     async def _close_session(self, session: _Session) -> None:
         try:
             await session.context.close()
+        except Exception as error:  # noqa: BLE001
+            logger.debug("minmax browser context close ignored: %s", error)
         finally:
             try:
                 if session.browser_manager is not None:
                     await session.browser_manager.__aexit__(None, None, None)
-                else:
+                elif session.browser is not None:
                     await session.browser.close()
+            except Exception as error:  # noqa: BLE001
+                logger.debug("minmax browser close ignored: %s", error)
             finally:
                 try:
                     if session.playwright is not None:
                         await session.playwright.stop()
+                except Exception as error:  # noqa: BLE001
+                    logger.debug("minmax playwright stop ignored: %s", error)
                 finally:
                     try:
                         if session.driver_processes:
@@ -1033,6 +1039,8 @@ class MinmaxOfficialBrowserTransport:
                                 session.driver_processes,
                                 label="minmax session cleanup",
                             )
+                    except Exception as error:  # noqa: BLE001
+                        logger.debug("minmax process termination ignored: %s", error)
                     finally:
                         if session.browser_lease is not None:
                             session.browser_lease.release()

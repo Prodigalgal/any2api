@@ -1,7 +1,25 @@
-# 当前任务板（源码 1.4.0，生产 1.4.0）
+# 当前任务板（源码 1.4.1，生产 1.4.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-15 修复 Arena/MinMax 底层传输异常、根除 Grok Cloudflare 403 重试风暴并优化 DeepSeek 验证码透传（1.4.1 待发布）
+
+### 目标与范围
+1. **修复 Arena 与浏览器底层传输异常导致的探活/调度阻塞**：
+   - 在 `official_browser.py` 与 `minmax_browser.py` 的 session 释放及启动失败清理流程中强化异常保护，捕获并记录底层 unix socket / pipe transport 异常（如 `Browser.close: unable to perform operation on WriteUnixTransport closed=True; the handler is closed`），防止底层清理异常向外破坏 Slot 租约和状态推进；
+   - 在 `page_fetch_browser.py` 中为 `session.page.evaluate` 流式交互引入显式超时（`effective_timeout_seconds`）与 504 熔断，根除 Arena/PageFetch 上游挂起导致的 Python 协程卡死与 `lease_expired`。
+2. **根除 Grok Cloudflare 403 触发的重试风暴**：
+   - 将 `grok_web_browser.py` 的根加载路径还原为 base url（`https://grok.com/`），恢复 Camoufox 对 Cloudflare Turnstile 挑战的主动处理，并在流式调用遭遇 403 时明确标记 `anti-bot challenge`；
+   - 后端 `GrokWebFailureClassifier.java` 将包含 `just a moment`、`challenges.cloudflare.com`、`turnstile`、`anti-bot` 及 HTTP 403 明确分类为 `anti_bot_rejected` 且不可重试（`retryable = false`），彻底消除 251 个请求膨胀至 354 次 attempts 的重试风暴。
+3. **修复 DeepSeek 验证码结果解析与业务错误快速透传**：
+   - 优化 `registry.py` 中 `_parse_visual_actions` 解析逻辑，支持自动清理 markdown 代码块标记并从文本中提取有效 JSON 数组，兼容 Python 字典/元组格式；
+   - 在 `deepseek_challenge.py` 中支持快速 `aborted` 回调，一旦上游接口返回明确业务错误（如域名不受支持、风控限流）立即中断挑战等待，直接透传真实错误；
+   - 修复 `registry.py` 与 `minmax_browser.py` 中的异常处理，完全通过 Ruff 质量与格式门禁。
+4. **全端版本对齐与质量门禁（1.4.1）**：
+   - 全端（backend `build.gradle.kts`、web `package.json` 及 `package-lock.json`、automation `pyproject.toml`、`uv.lock`、`main.py`）统一对齐至 `1.4.1`；
+   - `check_versions.py --jar` 全量契约验证通过；
+   - Automation 572 项全绿、Backend 588 项（583 passed / 5 skipped）全绿、Web build / lint 成功。
 
 ## 2026-10-15 升级内部多模态过码模型至 MiMo 2.6 系列，开放 UI 界面与全局默认内部过码模型选择（1.4.0 已发布）
 

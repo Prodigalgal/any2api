@@ -42,6 +42,7 @@ class DeepseekHcaptchaChallenge:
         page: Any,
         *,
         completed: Callable[[], bool] | None = None,
+        aborted: Callable[[], bool] | None = None,
         ai_policy: CaptchaAiPolicy | None = None,
     ) -> None:
         config = settings()
@@ -54,6 +55,9 @@ class DeepseekHcaptchaChallenge:
         while time.monotonic() < deadline:
             if completed is not None and completed():
                 self.last_diagnostic = "provider_response"
+                return
+            if aborted is not None and aborted():
+                self.last_diagnostic = "provider_aborted"
                 return
             frame, surface = _challenge_surface(page)
             if frame is None or surface is None:
@@ -132,6 +136,7 @@ class DeepseekHcaptchaChallenge:
             if _wait_for_completion(
                 page,
                 completed,
+                aborted,
                 timeout_seconds=min(
                     config.deepseek_hcaptcha_result_wait_seconds,
                     max(1.0, deadline - time.monotonic()),
@@ -319,6 +324,7 @@ def _drag(page: Any, start: tuple[float, float], end: tuple[float, float]) -> No
 def _wait_for_completion(
     page: Any,
     completed: Callable[[], bool] | None,
+    aborted: Callable[[], bool] | None = None,
     *,
     timeout_seconds: float = 5.0,
 ) -> bool:
@@ -326,6 +332,8 @@ def _wait_for_completion(
     while time.monotonic() < deadline:
         if completed is not None and completed():
             return True
+        if aborted is not None and aborted():
+            return False
         page.wait_for_timeout(250)
     return completed is not None and completed()
 

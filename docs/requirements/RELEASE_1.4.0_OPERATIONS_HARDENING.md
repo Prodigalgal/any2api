@@ -28,3 +28,7 @@
 ## 回滚
 
 回滚到 1.3.0 `20261015-v1.3.0-release-e7fa98e856a4f758d1eefff95e8e9a716337776a` 五个不可变镜像和原资源 patch；无数据库迁移，无账号/密钥回滚。若构建后需修改源码，则占用下一个正式补丁版本，不覆盖候选制品。
+
+## 交付结果
+
+1.4.0 已发布：源码 `2e4a080`、CI `38746417044`、GitOps `7a58b93`，五个应用实际版本/digest、Argo、受保护 API、代理绑定及短时 CPU/探针采样均已验证。Backend 583 passed/5 conditional skipped、Automation 572 passed、Web/Ruff/版本门禁通过。滚动期间发生过旧 Pod 占额引发的短暂创建阻塞，已自动恢复，保留事件；Arena/Grok/DeepSeek 厂商问题继续记录。详见[发布报告](../reports/RELEASE_1.4.0_RUNTIME_ACCEPTANCE_2026-10-15.md)。

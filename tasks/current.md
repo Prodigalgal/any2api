@@ -1,15 +1,16 @@
-# 当前任务板（源码 1.4.0，生产 1.3.0）
+# 当前任务板（源码 1.4.0，生产 1.4.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-15 升级内部多模态过码模型至 MiMo 2.6 系列，开放 UI 界面与全局默认内部过码模型选择（1.4.0 待发布）
+## 2026-10-15 升级内部多模态过码模型至 MiMo 2.6 系列，开放 UI 界面与全局默认内部过码模型选择（1.4.0 已发布）
 
-### 发布修复与验收（进行中）
+### 发布修复与验收（已完成）
 
 - 用户已授权修复后发布 1.4；[规格与回滚](../docs/requirements/RELEASE_1.4.0_OPERATIONS_HARDENING.md)。生产基线实查为 1.3.0、五个应用 Ready/零重启，源码 1.4.0 原 CI 因 FastAPI 版本遗漏失败。
 - 修复 FastAPI 版本与两个 Python 格式门禁；`AutomationProviderCatalog` 沿用启用状态缓存，跳过停用厂商专用目录请求，重新启用后恢复；公共 automation CPU limit `1 -> 2` 核、request `200m -> 500m`，保留内存/探针/滚动策略。
-- 新增专用目录启停/共享地址去重、验证码模型指定/全局默认/显式 random 和 Java wire 兼容回归；Automation 572 项、Ruff、Web lint/build、版本/JAR 契约、后端全量已通过，CI/生产验收继续推进。
+- 新增专用目录启停/共享地址去重、验证码模型指定/全局默认/显式 random 和 Java wire 兼容回归；Automation 572 项、Backend 583 passed/5 conditional skipped、Ruff、Web lint/build、版本/JAR 契约及 CI 全部通过。
+- Source `2e4a080`、CI `38746417044`、GitOps `7a58b93`：Argo Synced/Healthy，五个应用实际 1.4.0、Ready/零重启，digest 与仓库一致；CPU 稳态配额 8/10 核，公共 automation 5s 样本无节流；公网/只读管理 API 验收通过。[完整 changelog、运行证据及遗留风险](../docs/reports/RELEASE_1.4.0_RUNTIME_ACCEPTANCE_2026-10-15.md)。
 - 保留 Arena 反爬、Grok 上游流错误、DeepSeek 无启用账号的实际证据；未增加厂商生成探活，Qwen 继续停用，七家三类流量仍绑定 self proxy 四节点。
 
 - **目标与范围**：
@@ -25,7 +26,7 @@
      - `RegistrationCaptchaPolicy`、`CreateRegistrationJobCommand`、`RegistrationJobView`、`RegistrationDefaults`、`CaptchaAiPolicy` 增加 `aiInternalModel` 字段与 wire 编解码；
      - 遵循 `AGENTS.md` 版本规则，向后兼容特性扩展按次版本递增 `1.3.0 -> 1.4.0`；
      - 全端统一提升：`backend` 1.4.0、`automation` 1.4.0 (`uv.lock` 严格同步)、`web` 1.4.0 (`package-lock.json` 同步)；
-     - 后端 Gradle 单元测试通过、Web Next.js 生产打包成功、自动化端 pytest 全部 569 项通过、Ruff / ESlint 校验全绿。
+     - 后端 Gradle 单元测试通过、Web Next.js 生产打包成功、自动化端 pytest 全部 572 项通过、Ruff / ESlint 校验全绿。
 
 
 ## 2026-10-15 优化自动化端注册挑战交互，独立拆分 DeepSeek 自动化容器与微服务路由（1.3.0 已发布）

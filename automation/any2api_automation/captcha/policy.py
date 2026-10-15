@@ -28,9 +28,7 @@ class CaptchaAiPolicy:
         if mode not in {"auto", "internal", "external"}:
             raise ValueError("captcha ai_mode is unsupported")
         internal_model = str(
-            raw.get("ai_internal_model")
-            or raw.get("internal_model")
-            or ""
+            raw.get("ai_internal_model") or raw.get("internal_model") or ""
         ).strip()
         return cls(enabled=enabled, mode=cast(CaptchaAiMode, mode), internal_model=internal_model)
 

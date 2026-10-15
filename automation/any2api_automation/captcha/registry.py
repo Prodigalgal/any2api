@@ -897,9 +897,7 @@ class SolverRegistry:
         internal: _VisualTransport | None = None
         if config.java_base_url.strip() and config.public_api_key.strip():
             selected_model = (
-                policy.internal_model
-                or config.captcha_ai_internal_model
-                or ""
+                policy.internal_model or config.captcha_ai_internal_model or ""
             ).strip()
             if selected_model and selected_model.lower() != "random":
                 internal = _VisualTransport(

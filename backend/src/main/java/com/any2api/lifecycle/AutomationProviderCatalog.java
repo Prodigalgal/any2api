@@ -2,6 +2,7 @@ package com.any2api.lifecycle;
 
 import com.any2api.config.Any2ApiProperties;
 import com.any2api.provider.ProviderAction;
+import com.any2api.provider.ProviderInstallationCatalog;
 import com.any2api.provider.ProviderTransportMode;
 import java.net.URI;
 import java.time.Duration;
@@ -35,13 +36,19 @@ public class AutomationProviderCatalog {
 
     private final WebClient.Builder builder;
     private final Any2ApiProperties properties;
+    private final ProviderInstallationCatalog installations;
     private final String token;
     private final AtomicReference<Snapshot> current = new AtomicReference<>(Snapshot.empty());
     private final ConcurrentMap<URI, WebClient> clients = new ConcurrentHashMap<>();
 
-    public AutomationProviderCatalog(WebClient.Builder builder, Any2ApiProperties properties) {
+    public AutomationProviderCatalog(
+        WebClient.Builder builder,
+        Any2ApiProperties properties,
+        ProviderInstallationCatalog installations
+    ) {
         this.builder = builder;
         this.properties = properties;
+        this.installations = installations;
         this.token = properties.getSecurity().getInternalToken();
     }
 
@@ -60,7 +67,11 @@ public class AutomationProviderCatalog {
     public void refresh() {
         var targets = new LinkedHashSet<URI>();
         targets.add(properties.getAutomation().getBaseUrl());
-        targets.addAll(properties.getAutomation().getProviderUrls().values());
+        properties.getAutomation().getProviderUrls().forEach((providerId, target) -> {
+            if (installations.isEnabled(providerId)) {
+                targets.add(target);
+            }
+        });
 
         var responses = new ArrayList<JsonNode>();
         for (var target : targets) {

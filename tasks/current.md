@@ -5,6 +5,13 @@
 
 ## 2026-10-15 升级内部多模态过码模型至 MiMo 2.6 系列，开放 UI 界面与全局默认内部过码模型选择（1.4.0 待发布）
 
+### 发布修复与验收（进行中）
+
+- 用户已授权修复后发布 1.4；[规格与回滚](../docs/requirements/RELEASE_1.4.0_OPERATIONS_HARDENING.md)。生产基线实查为 1.3.0、五个应用 Ready/零重启，源码 1.4.0 原 CI 因 FastAPI 版本遗漏失败。
+- 修复 FastAPI 版本与两个 Python 格式门禁；`AutomationProviderCatalog` 沿用启用状态缓存，跳过停用厂商专用目录请求，重新启用后恢复；公共 automation CPU limit `1 -> 2` 核、request `200m -> 500m`，保留内存/探针/滚动策略。
+- 新增专用目录启停/共享地址去重、验证码模型指定/全局默认/显式 random 和 Java wire 兼容回归；Automation 572 项、Ruff、Web lint/build、版本/JAR 契约、后端全量已通过，CI/生产验收继续推进。
+- 保留 Arena 反爬、Grok 上游流错误、DeepSeek 无启用账号的实际证据；未增加厂商生成探活，Qwen 继续停用，七家三类流量仍绑定 self proxy 四节点。
+
 - **目标与范围**：
   1. **升级系统内部多模态视觉过码模型为 MiMo 2.6 系列**：
      - 将 `MimoProvider.java` 的 `RandomModelRole.TOP_MULTIMODAL` 模型列表从旧版单体 `mimo-v2.5` 升级为具备高精度多模态理解能力的 `List.of("mimo-v2.6-flash", "mimo-v2.6-pro")`，使内部 `/multimodal-random/v1/chat/completions` 优先派发最新 2.6 系列模型；

@@ -444,6 +444,47 @@ def test_visual_solver_routes_to_custom_internal_model(monkeypatch) -> None:
     assert request["json"]["model"] == "mimo/mimo-v2.6-flash"
 
 
+@pytest.mark.parametrize(
+    ("selected", "configured", "expected_path", "expected_model"),
+    [
+        ("", " mimo/mimo-v2.6-pro ", "/v1/chat/completions", "mimo/mimo-v2.6-pro"),
+        (
+            "mimo/mimo-v2.6-flash",
+            "mimo/mimo-v2.6-pro",
+            "/v1/chat/completions",
+            "mimo/mimo-v2.6-flash",
+        ),
+        ("random", "mimo/mimo-v2.6-pro", "/multimodal-random/v1/chat/completions", "random"),
+    ],
+)
+def test_visual_solver_internal_model_precedence(
+    monkeypatch, selected, configured, expected_path, expected_model
+) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_JAVA_BASE_URL", "https://gateway.example")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_INTERNAL_MODEL", configured)
+    settings.cache_clear()
+    request: dict[str, object] = {}
+
+    def post(url, **kwargs):
+        request.update({"url": url, **kwargs})
+        return _VisionResponse()
+
+    monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
+    try:
+        estimate = registry.solve_visual_points_sync(
+            b"fixture-image",
+            "fixture prompt",
+            ai_policy=CaptchaAiPolicy(internal_model=selected),
+        )
+        assert estimate is not None
+        assert request["url"] == f"https://gateway.example{expected_path}"
+        assert request["json"]["model"] == expected_model
+    finally:
+        settings.cache_clear()
+
+
 def test_visual_text_solver_keeps_only_captcha_characters(monkeypatch) -> None:
     monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
     monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-secret")

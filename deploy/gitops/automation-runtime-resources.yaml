@@ -9,11 +9,11 @@ spec:
         - name: automation
           resources:
             requests:
-              cpu: 200m
+              cpu: 500m
               memory: 1Gi
               ephemeral-storage: 512Mi
             limits:
-              cpu: "1"
+              cpu: "2"
               memory: 3Gi
               ephemeral-storage: 2Gi
 ---

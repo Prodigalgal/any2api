@@ -21,6 +21,12 @@ logger = logging.getLogger("any2api_automation.providers.deepseek.challenge")
 _ANIMAL_MATRIX_INSTRUCTIONS = (
     "drag one of the animals into the empty spot",
     "place the correct animal into the empty spot",
+    "動物を空いている場所に",
+    "動物を空の場所に",
+    "正しい動物を",
+    "拖动到空格",
+    "拖入空格",
+    "将正确的动物",
 )
 _ANIMAL_MATRIX_SOURCE_CENTERS = ((0.11, 0.14), (0.11, 0.40))
 _ANIMAL_MATRIX_GRID_X = (0.40, 0.56, 0.72, 0.88)
@@ -40,7 +46,7 @@ class DeepseekHcaptchaChallenge:
     ) -> None:
         config = settings()
         deadline = time.monotonic() + config.deepseek_hcaptcha_timeout_seconds
-        idle_deadline = time.monotonic() + 20
+        idle_deadline = time.monotonic() + 35
         checkbox_clicked = False
         checkbox_retries = 0
         last_checkbox_click = 0.0
@@ -152,7 +158,11 @@ def _frames(page: Any) -> list[Any]:
     return [
         frame
         for frame in page.frames
-        if frame is not page.main_frame and "hcaptcha.com" in str(frame.url).lower()
+        if frame is not page.main_frame
+        and any(
+            keyword in str(frame.url).lower()
+            for keyword in ("hcaptcha.com", "challenge", "captcha")
+        )
     ]
 
 
@@ -179,7 +189,12 @@ def _challenge_surface(page: Any) -> tuple[Any | None, Any | None]:
 
 def _click_checkbox(page: Any) -> bool:
     for frame in _frames(page):
-        for selector in ("#checkbox", "[role='checkbox']", ".checkbox"):
+        for selector in (
+            "#checkbox",
+            "[role='checkbox']",
+            ".checkbox",
+            "[aria-haspopup='dialog']",
+        ):
             locator = frame.locator(selector).first
             try:
                 if locator.count() and locator.is_visible():
@@ -342,7 +357,8 @@ def _solver_prompt(prompt: str) -> str:
         "Solve this hCaptcha semantic image challenge. Instruction: "
         + prompt
         + rule
-        + "\nFirst reason internally about every object, the row/column pattern, and the empty "
+        + "\nCarefully interpret the instruction in its original language (e.g. English, Japanese, Chinese)."
+        "\nFirst reason internally about every object, the row/column pattern, and the empty "
         "target. Use click actions for selection tasks. For drag tasks, return one drag action "
         "per object required by the instruction; return multiple drag actions only when the "
         "instruction explicitly requires multiple objects. Each drag must use "

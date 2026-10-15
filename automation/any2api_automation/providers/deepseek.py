@@ -513,11 +513,24 @@ def _register_browser(
         raise RuntimeError("DeepSeek send-code control is unavailable")
     challenge = DeepseekHcaptchaChallenge()
     seen = mail.message_ids_sync(mailbox)
-    code_responses: list[Any] = []
+    successful_code_responses: list[Any] = []
+    failed_code_responses: list[tuple[Any, dict[str, Any]]] = []
+    observed_requests: list[Any] = []
 
     def observe_code_response(response: Any) -> None:
         if urlparse(response.url).path == "/api/v0/users/create_email_verification_code":
-            code_responses.append(response)
+            try:
+                observed_requests.append(response.request)
+                body = _json_response(response, "email verification")
+                code = int(body.get("code") or 0)
+                data = body.get("data") or {}
+                biz_code = int(data.get("biz_code") or 0) if isinstance(data, dict) else -1
+                if code == 0 and biz_code == 0:
+                    successful_code_responses.append(response)
+                else:
+                    failed_code_responses.append((response, body))
+            except Exception:  # noqa: BLE001 - ignore unparseable or transient responses
+                failed_code_responses.append((response, {}))
 
     page.on("response", observe_code_response)
     try:
@@ -525,28 +538,51 @@ def _register_browser(
         try:
             challenge.solve(
                 page,
-                completed=lambda: bool(code_responses),
+                completed=lambda: bool(successful_code_responses),
                 ai_policy=captcha_policy,
             )
         except Exception as error:
-            raise RuntimeError(
-                "DeepSeek hCaptcha failed "
-                f"type={type(error).__name__} diagnostic={challenge.last_diagnostic}"
-            ) from error
+            if not successful_code_responses:
+                raise RuntimeError(
+                    "DeepSeek hCaptcha failed "
+                    f"type={type(error).__name__} diagnostic={challenge.last_diagnostic}"
+                ) from error
+        if not successful_code_responses:
+            retry_deadline = time.monotonic() + 10
+            while not successful_code_responses and time.monotonic() < retry_deadline:
+                page.wait_for_timeout(500)
+                try:
+                    if send.is_visible() and send.is_enabled():
+                        send.click(timeout=2000)
+                except Exception:  # noqa: BLE001,S110 - best-effort send re-click
+                    pass
         deadline = time.monotonic() + 15
-        while not code_responses and time.monotonic() < deadline:
+        while not successful_code_responses and time.monotonic() < deadline:
             page.wait_for_timeout(250)
     finally:
         page.remove_listener("response", observe_code_response)
-    if not code_responses:
-        raise RuntimeError("DeepSeek hCaptcha completed without an email verification response")
-    code_response = code_responses[-1]
+    if not successful_code_responses:
+        if failed_code_responses:
+            _, last_body = failed_code_responses[-1]
+            if last_body:
+                _require_success(last_body, "email verification")
+        raise RuntimeError(
+            "DeepSeek hCaptcha completed without a successful email verification response"
+        )
+    code_response = successful_code_responses[-1]
     code_body = _json_response(code_response, "email verification")
     _require_success(code_body, "email verification")
     trace.mark(RegistrationStage.CHALLENGE_CLEARED)
     request_body = code_response.request.post_data_json or {}
     request_headers = code_response.request.all_headers()
     device_id = str(request_body.get("device_id") or "").strip()
+    if not device_id and observed_requests:
+        for req in reversed(observed_requests):
+            d_id = str((req.post_data_json or {}).get("device_id") or "").strip()
+            if d_id:
+                device_id = d_id
+                request_headers = req.all_headers()
+                break
     if not device_id:
         raise RuntimeError("DeepSeek email verification omitted the device id")
     otp = mail.wait_for_code_sync(mailbox, seen_ids=seen)

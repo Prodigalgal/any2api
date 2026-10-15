@@ -628,3 +628,12 @@ async def test_register_preserves_mail_configuration(monkeypatch) -> None:
     actual_payload2, default_driver2 = captured_payloads[0]
     assert default_driver2 is None
     assert actual_payload2["mail"] == {}
+
+
+def test_hcaptcha_animal_matrix_multilingual_prompts() -> None:
+    from any2api_automation.providers.deepseek_challenge import _is_animal_matrix_prompt
+
+    assert _is_animal_matrix_prompt("動物を空いている場所にドラッグしてください") is True
+    assert _is_animal_matrix_prompt("将正确的动物拖入空格") is True
+    assert _is_animal_matrix_prompt("drag one of the animals into the empty spot") is True
+    assert _is_animal_matrix_prompt("Select all images with a traffic light") is False

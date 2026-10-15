@@ -71,6 +71,31 @@ class LifecycleAutomationClientTest {
     }
 
     @Test
+    void routesDeepseekToCustomProviderUrlWhenConfigured() {
+        var properties = new Any2ApiProperties();
+        properties.getAutomation().getProviderUrls().put(
+            "deepseek", URI.create("http://any2api-automation-deepseek:8090"));
+        var mapper = new ObjectMapper();
+        var recordedUri = new AtomicReference<URI>();
+
+        ExchangeFunction exchange = request -> {
+            recordedUri.set(request.url());
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .body("{\"ok\":true}")
+                .build());
+        };
+        var client = new LifecycleAutomationClient(
+            WebClient.builder().exchangeFunction(exchange),
+            properties, mapper);
+
+        client.execute("deepseek", "register", mapper.createObjectNode()).block();
+
+        assertThat(recordedUri.get().toString())
+            .startsWith("http://any2api-automation-deepseek:8090/internal/v1/providers/deepseek/execute");
+    }
+
+    @Test
     void rejectsConfiguredAutomationResponseLimitOutsideSafeBounds() {
         var properties = new Any2ApiProperties();
 

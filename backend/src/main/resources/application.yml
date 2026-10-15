@@ -127,6 +127,7 @@ any2api:
     provider-urls:
       arena: ${ANY2API_AUTOMATION_PROVIDER_URLS_ARENA:${AUTOMATION_BASE_URL:http://localhost:8090}}
       qwen: ${ANY2API_AUTOMATION_PROVIDER_URLS_QWEN:${AUTOMATION_BASE_URL:http://localhost:8090}}
+      deepseek: ${ANY2API_AUTOMATION_PROVIDER_URLS_DEEPSEEK:${AUTOMATION_BASE_URL:http://localhost:8090}}
 
   temp-mail:
     api-base: ${ANY2API_AUTOMATION_MAIL_API_BASE:}

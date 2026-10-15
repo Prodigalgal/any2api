@@ -12,3 +12,18 @@ spec:
               ephemeral-storage: 512Mi
             limits:
               ephemeral-storage: 3Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: any2api-automation-deepseek
+spec:
+  template:
+    spec:
+      containers:
+        - name: automation-deepseek
+          resources:
+            requests:
+              ephemeral-storage: 512Mi
+            limits:
+              ephemeral-storage: 3Gi

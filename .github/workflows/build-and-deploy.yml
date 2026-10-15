@@ -143,6 +143,9 @@ jobs:
           - component: automation-arena
             context: automation
             file: automation/Dockerfile.arena
+          - component: automation-deepseek
+            context: automation
+            file: automation/Dockerfile.deepseek
           - component: automation-qwen
             context: automation
             file: automation/Dockerfile.qwen
@@ -208,6 +211,26 @@ jobs:
           components = ["server", "automation", "automation-arena", "web"]
           if "name: any2api-automation-qwen" in content:
               components.append("automation-qwen")
+
+          deepseek_manifest = Path(os.environ["GITHUB_WORKSPACE"]) / "deploy/kubernetes/any2api-automation-deepseek.yaml"
+          if deepseek_manifest.exists():
+              target_manifest = path.parent / "automation-deepseek.yaml"
+              shutil.copyfile(deepseek_manifest, target_manifest)
+              if "automation-deepseek.yaml" not in content:
+                  if re.search(r"^resources:\s*$", content, re.MULTILINE):
+                      content = re.sub(r"^resources:\s*$", "resources:\n  - automation-deepseek.yaml", content, count=1, flags=re.MULTILINE)
+                  elif re.search(r"^resources:", content, re.MULTILINE):
+                      content = re.sub(r"(resources:\n)", r"\1  - automation-deepseek.yaml\n", content, count=1)
+              if "name: any2api-automation-deepseek" not in content:
+                  if re.search(r"^images:\s*$", content, re.MULTILINE):
+                      content = re.sub(r"^images:\s*$", f"images:\n  - name: any2api-automation-deepseek\n    newName: docker.io/speedproxy/any2api\n    newTag: automation-deepseek-{suffix}", content, count=1, flags=re.MULTILINE)
+                  elif re.search(r"^images:", content, re.MULTILINE):
+                      content = re.sub(r"(images:\n)", f"images:\n  - name: any2api-automation-deepseek\n    newName: docker.io/speedproxy/any2api\n    newTag: automation-deepseek-{suffix}\n", content, count=1)
+              if "automation-deepseek" not in components:
+                  components.append("automation-deepseek")
+          elif "name: any2api-automation-deepseek" in content:
+              components.append("automation-deepseek")
+
           for component in components:
               pattern = rf"(name: any2api-{component}\n\s+newName: .*\n\s+newTag: ).*"
               content, count = re.subn(pattern, rf"\g<1>{component}-{suffix}", content)
@@ -228,7 +251,7 @@ jobs:
           PY
           git config user.name any2api-ci
           git config user.email any2api-ci@users.noreply.github.com
-          git add any2api/oracle/kustomization.yaml any2api/oracle/server-database-affinity.yaml any2api/oracle/automation-runtime-resources.yaml
+          git add any2api/oracle/kustomization.yaml any2api/oracle/server-database-affinity.yaml any2api/oracle/automation-runtime-resources.yaml any2api/oracle/automation-deepseek.yaml
           if git diff --cached --quiet; then
             exit 0
           fi

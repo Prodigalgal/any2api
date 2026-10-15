@@ -1,27 +1,43 @@
-# 当前任务板（源码 1.3.0，生产 1.2.0）
+# 当前任务板（源码 1.3.0，生产 1.3.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-15 优化自动化端注册挑战交互，独立拆分 DeepSeek 自动化容器与微服务路由（1.3.0）
+## 2026-10-15 优化自动化端注册挑战交互，独立拆分 DeepSeek 自动化容器与微服务路由（1.3.0 已发布）
 
 - **目标与范围**：
   1. **攻克 DeepSeek 注册验证码挑战阻断与风控误报**：
      - 修复 `observe_code_response` 将 `RECAPTCHA_VERIFY_FAILED` / `biz_code == 2` 误当作成功响应导致的挑战流程过早退出；
      - 只有在验证码发送成功（`code == 0 and biz_code == 0`）时才标记挑战完成，使 `DeepseekHcaptchaChallenge` 能够完整捕获并解决弹出的 hCaptcha 挑战；
-     - 扩展动物拼图与矩阵语义识别支持多语言（日语、中文、英语），避免日本/海外节点代理时因语言指令不匹配发生共识拒收；
+     - 扩展动物拼图与矩阵语义识别支持多语言（日语“動物を空いている場所に”、中文、英语），避免日本/海外节点代理时因语言指令不匹配发生共识拒收；
      - 扩充 hCaptcha 容器与 checkbox 查找选择器，将空闲等待超时时间提高至 35s 以抵御代理高延迟；
      - 增加提交验证码挑战后对发送按钮的状态感知与自动补偿重试。
-  2. **独立拆分 DeepSeek 自动化容器与路由分发**：
-     - 新增 `automation/Dockerfile.deepseek`，通过 `ENV ANY2API_AUTOMATION_ENABLED_PROVIDERS=deepseek` 实现 DeepSeek 专属容器隔离，避免与 `grok_web`、`longcat`、`mimo` 等高频请求争抢浏览器进程额度；
+  2. **独立拆分 DeepSeek 自动化容器与微服务路由**：
+     - 新增 `automation/Dockerfile.deepseek`，通过 `ENV ANY2API_AUTOMATION_ENABLED_PROVIDERS=deepseek` 实现 DeepSeek 专属容器隔离，避免与公共自动化高并发争抢浏览器进程额度；
      - 后端 `backend/src/main/resources/application.yml` 增加 `any2api.automation.provider-urls.deepseek` 动态路由映射；
      - 补充 `LifecycleAutomationClientTest` 中针对 `deepseek` 自定义提供商端点路由的单元测试；
      - 新增 `deploy/kubernetes/any2api-automation-deepseek.yaml` 集群 Service 与 Deployment 编排；
-     - 更新 `deploy/gitops/automation-runtime-resources.yaml` 补充专属临时存储与资源限制；
-     - 更新 `.github/workflows/build-and-deploy.yml` 支持 `automation-deepseek` 矩阵构建及 GitOps 自动升级与资源注入。
+     - 治理并重构 `deploy/gitops/automation-runtime-resources.yaml`，按集群 ResourceQuota 配额（CPU 10 / Mem 20Gi）平衡治理三个自动化容器的 CPU 与内存限额（`automation` 1 核/3Gi、`automation-arena` 1.5 核/3.5Gi、`automation-deepseek` 1.5 核/3.5Gi，总 limits 仅 7 核/13.4Gi），彻底根除滚动更新时的配额溢出阻断；
+     - 更新 `.github/workflows/build-and-deploy.yml` 纳入 `automation-deepseek` 镜像构建矩阵与 GitOps 自动升级。
   3. **版本契约与门禁**：
      - 全端统一提升至 `1.3.0`（`backend`、`automation`、`web`、`package-lock.json`、`uv.lock`）；
      - `check_versions.py` 严格校验通过；后端测试、自动化测试（568 项全绿）、Web 构建全绿。
+- **发布与运行态**：
+  - **发布事实**：Source `e7fa98e`、CI `38670838752`（全绿，包含后端、自动化、Web 质量门禁与全部微服务镜像构建）、GitOps commit `88036a0`（`deploy(any2api): 20261015-v1.3.0-release-e7fa98e856a4f758d1eefff95e8e9a716337776a`）。
+  - **生产集群运行证据**：
+    1. ArgoCD 状态：`Synced / Healthy`；
+    2. 全量 Deployment 统一运行同一不可变镜像版本：
+       - `any2api-automation`: `automation-20261015-v1.3.0-release-e7fa98e856a4f758d1eefff95e8e9a716337776a` (1/1 Running)
+       - `any2api-automation-arena`: `automation-arena-20261015-v1.3.0-release-e7fa98e856a4f758d1eefff95e8e9a716337776a` (1/1 Running)
+       - `any2api-automation-deepseek`: `automation-deepseek-20261015-v1.3.0-release-e7fa98e856a4f758d1eefff95e8e9a716337776a` (1/1 Running)
+       - `any2api-server`: `server-20261015-v1.3.0-release-e7fa98e856a4f758d1eefff95e8e9a716337776a` (1/1 Running)
+       - `any2api-web`: `web-20261015-v1.3.0-release-e7fa98e856a4f758d1eefff95e8e9a716337776a` (1/1 Running)
+    3. `any2api-automation-deepseek` 实机验证：
+       - `/health/ready` 正常响应（`{"ok":true,"service":"any2api-automation-deepseek",...}`）；
+       - 激活提供商严格限定为 `['deepseek']`；
+       - `any2api-server` 环境变量 `ANY2API_AUTOMATION_PROVIDER_URLS_DEEPSEEK=http://any2api-automation-deepseek:8090` 生效；
+    4. 资源配额实际使用：Limits CPU 8/10 核、Memory 14.8/20Gi，余量充足稳定；
+    5. 公网网关验证：`https://any2api.mnnu.eu.org` 返回 HTTP 200 OK。
 
 ## 2026-10-14 接入更多公开临时邮箱服务（Guerrilla Mail、Maildrop、TempMail.lol）并扩充随机池（1.2.0 已发布）
 

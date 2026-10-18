@@ -112,10 +112,10 @@ _PROVIDER_DEFAULT_RULES: dict[str, dict[str, Any]] = {
     },
     "mimo": {
         "build_asset_markers": ("xiaomimimo.com",),
-        "discovery_markers": {"requestModule": ("/open-apis/bot/chat", "genUploadInfo")},
+        "discovery_markers": {"requestModule": ("/open-apis/react/chat", "genUploadInfo")},
         "capabilities": {"chat": "completions", "models": "getConfig"},
         "endpoint_paths": {
-            "chat": "/open-apis/bot/chat",
+            "chat": "/open-apis/react/chat",
             "models": "/open-apis/bot/config",
             "uploadInfo": "/open-apis/resource/genUploadInfo",
             "parse": "/open-apis/resource/parse",

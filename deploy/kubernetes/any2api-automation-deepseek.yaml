@@ -62,6 +62,16 @@ spec:
           value: deepseek
         - name: ANY2API_AUTOMATION_SERVICE_NAME
           value: any2api-automation-deepseek
+        - name: DISPLAY
+          value: ":99"
+        - name: LIBGL_ALWAYS_SOFTWARE
+          value: "1"
+        - name: GALLIUM_DRIVER
+          value: "llvmpipe"
+        - name: MESA_GL_VERSION_OVERRIDE
+          value: "4.5"
+        - name: MESA_GLSL_VERSION_OVERRIDE
+          value: "450"
         envFrom:
         - configMapRef:
             name: any2api-env
@@ -73,7 +83,7 @@ spec:
           protocol: TCP
         resources:
           requests:
-            cpu: 200m
+            cpu: 500m
             memory: 1Gi
             ephemeral-storage: 512Mi
           limits:

@@ -78,6 +78,9 @@ class DeepseekHcaptchaChallenge:
                     idle_deadline = max(idle_deadline, time.monotonic() + 5)
                 if retry_required and checkbox_retries >= 3:
                     raise RuntimeError("DeepSeek hCaptcha checkbox retry budget was exhausted")
+                if _is_device_environment_error(page):
+                    self.last_diagnostic = "device_environment_rejected"
+                    raise RuntimeError("DeepSeek rejected registration: device environment error")
                 if time.monotonic() >= idle_deadline:
                     raise RuntimeError("DeepSeek hCaptcha did not produce a provider response")
                 page.wait_for_timeout(250)
@@ -166,7 +169,7 @@ def _frames(page: Any) -> list[Any]:
         if frame is not page.main_frame
         and any(
             keyword in str(frame.url).lower()
-            for keyword in ("hcaptcha.com", "challenge", "captcha")
+            for keyword in ("hcaptcha.com", "challenge", "captcha", "turnstile", "cloudflare")
         )
     ]
 
@@ -178,6 +181,7 @@ def _challenge_surface(page: Any) -> tuple[Any | None, Any | None]:
         ".challenge-view",
         ".task-image",
         ".challenge-container",
+        "#challenge-stage",
     )
     for frame in _frames(page):
         for selector in selectors:
@@ -199,6 +203,9 @@ def _click_checkbox(page: Any) -> bool:
             "[role='checkbox']",
             ".checkbox",
             "[aria-haspopup='dialog']",
+            "input[type='checkbox']",
+            "#cf-stage",
+            ".cf-turnstile",
         ):
             locator = frame.locator(selector).first
             try:
@@ -207,6 +214,24 @@ def _click_checkbox(page: Any) -> bool:
                     return True
             except Exception:  # noqa: BLE001,S112 - another frame may own the checkbox
                 continue
+    return False
+
+
+def _is_device_environment_error(page: Any) -> bool:
+    try:
+        body = " ".join(page.locator("body").inner_text().lower().split())
+        if any(
+            err in body
+            for err in (
+                "current device environment error",
+                "現在のデバイス環境でエラーが発生しました",
+                "当前设备环境存在异常",
+                "当前设备环境错误",
+            )
+        ):
+            return True
+    except Exception:  # noqa: BLE001,S110 - error banner detection is best effort
+        pass
     return False
 
 

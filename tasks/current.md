@@ -1,22 +1,60 @@
-# 当前任务板（源码 1.4.3，生产 1.4.2 -> 1.4.3 构建发布中）
+# 当前任务板（源码 1.5.0，生产 1.4.3 -> 1.5.0 构建发布中）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-15 修复 DeepSeek 注册验证码中断根因并对比双代理池注册效果（1.4.3 待发布/构建中）
+## 2026-10-16 拔出 DeepSeek 注册能力、禁用定时调度并停用提供商
 
 ### 目标与范围
-1. **彻底修复 DeepSeek 注册流程中验证码等待被误判为终态失败的根因**：
-   - DeepSeek 注册页面点击“发送验证码”时，官方接口首先返回 `code: 0, data: {biz_code: 2}, msg: RECAPTCHA_VERIFY_FAILED` 作为触发出码信号；
-   - 修复前直接将非成功响应计入失败响应列表，导致 `challenge.solve` 的 `aborted` 条件在出码第一时刻触发并直接抛出异常，未能进入 hCaptcha 解题弹窗；
-   - 新增 `_is_terminal_code_failure` 精确判定函数，排除 `code == 0 && biz_code == 2` 的出码信号，仅对真实的业务错误（如频率受限、手机号限制等）触发中断。
-2. **清理历史失效账号与对比双代理池注册表现**：
-   - 彻底清除已拉黑封禁的 16 个 DeepSeek 历史账号；
-   - 对比测试 `Self-hosted Oracle` 与 `CF Dynamic Overseas` 两个代理池对 DeepSeek 注册的网络连通性、CloudFront WAF 拦截率、hCaptcha 触发率及邮件验证码成功率；
-   - 挑选最优代理池发起注册并激活新账号。
-3. **全端版本对齐（1.4.3）**：
-   - 全端（backend `build.gradle.kts`、web `package.json` 及 `package-lock.json`、automation `pyproject.toml`、`uv.lock`、`main.py`）统一对齐至 `1.4.3`；
-   - `check_versions.py` 契约检查通过，Automation 测试与 Ruff 检查通过。
+1. **停止并拔出 DeepSeek 注册定时调度与运行态任务**：
+   - 将 `registration_schedules` 中的 `daily-registration-deepseek-0300` 设为 `enabled = false`，彻底终结每天半夜对 DeepSeek 注册的无效触发；
+   - 确认无挂起或运行中的 DeepSeek 注册作业。
+2. **从核心能力中拔出 DeepSeek 注册能力**：
+   - 后端 `DeepseekProvider.java`：从 `MANIFEST` capabilities 中移除 `ProviderCapability.REGISTRATION`，系统表单和 API 层面禁止发起 DeepSeek 注册请求；
+   - 自动化端 `deepseek.py`：从 `operations` 中移除 `"register"`，不再暴露注册动作；
+   - 数据库中将 `providers` 表的 `deepseek` 标记为 `enabled = false`（与 Qwen 一致进入停用归档态）。
+3. **测试门禁回归（100% PASS）**：
+   - 后端 Gradle 全量测试通过（BUILD SUCCESSFUL in 2m 7s，589 项测试）；
+   - 自动化端 pytest 全量测试通过（573 passed in 22.31s）、Ruff 检查通过；
+   - Web Next.js 生产打包成功（16.2.12 Turbopack）、ESLint 零警告通过。
+
+## 2026-10-16 默认视觉解码升级 mimo-v2.6-pro、修复 MiMo v3 协议适配并实现多模型链故障轮询与 UI 手动排序
+
+### 目标与范围
+1. **默认使用 mimo-v2.6-pro 并升级后备模型**：
+   - 将 `MimoProvider` 默认 manifest、`RandomModelRole.TOP_MULTIMODAL` 首选模型和 `initialVerificationModel` 升级为 `mimo-v2.6-pro`（替换旧版 `mimo-v2.6-flash`）；
+   - 保持架构分层与核心类厂商中立（通过 `ProviderIsolationArchitectureTest`）；
+   - 前端系统设置默认多模型推荐链升级为 `["mimo/mimo-v2.6-pro", "glm/GLM-5v-Turbo", "arena/gemini-2.5-flash"]`。
+2. **修复 MiMo 适配并防范上游维护通知**：
+   - 全链路（后端 `MimoEventDecoder`、Liquibase `035-mimo-v3-runtime-rules.sql`、自动化端 `mimo_browser.py`、`mimo_api_actions.py`、`runtime_rules.py`）升级端点至官方 v3 协议 `/open-apis/react/chat`；
+   - `MimoEventDecoder` 支持直接 `content`、`reasoningContent` 与嵌套 `usage` 解码；
+   - 识别拦截 `"MiMo Studio updated. Refresh your page for better performance!"` 维护横幅，将其归类为可重试的 `upstream_maintenance`，触发自动重试或模型轮询。
+3. **实现 AI 打码视觉多模型链自动故障轮询**：
+   - 后端契约扩展：`RegistrationCaptchaPolicy`、`RegistrationJobRequest`、`RegistrationJobService`、`RegistrationJobView`、`RuntimeSettingsService` 支持有序模型列表 `aiInternalModels`；
+   - 自动化端 `policy.py`、`registry.py` 支持按顺序构造视觉模型传输链（`_visual_transports`），在打码请求发生 4xx/5xx/维护提示/空响应时，自动按优先级链轮询下一个顶级模型（如 `mimo/mimo-v2.6-pro -> glm/GLM-5v-Turbo -> arena/gemini-2.5-flash`）。
+4. **UI 界面支持直观手动排序解码模型**：
+   - 新建 `ModelPriorityEditor`（`web/src/components/model-priority-editor.tsx`），支持序号展示、上移/下移调整优先级、删除、下拉预设添加、自定义输入添加以及一键恢复推荐顺序；
+   - 在系统设置（`system-settings.tsx`）与注册任务新建表单（`registration-job-form.tsx`）中无缝集成。
+5. **质量门禁全绿**：
+   - 后端 589 项测试（含架构隔离、Liquibase 迁移、契约测试）100% 通过；
+   - 自动化端 573 项 pytest 测试、Ruff 代码规范 100% 通过；
+   - Web Next.js 生产构建（16.2.12 Turbopack）、ESLint 100% 通过。
+
+## 2026-10-16 DeepSeek 容器与运行时深度优化、全厂商双代理池基准评测（1.4.3）
+
+### 目标与范围
+1. **DeepSeek 容器与图形渲染深度优化**：
+   - 镜像与环境变量：在 `Dockerfile.deepseek` 与 Kubernetes 编排中显式注入 `DISPLAY=:99`、`LIBGL_ALWAYS_SOFTWARE=1`、`GALLIUM_DRIVER=llvmpipe`、`MESA_GL_VERSION_OVERRIDE=4.5`、`MESA_GLSL_VERSION_OVERRIDE=450`，强制启用 LLVMpipe 软件 3D 光栅化，彻底根除 WebGL 驱动耗尽告警（`FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS`）；
+   - Xvfb 增强：启动参数追加 `+extension GLX +render -noreset`，确保常驻具备完整 GLX 扩展；
+   - 浏览器指纹仿真升级：`deepseek.py` 将 `camoufox_mode` 由 `"synthetic"` 升级为 `"real"`，自动加载真实 Windows 硬件级 WebGL/GPU（NVIDIA GTX/RTX）、真实 AudioContext 拓扑；并在 `browser_launch_profile` 中强制启用 WebGL 与图层加速，放行跨域追踪探针；
+   - 质询与风控快速熔断：`deepseek_challenge.py` 支持捕获主页面设备环境异常横幅（`_is_device_environment_error`），在设备环境被拒时快速熔断返回 `device_environment_rejected`，避免死等 35s 超时；
+   - 计算配额优化：将 `any2api-automation-deepseek` 的 CPU Request 由 `200m` 提升至 `500m`，确保 Camoufox 软件光栅化与 `DeepSeekHashV1` PoW 求解不被 CPU 限频。
+2. **全厂商双代理池基准实测与架构沉淀**：
+   - 完成 8 大厂商（DeepSeek、Grok、Arena、MiMo、MiniMax、LongCat、GLM、Qwen）在 `Self-hosted Oracle` 与 `CF Dynamic Overseas` 两个代理池下的端到端连通性与延迟评测；
+   - 输出详尽评测报告 [PROXY_POOLS_COMPATIBILITY_BENCHMARK_2026-10-16.md](../docs/reports/PROXY_POOLS_COMPATIBILITY_BENCHMARK_2026-10-16.md)，并在 [PROXY_POOLS.md](../docs/architecture/PROXY_POOLS.md) 中沉淀厂商代理适配矩阵。
+3. **DeepSeek 账号与风控机制闭环**：
+   - 清理所有历史拉黑/失效账号，当前 DeepSeek 账号数为 0；
+   - 逆向解剖 DeepSeek 最新四层风控（CloudFront/AWS WAF Token 质询、客户端 PoW Hash 求解、端到端请求混合加密、火山引擎硬件环境指纹探针）。
 
 ## 2026-10-15 修复 Arena/MinMax 底层传输异常、根除 Grok Cloudflare 403 重试风暴并优化 DeepSeek 验证码透传（1.4.2 已发布）
 

@@ -110,7 +110,7 @@ async def _chat_input(
         separators=(",", ":"),
     )
     return (
-        _with_phase("/open-apis/bot/chat", current),
+        _with_phase("/open-apis/react/chat", current),
         body,
         _request_headers(base_url, current, request),
     )

@@ -55,7 +55,7 @@ class ResponsesStateIntegrationTest {
         assertThat(database.store(mapper).find("resp_database",ResponsesService.owner(grant)).orElseThrow().response()).isEqualTo(body);
         assertThat(store.find("resp_database",ResponsesService.owner(grant(InteropDatabase.OTHER_KEY)))).isEmpty();
         assertThat(database.jdbc.sql("SELECT tag FROM databasechangelog WHERE tag IS NOT NULL ORDER BY orderexecuted DESC LIMIT 1")
-            .query(String.class).single()).isEqualTo("1.0.0");
+            .query(String.class).single()).isEqualTo("1.5.0");
     }
 
     @Test void completesStoredToolLoopWithPaginationDeletionAndExpiry() {

@@ -26,3 +26,19 @@ VLESS supports WebSocket/TLS and TCP REALITY with XTLS Vision. Direct HTTP and S
 `ANY2API_PROXY_BOOTSTRAP_DIRECTORY` may point to a read-only Kubernetes Secret volume containing one or more node files. At application readiness, Java imports all non-comment lines into `ANY2API_PROXY_BOOTSTRAP_POOL_NAME`, encrypts them in PostgreSQL, and preserves existing provider bindings. Logs contain only the pool name and node count.
 
 Bootstrap files and node URIs must stay outside the public repository. The GitOps deployment references only an existing Secret name.
+
+## Vendor Proxy Compatibility Matrix
+
+Based on production benchmark tests across all 8 supported AI providers (see [Benchmark Report](../reports/PROXY_POOLS_COMPATIBILITY_BENCHMARK_2026-10-16.md)), the recommended pool binding strategy is as follows:
+
+| Provider | Recommended Pool | Rationale & Performance |
+| :--- | :--- | :--- |
+| **DeepSeek** | `Self-hosted Oracle` | 181ms latency, 100% availability, zero connection drops for long SSE streaming. Passes CloudFront WAF cleanly. |
+| **Grok** | `Self-hosted Oracle` | 579ms latency vs 1151ms on CF (nearly 2x faster). Stable websockets for multi-turn reasoning and tool use. |
+| **Arena** | `Self-hosted Oracle` | 420ms vs 610ms on CF. Pairs with Camoufox to bypass Cloudflare 403 anti-bot. |
+| **MiMo** | `Self-hosted Oracle` | 409ms vs 513ms on CF. High IP reputation prevents captcha prompts. |
+| **MiniMax** | `Self-hosted Oracle` | 565ms vs 739ms on CF. Robust streaming connectivity for `agent-stream.minimax.io`. |
+| **LongCat** | `Self-hosted Oracle` | 1347ms vs 2594ms on CF (1.2s faster response time). Prevents high first-token latency. |
+| **ChatGLM** | `CF Overseas / Oracle` | CF dynamic edge achieves 441ms vs 875ms into mainland China CDN endpoints; Oracle serves as reliable fallback. |
+| **Qwen** | `CF Overseas / Oracle` | CF dynamic edge achieves 344ms vs 546ms to Alibaba Cloud; Oracle provides 100% connection guarantee. |
+

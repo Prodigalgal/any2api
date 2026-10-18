@@ -13,6 +13,7 @@ class CaptchaAiPolicy:
     enabled: bool = True
     mode: CaptchaAiMode = "internal"
     internal_model: str = ""
+    internal_models: tuple[str, ...] = ()
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> CaptchaAiPolicy:
@@ -30,7 +31,23 @@ class CaptchaAiPolicy:
         internal_model = str(
             raw.get("ai_internal_model") or raw.get("internal_model") or ""
         ).strip()
-        return cls(enabled=enabled, mode=cast(CaptchaAiMode, mode), internal_model=internal_model)
+        models_input = raw.get("ai_internal_models")
+        models_list: list[str] = []
+        if isinstance(models_input, list):
+            for item in models_input:
+                val = str(item or "").strip()
+                if val and val not in models_list:
+                    models_list.append(val)
+        if not models_list and internal_model:
+            models_list = [internal_model]
+        elif models_list and not internal_model:
+            internal_model = models_list[0]
+        return cls(
+            enabled=enabled,
+            mode=cast(CaptchaAiMode, mode),
+            internal_model=internal_model,
+            internal_models=tuple(models_list),
+        )
 
 
 _current_policy: ContextVar[CaptchaAiPolicy | None] = ContextVar(

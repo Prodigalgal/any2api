@@ -61,7 +61,6 @@ public final class DeepseekProvider implements InferenceProvider {
             ProviderCapability.REASONING, SupportLevel.NATIVE,
             ProviderCapability.MODEL_DISCOVERY, SupportLevel.NATIVE,
             ProviderCapability.ACCOUNT_KEEPALIVE, SupportLevel.NATIVE,
-            ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
             ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
         Map.of(RandomModelRole.TOP_TEXT, List.of("expert")), true);
 

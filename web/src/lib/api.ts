@@ -216,6 +216,7 @@ export type RegistrationJob = {
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
   aiInternalModel?: string | null;
+  aiInternalModels?: string[] | null;
   attempts: number;
   successCount: number;
   failureCount: number;
@@ -282,6 +283,7 @@ export type RegistrationJobFormValue = {
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
   aiInternalModel?: string | null;
+  aiInternalModels?: string[] | null;
   idempotencyKey?: string | null;
 };
 
@@ -445,6 +447,7 @@ export type RegistrationDefaults = {
   aiCaptchaEnabled: boolean;
   aiCaptchaMode: CaptchaAiMode;
   aiInternalModel: string;
+  aiInternalModels?: string[];
 };
 
 export type SystemSettings = {

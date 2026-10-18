@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     captcha_ai_api_key: str = ""
     captcha_ai_model: str = ""
     captcha_ai_internal_model: str = ""
+    captcha_ai_internal_models: list[str] = Field(default_factory=list)
     captcha_ai_prompt_prefix: str = ""
     captcha_ai_action_samples: int = 5
     captcha_ai_action_sample_timeout_seconds: int = 60

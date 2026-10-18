@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type CaptchaAiMode, type RegistrationDefaults, type RegistrationProxyPolicy, type TempMailSettings } from "@/lib/api";
 import { DataSurface, PageContainer, PageHeader } from "@/components/page-layout";
+import { DEFAULT_DECODING_MODELS, ModelPriorityEditor } from "@/components/model-priority-editor";
 
 export function SystemSettingsPage() {
   const settings = useQuery({ queryKey: ["system-settings"], queryFn: api.systemSettings });
@@ -73,15 +74,23 @@ function RegistrationDefaultsForm({ initial }: { initial: RegistrationDefaults }
         <FormControlLabel control={<Switch checked={value.headless} onChange={(event) => setValue({ ...value, headless: event.target.checked })} />} label="无头浏览器" />
         <FormControlLabel control={<Switch checked={value.aiCaptchaEnabled} onChange={(event) => setValue({ ...value, aiCaptchaEnabled: event.target.checked })} />} label="AI 打码" />
         <ToggleButtonGroup exclusive size="small" value={value.aiCaptchaMode} disabled={!value.aiCaptchaEnabled} onChange={(_, mode: CaptchaAiMode | null) => mode && setValue({ ...value, aiCaptchaMode: mode })}><ToggleButton value="AUTO">自动</ToggleButton><ToggleButton value="INTERNAL">内置</ToggleButton><ToggleButton value="EXTERNAL">外置</ToggleButton></ToggleButtonGroup>
-        <TextField select size="small" label="默认内部过码模型" value={value.aiInternalModel || ""} disabled={!value.aiCaptchaEnabled || value.aiCaptchaMode === "EXTERNAL"} onChange={(event) => setValue({ ...value, aiInternalModel: event.target.value })}>
-          <MenuItem value="">系统默认（TOP_MULTIMODAL 随机池）</MenuItem>
-          <MenuItem value="mimo/mimo-v2.6-flash">MiMo 2.6 Flash（推荐·极速视觉）</MenuItem>
-          <MenuItem value="mimo/mimo-v2.6-pro">MiMo 2.6 Pro（深度多模态推理）</MenuItem>
-          <MenuItem value="mimo/mimo-v2.5">MiMo 2.5（旧版兼容）</MenuItem>
-          {value.aiInternalModel && !["", "mimo/mimo-v2.6-flash", "mimo/mimo-v2.6-pro", "mimo/mimo-v2.5"].includes(value.aiInternalModel) && (
-            <MenuItem value={value.aiInternalModel}>{value.aiInternalModel}</MenuItem>
-          )}
-        </TextField>
+        <Box sx={{ gridColumn: { xs: "1fr", sm: "span 2", xl: "span 4" } }}>
+          <ModelPriorityEditor
+            models={
+              value.aiInternalModels && value.aiInternalModels.length > 0
+                ? value.aiInternalModels
+                : (value.aiInternalModel ? [value.aiInternalModel] : DEFAULT_DECODING_MODELS)
+            }
+            disabled={!value.aiCaptchaEnabled || value.aiCaptchaMode === "EXTERNAL"}
+            onChange={(nextModels) => {
+              setValue({
+                ...value,
+                aiInternalModels: nextModels,
+                aiInternalModel: nextModels[0] || "",
+              });
+            }}
+          />
+        </Box>
       </Box>
     </Box>
   </DataSurface>;

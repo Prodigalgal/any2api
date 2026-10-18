@@ -72,7 +72,7 @@ class DeepseekAutomationProvider(AutomationProvider):
             "hcaptcha_grid",
             "hcaptcha_semantic_drag",
         ),
-        operations=("register", "reauthenticate", "keepalive"),
+        operations=("reauthenticate", "keepalive"),
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",
@@ -313,7 +313,19 @@ def _catalog_available(body: dict[str, Any]) -> bool:
         )
 
     def browser_launch_profile(self) -> BrowserLaunchProfile:
-        return BrowserLaunchProfile(headless=False, humanize=True, camoufox_os="windows")
+        return BrowserLaunchProfile(
+            headless=False,
+            humanize=True,
+            camoufox_os="windows",
+            firefox_user_prefs=(
+                ("webgl.force-enabled", True),
+                ("webgl.disabled", False),
+                ("layers.acceleration.force-enabled", True),
+                ("privacy.trackingprotection.enabled", False),
+                ("privacy.trackingprotection.pbmode.enabled", False),
+                ("network.cookie.cookieBehavior", 0),
+            ),
+        )
 
     def browser_fingerprint_policy(self) -> BrowserFingerprintPolicy:
         return BrowserFingerprintPolicy(
@@ -329,7 +341,7 @@ def _catalog_available(body: dict[str, Any]) -> bool:
                 )
                 for width, height in ((1365, 900), (1440, 900), (1536, 864))
             ),
-            camoufox_mode="synthetic",
+            camoufox_mode="real",
         )
 
 

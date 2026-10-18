@@ -79,7 +79,7 @@ public final class MimoProvider implements InferenceProvider {
     @Override
     public ProviderManifest manifest() {
         return new ProviderManifest("mimo", "MiMo", "official-browser-mimo-web-v1", "3",
-            List.of("mimo-v2.6-flash", "mimo-v2.6-pro", "mimo-v2.5"), Map.of(
+            List.of("mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-v2.5"), Map.of(
                 ProviderCapability.CHAT_COMPLETIONS, SupportLevel.NATIVE,
                 ProviderCapability.RESPONSES, SupportLevel.NATIVE,
                 ProviderCapability.STREAMING, SupportLevel.NATIVE,
@@ -91,13 +91,13 @@ public final class MimoProvider implements InferenceProvider {
                 ProviderCapability.REGISTRATION, SupportLevel.NATIVE,
                 ProviderCapability.REAUTHENTICATION, SupportLevel.NATIVE),
             Map.of(
-                RandomModelRole.TOP_TEXT, List.of("mimo-v2.6-flash", "mimo-v2.6-pro"),
-                RandomModelRole.TOP_MULTIMODAL, List.of("mimo-v2.6-flash", "mimo-v2.6-pro")), true);
+                RandomModelRole.TOP_TEXT, List.of("mimo-v2.6-pro", "mimo-v2.6-flash"),
+                RandomModelRole.TOP_MULTIMODAL, List.of("mimo-v2.6-pro", "mimo-v2.6-flash")), true);
     }
 
     @Override
     public java.util.Optional<String> initialVerificationModel() {
-        return java.util.Optional.of("mimo-v2.6-flash");
+        return java.util.Optional.of("mimo-v2.6-pro");
     }
 
     @Override

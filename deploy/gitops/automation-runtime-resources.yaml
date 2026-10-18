@@ -47,7 +47,7 @@ spec:
         - name: automation-deepseek
           resources:
             requests:
-              cpu: 200m
+              cpu: 500m
               memory: 1Gi
               ephemeral-storage: 512Mi
             limits:

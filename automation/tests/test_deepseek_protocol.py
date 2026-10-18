@@ -40,7 +40,7 @@ from any2api_automation.providers.deepseek_challenge import (
 def test_manifest_is_discovered_with_full_lifecycle_operations() -> None:
     provider = provider_registry.require("deepseek")
 
-    assert provider.manifest.operations == ("register", "reauthenticate", "keepalive")
+    assert provider.manifest.operations == ("reauthenticate", "keepalive")
     assert provider.manifest.registration_attempt_mode == "single_identity"
     assert provider.manifest.challenge_types == (
         "hcaptcha_area_select",

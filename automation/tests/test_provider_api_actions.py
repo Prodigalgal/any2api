@@ -370,7 +370,7 @@ async def test_mimo_api_prepares_phase_bound_chat_request() -> None:
         "",
     )
 
-    assert path.startswith("/open-apis/bot/chat?xiaomichatbot_ph=phase-1")
+    assert path.startswith("/open-apis/react/chat?xiaomichatbot_ph=phase-1")
     assert json.loads(body)["modelConfig"]["model"] == "mimo-v2.5"
     assert "xiaomichatbot_ph=phase-1" in headers["Cookie"]
 
@@ -730,7 +730,7 @@ async def test_mimo_api_applies_rotated_cookie_aliases_to_follow_up_requests(mon
     assert "serviceToken=service-2" in calls[1][1]["Cookie"]
     assert "userId=user-2" in calls[1][1]["Cookie"]
     assert "xiaomichatbot_ph=phase-2" in calls[1][1]["Cookie"]
-    assert path == "/open-apis/bot/chat?xiaomichatbot_ph=phase-2"
+    assert path == "/open-apis/react/chat?xiaomichatbot_ph=phase-2"
     assert "serviceToken=service-2" in headers["Cookie"]
 
 

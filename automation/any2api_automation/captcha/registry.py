@@ -841,7 +841,8 @@ class SolverRegistry:
             ),
         )
         deadline = time.monotonic() + budget
-        for attempt in range(1, 4):
+        max_attempts = max(3, len(transports))
+        for attempt in range(1, max_attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining < 1:
                 break
@@ -862,10 +863,10 @@ class SolverRegistry:
                 provider = str(headers.get("X-Any2API-Provider") or transport.kind)
                 model = str(headers.get("X-Any2API-Model") or transport.model)
                 error_type = self._response_error_type(response)
-                if error_type == "account_unavailable" and attempt < 3:
+                if error_type == "account_unavailable" and attempt < max_attempts:
                     self._diagnostics.visual = (
                         f"retrying_account_unavailable:transport={transport.kind}:"
-                        f"provider={provider}:model={model}"
+                        f"provider={provider}:model={model}:attempt={attempt}"
                     )
                     time.sleep(min(random.uniform(0.1, 0.4), max(0, remaining - 1)))
                     continue
@@ -879,25 +880,31 @@ class SolverRegistry:
                         value if isinstance(value, str) else str(value.get("text") or "")
                         for value in content
                     )
-                if not str(content).strip() and attempt < 3:
-                    self._diagnostics.visual = (
-                        f"retrying_empty_response:provider={provider}:model={model}"
-                    )
+                content_str = str(content).strip()
+                if not content_str and attempt < max_attempts:
+                    self._diagnostics.visual = f"retrying_empty_response:provider={provider}:model={model}:attempt={attempt}"
+                    continue
+                if (
+                    "MiMo Studio updated" in content_str or "Refresh your page" in content_str
+                ) and attempt < max_attempts:
+                    self._diagnostics.visual = f"retrying_upstream_maintenance:provider={provider}:model={model}:attempt={attempt}"
                     continue
                 self._diagnostics.visual = (
                     f"response_received:transport={transport.kind}:"
                     f"provider={provider}:model={model}:attempt={attempt}"
                 )
-                return str(content)
+                return content_str
             except httpx.HTTPStatusError as error:
                 headers = error.response.headers
                 provider = str(headers.get("X-Any2API-Provider") or transport.kind)
                 model = str(headers.get("X-Any2API-Model") or transport.model)
                 status = error.response.status_code
-                if (status in {408, 409, 425, 429} or status >= 500) and attempt < 3:
+                if (
+                    status in {400, 408, 409, 425, 429} or status >= 500
+                ) and attempt < max_attempts:
                     self._diagnostics.visual = (
                         f"retrying_http_status:{status}:transport={transport.kind}:"
-                        f"provider={provider}:model={model}"
+                        f"provider={provider}:model={model}:attempt={attempt}"
                     )
                     time.sleep(min(random.uniform(0.1, 0.4), max(0, remaining - 1)))
                     continue
@@ -907,6 +914,10 @@ class SolverRegistry:
                 )
                 return ""
             except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+                if attempt < max_attempts:
+                    self._diagnostics.visual = f"retrying_request_error:{type(error).__name__}:transport={transport.kind}:model={transport.model}"
+                    time.sleep(min(random.uniform(0.1, 0.4), max(0, remaining - 1)))
+                    continue
                 self._diagnostics.visual = f"request_error:{type(error).__name__}"
                 return ""
         return ""
@@ -915,25 +926,43 @@ class SolverRegistry:
         config = settings()
         if not config.captcha_ai_enabled or not policy.enabled:
             return []
-        internal: _VisualTransport | None = None
+        internals: list[_VisualTransport] = []
         if config.java_base_url.strip() and config.public_api_key.strip():
-            selected_model = (
-                policy.internal_model or config.captcha_ai_internal_model or ""
-            ).strip()
-            if selected_model and selected_model.lower() != "random":
-                internal = _VisualTransport(
-                    "internal",
-                    f"{config.java_base_url.rstrip('/')}/v1/chat/completions",
-                    config.public_api_key.strip(),
-                    selected_model,
-                )
-            else:
-                internal = _VisualTransport(
-                    "internal",
-                    f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions",
-                    config.public_api_key.strip(),
-                    "random",
-                )
+            candidates: list[str] = []
+            if policy.internal_models:
+                candidates.extend(policy.internal_models)
+            elif policy.internal_model:
+                candidates.append(policy.internal_model)
+            elif getattr(config, "captcha_ai_internal_models", None):
+                candidates.extend(config.captcha_ai_internal_models)
+            elif config.captcha_ai_internal_model:
+                candidates.append(config.captcha_ai_internal_model)
+
+            if not candidates:
+                candidates = ["random"]
+
+            for model_candidate in candidates:
+                selected_model = str(model_candidate).strip()
+                if not selected_model:
+                    continue
+                if selected_model.lower() != "random":
+                    internals.append(
+                        _VisualTransport(
+                            "internal",
+                            f"{config.java_base_url.rstrip('/')}/v1/chat/completions",
+                            config.public_api_key.strip(),
+                            selected_model,
+                        )
+                    )
+                else:
+                    internals.append(
+                        _VisualTransport(
+                            "internal",
+                            f"{config.java_base_url.rstrip('/')}/multimodal-random/v1/chat/completions",
+                            config.public_api_key.strip(),
+                            "random",
+                        )
+                    )
         external: _VisualTransport | None = None
         if (
             config.captcha_ai_api_base.strip()
@@ -949,10 +978,13 @@ class SolverRegistry:
                 config.captcha_ai_model.strip(),
             )
         if policy.mode == "internal":
-            return [internal] if internal else []
+            return internals
         if policy.mode == "external":
             return [external] if external else []
-        return [transport for transport in (internal, external) if transport is not None]
+        combined = list(internals)
+        if external:
+            combined.append(external)
+        return combined
 
     def _visual_ai_payload(self, image: bytes) -> tuple[str, bytes]:
         from PIL import Image, UnidentifiedImageError

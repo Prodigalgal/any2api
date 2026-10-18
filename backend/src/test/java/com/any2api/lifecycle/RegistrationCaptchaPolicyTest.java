@@ -33,4 +33,18 @@ class RegistrationCaptchaPolicyTest {
             new RegistrationCaptchaPolicy(false,
                 RegistrationCaptchaPolicy.AiMode.EXTERNAL, "mimo/mimo-v2.6-pro"));
     }
+
+    @Test
+    void orderedInternalModelsSurviveWireRoundTrip() {
+        var models = java.util.List.of("mimo/mimo-v2.6-pro", "glm/GLM-5v-Turbo", "arena/gemini-2.5-flash");
+        var policy = RegistrationCaptchaPolicy.resolve(
+            true, RegistrationCaptchaPolicy.AiMode.INTERNAL, null, models);
+        assertThat(policy.aiInternalModel()).isEqualTo("mimo/mimo-v2.6-pro");
+        assertThat(policy.aiInternalModels()).containsExactlyElementsOf(models);
+
+        var wire = mapper.createObjectNode().set("captcha", policy.toWire(mapper));
+        var restored = RegistrationCaptchaPolicy.from(wire);
+        assertThat(restored.aiInternalModel()).isEqualTo("mimo/mimo-v2.6-pro");
+        assertThat(restored.aiInternalModels()).containsExactlyElementsOf(models);
+    }
 }

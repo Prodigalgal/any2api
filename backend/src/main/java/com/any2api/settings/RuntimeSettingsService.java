@@ -291,7 +291,8 @@ public class RuntimeSettingsService {
         boolean headless,
         boolean aiCaptchaEnabled,
         RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
-        String aiInternalModel
+        String aiInternalModel,
+        List<String> aiInternalModels
     ) {
         public RegistrationDefaults(
             int target, int maxAttempts, int concurrency,
@@ -305,7 +306,28 @@ public class RuntimeSettingsService {
             this(target, maxAttempts, concurrency, attemptIntervalSeconds,
                 roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
                 maxConsecutiveFailureBatches, proxyPolicy, headless,
-                aiCaptchaEnabled, aiCaptchaMode, "");
+                aiCaptchaEnabled, aiCaptchaMode, "",
+                List.of());
+        }
+
+        public RegistrationDefaults(
+            int target, int maxAttempts, int concurrency,
+            int attemptIntervalSeconds, int roundIntervalSeconds,
+            int attemptTimeoutSeconds, int flowMaxAttempts,
+            int maxConsecutiveFailureBatches,
+            RegistrationProxyPolicy proxyPolicy, boolean headless,
+            boolean aiCaptchaEnabled,
+            RegistrationCaptchaPolicy.AiMode aiCaptchaMode,
+            String aiInternalModel
+        ) {
+            this(target, maxAttempts, concurrency, attemptIntervalSeconds,
+                roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
+                maxConsecutiveFailureBatches, proxyPolicy, headless,
+                aiCaptchaEnabled, aiCaptchaMode,
+                aiInternalModel == null ? "" : aiInternalModel.trim(),
+                aiInternalModel == null || aiInternalModel.isBlank()
+                    ? List.of()
+                    : List.of(aiInternalModel.trim()));
         }
 
         public static RegistrationDefaults standard() {
@@ -313,7 +335,8 @@ public class RuntimeSettingsService {
             // identities reduce same-IP ban/challenge collisions.
             return new RegistrationDefaults(1, 5, 1, 45, 8, 2100, 5, 8,
                 RegistrationProxyPolicy.PROVIDER_DEFAULT, true, true,
-                RegistrationCaptchaPolicy.AiMode.INTERNAL, "");
+                RegistrationCaptchaPolicy.AiMode.INTERNAL, "",
+                List.of());
         }
 
         public RegistrationDefaults normalized() {
@@ -326,6 +349,13 @@ public class RuntimeSettingsService {
             requireRange(flowMaxAttempts, 1, 10, "flow max attempts");
             requireRange(maxConsecutiveFailureBatches, 1, 20,
                 "maximum consecutive failed rounds");
+            var models = normalizeModels(aiInternalModels);
+            var single = aiInternalModel == null ? "" : aiInternalModel.trim();
+            if (models.isEmpty() && !single.isEmpty()) {
+                models = List.of(single);
+            } else if (!models.isEmpty() && single.isEmpty()) {
+                single = models.get(0);
+            }
             return new RegistrationDefaults(
                 target, maxAttempts, concurrency, attemptIntervalSeconds,
                 roundIntervalSeconds, attemptTimeoutSeconds, flowMaxAttempts,
@@ -333,9 +363,23 @@ public class RuntimeSettingsService {
                 proxyPolicy == null ? RegistrationProxyPolicy.PROVIDER_DEFAULT : proxyPolicy,
                 headless, aiCaptchaEnabled,
                 aiCaptchaMode == null ? RegistrationCaptchaPolicy.AiMode.INTERNAL : aiCaptchaMode,
-                aiInternalModel == null ? "" : aiInternalModel.trim());
+                single,
+                models);
         }
 
+        private static List<String> normalizeModels(List<String> input) {
+            if (input == null || input.isEmpty()) return List.of();
+            var list = new java.util.ArrayList<String>();
+            for (var item : input) {
+                if (item != null) {
+                    var trimmed = item.trim();
+                    if (!trimmed.isEmpty() && !list.contains(trimmed)) {
+                        list.add(trimmed);
+                    }
+                }
+            }
+            return List.copyOf(list);
+        }
     }
 
     private static void requireRange(int value, int minimum, int maximum, String name) {

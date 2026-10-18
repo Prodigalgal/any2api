@@ -78,9 +78,32 @@ final class MimoEventDecoder {
         if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) return output;
         try {
             var event = mapper.readTree(data);
-            if (event.path("type").asText("").equals("text")) {
-                var text = event.path("content").asText("");
-                if (!text.isEmpty() && !INTERNAL_TOKENS.contains(text.trim())) {
+            if (event.has("error") && !event.path("error").asText("").isBlank()) {
+                var errorText = event.path("error").asText("");
+                output.add(new CanonicalEvent.Failed(1, requestId, next(), "upstream_error",
+                    errorText, java.util.Map.of("retryable", true)));
+                completed = true;
+                return output;
+            }
+            if (event.has("reasoningContent")) {
+                var reasoningText = event.path("reasoningContent").asText("");
+                if (!reasoningText.isEmpty()) {
+                    output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), reasoningText));
+                }
+            }
+            String text = "";
+            if (event.path("type").asText("").equals("text") || event.has("content")) {
+                text = event.path("content").asText("");
+            }
+            if (!text.isEmpty()) {
+                if (text.contains("MiMo Studio updated") || text.contains("Refresh your page for better performance")) {
+                    output.add(new CanonicalEvent.Failed(1, requestId, next(), "upstream_maintenance",
+                        "MiMo Studio returned update notification: " + text, java.util.Map.of("retryable", true)));
+                    buffer.setLength(0);
+                    completed = true;
+                    return output;
+                }
+                if (!INTERNAL_TOKENS.contains(text.trim())) {
                     var normalized = text.replace("\0", "");
                     if (!tools.isEmpty() && normalized.length() > MAX_TOOL_CAPTURE_CHARACTERS - buffer.length()) {
                         output.add(new CanonicalEvent.Failed(1, requestId, next(), "tool_call_generation_failed",
@@ -92,9 +115,11 @@ final class MimoEventDecoder {
                     buffer.append(normalized);
                     if (tools.isEmpty() && !pendingLengthRejection()) output.addAll(drain(false));
                 }
-            } else if (event.has("promptTokens") && !usageEmitted) {
+            }
+            var usageNode = event.has("usage") ? event.path("usage") : event;
+            if (usageNode.has("promptTokens") && !usageEmitted) {
                 output.add(new CanonicalEvent.Usage(1, requestId, next(),
-                    event.path("promptTokens").asLong(), event.path("completionTokens").asLong(), 0));
+                    usageNode.path("promptTokens").asLong(), usageNode.path("completionTokens").asLong(), 0));
                 usageEmitted = true;
             }
             return output;

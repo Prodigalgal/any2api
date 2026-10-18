@@ -580,6 +580,44 @@ def test_visual_completion_auto_mode_falls_back_to_configured_external_solver(
     assert "transport=external" in registry.visual_diagnostic()
 
 
+def test_visual_completion_cycles_through_multiple_internal_models_on_failure(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "internal-secret")
+    monkeypatch.setenv("ANY2API_AUTOMATION_JAVA_BASE_URL", "https://gateway.example")
+    settings.cache_clear()
+    responses = iter((_VisionGatewayErrorResponse(), _VisionActionResponse()))
+    requests: list[tuple[str, str]] = []
+
+    def post(url, **kwargs):
+        requests.append((url, kwargs["json"]["model"]))
+        return next(responses)
+
+    monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
+
+    policy = CaptchaAiPolicy(
+        enabled=True,
+        mode="internal",
+        internal_models=("mimo/mimo-v2.6-pro", "glm/GLM-5v-Turbo"),
+    )
+    content = registry._visual_completion_sync(
+        b"fixture-image",
+        "fixture prompt",
+        max_tokens=100,
+        timeout_seconds=10,
+        ai_policy=policy,
+    )
+
+    settings.cache_clear()
+    assert content.startswith("ACTIONS=")
+    assert requests == [
+        ("https://gateway.example/v1/chat/completions", "mimo/mimo-v2.6-pro"),
+        ("https://gateway.example/v1/chat/completions", "glm/GLM-5v-Turbo"),
+    ]
+    assert "model=glm/GLM-5v-Turbo" in registry.visual_diagnostic()
+
+
 def test_task_policy_can_disable_ai_without_disabling_local_solvers(monkeypatch) -> None:
     monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
     monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "internal-secret")

@@ -9,8 +9,13 @@ COPY --chown=10001:10001 pyproject.toml check_runtime_version.py ./
 RUN uv pip install --python /app/.venv/bin/python --no-deps --reinstall-package any2api-automation . \
     && /app/.venv/bin/python check_runtime_version.py
 
-ENV ANY2API_AUTOMATION_ENABLED_PROVIDERS=deepseek
+ENV ANY2API_AUTOMATION_ENABLED_PROVIDERS=deepseek \
+    DISPLAY=:99 \
+    LIBGL_ALWAYS_SOFTWARE=1 \
+    GALLIUM_DRIVER=llvmpipe \
+    MESA_GL_VERSION_OVERRIDE=4.5 \
+    MESA_GLSL_VERSION_OVERRIDE=450
 
 EXPOSE 8090
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/bin/sh", "-c", "Xvfb :99 -screen 0 1365x900x24 -nolisten tcp -ac & for i in $(seq 1 50); do [ -S /tmp/.X11-unix/X99 ] && break; sleep 0.1; done; [ -S /tmp/.X11-unix/X99 ] || exit 1; export DISPLAY=:99; exec /app/.venv/bin/uvicorn any2api_automation.main:app --host 0.0.0.0 --port 8090"]
+CMD ["/bin/sh", "-c", "Xvfb :99 -screen 0 1365x900x24 +extension GLX +render -noreset -nolisten tcp -ac & for i in $(seq 1 50); do [ -S /tmp/.X11-unix/X99 ] && break; sleep 0.1; done; [ -S /tmp/.X11-unix/X99 ] || exit 1; export DISPLAY=:99; exec /app/.venv/bin/uvicorn any2api_automation.main:app --host 0.0.0.0 --port 8090"]

@@ -886,16 +886,21 @@ def _arena_ndjson_stream_script(
     return (
         rf"""async request => {{
   const emit = event => window[{binding}]({{requestId: request.requestId, ...event}});
+  const controller = new AbortController();
+  const controllers = window.__any2apiArenaStreamControllers ||= new Map();
+  controllers.set(request.requestId, controller);
+  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
   const getRecaptchaV3Token = async () => {{
     const deadline = Date.now() + 10_000;
     let enterprise;
-    while (Date.now() < deadline) {{
+    while (Date.now() < deadline && !controller.signal.aborted) {{
       enterprise = window.grecaptcha?.enterprise;
       if (typeof enterprise?.ready === 'function'
           && typeof enterprise?.execute === 'function') break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }}
-    if (typeof enterprise?.ready !== 'function' || typeof enterprise?.execute !== 'function') {{
+    if (controller.signal.aborted || typeof enterprise?.ready !== 'function'
+        || typeof enterprise?.execute !== 'function') {{
       return {{token: '', available: false}};
     }}
     const execute = new Promise(resolve => enterprise.ready(async () => {{
@@ -905,20 +910,29 @@ def _arena_ndjson_stream_script(
       }} catch (_) {{
         resolve({{token: '', available: true}});
       }}
-    }}));
-    const timeout = new Promise(resolve =>
-      setTimeout(() => resolve({{token: '', available: true}}), 10_000));
-    return await Promise.race([execute, timeout]);
+    }})).catch(() => ({{token: '', available: true}}));
+    let tokenTimer;
+    let abortToken;
+    const tokenTimeout = new Promise(resolve => {{
+      tokenTimer = setTimeout(() => resolve({{token: '', available: true}}), 10_000);
+      abortToken = () => resolve({{token: '', available: true}});
+      controller.signal.addEventListener('abort', abortToken, {{once: true}});
+    }});
+    try {{ return await Promise.race([execute, tokenTimeout]); }}
+    finally {{
+      clearTimeout(tokenTimer);
+      controller.signal.removeEventListener('abort', abortToken);
+    }}
   }};
   const getRecaptchaV2Token = async triggerReason => {{
     const deadline = Date.now() + 10_000;
     let enterprise;
-    while (Date.now() < deadline) {{
+    while (Date.now() < deadline && !controller.signal.aborted) {{
       enterprise = window.grecaptcha?.enterprise;
       if (typeof enterprise?.render === 'function') break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }}
-    if (typeof enterprise?.render !== 'function') {{
+    if (controller.signal.aborted || typeof enterprise?.render !== 'function') {{
       await emit({{type: 'recaptcha', version: 'v2', state: 'unavailable', available: false,
         tokenLength: 0, triggerReason}});
       return '';
@@ -935,17 +949,26 @@ def _arena_ndjson_stream_script(
     await emit({{type: 'recaptcha', version: 'v2', state: 'required', available: true,
       tokenLength: 0, triggerReason}});
     let token = '';
+    let widgetId;
+    let challengeTimer;
+    let abortChallenge;
     try {{
       token = await new Promise(resolve => {{
         let settled = false;
         const finish = value => {{
           if (settled) return;
           settled = true;
+          clearTimeout(challengeTimer);
           resolve(typeof value === 'string' ? value : '');
         }};
+        abortChallenge = () => finish('');
+        controller.signal.addEventListener('abort', abortChallenge, {{once: true}});
+        if (controller.signal.aborted) {{ finish(''); return; }}
+        challengeTimer = setTimeout(() => finish(''), {recaptcha_v2_timeout_ms});
         const render = () => {{
+          if (settled) return;
           try {{
-            enterprise.render(container, {{
+            widgetId = enterprise.render(container, {{
               sitekey: {v2_site_key},
               callback: finish,
               'error-callback': () => finish(''),
@@ -962,50 +985,20 @@ def _arena_ndjson_stream_script(
         }} catch (_) {{
           finish('');
         }}
-        // Auto-click the reCAPTCHA checkbox after it renders
-        const autoClick = async () => {{
-          for (let i = 0; i < 30; i++) {{
-            await new Promise(r => setTimeout(r, 1000));
-            try {{
-              const iframe = container.querySelector('iframe[src*="recaptcha"]');
-              if (iframe) {{
-                const rect = iframe.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {{
-                  // Click the checkbox area (left side of the iframe)
-                  const clickX = rect.left + 30;
-                  const clickY = rect.top + rect.height / 2;
-                  const el = document.elementFromPoint(clickX, clickY);
-                  if (el) {{
-                    el.click();
-                    // Also try dispatching mouse events on the iframe
-                    iframe.dispatchEvent(new MouseEvent('click', {{
-                      bubbles: true, cancelable: true,
-                      clientX: clickX, clientY: clickY
-                    }}));
-                  }}
-                }}
-              }}
-              // Also look for any clickable checkbox-like elements
-              const checkbox = container.querySelector(
-                '.recaptcha-checkbox, [role="checkbox"], input[type="checkbox"]'
-              );
-              if (checkbox) checkbox.click();
-            }} catch (_) {{}}
-          }}
-        }};
-        autoClick();
-        setTimeout(() => finish(''), {recaptcha_v2_timeout_ms});
       }});
     }} finally {{
+      clearTimeout(challengeTimer);
+      if (abortChallenge) controller.signal.removeEventListener('abort', abortChallenge);
       await emit({{type: 'recaptcha', version: 'v2',
-        state: token ? 'solved' : 'timeout', available: true,
+        state: token ? 'solved' : controller.signal.aborted ? 'aborted' : 'timeout', available: true,
         tokenLength: String(token || '').length, triggerReason}});
+      if (widgetId !== undefined && typeof enterprise.reset === 'function') {{
+        try {{ enterprise.reset(widgetId); }} catch (_) {{ /* widget may already be removed */ }}
+      }}
       try {{ container.remove(); }} catch (_) {{}}
     }}
     return token;
   }};
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
   try {{
     let parsedBody;
     if (request.method === 'POST' && request.body !== '') {{
@@ -1018,6 +1011,8 @@ def _arena_ndjson_stream_script(
     }}
     const requestBody = async v2Token => {{
       if (!parsedBody) return request.body === '' ? undefined : request.body;
+      const interaction = window.__any2apiArenaClientInteraction;
+      if (typeof interaction === 'function') parsedBody.cx = interaction();
       if (v2Token) {{
         const retryBody = {{...parsedBody, recaptchaV2Token: v2Token}};
         delete retryBody.recaptchaV3Token;
@@ -1028,15 +1023,23 @@ def _arena_ndjson_stream_script(
       const recaptcha = await getRecaptchaV3Token();
       await emit({type: 'recaptcha', available: recaptcha.available === true,
         tokenLength: String(recaptcha.token || '').length});
-      if (!recaptcha.token) return JSON.stringify(parsedBody);
+      if (!recaptcha.token) return null;
       return JSON.stringify({...parsedBody, recaptchaV3Token: recaptcha.token});
     };
     const send = async (attempt, v2Token = '') => {
+      const body = await requestBody(v2Token);
+      if (body === null) {
+        await emit({type: 'status', status: 403, contentType: 'application/json'});
+        await emit({type: 'error', data: JSON.stringify({
+          error: 'recaptcha v3 token is unavailable', code: 'recaptcha_v3_unavailable'
+        })});
+        return;
+      }
       const response = await fetch(request.url, {
         method: request.method,
         credentials: 'include',
         headers: request.headers,
-        body: await requestBody(v2Token),
+        body,
         signal: controller.signal
       });
       if (!response.ok) {
@@ -1091,6 +1094,7 @@ def _arena_ndjson_stream_script(
     await send(0);
   } finally {
     clearTimeout(timeout);
+    controllers.delete(request.requestId);
   }
 }"""
     )
@@ -1214,39 +1218,17 @@ def _arena_upload_script() -> str:
 }"""
 
 
-def _arena_fetch_interceptor_script() -> str:
-    """Intercept fetch calls to capture Arena's official request format."""
-
-    return r"""(() => {
-  const originalFetch = window.fetch;
-  window.__any2apiArenaFetchLog = [];
-  window.fetch = async function(...args) {
-    const [input, init] = args;
-    const url = typeof input === 'string' ? input : (input?.url || '');
-    if (url.includes('create-evaluation') || url.includes('generateUploadUrl') || url.includes('getSignedUrl')) {
-      const entry = {url: url.slice(0, 200), method: init?.method || 'GET'};
-      if (init?.body) {
-        try {
-          const bodyStr = typeof init.body === 'string' ? init.body : String(init.body);
-          entry.bodyPreview = bodyStr.slice(0, 2000);
-          try { entry.bodyJson = JSON.parse(bodyStr); } catch (_) {}
-        } catch (_) { entry.bodyType = typeof init.body; }
-      }
-      window.__any2apiArenaFetchLog.push(entry);
-    }
-    return originalFetch.apply(this, args);
-  };
-})();"""
-
-
 def _arena_turbopack_uploader_init_script() -> str:
-    """Capture Arena's exported uploader while Turbopack evaluates its module."""
+    """Reuse the page-owned upload and interaction exports across build changes."""
 
     return r"""(() => {
   const wrapFactory = factory => {
     if (typeof factory !== 'function') return factory;
     const source = String(factory);
-    if (!source.includes('generateUploadUrl') || !source.includes('getSignedUrl')) {
+    const uploader = source.includes('generateUploadUrl') && source.includes('getSignedUrl');
+    const interaction = source.includes('buildProgrammaticClientInteraction')
+      && source.includes('packClientInteraction');
+    if (!uploader && !interaction) {
       return factory;
     }
     if (factory.__any2apiArenaWrapped) return factory;
@@ -1255,11 +1237,22 @@ def _arena_turbopack_uploader_init_script() -> str:
         const defineExports = moduleContext.s;
         moduleContext.s = function(definitions, ...defineArgs) {
           if (Array.isArray(definitions)) {
+            let buildInteraction;
+            let packInteraction;
             for (let index = 0; index + 2 < definitions.length; index += 3) {
               if (definitions[index] === 'uploadFile'
                   && typeof definitions[index + 2] === 'function') {
                 window.__any2apiArenaUploadFile = definitions[index + 2];
               }
+              if (definitions[index] === 'buildProgrammaticClientInteraction') {
+                buildInteraction = definitions[index + 2];
+              }
+              if (definitions[index] === 'packClientInteraction') {
+                packInteraction = definitions[index + 2];
+              }
+            }
+            if (typeof buildInteraction === 'function' && typeof packInteraction === 'function') {
+              window.__any2apiArenaClientInteraction = () => packInteraction(buildInteraction());
             }
           }
           return defineExports.call(this, definitions, ...defineArgs);
@@ -2180,7 +2173,12 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
     ) -> None:
         await super().configure_page(session, credential)
         await session.page.add_init_script(_arena_turbopack_uploader_init_script())
-        await session.page.add_init_script(_arena_fetch_interceptor_script())
+
+    async def cancel_stream_request(self, page: Any, request_id: str) -> None:
+        await page.evaluate(
+            "requestId => window.__any2apiArenaStreamControllers?.get(requestId)?.abort()",
+            request_id,
+        )
 
     async def models(
         self,

@@ -21,3 +21,11 @@
 - 可能涉及 `arena_browser.py`、`arena_settings.py`、局部 Runtime 事件/超时边界及相应用例；以证据决定最小修改。
 - OpenAI Chat/Responses 契约保持，错误不能伪装成成功，不新增付费验证码 SaaS，不触碰 RCM、DeepSeek/Qwen 和其他厂家绑定。
 - 验收需存在真实有效正文或合法工具调用，记录 request_id、事件类型与长度；同时验证错误、取消、超时、凭据/出口切换和资源回收。若官方要求人工验证码或账号操作，则明确具体阻断与证据，不盲目重试消耗额度。
+
+## 1.5.3 修复规格
+
+- 已确认：同一历史成功账号在新固定 IPv6 的官方原生页面也返回 403 `recaptcha validation failed`；`cx` 缺失不能解释全部故障。官方 v3 site key/action 未变，同源绝对 URL 也会补齐部署请求头。
+- 请求兼容：复用页面自身导出的 `buildProgrammaticClientInteraction` / `packClientInteraction`，记录真实 programmatic 上下文，不复制盐值、伪造可信事件或硬编码压缩格式；保留官方上传能力。
+- 资源边界：移除无人读取且会保存正文/Token 的 fetch 调试拦截；v2 等待必须遵守本次请求截止时间并清理定时器/widget，辅助任务随流结束或取消回收；v3 Token 不可用时明确失败，不能继续发送缺 Token 的请求。
+- 回归：执行 JS 行为测试，覆盖正常流、v2 超时/截止/已解决重试、Token 缺失、上传与交互导出共存；执行异步辅助任务结束/取消测试及 Automation 全量检查。
+- 发布：兼容补丁占用新版本 1.5.3；保持 OpenAI 契约和数据库不变，回滚点为 1.5.2 镜像组合；生产恢复判定仍需真实有效输出，不能用兼容修复通过替代。

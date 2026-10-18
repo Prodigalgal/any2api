@@ -252,6 +252,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
             data_events = 0
             data_bytes = 0
             data_shapes: set[str] = set()
+            challenge_task: asyncio.Task[None] | None = None
             try:
                 while True:
                     event = await queue.get()
@@ -284,7 +285,10 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                             "official_browser_recaptcha_v2_challenge_detected endpoint=%s",
                             endpoint_key or target_path,
                         )
-                        asyncio.create_task(self._try_solve_page_recaptcha_v2(session.page))
+                        if challenge_task is None or challenge_task.done():
+                            challenge_task = asyncio.create_task(
+                                self._try_solve_page_recaptcha_v2(session.page)
+                            )
                     if event_type == "data" and str(event.get("data") or ""):
                         data_seen = True
                         data_events += 1
@@ -314,9 +318,27 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                     yield pending_error
             finally:
                 self._stream_queues.pop(request_id, None)
+                if challenge_task is not None and not challenge_task.done():
+                    challenge_task.cancel()
                 if not task.done():
                     task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+                    try:
+                        async with asyncio.timeout(2):
+                            await self.cancel_stream_request(session.page, request_id)
+                    except Exception as error:  # noqa: BLE001 - cleanup must release the session
+                        self._logger.warning(
+                            "official_browser_stream_abort_failed endpoint=%s error_type=%s",
+                            endpoint_key or target_path,
+                            type(error).__name__,
+                        )
+                await asyncio.gather(
+                    *([task, challenge_task] if challenge_task is not None else [task]),
+                    return_exceptions=True,
+                )
+
+    async def cancel_stream_request(self, page: Any, request_id: str) -> None:
+        """Allow provider scripts to stop page-owned work before the session is released."""
+        del page, request_id
 
     def stream_request_script(self) -> str:
         """Return the page-world stream reader for this provider's framing protocol."""

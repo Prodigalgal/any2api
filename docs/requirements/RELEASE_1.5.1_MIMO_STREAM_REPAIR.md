@@ -33,4 +33,5 @@
 
 ## 状态
 
-- 本地验收完成，已获得发布授权；CI/GitOps/生产验收待执行。
+- 1.5.1 已发布：源码 `77b5dbc`，CI `39112203021` 成功，GitOps `3e09566`，Argo Synced/Healthy；四个运行中的应用版本/digest、公开接口和停用厂商状态已核验。
+- MiMo 自然流量、遗留问题和发布证据以[运行验收报告](../reports/RELEASE_1.5.1_RUNTIME_ACCEPTANCE_2026-10-18.md)为准，不以 Pod 就绪替代生成验收。

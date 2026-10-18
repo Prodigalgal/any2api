@@ -2240,7 +2240,13 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                 separators=(",", ":"),
             ),
         }
-        self._models_cache = result
+        # Catalog data is shared across accounts; browser state and canary reports
+        # belong only to the account/plan that performed this fresh request.
+        self._models_cache = {
+            key: result[key]
+            for key in ("status", "body", "content_type", "transport_mode")
+            if key in result
+        }
         self._models_cache_time = now
         return result
 

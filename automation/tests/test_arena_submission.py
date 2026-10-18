@@ -172,3 +172,49 @@ async def test_chat_uses_the_inference_deadline_instead_of_the_catalog_canary_de
         assert observed[0]["timeout_ms"] == 240_000
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh_status", [200, 502])
+async def test_shared_catalog_cache_never_replays_another_accounts_browser_state(
+    monkeypatch, refresh_status
+):
+    runtime = _runtime()
+    owner_patch = {"browser_execution_context": {"storage_state": {"owner": "account-a"}}}
+    catalog = [{"id": "Max", "metadata": {"arena_model_id": "model-id"}}]
+
+    def parse(body):
+        if body != "valid-catalog":
+            raise ValueError("invalid catalog")
+        return catalog
+
+    request = AsyncMock(
+        side_effect=[
+            {
+                "status": 200,
+                "body": "valid-catalog",
+                "credential_patch": owner_patch,
+                "runtime_reports": [{"revision": "account-a-plan"}],
+                "content_type": "text/html",
+                "transport_mode": "camoufox_browser_runtime",
+            },
+            {"status": refresh_status, "body": "invalid-catalog"},
+        ]
+    )
+    monkeypatch.setattr(runtime, "request", request)
+    monkeypatch.setattr(arena_browser, "parse_arena_models", parse)
+    plan = default_runtime_plan_for_provider("arena")
+    try:
+        fresh = await runtime.models({"email": "account-a"}, "", plan)
+        assert fresh["credential_patch"] == owner_patch
+        for force_refresh in (False, True):
+            cached = await runtime.models(
+                {"email": "account-b"}, "", plan, force_refresh=force_refresh
+            )
+            assert cached["status"] == 200
+            assert json.loads(cached["body"])["models"] == catalog
+            assert "credential_patch" not in cached
+            assert "runtime_reports" not in cached
+        assert request.await_count == 2
+    finally:
+        await runtime.close()

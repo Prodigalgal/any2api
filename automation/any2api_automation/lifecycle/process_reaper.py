@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..browser_budget import BrowserProcessBudget, browser_process_budget
 from ..config import settings
+from ..process_identity import ProcessIdentity, clock_ticks_per_second, read_process_stat
 
 logger = logging.getLogger("any2api_automation.process_reaper")
 
@@ -40,6 +42,7 @@ class ProcessInfo:
     elapsed_seconds: float
     is_browser: bool
     is_driver: bool
+    start_ticks: int
 
 
 @dataclass
@@ -52,8 +55,11 @@ class ReaperStats:
 
 
 class BrowserProcessReaper:
-    def __init__(self, proc_path: Path | None = None) -> None:
+    def __init__(
+        self, proc_path: Path | None = None, *, budget: BrowserProcessBudget | None = None
+    ) -> None:
         self._proc_path = proc_path or Path("/proc")
+        self._budget = budget or browser_process_budget
         self._stats = ReaperStats()
         self._task: asyncio.Task[None] | None = None
         self._sweep_task: asyncio.Task[int] | None = None
@@ -69,6 +75,7 @@ class BrowserProcessReaper:
             "total_stalled_reaped": self._stats.total_stalled_reaped,
             "last_sweep_at": self._stats.last_sweep_at,
             "last_sweep_reaped": self._stats.last_sweep_reaped,
+            "managed_process_roots": len(self._budget.owned_processes()),
         }
 
     def discover_processes(self) -> list[ProcessInfo]:
@@ -76,12 +83,12 @@ class BrowserProcessReaper:
         if not self._proc_path.exists() or not self._proc_path.is_dir():
             return []
 
-        now = time.time()
         discovered: list[ProcessInfo] = []
 
         try:
+            uptime = float((self._proc_path / "uptime").read_text().split()[0])
             entries = list(self._proc_path.iterdir())
-        except OSError:
+        except (OSError, ValueError, IndexError):
             return []
 
         for entry in entries:
@@ -97,29 +104,28 @@ class BrowserProcessReaper:
                 if not cmdline:
                     continue
 
-                status_text = (entry / "status").read_text(encoding="utf-8", errors="replace")
-                ppid = 0
-                for line in status_text.splitlines():
-                    if line.startswith("PPid:"):
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            ppid = int(parts[1])
-                        break
-
-                elapsed = max(0.0, now - entry.stat().st_mtime)
-
-                is_browser = any(target in cmdline for target in BROWSER_PROCESS_TARGETS)
-                is_driver = any(sig in cmdline for sig in DRIVER_PROCESS_SIGNATURES)
+                process = read_process_stat(pid, self._proc_path)
+                if process is None:
+                    continue
+                elapsed = max(0.0, uptime - process.identity.start_ticks / clock_ticks_per_second())
+                executable = Path(
+                    cmdline_bytes.split(b"\x00", 1)[0].decode("utf-8", "replace")
+                ).name
+                is_browser = executable in BROWSER_PROCESS_TARGETS
+                is_driver = executable in {"node", "nodejs"} and any(
+                    sig in cmdline for sig in DRIVER_PROCESS_SIGNATURES
+                )
 
                 if is_browser or is_driver:
                     discovered.append(
                         ProcessInfo(
                             pid=pid,
-                            ppid=ppid,
+                            ppid=process.parent_pid,
                             cmdline=cmdline,
                             elapsed_seconds=elapsed,
                             is_browser=is_browser,
                             is_driver=is_driver,
+                            start_ticks=process.identity.start_ticks,
                         )
                     )
             except (OSError, ProcessLookupError, PermissionError):
@@ -144,6 +150,8 @@ class BrowserProcessReaper:
 
         targets: list[tuple[ProcessInfo, str]] = []
         for proc in processes:
+            if self._is_owned(proc.pid):
+                continue
             # 1. Orphan check: ppid is 1 (reparented to tini/init)
             if proc.ppid <= 1:
                 targets.append((proc, "orphan_reparented_to_init"))
@@ -160,6 +168,13 @@ class BrowserProcessReaper:
         stalled_count = 0
 
         for proc, reason in targets:
+            current = read_process_stat(proc.pid, self._proc_path)
+            if (
+                current is None
+                or current.identity != ProcessIdentity(proc.pid, proc.start_ticks)
+                or self._is_owned(proc.pid)
+            ):
+                continue
             logger.warning(
                 "terminating residual process pid=%s ppid=%s reason=%s elapsed=%.1fs cmd=%s",
                 proc.pid,
@@ -189,9 +204,25 @@ class BrowserProcessReaper:
             )
         return reaped_count
 
+    def _is_owned(self, pid: int) -> bool:
+        owners = self._budget.owned_processes()
+        visited: set[int] = set()
+        while pid > 1 and pid not in visited:
+            visited.add(pid)
+            process = read_process_stat(pid, self._proc_path)
+            if process is None:
+                return False
+            if process.identity in owners:
+                return True
+            pid = process.parent_pid
+        return False
+
     def _kill_process(self, pid: int) -> bool:
         """Sends SIGTERM then SIGKILL to ensure termination."""
         kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+        original = read_process_stat(pid, self._proc_path)
+        if original is None or self._is_owned(pid):
+            return False
         try:
             os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
@@ -200,7 +231,9 @@ class BrowserProcessReaper:
         # Wait briefly for process to exit
         time.sleep(0.15)
         try:
-            os.kill(pid, 0)
+            current = read_process_stat(pid, self._proc_path)
+            if current is None or current.identity != original.identity or self._is_owned(pid):
+                return True
             # Still alive, escalate to SIGKILL
             if kill_signal != signal.SIGTERM:
                 os.kill(pid, kill_signal)

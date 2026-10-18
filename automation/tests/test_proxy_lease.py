@@ -8,10 +8,72 @@ from any2api_automation.lifecycle.proxy import (
     _ordered_nodes,
     _parse_nodes,
     _singbox_config,
+    browser_proxy_options,
     proxy_attempt_payload,
     proxy_lease,
     proxy_parameters,
 )
+
+
+def test_browser_proxy_authentication_is_separate_from_server_url() -> None:
+    assert browser_proxy_options("http://user%40name:p%3Ass@proxy.example:10800") == {
+        "server": "http://proxy.example:10800",
+        "username": "user@name",
+        "password": "p:ss",
+    }
+    assert (
+        browser_proxy_options("http://u:p@[2001:db8::1]:8080")["server"]
+        == "http://[2001:db8::1]:8080"
+    )
+    assert browser_proxy_options("http://127.0.0.1:8080") == {"server": "http://127.0.0.1:8080"}
+
+
+def test_reused_browser_tunnel_does_not_hold_request_node_reservation(monkeypatch) -> None:
+    import httpx
+
+    from any2api_automation.lifecycle import proxy
+    from any2api_automation.lifecycle.proxy_tunnels import ProxyTunnelPool
+
+    class Tunnel:
+        alive = False
+        starts = 0
+
+        def __enter__(self):
+            self.alive = True
+            self.starts += 1
+            return "http://127.0.0.1:18080"
+
+        def __exit__(self, *_):
+            self.alive = False
+
+        def is_alive(self):
+            return self.alive
+
+    process = Tunnel()
+    pool = ProxyTunnelPool(lambda _: process, capacity=1, idle_seconds=30)
+    monkeypatch.setattr(proxy, "proxy_tunnel_pool", pool)
+    monkeypatch.setattr(settings(), "dynamic_proxy_distributed_leases", False)
+    monkeypatch.setattr(settings(), "dynamic_proxy_node_concurrency", 1)
+    monkeypatch.setattr(proxy, "_connectivity", lambda *_: (httpx.Response(200), True))
+    arguments = {
+        "explicit_url": "",
+        "dynamic": True,
+        "check_url": "https://example.test",
+        "node_urls": ["vless://id@proxy.example:443?type=ws&security=tls&path=%2Fws"],
+    }
+    browser = None
+    try:
+        with proxy_lease(**arguments) as first:
+            browser = proxy.retain_proxy_tunnel(first)
+        assert proxy._local_nodes == set()
+        with proxy_lease(**arguments) as second:
+            assert second == first
+        assert proxy._local_nodes == set()
+        assert process.starts == 1
+    finally:
+        if browser is not None:
+            browser.release()
+        pool.close()
 
 
 def test_explicit_proxy_preserves_provider_exception() -> None:

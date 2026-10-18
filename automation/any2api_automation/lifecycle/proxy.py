@@ -22,6 +22,7 @@ import httpx
 import redis
 
 from ..config import settings
+from .proxy_tunnels import ProxyTunnelLease, ProxyTunnelPool
 
 _local_node_lock = threading.Lock()
 _local_nodes: set[str] = set()
@@ -49,6 +50,20 @@ class DirectNode:
 
 
 ProxyNode = VlessNode | DirectNode
+
+
+def browser_proxy_options(proxy_url: str) -> dict[str, str]:
+    parsed = urlparse(proxy_url)
+    if parsed.username is None and parsed.password is None:
+        return {"server": proxy_url}
+    host = parsed.hostname or ""
+    host = f"[{host}]" if ":" in host else host
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    return {
+        "server": f"{parsed.scheme}://{host}{port}",
+        "username": unquote(parsed.username or ""),
+        "password": unquote(parsed.password or ""),
+    }
 
 
 def proxy_parameters(payload: dict[str, Any]) -> dict[str, Any]:
@@ -145,34 +160,31 @@ def proxy_lease(
         if reservation is None:
             errors.append("NodeBusy")
             continue
-        lease = _SingBoxLease(node) if isinstance(node, VlessNode) else None
+        lease = None
         try:
-            proxy_url = lease.__enter__() if lease else node.url
-            response, assets_ready = _connectivity(proxy_url, check_url)
-            location = response.headers.get("location", "")
-        except (OSError, RuntimeError, httpx.HTTPError) as error:
-            if lease:
-                lease.__exit__()
-            reservation.release()
-            errors.append(type(error).__name__)
-            continue
-        if (
-            response.status_code >= 500
-            or _rejected_redirect(location, reject_redirect_hosts)
-            or not assets_ready
-        ):
-            if lease:
-                lease.__exit__()
-            reservation.release()
-            errors.append(f"http_{response.status_code}")
-            continue
-        try:
+            try:
+                lease = proxy_tunnel_pool.acquire(node) if isinstance(node, VlessNode) else None
+                proxy_url = lease.proxy_url if lease else node.url
+                response, assets_ready = _connectivity(proxy_url, check_url)
+                location = response.headers.get("location", "")
+            except (OSError, RuntimeError, httpx.HTTPError) as error:
+                errors.append(type(error).__name__)
+                continue
+            if (
+                response.status_code >= 500
+                or _rejected_redirect(location, reject_redirect_hosts)
+                or not assets_ready
+            ):
+                errors.append(f"http_{response.status_code}")
+                continue
             yield proxy_url
+            return
         finally:
-            if lease:
-                lease.__exit__()
-            reservation.release()
-        return
+            try:
+                if lease:
+                    lease.release()
+            finally:
+                reservation.release()
     raise RuntimeError("CF dynamic proxy has no usable overseas node: " + ",".join(errors))
 
 
@@ -207,15 +219,34 @@ class _SingBoxLease:
         raise RuntimeError("sing-box did not bind its local port")
 
     def __exit__(self, *_: object) -> None:
-        if self.process is not None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=3)
-        if self.directory is not None:
-            self.directory.cleanup()
+        try:
+            if self.process is not None and self.process.poll() is None:
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=3)
+                except ProcessLookupError:
+                    pass  # The child exited between poll() and terminate().
+        finally:
+            if self.directory is not None:
+                self.directory.cleanup()
+
+    def is_alive(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+
+def retain_proxy_tunnel(proxy_url: str) -> ProxyTunnelLease | None:
+    return proxy_tunnel_pool.retain(proxy_url)
+
+
+proxy_tunnel_pool = ProxyTunnelPool(
+    lambda node: _SingBoxLease(node),
+    capacity=settings().dynamic_proxy_tunnel_pool_size,
+    idle_seconds=settings().dynamic_proxy_tunnel_idle_seconds,
+    acquire_timeout_seconds=settings().dynamic_proxy_tunnel_acquire_timeout_seconds,
+)
 
 
 _LUA_ACQUIRE_LEASE = """
@@ -230,15 +261,13 @@ end
 """
 
 _LUA_RELEASE_LEASE = """
-if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then
-    redis.call('SREM', KEYS[1], ARGV[1])
-    return 1
-else
-    if redis.call('GET', KEYS[1]) == ARGV[1] then
-        return redis.call('DEL', KEYS[1])
-    end
-    return 0
+local key_type = redis.call('TYPE', KEYS[1]).ok
+if key_type == 'set' then
+    return redis.call('SREM', KEYS[1], ARGV[1])
+elseif key_type == 'string' and redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
 end
+return 0
 """
 
 

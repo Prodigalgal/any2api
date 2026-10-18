@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 from ..lifecycle.proxy import proxy_lease, proxy_parameters
+
+logger = logging.getLogger("any2api_automation.transport_support")
 
 
 def transport_frame(kind: str, **payload: object) -> bytes:
@@ -39,8 +42,24 @@ async def transport_proxy_lease(
         reject_redirect_hosts=reject_redirect_hosts,
         **optional_proxy_parameters(payload),
     )
-    proxy_url = await asyncio.to_thread(lease.__enter__)
+    acquiring = asyncio.create_task(asyncio.to_thread(lease.__enter__))
+    try:
+        proxy_url = await asyncio.shield(acquiring)
+    except asyncio.CancelledError:
+        # A worker thread keeps running after task cancellation; recover its lease first.
+        try:
+            await acquiring
+        except Exception as error:  # noqa: BLE001 - preserve the caller's cancellation
+            logger.warning("cancelled_proxy_acquire_failed error_type=%s", type(error).__name__)
+        else:
+            await asyncio.to_thread(lease.__exit__, None, None, None)
+        raise
     try:
         yield proxy_url
     finally:
-        await asyncio.to_thread(lease.__exit__, None, None, None)
+        releasing = asyncio.create_task(asyncio.to_thread(lease.__exit__, None, None, None))
+        try:
+            await asyncio.shield(releasing)
+        except asyncio.CancelledError:
+            await releasing
+            raise

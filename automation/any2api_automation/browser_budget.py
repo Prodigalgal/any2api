@@ -8,9 +8,11 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Self
 
 from .config import settings
+from .process_identity import ProcessIdentity, read_process_stat
 
 _WAIT_INTERVAL_SECONDS = 0.25
 
@@ -31,12 +33,24 @@ class BrowserProcessLease:
         self._released = False
         self._lock = threading.Lock()
 
+    def track_process(self, pid: int | None, *, proc_path: Path = Path("/proc")) -> None:
+        if pid is None or pid <= 1:
+            return
+        process = read_process_stat(pid, proc_path)
+        if process is None:
+            return
+        with self._lock:
+            if self._released:
+                raise RuntimeError("cannot track a process on a released browser lease")
+            with self._budget._condition:
+                self._budget._process_owners.setdefault(self, set()).add(process.identity)
+
     def release(self) -> None:
         with self._lock:
             if self._released:
                 return
             self._released = True
-        self._budget._release()
+            self._budget._release(self)
 
     def __enter__(self) -> Self:
         return self
@@ -59,6 +73,7 @@ class BrowserProcessBudget:
             raise ValueError("browser process capacity must be positive")
         self._capacity = capacity
         self._in_use = 0
+        self._process_owners: dict[BrowserProcessLease, set[ProcessIdentity]] = {}
         self._condition = threading.Condition()
         self._logger = logger or logging.getLogger("any2api_automation.browser_budget")
         self._async_evictors: list[Callable[[], Awaitable[bool]]] = []
@@ -144,11 +159,18 @@ class BrowserProcessBudget:
                 available=self._capacity - in_use,
             )
 
-    def _release(self) -> None:
+    def owned_processes(self) -> frozenset[ProcessIdentity]:
+        with self._condition:
+            return frozenset(
+                identity for identities in self._process_owners.values() for identity in identities
+            )
+
+    def _release(self, lease: BrowserProcessLease) -> None:
         with self._condition:
             if self._in_use < 1:
                 raise RuntimeError("browser process budget released without an active lease")
             self._in_use -= 1
+            self._process_owners.pop(lease, None)
             self._condition.notify_all()
 
     async def _evict_one_async_idle(self, label: str) -> bool:

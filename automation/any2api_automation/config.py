@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     dynamic_proxy_lease_seconds: int = 180
     dynamic_proxy_node_concurrency: int = 8
     dynamic_proxy_distributed_leases: bool = True
+    dynamic_proxy_tunnel_pool_size: int = Field(default=16, ge=1, le=128)
+    dynamic_proxy_tunnel_idle_seconds: int = Field(default=300, ge=0, le=3600)
+    dynamic_proxy_tunnel_acquire_timeout_seconds: int = Field(default=10, ge=1, le=120)
     mail_api_base: str = ""
     mail_admin_password: str = ""
     mail_site_password: str = ""

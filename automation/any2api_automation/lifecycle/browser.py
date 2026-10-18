@@ -16,7 +16,7 @@ from typing import Any
 
 from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..config import settings
-from .proxy import proxy_lease, proxy_parameters
+from .proxy import browser_proxy_options, proxy_lease, proxy_parameters
 
 logger = logging.getLogger("any2api_automation.browser")
 BROWSER_EXECUTION_CONTEXT_SCHEMA_VERSION = 1
@@ -396,7 +396,7 @@ def launch_browser(
                     "headless": headless,
                     "humanize": effective_profile.humanize,
                     "geoip": not effective_profile.camoufox_config,
-                    "proxy": {"server": proxy_url} if proxy_url else None,
+                    "proxy": browser_proxy_options(proxy_url) if proxy_url else None,
                     "env": {**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
                     "firefox_user_prefs": {
                         "security.sandbox.content.level": 0,
@@ -440,7 +440,7 @@ def launch_browser(
                     prepared_env.update(get_env_vars(exact_config, get_target_os(exact_config)))
                     prepared["env"] = prepared_env
                     if proxy_url:
-                        prepared["proxy"] = {"server": proxy_url}
+                        prepared["proxy"] = browser_proxy_options(proxy_url)
                     if effective_profile.camoufox_firefox_user_prefs:
                         prepared["firefox_user_prefs"] = {
                             **dict(prepared.get("firefox_user_prefs") or {}),
@@ -464,6 +464,7 @@ def launch_browser(
             driver_processes: tuple[int, ...] = ()
             try:
                 driver_pid = _driver_pid(browser)
+                browser_lease.track_process(driver_pid)
                 driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
                 yield backend, browser
             finally:
@@ -494,9 +495,10 @@ def launch_browser(
 
                 browser_lease = browser_process_budget.acquire_sync("lifecycle:patchright")
                 runtime = sync_playwright().start()
+                browser_lease.track_process(_driver_pid(runtime))
                 options: dict[str, Any] = {"headless": headless}
                 if proxy_url:
-                    options["proxy"] = {"server": proxy_url}
+                    options["proxy"] = browser_proxy_options(proxy_url)
                 if effective_profile.patchright_args:
                     options["args"] = list(effective_profile.patchright_args)
                 if effective_profile.patchright_ignore_default_args:
@@ -520,6 +522,7 @@ def launch_browser(
             driver_processes: tuple[int, ...] = ()
             try:
                 driver_pid = _driver_pid(browser)
+                browser_lease.track_process(driver_pid)
                 driver_processes = tuple(_process_tree(driver_pid)) if driver_pid else ()
                 yield backend, browser
             finally:

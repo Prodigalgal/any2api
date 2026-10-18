@@ -1,7 +1,16 @@
-# 当前任务板（源码与生产 1.5.1）
+# 当前任务板（源码候选 1.5.2 / 生产 1.5.1）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-18 浏览器误杀、代理生命周期和 IPv6 固定出口（1.5.2）
+
+- **目标/授权**：用户要求一起修复清理器误杀、代理与会话生命周期错配，优化重复创建销毁，并授权改造 `168.138.40.52` 的 IPv6 服务；沿既有授权验证、推送与部署。
+- **实现**：受管 driver 以 PID+内核启动时间登记，清理器保护进程树并保留孤儿清理；VLESS 隧道按完整节点身份池化，默认容量 16、空闲 300 秒回收，浏览器和请求分别持有引用，请求并发 reservation 不随空闲会话保留；支持并发创建、崩溃换代、取消和关闭。修复 Redis 独占 string 租约释放误用 SISMEMBER 的 WRONGTYPE；补齐浏览器代理认证映射。
+- **IPv6**：保留随机出口 `10800`，新增 systemd 管理的 `10801` 固定出口服务，4 个认证节点与 IPv6 一一固定；凭据仅在服务器管理 private 目录和 systemd credential 文件。Windows 与 Arena Pod 各验证每节点两次出口一致；原始 HTTP 访问 Arena 均为 Cloudflare 403，不能当作恢复。是否绑定依据浏览器和真实业务验证。
+- **验证/发布**：Automation 598 项及新增 Redis 集成门禁验收进行中，Backend test/bootJar、Web lint/build、源码与 JAR 统一版本 1.5.2 校验通过；CI/GitOps 发布待执行。
+- **兼容与回滚**：OpenAI/API/数据库契约不变；DeepSeek/Qwen 继续停用，其余厂家维持 Oracle 四节点。回滚使用 1.5.1 不可变镜像组合及原 Arena 三作用域绑定；新 IPv6 服务可独立停用。
+- **规格**：[发布执行计划](../docs/requirements/RELEASE_1.5.2_BROWSER_PROXY_OWNERSHIP.md)。
 
 ## 2026-10-18 MiMo v3 SSE 控制帧污染正文修复（1.5.1，已发布）
 

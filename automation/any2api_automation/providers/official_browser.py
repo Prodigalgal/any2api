@@ -23,6 +23,7 @@ from ..lifecycle.browser import (
     camoufox_config_from_options,
     terminate_residual_browser_process,
 )
+from ..lifecycle.proxy import ProxyTunnelLease, browser_proxy_options, retain_proxy_tunnel
 from ..session_pool import AccountSessionPool, SessionSlot
 from .runtime_rules import (
     RuntimeRule,
@@ -55,6 +56,7 @@ class OfficialBrowserSession:
     camoufox_config: dict[str, Any] | None = None
     browser_lease: BrowserProcessLease | None = None
     driver_processes: tuple[int, ...] = ()
+    proxy_tunnel: ProxyTunnelLease | None = None
 
 
 class OfficialBrowserRuntime:
@@ -284,7 +286,9 @@ class OfficialBrowserRuntime:
         camoufox_config = None
         browser_lease = await browser_process_budget.acquire_async(f"provider:{self.provider_id}")
         context = None
+        proxy_tunnel = None
         try:
+            proxy_tunnel = retain_proxy_tunnel(proxy_url)
             if backend == "camoufox":
                 from camoufox.async_api import AsyncCamoufox
 
@@ -301,12 +305,14 @@ class OfficialBrowserRuntime:
             else:
                 backend = "patchright"
                 playwright = await async_playwright().start()
+                browser_lease.track_process(_driver_pid(playwright))
                 options: dict[str, Any] = {
                     "headless": core_settings().registration_headless,
                 }
                 if proxy_url:
-                    options["proxy"] = {"server": proxy_url}
+                    options["proxy"] = browser_proxy_options(proxy_url)
                 browser = await playwright.chromium.launch(**options)
+            browser_lease.track_process(_driver_pid(browser))
             options = context_options(execution, backend)
             if storage_state:
                 options["storage_state"] = storage_state
@@ -334,6 +340,7 @@ class OfficialBrowserRuntime:
                 camoufox_config=camoufox_config,
                 browser_lease=browser_lease,
                 driver_processes=driver_processes,
+                proxy_tunnel=proxy_tunnel,
             )
             await self.configure_page(session, credential)
             await page.goto(
@@ -397,6 +404,8 @@ class OfficialBrowserRuntime:
                         finally:
                             if browser_lease is not None:
                                 browser_lease.release()
+                            if proxy_tunnel is not None:
+                                await asyncio.to_thread(proxy_tunnel.release)
             raise
 
     async def _close_session(self, session: OfficialBrowserSession) -> None:
@@ -430,6 +439,8 @@ class OfficialBrowserRuntime:
                     finally:
                         if session.browser_lease is not None:
                             session.browser_lease.release()
+                        if session.proxy_tunnel is not None:
+                            await asyncio.to_thread(session.proxy_tunnel.release)
 
     def _storage_state(self, execution: dict[str, Any]) -> dict[str, Any] | None:
         state = execution.get("storage_state")
@@ -492,12 +503,12 @@ def camoufox_launch_options(
             headless=core_settings().registration_headless,
             humanize=humanize,
             geoip=True,
-            proxy={"server": proxy_url} if proxy_url else None,
+            proxy=browser_proxy_options(proxy_url) if proxy_url else None,
             env={**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
             firefox_user_prefs={"security.sandbox.content.level": 0},
         )
     if proxy_url:
-        prepared["proxy"] = {"server": proxy_url}
+        prepared["proxy"] = browser_proxy_options(proxy_url)
     return prepared
 
 

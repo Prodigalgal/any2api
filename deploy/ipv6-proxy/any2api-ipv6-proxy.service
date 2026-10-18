@@ -1,0 +1,28 @@
+[Unit]
+Description=Any2API stable IPv6 HTTP proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+LoadCredential=config.json:/etc/any2api-ipv6-proxy/config.json
+ExecStart=/usr/bin/python3 /opt/any2api-ipv6-proxy/ipv6_proxy.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=128M
+TasksMax=64
+LimitNOFILE=1024
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

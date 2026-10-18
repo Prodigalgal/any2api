@@ -17,7 +17,8 @@ from patchright.sync_api import sync_playwright
 
 from ..browser_budget import browser_process_budget
 from ..config import settings as core_settings
-from ..lifecycle.browser import camoufox_config_from_options
+from ..lifecycle.browser import _driver_pid, camoufox_config_from_options
+from ..lifecycle.proxy import browser_proxy_options
 from .base import validate_semantic_command
 from .glm_challenge import GlmAliyunChallenge
 from .multimodal import decode_inline_data_url, iter_media_blocks, media_source, text_content
@@ -368,6 +369,7 @@ def _launch_browser(
             )
             manager = Camoufox(from_options=prepared)
             browser = manager.__enter__()
+            browser_lease.track_process(_driver_pid(browser))
         except BaseException:
             try:
                 if manager is not None:
@@ -388,10 +390,12 @@ def _launch_browser(
     browser_lease = browser_process_budget.acquire_sync(f"provider:glm:{backend}")
     try:
         playwright = sync_playwright().start()
+        browser_lease.track_process(_driver_pid(playwright))
         options: dict[str, Any] = {"headless": core_settings().registration_headless}
         if proxy_url:
-            options["proxy"] = {"server": proxy_url}
+            options["proxy"] = browser_proxy_options(proxy_url)
         browser = playwright.chromium.launch(**options)
+        browser_lease.track_process(_driver_pid(browser))
         yield "patchright", browser, None
     finally:
         try:

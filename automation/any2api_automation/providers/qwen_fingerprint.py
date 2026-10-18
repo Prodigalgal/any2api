@@ -8,6 +8,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from ..lifecycle.proxy import browser_proxy_options
+
 QWEN_FINGERPRINT_SCHEMA_VERSION = 2
 QWEN_LEGACY_FINGERPRINT_SCHEMA_VERSION = 1
 QWEN_FINGERPRINT_MAX_BYTES = 256 << 10
@@ -222,7 +224,7 @@ def camoufox_launch_options(
         "block_webrtc": True,
     }
     if proxy_url:
-        options["proxy"] = {"server": proxy_url}
+        options["proxy"] = browser_proxy_options(proxy_url)
     prepared = launch_options(**options)
     environment = dict(prepared.get("env") or {})
     for name in tuple(environment):
@@ -292,7 +294,7 @@ def _new_camoufox_fingerprint(proxy_url: str) -> dict[str, Any]:
                 options.update(
                     {
                         "geoip": True,
-                        "proxy": {"server": proxy_url},
+                        "proxy": browser_proxy_options(proxy_url),
                     }
                 )
             prepared = launch_options(

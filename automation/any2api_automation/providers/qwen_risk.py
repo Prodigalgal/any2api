@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field, PrivateAttr, model_validator
 from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..browser_transport import manager as browser_session_manager
 from ..config import settings as global_settings
+from ..lifecycle.browser import _driver_pid
+from ..lifecycle.proxy import browser_proxy_options
 from ..security import require_internal_token
 from .multimodal import decode_inline_data_url
 from .qwen_fingerprint import (
@@ -231,7 +233,9 @@ class QwenRiskHeaderProvider:
                 config = settings()
                 browser_lease = browser_process_budget.acquire_sync("provider:qwen-risk")
                 try:
+                    browser_lease.track_process(_driver_pid(playwright))
                     browser = playwright.chromium.launch(headless=config.qwen_risk_headless)
+                    browser_lease.track_process(_driver_pid(browser))
                     context = browser.new_context(
                         locale="zh-CN",
                         timezone_id="Asia/Shanghai",
@@ -1504,7 +1508,7 @@ class QwenNativeBrowserTransport:
                 }
             )
             if proxy_url:
-                options["proxy"] = {"server": proxy_url}
+                options["proxy"] = browser_proxy_options(proxy_url)
         else:
             from camoufox.async_api import AsyncCamoufox
 
@@ -1517,6 +1521,7 @@ class QwenNativeBrowserTransport:
             )
             browser_manager = AsyncCamoufox(from_options=prepared)
             browser = await browser_manager.__aenter__()
+            browser_lease.track_process(_driver_pid(browser))
         if browser is None:
             raise RuntimeError("Qwen browser runtime is unavailable")
         context = None
@@ -1689,9 +1694,11 @@ class QwenNativeBrowserTransport:
                     await self._close_unlocked()
                 browser_lease = await browser_process_budget.acquire_async("provider:qwen-native")
                 self._playwright = await async_playwright().start()
+                browser_lease.track_process(_driver_pid(self._playwright))
                 self._browser = await self._playwright.chromium.launch(
                     headless=config.qwen_risk_headless
                 )
+                browser_lease.track_process(_driver_pid(self._browser))
                 self._browser_lease = browser_lease
                 logger.info(
                     "qwen_native_browser_started engine_version=%s",

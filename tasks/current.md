@@ -1,7 +1,15 @@
-# 当前任务板（源码候选 1.5.4，生产 1.5.2）
+# 当前任务板（源码候选 1.5.5，生产 1.5.4）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-18 已有 Arena 会话复核与请求准备等待修复（1.5.5）
+
+- **范围**：用户选择复用已有已验证会话。盘点 40 个有历史成功的启用账号保存状态，没有独立的当前已验证会话文件；追加另一 ACTIVE 账号、完整状态、原 Self Proxy 出口的一次官方“你好”，仍登录有效但生成被 403/v2 阻断，尚未恢复。
+- **修复**：统一正常关闭/启动失败回收，使用已有 cleanup deadline、进程 watchdog 与线程终止，取消后保留所有权直至回收完成；Action 首内部帧与非流式页面准备使用已有默认 90 秒预算，正常长流继续沿原有时长策略；增加阶段耗时日志。
+- **验证**：Automation 636 passed（含真实 Redis）、Ruff check/136 文件 format、后端 test 缓存/1.5.5 bootJar、Web lint/build/TypeScript、版本/JAR 契约通过；等待 CI、GitOps 与运行验收。
+- **边界/回滚**：具体线上挂起协程尚未直接证实，不把补齐关闭边界等同于恢复验证码；不新增管理 API、不改代理绑定、不恢复生成探活，DeepSeek/Qwen 继续停用。回滚到 1.5.4 不可变镜像。
+- **记录**：[任务规格](../docs/requirements/ARENA_SESSION_RECOVERY_1.5.5.md)、[验证与发布记录](../docs/reports/RELEASE_1.5.5_SESSION_PREPARATION_2026-10-18.md)。
 
 ## 2026-10-18 Arena 官方请求上下文、v2 iframe 与取消边界（1.5.4）
 
@@ -10,6 +18,7 @@
 - **验证**：新版脚本在官方页面拦截得到 20 字符 `cx`、v3 Token 与部署请求头，未向上游发送生成；1.5.4 Automation 全量 613 通过（含 Redis/JS 行为测试），后端 test 缓存有效、1.5.4 bootJar 与版本契约通过，Web lint/build 与 Ruff 通过。后续通过 CI、GitOps 和运行态验收确认部署；真实输出仍单独判定。
 - **风险/回滚**：官方仍可能要求人工 v2，修复上下文不等于验证码通过；不引入额外验证码 SaaS。回滚使用 1.5.2 不可变镜像，保留 IPv6 服务和当前池绑定，不恢复 DeepSeek/Qwen。
 - **候选更新**：1.5.3 三项 CI 门禁通过，发布前现场发现隐藏 v3 iframe 遮蔽 v2 checkbox（旧选择器 count=0、新可见单帧 count=1）；取消其 GitOps 发布且保留版本占用，新候选 1.5.4 修复选择器并补回归。
+- **部署回写**：1.5.4 源码 `68d81e4`、CI `39122208522`、GitOps `9239a26` 已完成，四应用版本/digest/双公网验收通过；22:06 复查共享 Automation 累计重启 1 次（143），其余应用零重启、均 Ready。Arena 后续仍有准备期挂起和下游取消，转入 1.5.5，不记为推理恢复。
 - **规格**：[Arena 回归定位与修复计划](../docs/requirements/ARENA_V3_REGRESSION_INVESTIGATION_2026-10-18.md)。
 
 ## 2026-10-18 浏览器误杀、代理生命周期和 IPv6 固定出口（1.5.2）

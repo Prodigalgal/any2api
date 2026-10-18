@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Iterable
@@ -8,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .captcha.policy import CaptchaAiPolicy, bind_captcha_policy
+from .config import settings as core_settings
 from .observability import OperationFailure, bind_operation, failure_details, sanitize
 from .providers import provider_registry
 from .providers.actions import ProviderAction, ProviderActionRequest
@@ -317,9 +319,27 @@ def _api_error_detail(error: ApiActionError) -> str:
 async def _guard_action_stream(
     stream: AsyncIterator[bytes] | Iterable[bytes],
 ) -> AsyncIterator[bytes]:
+    iterator: AsyncIterator[bytes] | None = None
     try:
         if hasattr(stream, "__aiter__"):
-            async for chunk in stream:
+            iterator = aiter(stream)
+            deadline = asyncio.timeout(core_settings().inference_first_frame_timeout_seconds)
+            try:
+                async with deadline:
+                    first = await anext(iterator)
+            except StopAsyncIteration:
+                return
+            except TimeoutError as exc:
+                if not deadline.expired():
+                    raise
+                logger.warning(
+                    "provider_action_stream_failed stage=first_frame error_type=TimeoutError"
+                )
+                raise ApiActionError(
+                    "provider action timed out before first frame", status=504
+                ) from exc
+            yield first
+            async for chunk in iterator:
                 yield chunk
         else:
             for chunk in stream:
@@ -347,3 +367,12 @@ async def _guard_action_stream(
             "error",
             data=f"provider action failed ({type(exc).__name__})",
         )
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if callable(close):
+            try:
+                await close()
+            except Exception as exc:  # noqa: BLE001 - preserve the stream's original failure
+                logger.warning(
+                    "provider_action_stream_cleanup_failed error_type=%s", type(exc).__name__
+                )

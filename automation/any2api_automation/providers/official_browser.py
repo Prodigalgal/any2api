@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -20,6 +21,7 @@ from ..config import settings as core_settings
 from ..lifecycle.browser import (
     _driver_pid,
     _process_tree,
+    browser_operation_deadline,
     camoufox_config_from_options,
     terminate_residual_browser_process,
 )
@@ -105,7 +107,13 @@ class OfficialBrowserRuntime:
     @asynccontextmanager
     async def account_operation(self, credential: dict[str, Any]):
         self._event_loop = asyncio.get_running_loop()
+        started = time.monotonic()
+        self.logger.info("official_browser_operation stage=waiting_for_session")
         async with self._sessions.borrow(self._account_key(credential)) as slot:
+            self.logger.info(
+                "official_browser_operation stage=session_acquired wait_ms=%s",
+                round((time.monotonic() - started) * 1000),
+            )
             token = self._operation.set(slot)
             try:
                 yield
@@ -288,6 +296,7 @@ class OfficialBrowserRuntime:
         context = None
         proxy_tunnel = None
         try:
+            self.logger.info("official_browser_session stage=launching backend=%s", backend)
             proxy_tunnel = retain_proxy_tunnel(proxy_url)
             if backend == "camoufox":
                 from camoufox.async_api import AsyncCamoufox
@@ -372,75 +381,106 @@ class OfficialBrowserRuntime:
             )
             return session
         except BaseException:
-            try:
-                if context is not None:
-                    await context.close()
-            except Exception as error:  # noqa: BLE001
-                self.logger.debug("browser launch context cleanup ignored: %s", error)
-            finally:
-                try:
-                    if browser_manager is not None:
-                        await browser_manager.__aexit__(None, None, None)
-                    elif browser is not None:
-                        await browser.close()
-                except Exception as error:  # noqa: BLE001
-                    self.logger.debug("browser launch browser cleanup ignored: %s", error)
-                finally:
-                    try:
-                        if playwright is not None:
-                            await playwright.stop()
-                    except Exception as error:  # noqa: BLE001
-                        self.logger.debug("browser launch playwright cleanup ignored: %s", error)
-                    finally:
-                        try:
-                            driver_pid = _driver_pid(browser) or _driver_pid(playwright)
-                            if driver_pid:
-                                terminate_residual_browser_process(
-                                    driver_pid,
-                                    label=f"{self.provider_id} session launch cleanup",
-                                )
-                        except Exception as error:  # noqa: BLE001
-                            self.logger.debug("browser launch process cleanup ignored: %s", error)
-                        finally:
-                            if browser_lease is not None:
-                                browser_lease.release()
-                            if proxy_tunnel is not None:
-                                await asyncio.to_thread(proxy_tunnel.release)
+            driver_pid = (
+                _driver_pid(browser) or _driver_pid(playwright) or _driver_pid(browser_manager)
+            )
+            await self._dispose_browser(
+                context=context,
+                browser=browser,
+                browser_manager=browser_manager,
+                playwright=playwright,
+                driver_processes=tuple(_process_tree(driver_pid)) if driver_pid else (),
+                browser_lease=browser_lease,
+                proxy_tunnel=proxy_tunnel,
+            )
             raise
 
     async def _close_session(self, session: OfficialBrowserSession) -> None:
-        try:
-            await session.context.close()
-        except Exception as error:  # noqa: BLE001
-            self.logger.debug("browser context close ignored: %s", error)
-        finally:
+        await self._dispose_browser(
+            context=session.context,
+            browser=session.browser,
+            browser_manager=session.browser_manager,
+            playwright=session.playwright,
+            driver_processes=session.driver_processes,
+            browser_lease=session.browser_lease,
+            proxy_tunnel=session.proxy_tunnel,
+        )
+
+    async def _dispose_browser(
+        self,
+        *,
+        context: Any,
+        browser: Any,
+        browser_manager: Any,
+        playwright: Any,
+        driver_processes: tuple[int, ...],
+        browser_lease: BrowserProcessLease | None,
+        proxy_tunnel: ProxyTunnelLease | None,
+    ) -> None:
+        async def cleanup() -> None:
+            started = time.monotonic()
+            self.logger.info("official_browser_cleanup stage=started")
             try:
-                if session.browser_manager is not None:
-                    await session.browser_manager.__aexit__(None, None, None)
-                elif session.browser is not None:
-                    await session.browser.close()
-            except Exception as error:  # noqa: BLE001
-                self.logger.debug("browser close ignored: %s", error)
+                # Driver teardown can await again in a finally block after cancellation.
+                # The existing process watchdog also stops that unresponsive driver.
+                with browser_operation_deadline(
+                    browser or playwright or browser_manager,
+                    core_settings().browser_cleanup_timeout_seconds,
+                    label=f"{self.provider_id} async session cleanup",
+                ):
+                    if context is not None:
+                        await self._cleanup_phase("context", context.close)
+                    if browser_manager is not None:
+                        await self._cleanup_phase(
+                            "browser_manager", lambda: browser_manager.__aexit__(None, None, None)
+                        )
+                    elif browser is not None:
+                        await self._cleanup_phase("browser", browser.close)
+                    if playwright is not None:
+                        await self._cleanup_phase("driver", playwright.stop)
             finally:
                 try:
-                    if session.playwright is not None:
-                        await session.playwright.stop()
-                except Exception as error:  # noqa: BLE001
-                    self.logger.debug("playwright stop ignored: %s", error)
+                    if driver_processes:
+                        await asyncio.to_thread(
+                            terminate_residual_browser_process,
+                            driver_processes,
+                            label=f"{self.provider_id} session cleanup",
+                        )
+                except Exception as error:  # noqa: BLE001 - ownership release must still run
+                    self.logger.warning(
+                        "official_browser_cleanup_failed phase=process error_type=%s",
+                        type(error).__name__,
+                    )
                 finally:
                     try:
-                        if session.driver_processes:
-                            terminate_residual_browser_process(
-                                session.driver_processes,
-                                label=f"{self.provider_id} session cleanup",
-                            )
-                    except Exception as error:  # noqa: BLE001
-                        self.logger.debug("process termination ignored: %s", error)
+                        if browser_lease is not None:
+                            browser_lease.release()
                     finally:
-                        if session.browser_lease is not None:
-                            session.browser_lease.release()
-                        if session.proxy_tunnel is not None:
-                            await asyncio.to_thread(session.proxy_tunnel.release)
+                        if proxy_tunnel is not None:
+                            await asyncio.to_thread(proxy_tunnel.release)
+            self.logger.info(
+                "official_browser_cleanup stage=finished duration_ms=%s",
+                round((time.monotonic() - started) * 1000),
+            )
+
+        task = asyncio.create_task(cleanup())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Keep ownership until bounded browser shutdown and process termination finish.
+            await task
+            raise
+
+    async def _cleanup_phase(self, phase: str, operation: Callable[[], Awaitable[None]]) -> None:
+        try:
+            async with asyncio.timeout(core_settings().browser_cleanup_timeout_seconds):
+                await operation()
+        except Exception as error:  # noqa: BLE001 - continue with driver/process cleanup
+            self.logger.warning(
+                "official_browser_cleanup_failed phase=%s error_type=%s",
+                phase,
+                type(error).__name__,
+            )
 
     def _storage_state(self, execution: dict[str, Any]) -> dict[str, Any] | None:
         state = execution.get("storage_state")

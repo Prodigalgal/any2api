@@ -141,7 +141,10 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         timeout_ms: int | None = None,
     ) -> dict[str, Any]:
         method = _method(method)
-        async with self.account_operation(credential):
+        async with (
+            asyncio.timeout(core_settings().inference_first_frame_timeout_seconds),
+            self.account_operation(credential),
+        ):
             session, selection, reports = await self._select_session(credential, proxy_url, plan)
             target_path = _resolve_target_path(path, endpoint_key, selection.rules.endpoint_paths)
             response = await session.page.evaluate(

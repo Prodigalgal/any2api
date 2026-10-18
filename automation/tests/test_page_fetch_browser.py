@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from any2api_automation.providers import page_fetch_browser
 from any2api_automation.providers.mimo_browser import default_runtime_plan
 from any2api_automation.providers.page_fetch_browser import (
     PageFetchBrowserRuntime,
@@ -35,6 +36,56 @@ def test_data_shape_exposes_event_metadata_without_event_content() -> None:
 
 def test_data_shape_marks_non_json_payloads() -> None:
     assert _data_shape("upstream returned html") == "non_json"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["session", "request", "credential_patch"])
+async def test_buffered_request_timeout_releases_account_at_every_preparation_stage(
+    monkeypatch, stage
+):
+    runtime = PageFetchBrowserRuntime(
+        "fixture",
+        "https://example.test",
+        allowed_domain_suffixes=("example.test",),
+        identity_fields=("user_id",),
+    )
+    monkeypatch.setattr(
+        page_fetch_browser,
+        "core_settings",
+        lambda: SimpleNamespace(
+            inference_first_frame_timeout_seconds=0.02,
+            browser_transport_max_buffered_bytes=1024,
+        ),
+    )
+
+    async def hang(*_, **__):
+        await asyncio.Event().wait()
+
+    plan = default_runtime_plan()
+    session = SimpleNamespace(
+        page=SimpleNamespace(evaluate=AsyncMock(return_value={"status": 200, "body": "{}"}))
+    )
+    select = AsyncMock(return_value=(session, plan.active, []))
+    patch = AsyncMock(return_value={})
+    monkeypatch.setattr(runtime, "_select_session", select)
+    monkeypatch.setattr(runtime, "credential_patch", patch)
+    if stage == "session":
+        select.side_effect = hang
+    elif stage == "request":
+        session.page.evaluate.side_effect = hang
+    else:
+        patch.side_effect = hang
+
+    credential = {"user_id": "account"}
+    try:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(
+                runtime.request(credential, "", plan, method="GET", path="/models"), 0.5
+            )
+        async with runtime.account_operation(credential):
+            pass
+    finally:
+        await runtime.close()
 
 
 @pytest.mark.asyncio

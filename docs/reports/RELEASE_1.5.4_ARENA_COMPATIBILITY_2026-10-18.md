@@ -1,6 +1,6 @@
 # 1.5.4 Arena 请求兼容、v2 iframe 与取消边界修复
 
-本文时间为 UTC+8，区分官方浏览器对照、桥接契约、部署健康与真实输出。1.5.3 源码 `4299f4c` 的三项 CI 门禁通过；发布前发现 v2 iframe 选择错误，已取消 [CI 39121533392](https://github.com/Prodigalgal/any2api/actions/runs/39121533392) 的 GitOps 发布，版本与已生成制品保留占用。新源码候选 1.5.4 待完整验收后回写。
+本文时间为 UTC+8，区分官方浏览器对照、桥接契约、部署健康与真实输出。1.5.3 源码 `4299f4c` 的三项 CI 门禁通过；发布前发现 v2 iframe 选择错误，已取消 [CI 39121533392](https://github.com/Prodigalgal/any2api/actions/runs/39121533392) 的 GitOps 发布，版本与已生成制品保留占用。1.5.4 已完成部署验收，Arena 真实输出未恢复。
 
 ## 已定位的事实
 
@@ -49,7 +49,12 @@
 
 ## 部署与真实业务验收
 
-待 CI 镜像、GitOps 同步与运行态核对完成后回写。源码发布不等于 Arena 已恢复有效输出。
+- 源码 `68d81e4ef343bb01b9134786a672b51240646c0d`，[CI 39122208522](https://github.com/Prodigalgal/any2api/actions/runs/39122208522) 成功，GitOps `9239a2661b8325d67c1df6ddd157d02f17d117f9`；19:20 左右四应用完成滚动，Argo Synced/Healthy。
+- Backend、Web、共享 Automation 与 Arena Automation 实际版本均为 1.5.4，运行镜像为 `*-20261018-v1.5.4-release-68d81e4ef343bb01b9134786a672b51240646c0d`；四个运行 digest 与 Registry arm64 制品逐一相符。DeepSeek/Qwen 继续停用、零副本。
+- 双公网 health/ready 为 200，Chat/Responses 缺少鉴权时返回带 request_id 的 OpenAI 401，六家独立 Key 的模型目录均 200；未发送生成探活。
+- 发布验收时四应用零重启。后续共享 Automation 于 19:51:19 以 143 退出一次，22:06 复查已 Running/Ready、累计 1 次重启，其余应用零重启；没有 OOM 证据。
+- 21:45 附近最近 30 分钟 Arena 5 次请求均 TTFB=0、约 300 秒后下游取消。细查账号获取约 100 毫秒，Automation HTTP 入口已收到请求，不能归为“没到自动化服务”；准备阶段缺少日志且已有异步关闭无超时缺口，转入 [1.5.5 修复](../requirements/ARENA_SESSION_RECOVERY_1.5.5.md)。
+- 用户选择复用已有通过验证的会话。盘点 40 个有历史成功的启用账号均有保存状态，没有发现独立的当前已验证会话文件。选另一 ACTIVE 账号恢复完整状态并使用原 Self Proxy 出口，官方原生提交一次“你好”：登录有效、v3 Token 可获取，生成仍 403 `recaptcha validation failed` 并出现 v2。历史成功状态不能证明当前能生成，也不支持扩大到所有账号的结论。
 
 ## 回滚与遗留
 

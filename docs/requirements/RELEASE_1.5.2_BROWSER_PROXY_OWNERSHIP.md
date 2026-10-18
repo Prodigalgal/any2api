@@ -32,11 +32,12 @@
 
 ## 回滚
 
-- 代码回滚到 1.5.1 原不可变镜像组合，保持 DeepSeek/Qwen 零副本。
+- 先恢复原 Arena 代理绑定，再回滚到 1.5.1 原不可变镜像组合，保持 DeepSeek/Qwen 零副本；旧 Runtime 不具备本次 HTTP 代理认证字段映射。
 - Arena 代理绑定恢复发布前的 Self-hosted Oracle 四节点及三类流量作用域；新增 IPv6 池可停用保留，便于审计。
 - 现有 IPv6 服务不重启、不改全局路由；若代理不可用，先恢复原 Arena 绑定并明确记录失败原因。
 
 ## 当前状态
 
-- 基线源码 `034b2c8`，生产 1.5.1 / Argo revision `3e09566`。
-- 两项修复与隧道池已实现，新增资源生命周期/并发/取消回归测试已通过；全量回归与新 IPv6 服务部署验收进行中，尚未发布候选。
+- 发布源码 `48718c9`，生产 1.5.2 / Argo revision `23e93e6`，四个运行组件 Ready/零重启、Synced/Healthy，CI 39116067079 成功。
+- Automation 601 通过，Backend 596 通过/5 条件跳过，Web/Ruff/版本与镜像校验通过；新 IPv6 最终仅监听私网 `100.64.0.2:10801`，Arena 三作用域已绑定。
+- 自然流量已证明 MiMo/Grok 正文输出与实际隧道复用；Arena 两条 Max 请求仍卡 v2，未将前端 200 当作恢复。详见 [运行验收报告](../reports/RELEASE_1.5.2_RUNTIME_ACCEPTANCE_2026-10-18.md)。

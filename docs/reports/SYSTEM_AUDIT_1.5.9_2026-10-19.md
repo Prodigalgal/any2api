@@ -1,4 +1,4 @@
-# 1.5.9 全系统可靠性审计与修复
+# 1.5.9 全系统可靠性审计与 1.5.10 验收修正
 
 ## 范围与结论边界
 
@@ -12,7 +12,7 @@
 
 | 级别 | 缺陷与证据 | 修复、关键模块与兼容性 |
 | --- | --- | --- |
-| P1 | 共享 Automation 曾 OOMKilled/137；审计时 3 个 Camoufox，cgroup 当前约 2.52Gi、重启后峰值约 2.85Gi，限额 3Gi。 | `automation-runtime-resources.yaml` 将共享实例 `ANY2API_BROWSER_PROCESS_CAPACITY` 设为 2；沿用统一预算、空闲会话驱逐及现有资源限额。会增加高峰排队，需部署后观察。 |
+| P1 | 共享 Automation 曾 OOMKilled/137；审计时 3 个 Camoufox，cgroup 当前约 2.52Gi、重启后峰值约 2.85Gi，限额 3Gi。 | `automation-runtime-resources.yaml` 将共享实例 `ANY2API_AUTOMATION_BROWSER_PROCESS_CAPACITY` 设为 2；沿用统一预算、空闲会话驱逐及现有资源限额。1.5.9 首次配置漏前缀，线上仍为 3，该项未通过；1.5.10 修正并补部署解析回归。会增加高峰排队，需观察。 |
 | P1 | 生命周期一次 claim 8 项、实际并发 2；未开始执行的任务没有续租，可能先耗尽 5 分钟租约；多厂商有 30 分钟以上逾期。 | `LifecycleScheduler` 只领取可执行并发数，同优先级按厂商轮转取第一项，再取后续项；保留优先级、`SKIP LOCKED`、执行中续租与幂等。真实 PostgreSQL 测试验证 claim 数量与公平性。 |
 | P1 | keepalive 等待批处理通道与浏览器准备缺少操作总预算，长请求阻塞其他维护。 | Python `provider_api` 将 keepalive 通道等待和执行纳入已有首帧预算；Java `LifecycleAutomationClient` 增加 3 分钟 keepalive 总超时。注册/重授权保持原有策略。取消后的必要资源回收仍可能占用尾部时间。 |
 | P1 | 近期成功推理后仍重复维护账号，争用浏览器。 | 仅对 ACTIVE/enabled、已结束初次验证、近期有普通成功 `INFERENCE`、非每日签到、非临近过期账号延后 keepalive；不使用 PROBE，不新增生成，不修改健康计数；原 owner/lease 条件和 action generation 保留。 |
@@ -73,9 +73,10 @@
 - Automation 全量：677 passed，含真实 Redis reservation 与 Node 页面脚本；1 条既有 Starlette/httpx 弃用提示。
 - Ruff：全量 check / 140 文件 format check 通过。
 - Web：ESLint、Next production build、TypeScript 检查通过。
-- Backend：全量 test / 1.5.9 bootJar 通过，包含真实 PostgreSQL 调度集成、缓存/租约、权限与协议回归。
+- Backend：1.5.9 全量 612 项，607 passed、5 skipped（需显式开启的 Grok live interop），bootJar 通过；包含真实 PostgreSQL 调度集成、缓存/租约、权限与协议回归。
 - 版本契约：源码 7 处及 `any2api-backend-1.5.9.jar` 均为 1.5.9；最新迁移 tag 1.5.0，无新迁移。
-- CI、不可变镜像、GitOps、运行时版本/digest/资源预算、双公网与真实输出待发布后回写；此处不能作为上线完成凭据。
+- 1.5.9 源码 `df78407`、CI `39147250465`、GitOps `8733c937794937067d988e73b5bcbf212f98bf5a` 已上线；运行验收发现预算仍为 3，未将本轮整体判定通过。
+- 1.5.10 修正部署变量并占用新版本，配置契约测试旧部署失败、新部署通过；其余业务源码沿用 1.5.9。完整发布、capabilities/digest/API 与真实输出继续回写。
 
 ## 回滚与后续观察
 

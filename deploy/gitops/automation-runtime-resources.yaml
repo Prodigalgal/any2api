@@ -8,7 +8,7 @@ spec:
       containers:
         - name: automation
           env:
-            - name: ANY2API_BROWSER_PROCESS_CAPACITY
+            - name: ANY2API_AUTOMATION_BROWSER_PROCESS_CAPACITY
               value: "2"
           resources:
             requests:

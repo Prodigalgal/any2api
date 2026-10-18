@@ -1,4 +1,4 @@
-# 当前任务板（源码候选 1.5.9，生产 1.5.8）
+# 当前任务板（源码候选 1.5.10，生产 1.5.9）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
@@ -11,6 +11,7 @@
 - **验证**：Automation 677 passed（真实 Redis/Node），Ruff/140 文件 format、Backend 全量 test/bootJar、Web lint/build/TypeScript、1.5.9 源码/JAR 契约通过；CI/GitOps/运行验收完成后回写。
 - **边界与回滚**：没有把 Arena Cookie 修复或本地 HTTP 418 对照当作恢复生成；短窗口资源正常不代表长期稳定。应用可回滚 1.5.8，无数据库迁移；不回滚原四节点代理绑定。
 - **记录**：[全系统规格](../docs/requirements/SYSTEM_AUDIT_2026-10-19.md)、[Arena 子范围](../docs/requirements/ARENA_RUNTIME_STABILITY_1.5.9.md)、[缺陷/性能/验收报告](../docs/reports/SYSTEM_AUDIT_1.5.9_2026-10-19.md)。
+- **验收修正 1.5.10**：1.5.9 CI/GitOps 已发布，但 capabilities 显示预算仍为 3；本次新增部署变量漏 `AUTOMATION_` 前缀。修正为已有设置名并补真实环境解析回归，全部组件升至 1.5.10，不复用 1.5.9 制品。业务修复保持，继续完成生产验收。
 
 ## 2026-10-18 已有 Arena 会话复核与请求准备等待修复（1.5.5）
 

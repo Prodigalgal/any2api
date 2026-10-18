@@ -26,3 +26,7 @@
 - 可部署候选统一占用 1.5.9；不覆盖 1.5.8 制品。后续接受候选后再修改源码必须继续升版本。
 - 沿现有授权提交、CI、镜像/GitOps、Pod/digest/API 验证；真实有效输出单独验收。应用回滚至 1.5.8，不改回已停用的 HE IPv6 池。
 - 影响文件随确认缺陷收敛，主要围绕 `automation/` 运行时、`backend/` 调度/推理/读取及 `deploy/gitops/`，Web 只处理与发现问题直接相关的改动。
+
+## 1.5.10 运行验收修正
+
+1.5.9 已发布后，内部 capabilities 显示共享浏览器预算仍为 3。部署变量遗漏 `AUTOMATION_` 前缀，未被 `Settings` 读取；本项验收未通过。修正为既有 `ANY2API_AUTOMATION_BROWSER_PROCESS_CAPACITY=2`，补部署文件到真实环境解析器的契约回归，全部组件升为 1.5.10；保留 1.5.9 不可变制品。没有新增 API 或数据库变更。验收必须读取正在运行服务的 capabilities 确认 capacity=2，不只检查 Pod 环境变量存在。

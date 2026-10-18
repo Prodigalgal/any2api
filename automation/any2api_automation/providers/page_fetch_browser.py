@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..config import settings as core_settings
+from .browser_stream_buffer import BrowserStreamBuffer
 from .official_browser import (
     OfficialBrowserRuntime,
     OfficialBrowserSession,
@@ -59,6 +60,8 @@ def _stream_request_script(binding_name: str) -> str:
     return rf"""async request => {{
   const emit = event => window[{binding}]({{requestId: request.requestId, ...event}});
   const controller = new AbortController();
+  const controllers = window.__any2apiPageStreamControllers ||= new Map();
+  controllers.set(request.requestId, controller);
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
   try {{
     const response = await fetch(request.url, {{
@@ -82,6 +85,9 @@ def _stream_request_script(binding_name: str) -> str:
       pending += text;
       const frames = pending.split(/\r?\n\r?\n/);
       pending = frames.pop() || '';
+      if (new TextEncoder().encode(pending).byteLength > request.maximumBytes) {{
+        throw new Error('official browser stream frame exceeds the buffered byte limit');
+      }}
       for (const frame of frames) {{
         const data = frame.split(/\r?\n/)
           .filter(line => line.startsWith('data:'))
@@ -99,12 +105,16 @@ def _stream_request_script(binding_name: str) -> str:
     if (pending.trim()) await consume('\n\n');
   }} finally {{
     clearTimeout(timeout);
+    controller.abort();
+    controllers.delete(request.requestId);
   }}
 }}"""
 
 
 class PageFetchBrowserRuntime(OfficialBrowserRuntime):
     """Executes provider requests with fetch from an isolated Camoufox page."""
+
+    prefer_restored_cookies: bool = False
 
     def __init__(
         self,
@@ -210,7 +220,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                 yield {"type": "runtime_canary", **report}
 
             request_id = uuid4().hex
-            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            queue = BrowserStreamBuffer()
             self._stream_queues[request_id] = queue
 
             async def execute() -> None:
@@ -232,6 +242,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                                 "method": method,
                                 "headers": _headers(headers),
                                 "body": body,
+                                "maximumBytes": core_settings().browser_transport_max_buffered_bytes,
                                 "timeoutMs": timeout_ms
                                 or selection.rules.canary_timeout_seconds * 1000,
                             },
@@ -355,7 +366,11 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
 
     async def cancel_stream_request(self, page: Any, request_id: str) -> None:
         """Allow provider scripts to stop page-owned work before the session is released."""
-        del page, request_id
+        await evaluate_in_page_world(
+            page,
+            "requestId => window.__any2apiPageStreamControllers?.get(requestId)?.abort()",
+            request_id,
+        )
 
     def stream_request_script(self) -> str:
         """Return the page-world stream reader for this provider's framing protocol."""
@@ -368,7 +383,13 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         credential: dict[str, Any],
     ) -> None:
         values = _credential_cookies(credential, self.cookie_fields)
-        if not values and self.require_cookie:
+        restored_names = set()
+        if self.prefer_restored_cookies:
+            # Query the browser so expired or inapplicable saved cookies do not
+            # suppress a valid legacy fallback. Flat cookies have lost their scope.
+            restored_names = {cookie["name"] for cookie in await context.cookies(self.base_url)}
+            values = {name: value for name, value in values.items() if name not in restored_names}
+        if not values and not restored_names and self.require_cookie:
             raise ValueError(f"{self.provider_id} official browser requires an account cookie")
         if not values:
             return

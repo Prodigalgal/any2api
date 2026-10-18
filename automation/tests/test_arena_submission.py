@@ -133,7 +133,10 @@ async def test_native_preparation_removes_its_route_on_timeout_or_cancel(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_chat_uses_the_inference_deadline_instead_of_the_catalog_canary_deadline(monkeypatch):
+@pytest.mark.parametrize("with_media", [False, True])
+async def test_chat_uses_inference_deadline_and_logs_only_safe_media_metadata(
+    monkeypatch, with_media
+):
     runtime = _runtime()
     observed = []
     monkeypatch.setattr(
@@ -145,6 +148,23 @@ async def test_chat_uses_the_inference_deadline_instead_of_the_catalog_canary_de
         yield {"type": "data", "data": 'a0:"answer"'}
 
     monkeypatch.setattr(runtime, "stream", stream)
+    if with_media:
+        monkeypatch.setattr(arena_browser, "arena_media_sources", lambda _: [{}])
+        monkeypatch.setattr(
+            runtime,
+            "upload_attachments",
+            AsyncMock(
+                return_value={
+                    "attachments": [
+                        {
+                            "name": "private.png",
+                            "contentType": "image/png",
+                            "url": "https://storage.example.test/private.png?signature=secret",
+                        }
+                    ],
+                }
+            ),
+        )
     monkeypatch.setattr(
         arena_browser, "core_settings", lambda: SimpleNamespace(inference_timeout_seconds=240)
     )
@@ -154,7 +174,7 @@ async def test_chat_uses_the_inference_deadline_instead_of_the_catalog_canary_de
         "protocol": "RESPONSES",
         "model": "11111111-1111-4111-8111-111111111111",
         "stream": True,
-        "messages": [{"role": "user", "content": "你好"}],
+        "messages": [{"role": "user", "content": "private prompt"}],
         "generation": {},
         "reasoning": {},
         "tools": [],
@@ -168,8 +188,14 @@ async def test_chat_uses_the_inference_deadline_instead_of_the_catalog_canary_de
                 {}, command, "", default_runtime_plan_for_provider("arena")
             )
         ]
-        assert events[0]["type"] == "data"
+        assert events[-1]["type"] == "data"
         assert observed[0]["timeout_ms"] == 240_000
+        assert "private prompt" in observed[0]["body"]
+        diagnostics = [event for event in events if event["type"] == "diagnostic"]
+        assert len(diagnostics) == (2 if with_media else 0)
+        for event in diagnostics:
+            assert "private" not in json.dumps(event) and "secret" not in json.dumps(event)
+            assert event["attachmentCount"] == 1
     finally:
         await runtime.close()
 

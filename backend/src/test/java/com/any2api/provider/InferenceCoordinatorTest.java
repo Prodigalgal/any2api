@@ -36,6 +36,66 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 class InferenceCoordinatorTest {
 
+    @Test
+    void releasesPreleasedAccountOnCacheHitWithoutCallingTheProvider() {
+        var accounts = mock(AccountSelectionService.class);
+        var leased = leased("alpha");
+        when(accounts.release(leased)).thenReturn(Mono.just(true));
+        var cache = mock(com.any2api.cache.PromptExactCacheManager.class);
+        when(cache.isEligibleForCache(any())).thenReturn(true);
+        var completed = new CanonicalEvent.Completed(1, "request-id", 1, "stop");
+        when(cache.get(any(), any())).thenReturn(Mono.just(List.of(completed)));
+        var provider = spy(new TestProvider(false));
+
+        StepVerifier.create(coordinator(provider, accounts, cache, null)
+                .execute(request("alpha", false), leased))
+            .expectNext(completed).verifyComplete();
+
+        verify(accounts).release(leased);
+        verify(provider, never()).generate(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void releasesPreleasedAccountWhenCatalogFailsOrIsCancelled(boolean cancelled) {
+        var accounts = mock(AccountSelectionService.class);
+        var leased = leased("alpha");
+        when(accounts.release(leased)).thenReturn(Mono.just(true));
+        var catalog = mock(ModelCatalogCache.class);
+        when(catalog.find(anyString(), anyString())).thenReturn(cancelled ? Mono.never()
+            : Mono.error(new IllegalStateException("catalog unavailable")));
+        var events = coordinator(new TestProvider(false), accounts, null, catalog)
+            .execute(request("alpha"), leased);
+        if (cancelled) {
+            StepVerifier.create(events).thenCancel().verify();
+        } else {
+            StepVerifier.create(events).expectErrorMessage("catalog unavailable").verify();
+        }
+        verify(accounts).release(leased);
+    }
+
+    private InferenceCoordinator coordinator(
+        InferenceProvider provider, AccountSelectionService accounts,
+        com.any2api.cache.PromptExactCacheManager cache, ModelCatalogCache catalog
+    ) {
+        var transportModes = mock(ProviderTransportModeService.class);
+        when(transportModes.plan(any())).thenReturn(new ProviderTransportModeService.TransportPlan(
+            ProviderTransportMode.RUNTIME, ProviderTransportMode.RUNTIME, null));
+        var telemetry = mock(InferenceTelemetryService.class);
+        when(telemetry.start(any(), anyInt(), anyLong()))
+            .thenReturn(mock(InferenceTelemetryService.Started.class));
+        if (catalog == null) {
+            catalog = mock(ModelCatalogCache.class);
+            when(catalog.find(anyString(), anyString())).thenReturn(Mono.just(java.util.Optional.empty()));
+        }
+        return new InferenceCoordinator(ProviderRegistry.allEnabled(List.of(provider)), accounts,
+            new ProviderFailureDisposition(accounts, mock(com.any2api.lifecycle.AccountRecoveryService.class)),
+            telemetry, new ModelRuntimeGuard(new Any2ApiProperties(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
+            new UsageNormalizer(), catalog, new ModelRequestLimitGuard(), transportModes,
+            new com.any2api.protocol.SmartContextWindowManager(new tools.jackson.databind.ObjectMapper()), cache);
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     void appliesWebCompatibilityToNormalAndPreselectedAccounts(boolean preselected) {

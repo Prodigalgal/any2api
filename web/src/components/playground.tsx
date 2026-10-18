@@ -108,6 +108,11 @@ export function Playground() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const modelSelectId = useId();
 
+  useEffect(() => () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+  }, []);
+
   const selectedModel =
     selectedModelOverride ||
     models[0]?.id ||
@@ -406,8 +411,10 @@ export function Playground() {
         );
       }
     } finally {
-      setIsGenerating(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === abortCtrl) {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 

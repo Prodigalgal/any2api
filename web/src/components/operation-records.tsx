@@ -18,7 +18,7 @@ export function OperationRecords() {
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
   const operations = useQuery({
     queryKey: ["operation-logs", provider, domain, status, search, page, size],
-    queryFn: () => api.operationLogs({ provider, domain, status, search, page, size }),
+    queryFn: ({ signal }) => api.operationLogs({ provider, domain, status, search, page, size }, signal),
     refetchInterval: 10_000,
   });
   const applySearch = () => { setPage(0); setSearch(searchInput.trim()); };

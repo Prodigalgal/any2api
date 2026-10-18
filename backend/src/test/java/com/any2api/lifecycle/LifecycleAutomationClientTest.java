@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.any2api.config.Any2ApiProperties;
 import java.net.URI;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -17,6 +18,22 @@ import reactor.core.publisher.Mono;
 import tools.jackson.databind.ObjectMapper;
 
 class LifecycleAutomationClientTest {
+
+    @Test
+    void boundsKeepaliveTransportWithoutShorteningReauthentication() {
+        var client = new LifecycleAutomationClient(WebClient.builder().exchangeFunction(
+            request -> Mono.never()), new Any2ApiProperties(), new ObjectMapper());
+        reactor.test.StepVerifier.withVirtualTime(() -> client.execute(
+                "arena", "keepalive", Map.of("credential", Map.of())))
+            .thenAwait(java.time.Duration.ofMinutes(3))
+            .expectErrorMatches(error -> error instanceof AutomationInvocationException
+                && error.getCause() instanceof java.util.concurrent.TimeoutException)
+            .verify();
+        reactor.test.StepVerifier.withVirtualTime(() -> client.execute(
+                "arena", "reauthenticate", Map.of("credential", Map.of())))
+            .expectSubscription().expectNoEvent(java.time.Duration.ofMinutes(4))
+            .thenCancel().verify();
+    }
 
     @Test
     void acceptsBoundedBrowserStateResponseAboveDefaultCodecLimit() {

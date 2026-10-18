@@ -1,7 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Response
 
 from .browser_budget import browser_process_budget
 from .browser_transport import manager as browser_session_manager
@@ -44,7 +44,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Any2API Automation",
-    version="1.5.8",
+    version="1.5.9",
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
@@ -63,9 +63,10 @@ async def live() -> dict[str, object]:
 
 
 @app.get("/health/ready")
-async def ready() -> dict[str, object]:
+async def ready(response: Response) -> dict[str, object]:
     capabilities = registry.capabilities()
     local_solver_ready = any(item["available"] for item in capabilities.values())
+    response.status_code = 200 if local_solver_ready else 503
     return {
         "ok": local_solver_ready,
         "service": settings().service_name,

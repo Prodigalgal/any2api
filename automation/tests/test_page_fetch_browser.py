@@ -13,6 +13,60 @@ from any2api_automation.providers.page_fetch_browser import (
 )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefer_restored", [False, True])
+async def test_restored_cookie_precedence_is_opt_in_and_preserves_missing_legacy_values(
+    prefer_restored,
+):
+    runtime = PageFetchBrowserRuntime(
+        "fixture",
+        "https://example.test",
+        allowed_domain_suffixes=("example.test",),
+        identity_fields=("user_id",),
+    )
+    runtime.prefer_restored_cookies = prefer_restored
+    context = SimpleNamespace(
+        cookies=AsyncMock(return_value=[{"name": "auth", "value": "current"}]),
+        add_cookies=AsyncMock(),
+    )
+    try:
+        await runtime.configure_context(
+            context, {"cookies": {"auth": "stale", "legacy": "fallback"}}
+        )
+        actual = {
+            cookie["name"]: cookie["value"] for cookie in context.add_cookies.call_args.args[0]
+        }
+        assert actual == (
+            {"legacy": "fallback"} if prefer_restored else {"auth": "stale", "legacy": "fallback"}
+        )
+        assert context.cookies.await_count == int(prefer_restored)
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [[], [{"name": "auth", "value": "current"}]])
+async def test_restored_cookie_precedence_still_validates_required_authentication(existing):
+    runtime = PageFetchBrowserRuntime(
+        "fixture",
+        "https://example.test",
+        allowed_domain_suffixes=("example.test",),
+        identity_fields=("user_id",),
+        require_cookie=True,
+    )
+    runtime.prefer_restored_cookies = True
+    context = SimpleNamespace(cookies=AsyncMock(return_value=existing), add_cookies=AsyncMock())
+    try:
+        if existing:
+            await runtime.configure_context(context, {})
+            context.add_cookies.assert_not_awaited()
+        else:
+            with pytest.raises(ValueError, match="requires an account cookie"):
+                await runtime.configure_context(context, {})
+    finally:
+        await runtime.close()
+
+
 def test_endpoint_key_resolves_without_a_fallback_path() -> None:
     assert (
         _resolve_target_path("", "completion", {"completion": "/api/v0/chat/completion"})
@@ -36,6 +90,46 @@ def test_data_shape_exposes_event_metadata_without_event_content() -> None:
 
 def test_data_shape_marks_non_json_payloads() -> None:
     assert _data_shape("upstream returned html") == "non_json"
+
+
+@pytest.mark.asyncio
+async def test_default_stream_cancellation_aborts_fetch_before_releasing_account(monkeypatch):
+    runtime = PageFetchBrowserRuntime(
+        "fixture",
+        "https://example.test",
+        allowed_domain_suffixes=("example.test",),
+        identity_fields=("user_id",),
+    )
+    aborted = []
+    started = []
+
+    async def evaluate(script, payload):
+        if isinstance(payload, str):
+            assert "StreamControllers" in script and "abort()" in script
+            aborted.append(payload)
+            return
+        started.append(payload["requestId"])
+        runtime._emit({"requestId": payload["requestId"], "type": "status", "status": 200})
+        await asyncio.Future()
+
+    plan = default_runtime_plan()
+    session = SimpleNamespace(page=SimpleNamespace(evaluate=evaluate))
+    monkeypatch.setattr(
+        runtime, "_select_session", AsyncMock(return_value=(session, plan.active, []))
+    )
+    credential = {"user_id": "canceled"}
+    stream = runtime.stream(credential, "", plan, method="POST", path="/chat")
+    try:
+        async with asyncio.timeout(2):
+            assert (await anext(stream))["status"] == 200
+            await stream.aclose()
+            assert aborted == started
+            assert runtime._stream_queues == {}
+            async with runtime.account_operation(credential):
+                pass
+    finally:
+        await stream.aclose()
+        await runtime.close()
 
 
 @pytest.mark.asyncio

@@ -93,7 +93,7 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> runtimeOptions,
         ProviderTransportMode transportMode
     ) {
-        return egressGate.wrapMono(providerId, proxyPool, affinityKey, () -> {
+        return egressGate.wrapMono(providerId, proxyPool, affinityKey, proxyNodeOffset(credential), () -> {
             var request = transportMode == ProviderTransportMode.API
                 ? request(providerId, null, operation, semanticCommand, credential, proxyPool,
                     affinityKey, runtimeOptions, transportMode)
@@ -184,7 +184,7 @@ public final class OfficialBrowserTransportClient {
         Map<String, Object> runtimeOptions,
         ProviderTransportMode transportMode
     ) {
-        return egressGate.wrapFlux(providerId, proxyPool, affinityKey, () -> {
+        return egressGate.wrapFlux(providerId, proxyPool, affinityKey, proxyNodeOffset(credential), () -> {
             var stream = transportMode == ProviderTransportMode.API
                 ? stream(providerId, null, operation, semanticCommand, credential, proxyPool,
                     affinityKey, runtimeOptions, transportMode)
@@ -294,6 +294,10 @@ public final class OfficialBrowserTransportClient {
     private Mono<ProviderRuntimeRuleService.RuntimePlan> runtimePlan(String providerId) {
         return Mono.fromCallable(() -> rules.plan(providerId))
             .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private static int proxyNodeOffset(JsonNode credential) {
+        return credential == null ? 0 : Math.max(0, credential.path("proxy_node_offset").asInt(0));
     }
 
     private Mono<Void> acceptReports(String providerId, JsonNode values) {

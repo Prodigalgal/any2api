@@ -1027,9 +1027,11 @@ def _arena_ndjson_stream_script(
         const retryBody = {{...parsedBody, recaptchaV2Token: v2Token}};
         delete retryBody.recaptchaV3Token;
         return JSON.stringify(retryBody);
-      }}"""
+      }}
+      if (!nativeV3Token) {{"""
         + warmup
         + r"""
+      }
       const recaptcha = nativeV3Token
         ? {token: nativeV3Token, available: true}
         : await getRecaptchaV3Token();
@@ -1070,7 +1072,10 @@ def _arena_ndjson_stream_script(
             contentType: response.headers.get('content-type') || ''});
           await emit({type: 'error', data: JSON.stringify({
             error: 'recaptcha v2 interactive verification required',
-            code: 'recaptcha_v2_required', triggerReason
+            code: 'recaptcha_v2_required', triggerReason,
+            triggerReasonSource: 'bridge_inferred',
+            upstreamStatus: response.status, upstreamError: errorBody,
+            retryAfter: response.headers.get('retry-after') || undefined
           })});
           return;
         }
@@ -1089,6 +1094,9 @@ def _arena_ndjson_stream_script(
         pending += text;
         const lines = pending.split(/\r?\n/);
         pending = lines.pop() || '';
+        if (new TextEncoder().encode(pending).byteLength > request.maximumBytes) {
+          throw new Error('Arena stream frame exceeds the buffered byte limit');
+        }
         for (const line of lines) {
           const value = line.trim();
           if (!value) continue;
@@ -1107,6 +1115,7 @@ def _arena_ndjson_stream_script(
     await send(0);
   } finally {
     clearTimeout(timeout);
+    controller.abort();
     controllers.delete(request.requestId);
   }
 }"""
@@ -2138,6 +2147,7 @@ def reauthenticate_with_credentials(
 
 
 class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
+    prefer_restored_cookies = True
     # Enable Camoufox behaviour humanisation for inference sessions so that
     # reCAPTCHA Enterprise v3 accumulates positive behavioural signals before
     # the create-evaluation token is requested.
@@ -2506,16 +2516,11 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             upload_patch = uploaded.get("credential_patch")
             if isinstance(upload_patch, dict) and upload_patch:
                 yield {"type": "credential_patch", "data": upload_patch}
-            # Diagnostic: capture attachment details
             if sources:
                 yield {
                     "type": "diagnostic",
-                    "data": json.dumps(
-                        {
-                            "attachments": uploaded.get("attachments", []),
-                        },
-                        ensure_ascii=False,
-                    )[:1500],
+                    "stage": "media_upload",
+                    "attachmentCount": len(uploaded.get("attachments", [])),
                 }
             request_body = build_arena_request(
                 command,
@@ -2531,15 +2536,11 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             if sources:
                 yield {
                     "type": "diagnostic",
-                    "data": json.dumps(
-                        {
-                            "body_preview": body[:2000],
-                            "attachments_in_body": request_body.get("userMessage", {}).get(
-                                "experimental_attachments", []
-                            ),
-                        },
-                        ensure_ascii=False,
-                    )[:2000],
+                    "stage": "request_prepared",
+                    "requestBytes": len(body.encode("utf8")),
+                    "attachmentCount": len(
+                        request_body.get("userMessage", {}).get("experimental_attachments", [])
+                    ),
                 }
         except (TypeError, ValueError, json.JSONDecodeError):
             yield {"type": "status", "status": 422}

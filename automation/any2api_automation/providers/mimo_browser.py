@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from ..config import settings as core_settings
 from .base import validate_semantic_command
+from .browser_stream_buffer import BrowserStreamBuffer
 from .multimodal import (
     decode_inline_data_url,
     iter_media_blocks,
@@ -67,6 +68,8 @@ def _stream_request(rule: RuntimeRule) -> str:
     return r"""async request => {
   const emit = event => window.__any2apiMimoEmit({requestId: request.requestId, ...event});
   const controller = new AbortController();
+  const controllers = window.__any2apiMimoStreamControllers ||= new Map();
+  controllers.set(request.requestId, controller);
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
   try {
     const response = await fetch(request.url, {
@@ -91,6 +94,9 @@ def _stream_request(rule: RuntimeRule) -> str:
       pending += text;
       const frames = pending.split(/\r?\n\r?\n/);
       pending = frames.pop() || '';
+      if (new TextEncoder().encode(pending).byteLength > request.maximumBytes) {
+        throw new Error('MiMo stream frame exceeds the buffered byte limit');
+      }
       for (const frame of frames) {
         let eventName = 'message';
         const dataLines = [];
@@ -127,6 +133,8 @@ def _stream_request(rule: RuntimeRule) -> str:
     }
   } finally {
     clearTimeout(timeout);
+    controller.abort();
+    controllers.delete(request.requestId);
   }
 }"""
 
@@ -290,34 +298,44 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
             for report in reports:
                 yield {"type": "runtime_canary", **report}
             request_id = uuid4().hex
-            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            queue = BrowserStreamBuffer()
             self._stream_queues[request_id] = queue
 
             async def execute() -> None:
                 try:
-                    await session.page.evaluate(
-                        _stream_request(selection.rules),
-                        {
-                            "requestId": request_id,
-                            "url": self._endpoint(
-                                selection,
-                                _with_phase(
-                                    selection.rules.endpoint_paths.get(
-                                        "chat", "/open-apis/react/chat"
+                    await asyncio.wait_for(
+                        session.page.evaluate(
+                            _stream_request(selection.rules),
+                            {
+                                "requestId": request_id,
+                                "url": self._endpoint(
+                                    selection,
+                                    _with_phase(
+                                        selection.rules.endpoint_paths.get(
+                                            "chat", "/open-apis/react/chat"
+                                        ),
+                                        credential,
                                     ),
-                                    credential,
                                 ),
-                            ),
-                            "headers": _headers(),
-                            "body": body,
-                            "timeoutMs": core_settings().registration_timeout_seconds * 1000,
-                        },
+                                "headers": _headers(),
+                                "body": body,
+                                "timeoutMs": core_settings().inference_timeout_seconds * 1000,
+                                "maximumBytes": core_settings().browser_transport_max_buffered_bytes,
+                            },
+                        ),
+                        timeout=core_settings().inference_timeout_seconds + 10,
                     )
                 except Exception as error:  # noqa: BLE001 - normalized stream boundary
                     logger.warning(
                         "mimo_official_browser_stream_failed error_type=%s reason=%s",
                         type(error).__name__,
                         _error_reason(error),
+                    )
+                    await queue.put(
+                        {
+                            "type": "status",
+                            "status": 504 if isinstance(error, TimeoutError) else 502,
+                        }
                     )
                     await queue.put(
                         {
@@ -389,6 +407,16 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                 self._stream_queues.pop(request_id, None)
                 if not task.done():
                     task.cancel()
+                    try:
+                        async with asyncio.timeout(2):
+                            await session.page.evaluate(
+                                "requestId => window.__any2apiMimoStreamControllers?.get(requestId)?.abort()",
+                                request_id,
+                            )
+                    except Exception as error:  # noqa: BLE001 - cleanup must still release ownership
+                        logger.warning(
+                            "mimo_stream_abort_failed error_type=%s", type(error).__name__
+                        )
                 await asyncio.gather(task, return_exceptions=True)
 
     async def _upload_media(

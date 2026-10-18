@@ -296,6 +296,42 @@ async def test_runtime_forwards_cookie_patch_before_v3_finish(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_downstream_cancellation_aborts_page_fetch_before_releasing_account(monkeypatch):
+    runtime = MimoOfficialBrowserTransport("https://aistudio.xiaomimimo.com")
+    aborted = []
+    request_ids = []
+
+    class Page:
+        async def evaluate(self, script, payload):
+            if isinstance(payload, str):
+                assert "StreamControllers" in script and "abort()" in script
+                aborted.append(payload)
+                return
+            request_ids.append(payload["requestId"])
+            runtime._emit({"requestId": payload["requestId"], "type": "status", "status": 200})
+            await asyncio.Future()
+
+    session = SimpleNamespace(page=Page(), build_id="test")
+    selection = SimpleNamespace(rules=default_runtime_plan().active.rules)
+    monkeypatch.setattr(
+        runtime, "_select_session", AsyncMock(return_value=(session, selection, []))
+    )
+    credential = {"user_id": "canceled", "xiaomichatbot_ph": "phase"}
+    stream = runtime.stream(credential, _semantic_command(), "", None)
+    try:
+        async with asyncio.timeout(2):
+            assert (await anext(stream))["status"] == 200
+            await stream.aclose()
+            assert aborted == request_ids
+            assert runtime._stream_queues == {}
+            async with runtime.account_operation(credential):
+                pass
+    finally:
+        await stream.aclose()
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_accounts_receive_only_their_own_stream_events(monkeypatch) -> None:
     from any2api_automation.providers import mimo_browser
 

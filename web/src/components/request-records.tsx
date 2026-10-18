@@ -24,7 +24,7 @@ export function RequestRecords() {
   const catalog = useQuery({ queryKey: ["providers"], queryFn: api.providers });
   const requests = useQuery({
     queryKey: ["request-logs", provider, model, apiKeyId, status, kind, search, page, size],
-    queryFn: () => api.requestLogs({ provider, model, api_key_id: apiKeyId, status, request_kind: kind, search, page, size }),
+    queryFn: ({ signal }) => api.requestLogs({ provider, model, api_key_id: apiKeyId, status, request_kind: kind, search, page, size }, signal),
     refetchInterval: 10_000,
   });
   const applySearch = () => { setPage(0); setSearch(searchInput.trim()); };

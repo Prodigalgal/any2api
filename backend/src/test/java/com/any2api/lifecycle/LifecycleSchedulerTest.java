@@ -12,6 +12,22 @@ class LifecycleSchedulerTest {
     private static final Instant NOW = Instant.parse("2026-07-28T00:00:00Z");
 
     @Test
+    void defersRedundantKeepaliveFromTheLastRealInferenceButRespectsCredentialRefresh() {
+        assertEquals(java.util.Optional.of(NOW.plusSeconds(1200)),
+            LifecycleScheduler.recentInferenceKeepaliveDueAt(NOW.minusSeconds(600), null,
+                NOW, Duration.ofMinutes(30)));
+        assertEquals(java.util.Optional.empty(), LifecycleScheduler.recentInferenceKeepaliveDueAt(
+            NOW.minusSeconds(1800), null, NOW, Duration.ofMinutes(30)));
+        assertEquals(java.util.Optional.empty(), LifecycleScheduler.recentInferenceKeepaliveDueAt(
+            NOW.plusSeconds(1), null, NOW, Duration.ofMinutes(30)));
+        assertEquals(java.util.Optional.empty(), LifecycleScheduler.recentInferenceKeepaliveDueAt(
+            NOW.minusSeconds(60), NOW.plusSeconds(600), NOW, Duration.ofMinutes(30)));
+        assertEquals(java.util.Optional.of(NOW.plusSeconds(1800)),
+            LifecycleScheduler.recentInferenceKeepaliveDueAt(NOW.minusSeconds(60),
+                NOW.plusSeconds(3000), NOW, Duration.ofHours(6)));
+    }
+
+    @Test
     void schedulesCredentialRefreshBeforeProviderExpiry() {
         assertEquals(
             Duration.ofHours(1).minusMinutes(20),

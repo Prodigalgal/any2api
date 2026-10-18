@@ -204,7 +204,10 @@ public final class ArenaProvider implements InferenceProvider {
                             frame.path("tokenLength").asInt(0),
                             frame.path("triggerReason").asText(""));
                     } else if ("diagnostic".equals(type)) {
-                        LOGGER.info("arena_diagnostic data={}", frame.path("data").asText(""));
+                        var stage = frame.path("stage").asText("");
+                        LOGGER.info("arena_diagnostic stage={} attachment_count={} request_bytes={}",
+                            Set.of("media_upload", "request_prepared").contains(stage) ? stage : "legacy",
+                            frame.path("attachmentCount").asInt(0), frame.path("requestBytes").asInt(0));
                     } else if ("error".equals(type)) {
                         var code = status.get() < 0 ? 502 : status.get();
                         sink.error(new ArenaUpstreamException(

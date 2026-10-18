@@ -16,6 +16,7 @@ from ..lifecycle.browser import BrowserResult
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from .base import reject_raw_request
+from .browser_stream_buffer import BrowserStreamBuffer
 from .multimodal import text_content
 from .official_browser import OfficialBrowserRuntime, OfficialBrowserSession
 from .runtime_rules import RuntimePlan, RuntimeRuleDiscoveryError, runtime_canary, successful_canary
@@ -301,7 +302,7 @@ class GrokWebOfficialBrowserTransport(OfficialBrowserRuntime):
                 if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", correlation_id)
                 else uuid4().hex
             )
-            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            queue = BrowserStreamBuffer()
             self._stream_queues[request_id] = queue
 
             async def execute() -> None:

@@ -509,9 +509,15 @@ async function adminJson<T>(
   init?: RequestInit,
   redirectOnUnauthorized = true,
 ): Promise<T> {
+  const isRead = !init?.method || init.method.toUpperCase() === "GET";
   const response = await fetch(url, {
     ...init,
     cache: "no-store",
+    signal: isRead
+      ? (init?.signal
+        ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)])
+        : AbortSignal.timeout(30_000))
+      : init?.signal,
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,
@@ -550,7 +556,7 @@ export const api = {
   logout: () => adminJson<{ authenticated: boolean }>(
     "/api/admin/v1/session", { method: "DELETE" },
   ),
-  accountPage: (query: AccountPageQuery) => {
+  accountPage: (query: AccountPageQuery, signal?: AbortSignal) => {
     const params = new URLSearchParams({
       page: String(query.page),
       size: String(query.size),
@@ -560,7 +566,7 @@ export const api = {
     if (query.status) params.set("status", query.status);
     if (query.enabled !== undefined) params.set("enabled", String(query.enabled));
     if (query.query) params.set("query", query.query);
-    return adminJson<AccountPage>(`/api/admin/v1/accounts/page?${params.toString()}`);
+    return adminJson<AccountPage>(`/api/admin/v1/accounts/page?${params.toString()}`, { signal });
   },
   adminProviders: () => adminJson<ProviderRuntime[]>("/api/admin/v1/providers"),
   updateProvider: (
@@ -661,22 +667,22 @@ export const api = {
   deleteRegistrationSchedule: (id: string) => adminJson<void>(
     `/api/admin/v1/registration-schedules/${id}`, { method: "DELETE" },
   ),
-  requestLogs: (query: Record<string, string | number>) => {
+  requestLogs: (query: Record<string, string | number>, signal?: AbortSignal) => {
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => {
       if (value !== "") params.set(key, String(value));
     });
-    return adminJson<RequestLogPage>(`/api/admin/v1/requests?${params.toString()}`);
+    return adminJson<RequestLogPage>(`/api/admin/v1/requests?${params.toString()}`, { signal });
   },
   requestLogDetail: (requestId: string, attempt: number) => adminJson<RequestLogDetail>(
     `/api/admin/v1/requests/${encodeURIComponent(requestId)}/attempts/${attempt}`,
   ),
-  operationLogs: (query: Record<string, string | number>) => {
+  operationLogs: (query: Record<string, string | number>, signal?: AbortSignal) => {
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => {
       if (value !== "") params.set(key, String(value));
     });
-    return adminJson<OperationLogPage>(`/api/admin/v1/operations?${params.toString()}`);
+    return adminJson<OperationLogPage>(`/api/admin/v1/operations?${params.toString()}`, { signal });
   },
   proxyPools: () => adminJson<ProxyPool[]>("/api/admin/v1/proxy-pools"),
   createProxyPool: (body: Record<string, unknown>) => adminJson<ProxyPool>(

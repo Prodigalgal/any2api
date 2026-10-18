@@ -1,7 +1,11 @@
-from unittest.mock import AsyncMock
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from any2api_automation.browser_budget import BrowserProcessBudget
+from any2api_automation.providers import official_browser
 from any2api_automation.providers.minmax_browser import (
     _UPLOAD_MEDIA,
     MinmaxOfficialBrowserTransport,
@@ -10,6 +14,62 @@ from any2api_automation.providers.minmax_browser import (
     _upstream_request_target,
     official_bridge_script,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["context", "driver"])
+async def test_minmax_shutdown_deadline_releases_ownership_after_process_cleanup(
+    monkeypatch, phase
+):
+    monkeypatch.setattr(
+        official_browser,
+        "core_settings",
+        lambda: SimpleNamespace(
+            browser_cleanup_timeout_seconds=0.02,
+        ),
+    )
+    budget = BrowserProcessBudget(1)
+    tunnel = SimpleNamespace(release=Mock())
+    context = SimpleNamespace(close=AsyncMock())
+    driver = SimpleNamespace(stop=AsyncMock())
+
+    async def hang():
+        await asyncio.Event().wait()
+
+    if phase == "context":
+        context.close.side_effect = hang
+    else:
+        driver.stop.side_effect = hang
+    session = _Session(
+        "fixture",
+        SimpleNamespace(close=AsyncMock()),
+        context,
+        SimpleNamespace(),
+        "patchright",
+        "",
+        "",
+        "",
+        playwright=driver,
+        browser_lease=budget.acquire_sync("fixture"),
+        driver_processes=(1234,),
+        proxy_tunnel=tunnel,
+    )
+    cleaned = []
+
+    def terminate(processes, *, label):
+        assert budget.snapshot().in_use == 1
+        tunnel.release.assert_not_called()
+        cleaned.append(processes)
+
+    monkeypatch.setattr(official_browser, "terminate_residual_browser_process", terminate)
+    transport = MinmaxOfficialBrowserTransport("https://agent.minimax.io")
+    try:
+        await asyncio.wait_for(transport._close_session(session), 0.5)
+        assert budget.snapshot().in_use == 0
+        assert cleaned == [(1234,)]
+        tunnel.release.assert_called_once()
+    finally:
+        await transport.close()
 
 
 def test_minmax_bridge_discovers_the_official_runtime_without_fixed_module_ids() -> None:

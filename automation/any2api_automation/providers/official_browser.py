@@ -429,70 +429,17 @@ class OfficialBrowserRuntime:
         browser_lease: BrowserProcessLease | None,
         proxy_tunnel: ProxyTunnelLease | None,
     ) -> None:
-        async def cleanup() -> None:
-            started = time.monotonic()
-            self.logger.info("official_browser_cleanup stage=started")
-            try:
-                # Driver teardown can await again in a finally block after cancellation.
-                # The existing process watchdog also stops that unresponsive driver.
-                with browser_operation_deadline(
-                    browser or playwright or browser_manager,
-                    core_settings().browser_cleanup_timeout_seconds,
-                    label=f"{self.provider_id} async session cleanup",
-                ):
-                    if context is not None:
-                        await self._cleanup_phase("context", context.close)
-                    if browser_manager is not None:
-                        await self._cleanup_phase(
-                            "browser_manager", lambda: browser_manager.__aexit__(None, None, None)
-                        )
-                    elif browser is not None:
-                        await self._cleanup_phase("browser", browser.close)
-                    if playwright is not None:
-                        await self._cleanup_phase("driver", playwright.stop)
-            finally:
-                try:
-                    if driver_processes:
-                        await asyncio.to_thread(
-                            terminate_residual_browser_process,
-                            driver_processes,
-                            label=f"{self.provider_id} session cleanup",
-                        )
-                except Exception as error:  # noqa: BLE001 - ownership release must still run
-                    self.logger.warning(
-                        "official_browser_cleanup_failed phase=process error_type=%s",
-                        type(error).__name__,
-                    )
-                finally:
-                    try:
-                        if browser_lease is not None:
-                            browser_lease.release()
-                    finally:
-                        if proxy_tunnel is not None:
-                            await asyncio.to_thread(proxy_tunnel.release)
-            self.logger.info(
-                "official_browser_cleanup stage=finished duration_ms=%s",
-                round((time.monotonic() - started) * 1000),
-            )
-
-        task = asyncio.create_task(cleanup())
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            # Keep ownership until bounded browser shutdown and process termination finish.
-            await task
-            raise
-
-    async def _cleanup_phase(self, phase: str, operation: Callable[[], Awaitable[None]]) -> None:
-        try:
-            async with asyncio.timeout(core_settings().browser_cleanup_timeout_seconds):
-                await operation()
-        except Exception as error:  # noqa: BLE001 - continue with driver/process cleanup
-            self.logger.warning(
-                "official_browser_cleanup_failed phase=%s error_type=%s",
-                phase,
-                type(error).__name__,
-            )
+        await close_owned_browser(
+            self.provider_id,
+            logger=self.logger,
+            context=context,
+            browser=browser,
+            browser_manager=browser_manager,
+            playwright=playwright,
+            driver_processes=driver_processes,
+            browser_lease=browser_lease,
+            proxy_tunnel=proxy_tunnel,
+        )
 
     def _storage_state(self, execution: dict[str, Any]) -> dict[str, Any] | None:
         state = execution.get("storage_state")
@@ -514,6 +461,83 @@ class OfficialBrowserRuntime:
         return any(
             host == suffix or host.endswith("." + suffix) for suffix in self.allowed_domain_suffixes
         )
+
+
+async def close_owned_browser(
+    provider_id: str,
+    *,
+    logger: logging.Logger,
+    context: Any,
+    browser: Any,
+    browser_manager: Any,
+    playwright: Any,
+    driver_processes: tuple[int, ...],
+    browser_lease: BrowserProcessLease | None,
+    proxy_tunnel: ProxyTunnelLease | None,
+) -> None:
+    async def phase(name: str, operation: Callable[[], Awaitable[None]]) -> None:
+        try:
+            async with asyncio.timeout(core_settings().browser_cleanup_timeout_seconds):
+                await operation()
+        except Exception as error:  # noqa: BLE001 - continue with driver/process cleanup
+            logger.warning(
+                "official_browser_cleanup_failed phase=%s error_type=%s",
+                name,
+                type(error).__name__,
+            )
+
+    async def cleanup() -> None:
+        started = time.monotonic()
+        logger.info("official_browser_cleanup stage=started")
+        try:
+            # A driver can await again in finally after cancellation. The process
+            # watchdog bounds that teardown before either ownership token is released.
+            with browser_operation_deadline(
+                browser or playwright or browser_manager,
+                core_settings().browser_cleanup_timeout_seconds,
+                label=f"{provider_id} async session cleanup",
+            ):
+                if context is not None:
+                    await phase("context", context.close)
+                if browser_manager is not None:
+                    await phase(
+                        "browser_manager", lambda: browser_manager.__aexit__(None, None, None)
+                    )
+                elif browser is not None:
+                    await phase("browser", browser.close)
+                if playwright is not None:
+                    await phase("driver", playwright.stop)
+        finally:
+            try:
+                if driver_processes:
+                    await asyncio.to_thread(
+                        terminate_residual_browser_process,
+                        driver_processes,
+                        label=f"{provider_id} session cleanup",
+                    )
+            except Exception as error:  # noqa: BLE001 - ownership release must still run
+                logger.warning(
+                    "official_browser_cleanup_failed phase=process error_type=%s",
+                    type(error).__name__,
+                )
+            finally:
+                try:
+                    if browser_lease is not None:
+                        browser_lease.release()
+                finally:
+                    if proxy_tunnel is not None:
+                        await asyncio.to_thread(proxy_tunnel.release)
+        logger.info(
+            "official_browser_cleanup stage=finished duration_ms=%s",
+            round((time.monotonic() - started) * 1000),
+        )
+
+    task = asyncio.create_task(cleanup())
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
+        raise
 
 
 def digest(value: dict[str, Any]) -> str:

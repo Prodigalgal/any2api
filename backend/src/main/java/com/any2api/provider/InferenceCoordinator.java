@@ -142,10 +142,36 @@ public class InferenceCoordinator {
         ProviderTransportMode requestedTransportMode,
         String requestKind
     ) {
+        return Flux.defer(() -> {
+            var transferred = new java.util.concurrent.atomic.AtomicBoolean();
+            var initialLease = reactor.core.publisher.Mono.fromSupplier(() -> {
+                transferred.set(true);
+                return account;
+            });
+            var releaseUnused = reactor.core.publisher.Mono.defer(() -> transferred.get()
+                ? reactor.core.publisher.Mono.<Void>empty()
+                : releaseAccount(account, request.requestId()));
+            // A random route owns its account before catalog/cache/admission work.
+            // Transfer ownership only when the inner execution actually takes it.
+            return Flux.usingWhen(reactor.core.publisher.Mono.just(account),
+                ignored -> Flux.defer(() -> executePreselected(
+                    request, account, initialLease, apiKeyId, requestedTransportMode, requestKind)),
+                ignored -> releaseUnused, (ignored, error) -> releaseUnused, ignored -> releaseUnused);
+        });
+    }
+
+    private Flux<CanonicalEvent> executePreselected(
+        CanonicalRequest request,
+        com.any2api.account.LeasedProviderAccount account,
+        reactor.core.publisher.Mono<com.any2api.account.LeasedProviderAccount> initialLease,
+        UUID apiKeyId,
+        ProviderTransportMode requestedTransportMode,
+        String requestKind
+    ) {
         if (!request.providerId().equals(account.providerId())) {
-            return accounts.release(account).thenMany(Flux.error(
+            return Flux.error(
                 new IllegalArgumentException(
-                    "random route account provider does not match the request")));
+                    "random route account provider does not match the request"));
         }
         var provider = providers.require(request.providerId());
         var transportPlan = requestedTransportMode == null
@@ -158,11 +184,9 @@ public class InferenceCoordinator {
             model.ifPresent(entry -> requestLimits.requireWithinLimits(
                 safeRequest, entry.capabilities()));
             var execution = runtime.execute(safeRequest, admission ->
-                    executeWithRetries(safeRequest, provider, reactor.core.publisher.Mono.just(account),
+                    executeWithRetries(safeRequest, provider, initialLease,
                         true, 1, apiKeyId, requestKind, admission.queueMs(),
-                        transportPlan.primary(), transportPlan.fallback(), modelCapabilities))
-                .onErrorResume(ModelRuntimeGuard.ModelRuntimeRejectedException.class,
-                    error -> accounts.release(account).thenMany(Flux.error(error)));
+                        transportPlan.primary(), transportPlan.fallback(), modelCapabilities));
             var liveEvents = execution;
             if (promptCache == null || !promptCache.isEligibleForCache(safeRequest)) {
                 return liveEvents;
@@ -427,13 +451,19 @@ public class InferenceCoordinator {
             ? accounts.mergeCredentialPatch(execution.account(), patch).onErrorReturn(false)
             : reactor.core.publisher.Mono.just(false);
         return persistence
-            .then(accounts.release(execution.account()))
+            .then(releaseAccount(execution.account(), execution.context().requestId()));
+    }
+
+    private reactor.core.publisher.Mono<Void> releaseAccount(
+        com.any2api.account.LeasedProviderAccount account, String requestId
+    ) {
+        return accounts.release(account)
             .then()
             .onErrorResume(com.any2api.coordination.CoordinationUnavailableException::isCausedBy, error -> {
                 // Cleanup cannot replace a committed generation terminal; the existing lease expires by TTL.
                 log.warn("account_lease_release_failed request_id={} provider={} account_id={} error_type={}",
-                    execution.context().requestId(), execution.account().providerId(),
-                    execution.account().accountId(), com.any2api.coordination.CoordinationUnavailableException.CODE);
+                      requestId, account.providerId(),
+                      account.accountId(), com.any2api.coordination.CoordinationUnavailableException.CODE);
                 return reactor.core.publisher.Mono.empty();
             });
     }

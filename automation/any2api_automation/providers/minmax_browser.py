@@ -22,10 +22,10 @@ from ..lifecycle.browser import (
     _driver_pid,
     _process_tree,
     camoufox_config_from_options,
-    terminate_residual_browser_process,
 )
 from ..lifecycle.proxy import ProxyTunnelLease, browser_proxy_options, retain_proxy_tunnel
 from ..session_pool import AccountSessionPool, SessionSlot
+from .official_browser import close_owned_browser
 
 logger = logging.getLogger("any2api_automation.providers.minmax_browser")
 _SCHEMA_VERSION = 1
@@ -934,31 +934,20 @@ class MinmaxOfficialBrowserTransport:
             )
             return session
         except BaseException:
-            try:
-                if context is not None:
-                    await context.close()
-            finally:
-                try:
-                    if browser_manager is not None:
-                        await browser_manager.__aexit__(None, None, None)
-                    elif browser is not None:
-                        await browser.close()
-                finally:
-                    try:
-                        if playwright is not None:
-                            await playwright.stop()
-                    finally:
-                        try:
-                            driver_pid = _driver_pid(browser) or _driver_pid(playwright)
-                            if driver_pid:
-                                terminate_residual_browser_process(
-                                    driver_pid,
-                                    label="minmax session launch cleanup",
-                                )
-                        finally:
-                            browser_lease.release()
-                            if proxy_tunnel is not None:
-                                await asyncio.to_thread(proxy_tunnel.release)
+            driver_pid = (
+                _driver_pid(browser) or _driver_pid(playwright) or _driver_pid(browser_manager)
+            )
+            await close_owned_browser(
+                "minmax",
+                logger=logger,
+                context=context,
+                browser=browser,
+                browser_manager=browser_manager,
+                playwright=playwright,
+                driver_processes=tuple(_process_tree(driver_pid)) if driver_pid else (),
+                browser_lease=browser_lease,
+                proxy_tunnel=proxy_tunnel,
+            )
             raise
 
     async def _wait_for_bridge(self, page: Any) -> None:
@@ -1023,38 +1012,17 @@ class MinmaxOfficialBrowserTransport:
         queue.put_nowait({key: value for key, value in event.items() if key != "requestId"})
 
     async def _close_session(self, session: _Session) -> None:
-        try:
-            await session.context.close()
-        except Exception as error:  # noqa: BLE001
-            logger.debug("minmax browser context close ignored: %s", error)
-        finally:
-            try:
-                if session.browser_manager is not None:
-                    await session.browser_manager.__aexit__(None, None, None)
-                elif session.browser is not None:
-                    await session.browser.close()
-            except Exception as error:  # noqa: BLE001
-                logger.debug("minmax browser close ignored: %s", error)
-            finally:
-                try:
-                    if session.playwright is not None:
-                        await session.playwright.stop()
-                except Exception as error:  # noqa: BLE001
-                    logger.debug("minmax playwright stop ignored: %s", error)
-                finally:
-                    try:
-                        if session.driver_processes:
-                            terminate_residual_browser_process(
-                                session.driver_processes,
-                                label="minmax session cleanup",
-                            )
-                    except Exception as error:  # noqa: BLE001
-                        logger.debug("minmax process termination ignored: %s", error)
-                    finally:
-                        if session.browser_lease is not None:
-                            session.browser_lease.release()
-                        if session.proxy_tunnel is not None:
-                            await asyncio.to_thread(session.proxy_tunnel.release)
+        await close_owned_browser(
+            "minmax",
+            logger=logger,
+            context=session.context,
+            browser=session.browser,
+            browser_manager=session.browser_manager,
+            playwright=session.playwright,
+            driver_processes=session.driver_processes,
+            browser_lease=session.browser_lease,
+            proxy_tunnel=session.proxy_tunnel,
+        )
 
 
 def _execution_context(credential: dict[str, Any]) -> dict[str, Any]:

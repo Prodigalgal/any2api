@@ -14,6 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 final class LifecycleAutomationClient {
+    private static final java.time.Duration KEEPALIVE_TIMEOUT = java.time.Duration.ofMinutes(3);
     private final WebClient.Builder builder;
     private final Any2ApiProperties properties;
     private final String token;
@@ -87,6 +88,7 @@ final class LifecycleAutomationClient {
                         context.correlationId(), response.statusCode().value(),
                         details.code(), details.stage(), details.message(), null));
                 }))
+            .transform(work -> "keepalive".equals(operation) ? work.timeout(KEEPALIVE_TIMEOUT) : work)
             .retryWhen(reactor.util.retry.Retry.max(1)
                 .filter(LifecycleAutomationClient::isTransientDnsOrConnect)
                 .onRetryExhaustedThrow((spec, signal) -> signal.failure()))

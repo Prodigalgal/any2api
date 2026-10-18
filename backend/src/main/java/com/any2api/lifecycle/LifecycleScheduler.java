@@ -162,13 +162,19 @@ public class LifecycleScheduler {
               AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
             """).param("maxAttempts", MAX_ATTEMPTS).update();
         return jdbc.sql("""
-            WITH candidates AS (
-                SELECT id FROM scheduled_actions
+            WITH ranked AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY provider_id ORDER BY priority DESC, due_at, id) AS provider_rank
+                FROM scheduled_actions
                 WHERE status = 'PENDING'
                   AND due_at <= CURRENT_TIMESTAMP
                   AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-                ORDER BY priority DESC, due_at, id
-                FOR UPDATE SKIP LOCKED
+            ), candidates AS (
+                SELECT action.id FROM scheduled_actions action
+                JOIN ranked ON ranked.id = action.id
+                WHERE action.status = 'PENDING'
+                ORDER BY action.priority DESC, ranked.provider_rank, action.due_at, action.id
+                FOR UPDATE OF action SKIP LOCKED
                 LIMIT :limit
             )
             UPDATE scheduled_actions action
@@ -180,7 +186,7 @@ public class LifecycleScheduler {
             RETURNING action.id, action.provider_id, action.entity_id,
                       action.action_family, action.generation, action.attempts
             """)
-            .param("limit", CLAIM_LIMIT)
+            .param("limit", Math.min(CLAIM_LIMIT, actionConcurrency))
             .param("owner", owner)
             .param("leaseSeconds", Long.toString(LEASE_TTL.toSeconds()))
             .query(LifecycleScheduler::mapAction)
@@ -285,6 +291,12 @@ public class LifecycleScheduler {
             if (!account.getProviderId().equals(action.providerId())) {
                 throw new IllegalStateException("scheduled account/provider ownership mismatch");
             }
+            observability.linkAccount(observed, accountId);
+            if (deferRecentlyUsedKeepalive(action, owner, account)) {
+                observability.succeed(observed, "keepalive_deferred_recent_inference");
+                // A deferred operation completes this Mono without invoking Automation.
+                return null;
+            }
             var credential = credentials.read(account, action.providerId());
             return new AccountTask(
                 account,
@@ -294,7 +306,6 @@ public class LifecycleScheduler {
                 proxyPools.runtimeForProvider(
                     action.providerId(), ProxyTrafficScope.LIFECYCLE).orElse(null));
         }).subscribeOn(Schedulers.boundedElastic())
-            .doOnNext(task -> observability.linkAccount(observed, task.account().getId()))
             .flatMap(task -> lifecycle.execute(
                 action.providerId(), action.action(), task.credential(),
                 task.account().getMetadata(), task.proxyPool(), context)
@@ -345,6 +356,62 @@ public class LifecycleScheduler {
             }))
             .doOnError(error -> observability.fail(observed, error))
             .contextWrite(RequestCorrelation.context(context.correlationId()));
+    }
+
+    private boolean deferRecentlyUsedKeepalive(
+        Action action, String owner, com.any2api.account.AccountEntity account
+    ) {
+        var now = Instant.now();
+        var interval = Duration.ofMinutes(runtimeSettings.keepalivePolicy(action.providerId()).intervalMinutes());
+        if (!"keepalive".equals(action.action()) || account.getStatus() != AccountStatus.ACTIVE
+            || !account.isEnabled() || account.getLastUsedAt() == null
+            || account.getLastUsedAt().isBefore(now.minus(interval))
+            || supportsDailyCheckin(action.providerId())) return false;
+        var latest = jdbc.sql("""
+            SELECT MAX(event.created_at + event.duration_ms * INTERVAL '1 millisecond') AS completed_at
+            FROM usage_events event
+            WHERE event.account_id = :accountId AND event.provider_id = :providerId
+              AND event.request_kind = 'INFERENCE' AND event.success = TRUE
+              AND event.created_at >= :since AND event.created_at <= :now
+              AND EXISTS (SELECT 1 FROM account_inference_checks initial
+                  WHERE initial.account_id = :accountId AND initial.status IN ('READY','FAILED'))
+            """).param("accountId", account.getId()).param("providerId", action.providerId())
+            .param("since", PostgresResultValues.timestamp(now.minus(interval)))
+            .param("now", PostgresResultValues.timestamp(now))
+            .query((row, ignored) -> java.util.Optional.ofNullable(
+                PostgresResultValues.instant(row, "completed_at"))).single();
+        var next = latest.flatMap(completed -> recentInferenceKeepaliveDueAt(
+            completed, account.getExpiresAt(), now, interval));
+        if (next.isEmpty()) return false;
+        transactions.executeWithoutResult(ignored -> {
+            var updated = jdbc.sql("""
+                UPDATE scheduled_actions SET status='PENDING', generation=:generation,
+                    attempts=0, due_at=:dueAt, idempotency_key=:idempotency,
+                    lease_owner=NULL, lease_expires_at=NULL,
+                    last_error_class='KeepaliveDeferredRecentInference', updated_at=CURRENT_TIMESTAMP
+                WHERE id=:id AND status='LEASED' AND lease_owner=:owner
+                  AND lease_expires_at > CURRENT_TIMESTAMP
+                """).param("generation", action.generation() + 1)
+                .param("dueAt", PostgresResultValues.timestamp(next.get()))
+                .param("idempotency", "action:" + action.id() + ":" + (action.generation() + 1))
+                .param("id", action.id()).param("owner", owner).update();
+            if (updated != 1) throw new IllegalStateException("lifecycle lease was lost before deferral");
+        });
+        LOGGER.info("lifecycle_keepalive_deferred provider={} account_id={} next_due_at={}",
+            action.providerId(), account.getId(), next.get());
+        return true;
+    }
+
+    static java.util.Optional<Instant> recentInferenceKeepaliveDueAt(
+        Instant completedAt, Instant credentialExpiresAt, Instant now, Duration interval
+    ) {
+        if (completedAt == null || completedAt.isAfter(now)
+            || !completedAt.isAfter(now.minus(interval))
+            || (credentialExpiresAt != null && !credentialExpiresAt.isAfter(now.plus(Duration.ofMinutes(20))))) {
+            return java.util.Optional.empty();
+        }
+        var due = completedAt.plus(healthyInterval(credentialExpiresAt, completedAt, interval));
+        return due.isAfter(now) ? java.util.Optional.of(due) : java.util.Optional.empty();
     }
 
     private void complete(

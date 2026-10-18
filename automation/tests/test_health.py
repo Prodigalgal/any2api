@@ -2,7 +2,7 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from any2api_automation.main import app
+from any2api_automation.main import app, registry
 
 client = TestClient(app)
 
@@ -15,6 +15,14 @@ def test_live_health() -> None:
     response = client.get("/health/live")
     assert response.status_code == 200
     assert response.json()["service"] == "any2api-automation"
+
+
+def test_readiness_failure_is_visible_to_http_probes_without_failing_liveness(monkeypatch):
+    monkeypatch.setattr(registry, "capabilities", lambda: {"fixture": {"available": False}})
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["ok"] is False
+    assert client.get("/health/live").status_code == 200
 
 
 def test_capabilities_include_all_providers() -> None:

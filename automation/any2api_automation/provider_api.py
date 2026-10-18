@@ -107,7 +107,12 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
         try:
             captcha_policy = CaptchaAiPolicy.from_payload(request.payload)
             with bind_captcha_policy(captcha_policy):
-                async with lanes.batch:
+                budget = (
+                    core_settings().inference_first_frame_timeout_seconds
+                    if request.operation == "keepalive"
+                    else None
+                )
+                async with asyncio.timeout(budget), lanes.batch:
                     runtime_plan = (
                         dict(request.payload["runtime_plan"])
                         if isinstance(request.payload.get("runtime_plan"), dict)
@@ -143,6 +148,16 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
                 },
                 **result,
             }
+        except TimeoutError as exc:
+            failure = OperationFailure(
+                code="operation_timeout",
+                stage=request.operation,
+                message="provider operation exceeded its deadline",
+                error_type="TimeoutError",
+            )
+            raise _http_failure(
+                failure, correlation, provider_id, request.operation, 504, started
+            ) from exc
         except (TypeError, ValueError) as exc:
             raise _http_failure(exc, correlation, provider_id, request.operation, 400, started)
         except ActionNotSupported as exc:

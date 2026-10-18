@@ -1,7 +1,16 @@
-# 当前任务板（源码与生产 1.5.8）
+# 当前任务板（源码候选 1.5.9，生产 1.5.8）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-19 全系统可靠性审计与修复（1.5.9）
+
+- **范围**：按用户要求由 Arena 专项扩展至 Pod/内存、数据库/Redis、账号调度/租约、浏览器/代理、流式取消、鉴权与 Read/管理端；DeepSeek/Qwen 继续停用，Arena 保持原 Self Proxy 四节点，不恢复周期生成探活。
+- **修复**：共享浏览器预算 2；生命周期只 claim 可执行并发、同优先级按厂商公平领取、keepalive 总超时及近期成功推理延后；对齐 Java/Python 出口排序/offset/429/取消；预租账号提前退出释放；MiniMax 统一有界清理；MiMo/LongCat 请求取消与流缓冲限界；Arena Cookie 恢复优先、保留原始上游错误及多模态日志脱敏；readiness 503；管理端读取超时/取消和 Playground 请求所有权。
+- **直接证据**：隔离零生成对照发现 9 处 Cookie 值冲突，恢复的 20 个唯一作用域全部保留；原生/规范提交字段、模型、Token/cx 对齐，生成 POST 全部拦截。Read 18 端点各 3 次，内网中位数多为 83～110ms、公网约 0.6～1.2s，全目录约 1.56MB；不能据此认定数据库是主要瓶颈。
+- **验证**：Automation 677 passed（真实 Redis/Node），Ruff/140 文件 format、Backend 全量 test/bootJar、Web lint/build/TypeScript、1.5.9 源码/JAR 契约通过；CI/GitOps/运行验收完成后回写。
+- **边界与回滚**：没有把 Arena Cookie 修复或本地 HTTP 418 对照当作恢复生成；短窗口资源正常不代表长期稳定。应用可回滚 1.5.8，无数据库迁移；不回滚原四节点代理绑定。
+- **记录**：[全系统规格](../docs/requirements/SYSTEM_AUDIT_2026-10-19.md)、[Arena 子范围](../docs/requirements/ARENA_RUNTIME_STABILITY_1.5.9.md)、[缺陷/性能/验收报告](../docs/reports/SYSTEM_AUDIT_1.5.9_2026-10-19.md)。
 
 ## 2026-10-18 已有 Arena 会话复核与请求准备等待修复（1.5.5）
 

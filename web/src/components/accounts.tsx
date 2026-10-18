@@ -111,7 +111,7 @@ export function Accounts() {
   ), [catalog.data]);
   const accounts = useQuery({
     queryKey: ["accounts-page", provider, status, enabled, expiry, debouncedSearch, page, pageSize],
-    queryFn: () => api.accountPage({
+    queryFn: ({ signal }) => api.accountPage({
       provider: provider || undefined,
       status: status || undefined,
       enabled: enabled ? enabled === "true" : undefined,
@@ -119,7 +119,7 @@ export function Accounts() {
       expiry,
       page,
       size: pageSize,
-    }),
+    }, signal),
     placeholderData: keepPreviousData,
   });
 

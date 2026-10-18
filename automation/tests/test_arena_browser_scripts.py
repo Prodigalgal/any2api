@@ -77,6 +77,8 @@ assert.equal(window.__any2apiArenaFetchLog, undefined);
         "v2_deadline",
         "v2_cancel",
         "v2_solved",
+        "v2_rate_limit",
+        "rate_limit",
         "native_success",
         "native_v2_solved",
     ],
@@ -105,6 +107,7 @@ const events = [];
 const sent = [];
 const containers = new Set();
 const reset = [];
+let syntheticMouseEvents = 0;
 window.__emit = async event => {
   events.push(event);
   if (scenario === 'v2_cancel' && event.version === 'v2' && event.state === 'required') {
@@ -112,7 +115,7 @@ window.__emit = async event => {
   }
 };
 global.document = {
-  dispatchEvent() {},
+  dispatchEvent() {syntheticMouseEvents++;},
   createElement: () => ({
     style: {}, setAttribute() {}, remove() {containers.delete(this);},
   }),
@@ -143,11 +146,12 @@ window.grecaptcha = {enterprise: {
 global.fetch = async (url, options) => {
   const body = JSON.parse(options.body);
   sent.push(body);
-  const failed = (scenario.startsWith('v2_') || scenario === 'native_v2_solved') && sent.length === 1;
+  const failed = (scenario.startsWith('v2_') || scenario === 'native_v2_solved' || scenario === 'rate_limit') && sent.length === 1;
+  const status = scenario === 'v2_rate_limit' || scenario === 'rate_limit' ? 429 : 403;
   return {
-    ok: !failed, status: failed ? 403 : 200,
-    headers: new Headers({'content-type': 'application/json'}),
-    text: async () => '{"error":"recaptcha validation failed"}',
+    ok: !failed, status: failed ? status : 200,
+    headers: new Headers({'content-type': 'application/json', 'retry-after': '12'}),
+    text: async () => JSON.stringify({error: scenario === 'v2_rate_limit' ? 'prompt failed' : scenario === 'rate_limit' ? 'too many requests' : 'recaptcha validation failed'}),
     body: new ReadableStream({start(controller) {
       controller.enqueue(new TextEncoder().encode('{"answer":"你好"}\n'));
       controller.close();
@@ -178,7 +182,10 @@ global.fetch = async (url, options) => {
     assert.equal(sent[0].cx, native ? 'native-context' : 'page-context-1');
     assert.equal(sent[0].recaptchaV3Token, native ? 'native-single-use-v3' : 'single-use-v3');
     assert.equal(sent[0].nativeSubmission, undefined);
-    if (native) assert.equal(contextCalls, 0);
+    if (native) {
+      assert.equal(contextCalls, 0);
+      assert.equal(syntheticMouseEvents, 0, 'fresh native context must not be followed by synthetic interactions');
+    }
     if (scenario.endsWith('v2_solved')) {
       assert.equal(sent.length, 2);
       assert.equal(sent[1].cx, native ? 'native-context' : 'page-context-2');
@@ -187,8 +194,17 @@ global.fetch = async (url, options) => {
       assert.equal(errors.length, 0);
     } else if (scenario.startsWith('v2_')) {
       assert.equal(sent.length, 1);
-      assert.equal(JSON.parse(errors[0].data).code, 'recaptcha_v2_required');
-      assert.equal(events.filter(event => event.type === 'status').at(-1).status, 403);
+      const error = JSON.parse(errors[0].data);
+      assert.equal(error.code, 'recaptcha_v2_required');
+      assert.equal(error.triggerReasonSource, 'bridge_inferred');
+      assert.equal(error.upstreamStatus, scenario === 'v2_rate_limit' ? 429 : 403);
+      assert.equal(error.upstreamError, JSON.stringify({error: scenario === 'v2_rate_limit' ? 'prompt failed' : 'recaptcha validation failed'}));
+      assert.equal(error.retryAfter, '12');
+      assert.equal(events.filter(event => event.type === 'status').at(-1).status, error.upstreamStatus);
+    } else if (scenario === 'rate_limit') {
+      assert.equal(sent.length, 1);
+      assert.equal(JSON.parse(errors[0].data).error, 'too many requests');
+      assert.equal(events.filter(event => event.type === 'status').at(-1).status, 429);
     } else {
       assert.equal(sent.length, 1);
       assert.equal(errors.length, 0);

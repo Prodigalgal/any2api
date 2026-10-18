@@ -20,6 +20,10 @@ final class MimoEventDecoder {
     private static final Set<String> INTERNAL_TOKENS = Set.of(
         "webSearch", "getTime", "getTimeInfo", "sessionSearch", "imageSearch",
         "fileSearch", "getLocation", "webExtract", "getWeather", "calculator");
+    private static final Set<String> MESSAGE_EVENTS = Set.of(
+        "message", "text", "usage", "finish", "error", "sensitive_query", "sensitive_title");
+    private static final Set<String> CONTROL_EVENTS = Set.of(
+        "dialogId", "tip_ratio", "tip_truncate", "web_search", "doc");
     private static final Pattern INVOKE = Pattern.compile(
         "<\\|MiMoML\\|invoke\\s+name=[\\\"']([^\\\"']+)[\\\"']\\s*>([\\s\\S]*?)</\\|MiMoML\\|invoke>",
         Pattern.CASE_INSENSITIVE);
@@ -73,36 +77,67 @@ final class MimoEventDecoder {
     }
 
     List<CanonicalEvent> decode(String data) {
+        return decode("", data);
+    }
+
+    List<CanonicalEvent> decode(String eventName, String data) {
         if (completed) return List.of();
+        if ("[DONE]".equals(data == null ? "" : data.trim())) return finish();
         var output = start();
-        if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) return output;
+        if (eventName != null && !eventName.isBlank() && !MESSAGE_EVENTS.contains(eventName)) {
+            return output;
+        }
+        if (data == null || data.isBlank()) {
+            if ("finish".equals(eventName)) output.addAll(finish());
+            return output;
+        }
         try {
             var event = mapper.readTree(data);
-            if (event.has("error") && !event.path("error").asText("").isBlank()) {
-                var errorText = event.path("error").asText("");
-                output.add(new CanonicalEvent.Failed(1, requestId, next(), "upstream_error",
-                    errorText, java.util.Map.of("retryable", true)));
+            var messageType = event.path("messageType").asText("");
+            var kind = messageType.isBlank() ? eventName : messageType;
+            if (kind == null || kind.isBlank()) kind = event.path("type").asText("");
+            if (CONTROL_EVENTS.contains(kind)) return output;
+            var text = event.path("content").asText("");
+            if (isMaintenanceNotification(text)) {
+                output.add(fail("upstream_maintenance",
+                    "MiMo Studio requires a page refresh before generating a response", true));
+                return output;
+            }
+            if ("error".equals(kind) || !event.path("error").asText("").isBlank()
+                || event.path("error").isObject() && !event.path("error").isEmpty()) {
+                var errorText = event.path("error").isObject()
+                    ? event.path("error").path("message").asText("")
+                    : event.path("error").asText("");
+                if (errorText.isBlank()) errorText = text.isBlank() ? "MiMo upstream rejected the request" : text;
+                output.add(fail("upstream_error", errorText, true));
+                return output;
+            }
+            if ("sensitive_query".equals(kind) || "sensitive_title".equals(kind)) {
+                output.add(new CanonicalEvent.Failed(1, requestId, next(), "content_filter",
+                    "MiMo Web rejected the request under its content policy",
+                    java.util.Map.of("retryable", false, "status", 400, "param", inputParameter)));
+                buffer.setLength(0);
                 completed = true;
+                return output;
+            }
+            if ("finish".equals(kind)) {
+                emitUsage(event, output);
+                output.addAll(finish());
+                return output;
+            }
+            if ("usage".equals(kind)) {
+                emitUsage(event, output);
                 return output;
             }
             if (event.has("reasoningContent")) {
                 var reasoningText = event.path("reasoningContent").asText("");
                 if (!reasoningText.isEmpty()) {
                     output.add(new CanonicalEvent.ReasoningDelta(1, requestId, next(), reasoningText));
-                }
-            }
-            String text = "";
-            if (event.path("type").asText("").equals("text") || event.has("content")) {
-                text = event.path("content").asText("");
-            }
-            if (!text.isEmpty()) {
-                if (text.contains("MiMo Studio updated") || text.contains("Refresh your page for better performance")) {
-                    output.add(new CanonicalEvent.Failed(1, requestId, next(), "upstream_maintenance",
-                        "MiMo Studio returned update notification: " + text, java.util.Map.of("retryable", true)));
-                    buffer.setLength(0);
-                    completed = true;
+                    emitUsage(event, output);
                     return output;
                 }
+            }
+            if (!text.isEmpty()) {
                 if (!INTERNAL_TOKENS.contains(text.trim())) {
                     var normalized = text.replace("\0", "");
                     if (!tools.isEmpty() && normalized.length() > MAX_TOOL_CAPTURE_CHARACTERS - buffer.length()) {
@@ -116,16 +151,33 @@ final class MimoEventDecoder {
                     if (tools.isEmpty() && !pendingLengthRejection()) output.addAll(drain(false));
                 }
             }
-            var usageNode = event.has("usage") ? event.path("usage") : event;
-            if (usageNode.has("promptTokens") && !usageEmitted) {
-                output.add(new CanonicalEvent.Usage(1, requestId, next(),
-                    usageNode.path("promptTokens").asLong(), usageNode.path("completionTokens").asLong(), 0));
-                usageEmitted = true;
-            }
+            emitUsage(event, output);
             return output;
         } catch (Exception error) {
             throw new IllegalArgumentException("MiMo upstream emitted invalid SSE JSON", error);
         }
+    }
+
+    private void emitUsage(tools.jackson.databind.JsonNode event, List<CanonicalEvent> output) {
+        var usageNode = event.has("usage") ? event.path("usage") : event;
+        if (usageNode.has("promptTokens") && !usageEmitted) {
+            output.add(new CanonicalEvent.Usage(1, requestId, next(),
+                usageNode.path("promptTokens").asLong(), usageNode.path("completionTokens").asLong(), 0));
+            usageEmitted = true;
+        }
+    }
+
+    private CanonicalEvent.Failed fail(String type, String message, boolean retryable) {
+        buffer.setLength(0);
+        completed = true;
+        return new CanonicalEvent.Failed(1, requestId, next(), type, message,
+            java.util.Map.of("retryable", retryable));
+    }
+
+    private static boolean isMaintenanceNotification(String text) {
+        var normalized = text.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("mimostudioupdated") && normalized.contains("refreshyourpage")
+            || text.contains("平台升级") && text.contains("刷新页面");
     }
 
     List<CanonicalEvent> finish() {

@@ -80,6 +80,7 @@ class MimoApiActionHandler:
                 proxy_url=proxy_url,
                 timeout_seconds=300,
                 impersonate=str(current.get("browser_profile") or "chrome146"),
+                preserve_sse_events=True,
             ):
                 if str(event.get("type") or "") == "credential_patch":
                     normalized = {"credential_patch": event.get("data")}

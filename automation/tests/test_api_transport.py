@@ -402,6 +402,78 @@ def _install_stream_response(monkeypatch, response, exited=None) -> None:
 
 
 @pytest.mark.asyncio
+async def test_api_stream_preserves_sse_event_boundaries_and_multiline_data(monkeypatch) -> None:
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.headers = {"content-type": "text/event-stream"}
+
+        def iter_lines(self):
+            yield from (
+                b": heartbeat",
+                b"event: dialogId",
+                b'data: {"content":"12345678"}',
+                b"",
+                b"event: message",
+                b'data: {"content":',
+                b'data: "answer"}',
+                b"",
+                b'data: {"content":"default event"}',
+                b"",
+                b"event: finish",
+                b'data: {"content":"[DONE]"}',
+            )
+
+    _install_stream_response(monkeypatch, Response())
+    events = [
+        event
+        async for event in api_transport.api_stream(
+            "https://aistudio.xiaomimimo.com",
+            "POST",
+            "/open-apis/react/chat",
+            preserve_sse_events=True,
+        )
+    ]
+
+    assert [event for event in events if event["type"] == "data"] == [
+        {"type": "data", "event": "dialogId", "data": '{"content":"12345678"}'},
+        {"type": "data", "event": "message", "data": '{"content":\n"answer"}'},
+        {"type": "data", "event": "message", "data": '{"content":"default event"}'},
+        {"type": "data", "event": "finish", "data": '{"content":"[DONE]"}'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_api_stream_bounds_aggregate_multiline_sse_frames(monkeypatch) -> None:
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.headers = {"content-type": "text/event-stream"}
+
+        def iter_lines(self):
+            yield b"event: message"
+            for _ in range(20):
+                yield b"data: 12345678"
+
+    _install_stream_response(monkeypatch, Response())
+    events = [
+        event
+        async for event in api_transport.api_stream(
+            "https://aistudio.xiaomimimo.com",
+            "POST",
+            "/open-apis/react/chat",
+            preserve_sse_events=True,
+            max_response_bytes=64,
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["status", "error"]
+    assert "ApiTransportError" in events[-1]["data"]
+
+
+@pytest.mark.asyncio
 async def test_api_stream_backpressure_preserves_burst_and_end(monkeypatch) -> None:
     import asyncio
 

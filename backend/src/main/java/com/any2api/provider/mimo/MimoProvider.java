@@ -224,19 +224,21 @@ public final class MimoProvider implements InferenceProvider {
                     } else if ("data".equals(type)
                         && status.get() >= 200
                         && status.get() < 300) {
-                        sink.next(frame.path("data").asText(""));
+                        sink.next(frame);
                     } else if ("credential_patch".equals(type)) {
                         context.acceptCredentialPatch(frame.path("data"));
                     }
                 })
-                .cast(String.class)
-                .takeUntil(data -> "[DONE]".equals(data.trim()))
-                .concatMapIterable(decoder::decode)
+                .cast(JsonNode.class)
+                .concatMapIterable(frame -> decoder.decode(
+                    frame.path("event").asText(""), frame.path("data").asText("")))
                 .concatWith(Flux.defer(() -> status.get() < 200 || status.get() >= 300
                     ? Flux.error(new MimoUpstreamException(
                         status.get() < 0 ? 502 : status.get(),
                         "MiMo upstream returned HTTP " + status.get()))
-                    : Flux.fromIterable(decoder.finish())));
+                    : Flux.fromIterable(decoder.finish())))
+                .takeUntil(event -> event instanceof CanonicalEvent.Completed
+                    || event instanceof CanonicalEvent.Failed);
         });
     }
 

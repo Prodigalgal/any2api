@@ -376,6 +376,36 @@ async def test_mimo_api_prepares_phase_bound_chat_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mimo_api_keeps_upstream_sse_event_names(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
+    from any2api_automation.providers import mimo_api_actions as module
+
+    @asynccontextmanager
+    async def proxy_lease(*args, **kwargs):
+        yield "http://proxy.example:8080"
+
+    async def stream(*args, **kwargs):
+        assert kwargs["preserve_sse_events"] is True
+        assert kwargs["proxy_url"] == "http://proxy.example:8080"
+        yield {"type": "status", "status": 200}
+        yield {"type": "data", "event": "dialogId", "data": '{"content":"12345678"}'}
+        yield {"type": "data", "event": "message", "data": '{"content":"answer"}'}
+        yield {"type": "data", "event": "finish", "data": '{"content":"[DONE]"}'}
+
+    monkeypatch.setattr(module, "transport_proxy_lease", proxy_lease)
+    monkeypatch.setattr(module, "api_stream", stream)
+    request = _request("mimo", _command("mimo-v2.6-pro"), {"xiaomichatbot_ph": "phase-1"})
+    frames = [json.loads(frame) async for frame in module.MimoApiActionHandler().stream(request)]
+
+    assert [frame["event"] for frame in frames if frame["type"] == "data"] == [
+        "dialogId",
+        "message",
+        "finish",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_qwen_api_prepares_chat_id_and_native_message_graph(monkeypatch) -> None:
     import any2api_automation.providers.qwen_api_actions as module
 

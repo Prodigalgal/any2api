@@ -1,7 +1,20 @@
-# 当前任务板（源码 1.5.0，生产 1.4.3 -> 1.5.0 构建发布中）
+# 当前任务板（源码 1.5.1，生产 1.5.0 -> 1.5.1 发布中）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-18 MiMo v3 SSE 控制帧污染正文修复（1.5.1，发布中）
+
+- **目标**：修复后台有输出但客户端无法使用的 MiMo 响应，按官方网页事件语义区分正文、推理、控制、错误和结束。
+- **范围/影响文件**：`api_transport.py` 的可选 SSE 事件保留、`mimo_api_actions.py`、`mimo_browser.py`、`MimoProvider`、`MimoEventDecoder`、`InferenceTelemetryService`、对应回归及统一版本文件。
+- **非目标**：不调整其他厂商默认解析、不关闭正常推理、不恢复模型探活、不启用 DeepSeek/Qwen、不修改数据库结构或生产配置。
+- **事实**：生产 1.5.0/Argo Synced+Healthy；15:45–16:15 发起的 28 条 MiMo 请求首段均为 8 位数字，18 条后台成功记录末段均为字面量 `[DONE]`。官方网页按 SSE `event` 过滤 `dialogId`/`finish`，当前两条传输路径均丢失该字段，解码器把任意 `content` 当作正文；另有 10 条下游断连。
+- **验收标准**：控制帧不进入正文；正文与推理分开；上游错误/敏感拦截返回失败；只有控制或推理不能成功；收到 finish 即收尾并释放上游；保留旧格式、工具调用及其他厂商行为；新快照能区分输出事件类型。
+- **测试方式**：Python 传输与 MiMo handler 回归、Java 解码/Provider/Chat+Responses 渲染回归、浏览器脚本本地合成 SSE 验证、全量后端/自动化测试、版本与 JAR 契约校验。使用合成事件，不新增厂家生成探活；生产恢复须以部署后实际业务请求验证。
+- **本地交付**：API 通道按帧保留 `event`/多行 data 并限制累计大小，其他厂商保留原解析；浏览器通道保留相同字段，收到 finish 取消 reader，并在终止帧前回传凭据更新。Java 过滤控制帧、映射错误/敏感拦截、拒绝纯推理/无正文的假成功，保留旧格式、数字答案与工具桥接；新输出快照增加 `eventType`。
+- **验证结果**：后端 `test bootJar` 成功，601 项中 596 通过、5 项需显式开启的 Grok 在线互操作用例跳过；自动化 577 通过；Ruff check/相关文件 format check、Web 生产构建、源码与 `any2api-backend-1.5.1.jar` 版本契约通过。Node 合成 SSE 验证覆盖 CRLF、多行 JSON、UTF-8 跨块、finish 后连接不关闭、reader 取消与迟到数据过滤。
+- **发布/风险边界**：本地修改未提交、未部署；生产镜像仍为 `server-20261018-v1.5.0-release-db4fdf5b0fc023987ebf21394cd88d2acba15b03`，Argo revision `e4139fb`/Synced+Healthy。Backend 与 Automation 必须成套更新，旧输出快照无法可靠追溯区分推理和正文；长耗时与下游断连仍待上线后的真实业务验收。无迁移；建议回滚点为 1.5.0 原不可变镜像组合。
+- **发布授权**：用户已要求推送部署，按 [1.5.1 发布执行计划](../docs/requirements/RELEASE_1.5.1_MIMO_STREAM_REPAIR.md)继续提交、CI/GitOps 发布与运行验收。
 
 ## 2026-10-16 拔出 DeepSeek 注册能力、禁用定时调度并停用提供商
 

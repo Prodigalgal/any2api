@@ -1,6 +1,7 @@
 package com.any2api.observability;
 
 import com.any2api.persistence.PostgresResultValues;
+import com.any2api.protocol.CanonicalEvent;
 import com.any2api.protocol.UsageSource;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.SignalType;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public final class InferenceTelemetryService {
@@ -113,7 +115,12 @@ public final class InferenceTelemetryService {
         }
 
         public void record(Object event) {
-            if (event != null) outputEvents.add(mapper.valueToTree(event));
+            if (event == null) return;
+            JsonNode snapshot = mapper.valueToTree(event);
+            if (event instanceof CanonicalEvent && snapshot instanceof ObjectNode object) {
+                object.put("eventType", event.getClass().getSimpleName());
+            }
+            outputEvents.add(snapshot);
         }
 
         public void output(Object value) {

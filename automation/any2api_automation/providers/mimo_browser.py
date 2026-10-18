@@ -86,25 +86,45 @@ def _stream_request(rule: RuntimeRule) -> str:
     if (!reader) throw new Error('MiMo browser response has no stream body');
     const decoder = new TextDecoder();
     let pending = '';
+    let finished = false;
     const consume = async text => {
       pending += text;
       const frames = pending.split(/\r?\n\r?\n/);
       pending = frames.pop() || '';
       for (const frame of frames) {
+        let eventName = 'message';
+        const dataLines = [];
         for (const line of frame.split(/\r?\n/)) {
-          if (line.startsWith('data:') && line.slice(5).trim()) {
-            await emit({type: 'data', data: line.slice(5).trim()});
+          const separator = line.indexOf(':');
+          const field = separator < 0 ? line : line.slice(0, separator);
+          const rawValue = separator < 0 ? '' : line.slice(separator + 1);
+          const value = rawValue.startsWith(' ') ? rawValue.slice(1) : rawValue;
+          if (field === 'event') eventName = value || 'message';
+          if (field === 'data') dataLines.push(value);
+        }
+        if (dataLines.length) {
+          const data = dataLines.join('\n');
+          await emit({type: 'data', event: eventName, data});
+          if (eventName === 'finish' || data.trim() === '[DONE]') {
+            finished = true;
+            return;
           }
         }
       }
     };
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      await consume(decoder.decode(value, {stream: true}));
+    try {
+      while (!finished) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        await consume(decoder.decode(value, {stream: true}));
+      }
+      if (!finished) {
+        await consume(decoder.decode());
+        if (pending.trim()) await consume('\n\n');
+      }
+    } finally {
+      await reader.cancel();
     }
-    await consume(decoder.decode());
-    if (pending.trim()) await consume('\n\n');
   } finally {
     clearTimeout(timeout);
   }
@@ -335,9 +355,9 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                             status,
                             str(event.get("contentType") or "")[:120],
                         )
-                    if (
-                        event.get("type") == "data"
-                        and str(event.get("data") or "").strip() == "[DONE]"
+                    if event.get("type") == "data" and (
+                        event.get("event") == "finish"
+                        or str(event.get("data") or "").strip() == "[DONE]"
                     ):
                         terminal_data = event
                         continue
@@ -358,11 +378,11 @@ class MimoOfficialBrowserTransport(OfficialBrowserRuntime):
                     success_report = successful_canary(plan, selection, session.build_id)
                     if success_report is not None:
                         yield {"type": "runtime_canary", **success_report}
-                if terminal_data is not None:
-                    yield terminal_data
                 patch = await self.credential_patch(session, credential)
                 if patch:
                     yield {"type": "credential_patch", "data": patch}
+                if terminal_data is not None:
+                    yield terminal_data
                 if pending_error is not None:
                     yield pending_error
             finally:

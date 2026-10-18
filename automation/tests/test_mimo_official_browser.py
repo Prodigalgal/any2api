@@ -262,6 +262,40 @@ def _runtime_plan() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
+async def test_runtime_forwards_cookie_patch_before_v3_finish(monkeypatch) -> None:
+    from any2api_automation.providers import mimo_browser
+
+    runtime = MimoOfficialBrowserTransport("https://aistudio.xiaomimimo.com")
+
+    class Page:
+        async def evaluate(self, _script, payload):
+            for event in (
+                {"type": "status", "status": 200},
+                {"type": "data", "event": "message", "data": '{"content":"answer"}'},
+                {"type": "data", "event": "finish", "data": '{"content":"[DONE]"}'},
+            ):
+                runtime._emit({"requestId": payload["requestId"], **event})
+
+    session = SimpleNamespace(page=Page(), build_id="test")
+    selection = SimpleNamespace(rules=default_runtime_plan().active.rules)
+    runtime._select_session = AsyncMock(return_value=(session, selection, []))
+    runtime.credential_patch = AsyncMock(return_value={"cookies": {"session": "rotated"}})
+    monkeypatch.setattr(mimo_browser, "successful_canary", lambda *_args: None)
+
+    events = [
+        event
+        async for event in runtime.stream(
+            {"user_id": "test", "xiaomichatbot_ph": "phase"}, _semantic_command(), "", None
+        )
+    ]
+
+    assert events[-2] == {"type": "credential_patch", "data": {"cookies": {"session": "rotated"}}}
+    assert events[-1] == {"type": "data", "event": "finish", "data": '{"content":"[DONE]"}'}
+    assert runtime._stream_queues == {}
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_accounts_receive_only_their_own_stream_events(monkeypatch) -> None:
     from any2api_automation.providers import mimo_browser
 

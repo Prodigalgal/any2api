@@ -350,6 +350,7 @@ async def api_stream(
     impersonate: str | None = None,
     max_response_bytes: int | None = None,
     include_unprefixed_lines: bool = False,
+    preserve_sse_events: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     """Read SSE with an event-driven cross-thread queue and cancellation-aware teardown."""
 
@@ -416,19 +417,25 @@ async def api_stream(
                     body_bytes = _read_response(response, max_response_bytes=max_response_bytes)
                     publish({"type": "error", "data": _decode(body_bytes)[:16_384]})
                     return
+                line_limit = min(
+                    max_response_bytes or core_settings().browser_transport_max_buffered_bytes,
+                    _MAX_SSE_LINE_BYTES,
+                )
+                sse = _SseFrameDecoder(line_limit) if preserve_sse_events else None
                 for raw_line in response.iter_lines():
                     line_bytes = (
                         raw_line
                         if isinstance(raw_line, bytes)
                         else str(raw_line).encode("utf-8", "replace")
                     )
-                    line_limit = min(
-                        max_response_bytes or core_settings().browser_transport_max_buffered_bytes,
-                        _MAX_SSE_LINE_BYTES,
-                    )
                     if len(line_bytes) > line_limit:
                         raise ApiTransportError("API SSE event exceeds the configured byte limit")
                     line = _decode(line_bytes)
+                    if sse is not None:
+                        frame = sse.feed(line)
+                        if frame is not None and not publish(frame):
+                            return
+                        continue
                     value = ""
                     if line.startswith("data:"):
                         value = line[5:].strip()
@@ -440,6 +447,10 @@ async def api_stream(
                         value = line.strip()
                     if value and not publish({"type": "data", "data": value}):
                         return
+                if sse is not None:
+                    frame = sse.feed("")
+                    if frame is not None:
+                        publish(frame)
         except Exception as error:  # noqa: BLE001 - normalized at the API channel boundary
             publish(
                 {
@@ -469,6 +480,42 @@ async def api_stream(
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+class _SseFrameDecoder:
+    def __init__(self, maximum_bytes: int) -> None:
+        self.maximum_bytes = maximum_bytes
+        self.event_name = ""
+        self.data_lines: list[str] = []
+        self.buffered_bytes = 0
+
+    def feed(self, line: str) -> dict[str, Any] | None:
+        if not line:
+            frame = (
+                {
+                    "type": "data",
+                    "event": self.event_name or "message",
+                    "data": "\n".join(self.data_lines),
+                }
+                if self.data_lines
+                else None
+            )
+            self.event_name = ""
+            self.data_lines = []
+            self.buffered_bytes = 0
+            return frame
+        field, _, value = line.partition(":")
+        if field not in {"event", "data"}:
+            return None
+        self.buffered_bytes += len(line.encode("utf-8")) + 1
+        if self.buffered_bytes > self.maximum_bytes:
+            raise ApiTransportError("API SSE event exceeds the configured byte limit")
+        value = value.removeprefix(" ")
+        if field == "event":
+            self.event_name = value
+        else:
+            self.data_lines.append(value)
+        return None
 
 
 def api_action_bindings(

@@ -37,10 +37,14 @@
 
 ## 发布与运行态
 
-待本候选 CI、不可变镜像、GitOps、Pod/digest/API 及定向请求完成后回写。发布前生产为 1.5.4、四应用 Ready，Arena 仍未恢复真实输出。
+- 源码 `0a2a0a97360597a8a98c411b36fd7559c06147f9`，CI [39134655792](https://github.com/Prodigalgal/any2api/actions/runs/39134655792) 成功；GitOps `0de384516e64a37f732517f39160462e0aae1111`，Argo Synced/Healthy。
+- 四应用实际版本均为 1.5.5，验收快照均 Ready、零重启；运行 digest 与 registry arm64 制品一致。镜像后缀 `20261018-v1.5.5-release-0a2a0a97360597a8a98c411b36fd7559c06147f9`。
+- 双公网 health/ready 为 200；Chat/Responses 无密钥请求为标准 401 且有 request_id；六家独立 Key 目录为 200。以上均不算生成成功。
+- 22:36:32 发起的 Arena Max 公网 Responses 请求 `0a0d8bb3-fad1-42c9-9efd-81b5e365db74`，165.6 秒返回 `response.failed` / `anti_bot_rejected` / `recaptcha_v2_required`。OpenAI SSE 错误契约正常，Arena 尚未恢复。
+- 新日志显示清理约 0.6–1.6 秒完成；后台保活/浏览器启动与推理竞争时仍观测到 25–65 秒槽位等待。健康接口在该次样本中正常，不把清理修复等同于全部延迟已消除。
 
 ## 遗留与回滚
 
-- 已有两份历史成功账号的官方原生流程复核仍被 v3/v2 阻断，没有确认可直接恢复的当前有效生成会话。保留用户选择的既有会话路线，不新增人工验证管理入口。
+- 发布时历史账号复核仍被 v3/v2 阻断。后续通过本机 Edge、同出口服务端 Chromium 及历史账号隔离桥接取得完整输出，页面脚本上下文和原生提交状态问题转入 [1.5.7 修复规格](../requirements/ARENA_PAGE_WORLD_RECOVERY_1.5.7.md)；不新增人工验证管理入口。
 - 当前准备阻塞的具体协程尚未取得直接栈证据；关闭无超时是源码确认的缺口，不能宣称它是全部挂起的唯一根因。部署后通过新增阶段日志继续判定。
 - 代码回滚使用 1.5.4 四应用不可变镜像组合，不回滚账号/代理数据；1.5.3 未进 GitOps且不复用。

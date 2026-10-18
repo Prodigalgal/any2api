@@ -10,7 +10,11 @@ from typing import Any
 from uuid import uuid4
 
 from ..config import settings as core_settings
-from .official_browser import OfficialBrowserRuntime, OfficialBrowserSession
+from .official_browser import (
+    OfficialBrowserRuntime,
+    OfficialBrowserSession,
+    evaluate_in_page_world,
+)
 from .runtime_rules import (
     RuntimePlan,
     RuntimeRule,
@@ -147,7 +151,8 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         ):
             session, selection, reports = await self._select_session(credential, proxy_url, plan)
             target_path = _resolve_target_path(path, endpoint_key, selection.rules.endpoint_paths)
-            response = await session.page.evaluate(
+            response = await evaluate_in_page_world(
+                session.page,
                 _buffered_request_script(),
                 {
                     "url": self._endpoint(selection, target_path),
@@ -178,6 +183,11 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
     async def before_stream_request(self, page: Any) -> None:
         """Hook called immediately before starting a streaming request."""
         del page
+
+    async def prepare_stream_request(self, page: Any, request: dict[str, Any]) -> dict[str, Any]:
+        """Prepare request-scoped page state while the account session is owned."""
+        await self.before_stream_request(page)
+        return request
 
     async def stream(
         self,
@@ -214,9 +224,8 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                         )
                     ) + 10.0
                     async with asyncio.timeout(effective_timeout_seconds):
-                        await self.before_stream_request(session.page)
-                        await session.page.evaluate(
-                            self.stream_request_script(),
+                        request = await self.prepare_stream_request(
+                            session.page,
                             {
                                 "requestId": request_id,
                                 "url": self._endpoint(selection, target_path),
@@ -226,6 +235,11 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                                 "timeoutMs": timeout_ms
                                 or selection.rules.canary_timeout_seconds * 1000,
                             },
+                        )
+                        await evaluate_in_page_world(
+                            session.page,
+                            self.stream_request_script(),
+                            request,
                         )
                 except Exception as error:  # noqa: BLE001 - stream boundary
                     self._logger.warning(

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from patchright.async_api import Page as PatchrightPage
 from patchright.async_api import async_playwright
 
 from ..browser_budget import BrowserProcessLease, browser_process_budget
@@ -36,6 +37,17 @@ from .runtime_rules import (
 )
 
 SCHEMA_VERSION = 1
+_NO_SCRIPT_ARGUMENT = object()
+
+
+async def evaluate_in_page_world(
+    page: Any, expression: str, argument: Any = _NO_SCRIPT_ARGUMENT
+) -> Any:
+    """Access page-owned SDKs without replaying side effects on signature errors."""
+    options = {"isolated_context": False} if isinstance(page, PatchrightPage) else {}
+    if argument is _NO_SCRIPT_ARGUMENT:
+        return await page.evaluate(expression, **options)
+    return await page.evaluate(expression, argument, **options)
 
 
 @dataclass

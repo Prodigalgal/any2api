@@ -39,6 +39,55 @@ def test_data_shape_marks_non_json_payloads() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("preparation_fails", [False, True])
+async def test_stream_preparation_is_request_scoped_and_gates_the_fetch(
+    monkeypatch, preparation_fails
+):
+    runtime = PageFetchBrowserRuntime(
+        "fixture",
+        "https://example.test",
+        allowed_domain_suffixes=("example.test",),
+        identity_fields=("user_id",),
+    )
+    observed = []
+
+    async def prepare(_page, request):
+        if preparation_fails:
+            raise ValueError("preparation failed")
+        return {**request, "nativeSubmission": {"cx": "context"}}
+
+    async def evaluate(_script, request):
+        observed.append(request)
+        runtime._emit({"requestId": request["requestId"], "type": "status", "status": 200})
+
+    plan = default_runtime_plan()
+    session = SimpleNamespace(page=SimpleNamespace(evaluate=evaluate))
+    monkeypatch.setattr(
+        runtime, "_select_session", AsyncMock(return_value=(session, plan.active, []))
+    )
+    monkeypatch.setattr(runtime, "credential_patch", AsyncMock(return_value={}))
+    monkeypatch.setattr(runtime, "prepare_stream_request", prepare)
+    try:
+        events = [
+            event
+            async for event in runtime.stream(
+                {"user_id": "account"}, "", plan, method="POST", path="/chat", body="original-body"
+            )
+        ]
+        assert bool(observed) is not preparation_fails
+        if observed:
+            assert observed[0]["nativeSubmission"] == {"cx": "context"}
+            assert observed[0]["body"] == "original-body"
+        else:
+            assert events[-1]["type"] == "error"
+        assert runtime._stream_queues == {}
+        async with runtime.account_operation({"user_id": "account"}):
+            pass
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["session", "request", "credential_patch"])
 async def test_buffered_request_timeout_releases_account_at_every_preparation_stage(
     monkeypatch, stage

@@ -77,6 +77,8 @@ assert.equal(window.__any2apiArenaFetchLog, undefined);
         "v2_deadline",
         "v2_cancel",
         "v2_solved",
+        "native_success",
+        "native_v2_solved",
     ],
 )
 def test_stream_context_tokens_deadlines_and_widget_cleanup(scenario: str) -> None:
@@ -125,6 +127,7 @@ window.grecaptcha = {enterprise: {
     callback();
   },
   execute: async (key, options) => {
+    assert.ok(!scenario.startsWith('native_'), 'native token must not be replaced');
     assert.equal(key, 'v3-key');
     assert.equal(options.action, 'chat_submit');
     if (scenario === 'v3_deadline') return new Promise(() => {});
@@ -132,7 +135,7 @@ window.grecaptcha = {enterprise: {
   },
   render: (container, options) => {
     assert.equal(options.sitekey, 'v2-key');
-    if (scenario === 'v2_solved') queueMicrotask(() => options.callback('single-use-v2'));
+    if (scenario.endsWith('v2_solved')) queueMicrotask(() => options.callback('single-use-v2'));
     return 7;
   },
   reset: id => {reset.push(id);},
@@ -140,7 +143,7 @@ window.grecaptcha = {enterprise: {
 global.fetch = async (url, options) => {
   const body = JSON.parse(options.body);
   sent.push(body);
-  const failed = scenario.startsWith('v2_') && sent.length === 1;
+  const failed = (scenario.startsWith('v2_') || scenario === 'native_v2_solved') && sent.length === 1;
   return {
     ok: !failed, status: failed ? 403 : 200,
     headers: new Headers({'content-type': 'application/json'}),
@@ -162,6 +165,8 @@ global.fetch = async (url, options) => {
     requestId: 'fixture', method: 'POST', url: 'https://arena.ai/nextjs-api/stream/create-evaluation',
     headers: {}, body: JSON.stringify({userMessage: {content: '你好'}}),
     timeoutMs: scenario.endsWith('deadline') ? 600 : 2000,
+    nativeSubmission: scenario.startsWith('native_')
+      ? {cx: 'native-context', recaptchaV3Token: 'native-single-use-v3'} : undefined,
   });
   if (scenario.endsWith('deadline')) assert.ok(performance.now() - started < 1000);
   const errors = events.filter(event => event.type === 'error');
@@ -169,11 +174,14 @@ global.fetch = async (url, options) => {
     assert.equal(sent.length, 0);
     assert.equal(JSON.parse(errors[0].data).code, 'recaptcha_v3_unavailable');
   } else {
-    assert.equal(sent[0].cx, 'page-context-1');
-    assert.equal(sent[0].recaptchaV3Token, 'single-use-v3');
-    if (scenario === 'v2_solved') {
+    const native = scenario.startsWith('native_');
+    assert.equal(sent[0].cx, native ? 'native-context' : 'page-context-1');
+    assert.equal(sent[0].recaptchaV3Token, native ? 'native-single-use-v3' : 'single-use-v3');
+    assert.equal(sent[0].nativeSubmission, undefined);
+    if (native) assert.equal(contextCalls, 0);
+    if (scenario.endsWith('v2_solved')) {
       assert.equal(sent.length, 2);
-      assert.equal(sent[1].cx, 'page-context-2');
+      assert.equal(sent[1].cx, native ? 'native-context' : 'page-context-2');
       assert.equal(sent[1].recaptchaV2Token, 'single-use-v2');
       assert.equal(sent[1].recaptchaV3Token, undefined);
       assert.equal(errors.length, 0);
@@ -186,7 +194,7 @@ global.fetch = async (url, options) => {
       assert.equal(errors.length, 0);
     }
   }
-  if (scenario.startsWith('v2_')) assert.deepEqual(reset, [7]);
+  if (scenario.startsWith('v2_') || scenario === 'native_v2_solved') assert.deepEqual(reset, [7]);
   assert.equal(containers.size, 0);
   assert.equal(timers.size, 0);
   assert.equal(window.__any2apiArenaStreamControllers.size, 0);

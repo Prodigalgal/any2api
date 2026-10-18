@@ -12,7 +12,9 @@ from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
+from weakref import WeakSet
 
+from ..config import settings as core_settings
 from ..lifecycle.account import flow_max_attempts
 from ..lifecycle.browser import BrowserResult, credential_from_context
 from ..lifecycle.mail import Mailbox, TempMailClient
@@ -20,6 +22,7 @@ from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import OperationFailure
 from .arena_settings import settings as arena_settings
 from .base import validate_semantic_command
+from .official_browser import evaluate_in_page_world
 from .page_fetch_browser import PageFetchBrowserRuntime
 from .runtime_rules import RuntimePlan
 
@@ -63,6 +66,8 @@ _ARENA_REGISTRATION_RETRY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 50
 _ARENA_REGISTRATION_RETRY_LIMIT = 3
 _ARENA_PROVISIONAL_ID_TIMEOUT_MS = 12_000
 _ARENA_NAVIGATION_RETRY_LIMIT = 3
+_ARENA_NATIVE_SUBMISSION_TIMEOUT_SECONDS = 30
+_ARENA_ATTACHMENT_PREPARATION_TEXT = "[attachment]"
 
 
 def _arena_terms_script() -> str:
@@ -102,7 +107,7 @@ def _arena_terms_script() -> str:
 
 async def _accept_arena_terms_if_present(page: Any) -> str:
     for attempt in range(_ARENA_TERMS_POLL_ATTEMPTS):
-        result = await page.evaluate(_arena_terms_script())
+        result = await evaluate_in_page_world(page, _arena_terms_script())
         status = result.get("status") if isinstance(result, dict) else None
         if status == "accepted":
             await page.wait_for_timeout(_ARENA_TERMS_POLL_INTERVAL_MS)
@@ -134,7 +139,8 @@ def _arena_tou_consented(profile: dict[str, Any]) -> bool:
 
 
 async def _arena_tou_profile(page: Any) -> dict[str, Any]:
-    result = await page.evaluate(
+    result = await evaluate_in_page_world(
+        page,
         _arena_me_script(),
         {"path": "/api/me", "timeoutMs": _ARENA_TOU_PROFILE_TIMEOUT_MS},
     )
@@ -172,8 +178,8 @@ async def _ensure_arena_tou_consent(page: Any) -> str:
     if not profile.get("touConsentFieldPresent"):
         return f"legacy_{dialog_state}"
 
-    consent = await page.evaluate(
-        _arena_update_tou_consent_script(), {"path": _ARENA_TOU_CONSENT_PATH}
+    consent = await evaluate_in_page_world(
+        page, _arena_update_tou_consent_script(), {"path": _ARENA_TOU_CONSENT_PATH}
     )
     consent_status = int(consent.get("status") or 502) if isinstance(consent, dict) else 502
     if 200 <= consent_status < 300 and await _wait_for_arena_tou_consent(page):
@@ -238,7 +244,7 @@ def _arena_license_dialog_script() -> str:
 
 
 async def _accept_arena_license_dialog_if_present(page: Any) -> str:
-    result = await page.evaluate(_arena_license_dialog_script())
+    result = await evaluate_in_page_world(page, _arena_license_dialog_script())
     if not isinstance(result, dict):
         return "unknown"
     status = result.get("status")
@@ -890,6 +896,9 @@ def _arena_ndjson_stream_script(
   const controllers = window.__any2apiArenaStreamControllers ||= new Map();
   controllers.set(request.requestId, controller);
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+  const nativeSubmission = request.nativeSubmission;
+  delete request.nativeSubmission;
+  let nativeV3Token = nativeSubmission?.recaptchaV3Token || '';
   const getRecaptchaV3Token = async () => {{
     const deadline = Date.now() + 10_000;
     let enterprise;
@@ -1012,7 +1021,8 @@ def _arena_ndjson_stream_script(
     const requestBody = async v2Token => {{
       if (!parsedBody) return request.body === '' ? undefined : request.body;
       const interaction = window.__any2apiArenaClientInteraction;
-      if (typeof interaction === 'function') parsedBody.cx = interaction();
+      if (nativeSubmission?.cx) parsedBody.cx = nativeSubmission.cx;
+      else if (typeof interaction === 'function') parsedBody.cx = interaction();
       if (v2Token) {{
         const retryBody = {{...parsedBody, recaptchaV2Token: v2Token}};
         delete retryBody.recaptchaV3Token;
@@ -1020,7 +1030,10 @@ def _arena_ndjson_stream_script(
       }}"""
         + warmup
         + r"""
-      const recaptcha = await getRecaptchaV3Token();
+      const recaptcha = nativeV3Token
+        ? {token: nativeV3Token, available: true}
+        : await getRecaptchaV3Token();
+      nativeV3Token = '';
       await emit({type: 'recaptcha', available: recaptcha.available === true,
         tokenLength: String(recaptcha.token || '').length});
       if (!recaptcha.token) return null;
@@ -2143,6 +2156,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         self._arena_chat_path = chat_path
         self._models_cache: dict[str, Any] | None = None
         self._models_cache_time: float = 0.0
+        self._submission_pages: WeakSet[Any] = WeakSet()
         super().__init__(
             "arena",
             base_url,
@@ -2175,7 +2189,8 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         await session.page.add_init_script(_arena_turbopack_uploader_init_script())
 
     async def cancel_stream_request(self, page: Any, request_id: str) -> None:
-        await page.evaluate(
+        await evaluate_in_page_world(
+            page,
             "requestId => window.__any2apiArenaStreamControllers?.get(requestId)?.abort()",
             request_id,
         )
@@ -2275,7 +2290,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                 "arena_human_interactions state=error error_type=%s", type(error).__name__
             )
         try:
-            await page.evaluate(_arena_natural_behavior_script())
+            await evaluate_in_page_world(page, _arena_natural_behavior_script())
         except Exception as error:  # noqa: BLE001 - non-critical, must not block session
             self._logger.debug(
                 "arena_behavior_warmup state=error error_type=%s", type(error).__name__
@@ -2326,6 +2341,75 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         """Inject real trusted CDP mouse movements and scrolls right before token evaluation."""
         await self._simulate_human_interactions(page)
 
+    async def prepare_stream_request(self, page: Any, request: dict[str, Any]) -> dict[str, Any]:
+        body = json.loads(request["body"])
+        prompt = body["userMessage"]["content"]
+        if not isinstance(prompt, str):
+            raise TypeError("Arena submission prompt must be text")
+        async with asyncio.timeout(_ARENA_NATIVE_SUBMISSION_TIMEOUT_SECONDS):
+            if page in self._submission_pages:
+                # The intercepted UI submission leaves React's draft/continuation state
+                # behind. Start a fresh draft while retaining the browser and proxy.
+                await page.goto(
+                    self.page_url,
+                    wait_until="domcontentloaded",
+                    timeout=_ARENA_NATIVE_SUBMISSION_TIMEOUT_SECONDS * 1000,
+                )
+                await self.wait_until_ready(page, None)
+            self._submission_pages.add(page)
+            await super().prepare_stream_request(page, request)
+            context = await self._capture_native_submission(page, request["url"], prompt)
+        self._logger.info(
+            "arena_native_submission_prepared cx_length=%s token_length=%s",
+            len(context["cx"]),
+            len(context["recaptchaV3Token"]),
+        )
+        return {**request, "nativeSubmission": context}
+
+    async def _capture_native_submission(
+        self, page: Any, endpoint: str, prompt: str
+    ) -> dict[str, str]:
+        captured: asyncio.Future[dict[str, str]] = asyncio.get_running_loop().create_future()
+
+        async def capture_submission(route: Any) -> None:
+            if route.request.method != "POST":
+                await route.fallback()
+                return
+            try:
+                submitted = json.loads(route.request.post_data or "{}")
+                context = {name: submitted.get(name) for name in ("cx", "recaptchaV3Token")}
+            except (AttributeError, TypeError, ValueError):
+                context = {}
+            finally:
+                # Preparation never reaches the generation endpoint. Only the canonical
+                # bridge request consumes this fresh token and its interaction context.
+                await route.fulfill(
+                    status=418,
+                    content_type="application/json",
+                    body='{"error":"submission_preparation_only"}',
+                )
+            if not captured.done():
+                captured.set_result(context)
+
+        await page.route(endpoint, capture_submission)
+        try:
+            composer = page.locator("textarea").first
+            # Image-only preparation needs a nonempty UI draft; the original body,
+            # including its empty content and uploaded attachments, is preserved.
+            await composer.fill(prompt or _ARENA_ATTACHMENT_PREPARATION_TEXT)
+            await composer.press("Enter")
+            context = await captured
+            if not all(
+                isinstance(context.get(name), str) and context[name]
+                for name in ("cx", "recaptchaV3Token")
+            ):
+                raise ValueError("Arena native submission context is incomplete")
+            return context
+        finally:
+            await page.unroute(endpoint, capture_submission)
+            if not captured.done():
+                captured.cancel()
+
     async def upload_attachments(
         self,
         credential: dict[str, Any],
@@ -2338,7 +2422,8 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         async with self.account_operation(credential):
             session, _, reports = await self._select_session(credential, proxy_url, plan)
             try:
-                result = await session.page.evaluate(
+                result = await evaluate_in_page_world(
+                    session.page,
                     _arena_upload_script(),
                     {
                         "files": [
@@ -2463,7 +2548,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             endpoint_key="chat",
             headers={"Accept": "*/*", "Content-Type": "text/plain;charset=UTF-8"},
             body=body,
-            timeout_ms=plan.active.rules.canary_timeout_seconds * 1000,
+            timeout_ms=core_settings().inference_timeout_seconds * 1000,
         ):
             yield event
 

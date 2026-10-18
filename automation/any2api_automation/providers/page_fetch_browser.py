@@ -419,7 +419,10 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                 await asyncio.sleep(0.5)
                 if not hasattr(page, "frame_locator"):
                     break
-                anchor_frame = page.frame_locator('iframe[src*="recaptcha"][src*="anchor"]')
+                # Enterprise v3 keeps a hidden anchor beside the interactive v2 widget.
+                anchor_frame = page.frame_locator(
+                    'iframe[src*="recaptcha"][src*="anchor"]:visible'
+                ).first
                 checkbox = anchor_frame.locator(
                     '#recaptcha-anchor, .recaptcha-checkbox, [role="checkbox"]'
                 ).first

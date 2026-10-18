@@ -1,14 +1,15 @@
-# 当前任务板（源码候选 1.5.3，生产 1.5.2）
+# 当前任务板（源码候选 1.5.4，生产 1.5.2）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-18 Arena 官方请求上下文与取消边界（1.5.3）
+## 2026-10-18 Arena 官方请求上下文、v2 iframe 与取消边界（1.5.4）
 
 - **事实**：10 月 16 日仍有 26 条 Max 成功；最后成功账号在新固定 IPv6 与原 Self-hosted Oracle 的官方原生自动化浏览器流程中各提交一次“你好”，均返回 403 `recaptcha validation failed`，账号 `/api/me` 正常。不能仅凭这些证据判断 IP 封禁、平台规则变化或全部账号故障；当前未恢复有效生成。
 - **修复**：使用当前页面自身导出的 `buildProgrammaticClientInteraction` / `packClientInteraction` 补齐 `cx`；移除无人读取的 fetch 正文/Token 调试缓存；缺少 v3 Token 时明确失败；v2 等待受本次请求 deadline/取消控制，回收定时器/widget 与辅助任务，页面请求显式中止后释放会话。保留上传、原生 iframe checkbox 尝试和既有 OpenAI 契约。
-- **验证**：新版脚本在官方页面拦截得到 20 字符 `cx`、v3 Token 与部署请求头，未向上游发送生成；Automation 全量 612 通过（含 Redis/JS 行为测试），后端 test 缓存有效、1.5.3 bootJar 与版本契约通过，Web lint/build 与 Ruff 通过。后续通过 CI、GitOps 和运行态验收确认部署；真实输出仍单独判定。
+- **验证**：新版脚本在官方页面拦截得到 20 字符 `cx`、v3 Token 与部署请求头，未向上游发送生成；1.5.4 Automation 全量 613 通过（含 Redis/JS 行为测试），后端 test 缓存有效、1.5.4 bootJar 与版本契约通过，Web lint/build 与 Ruff 通过。后续通过 CI、GitOps 和运行态验收确认部署；真实输出仍单独判定。
 - **风险/回滚**：官方仍可能要求人工 v2，修复上下文不等于验证码通过；不引入额外验证码 SaaS。回滚使用 1.5.2 不可变镜像，保留 IPv6 服务和当前池绑定，不恢复 DeepSeek/Qwen。
+- **候选更新**：1.5.3 三项 CI 门禁通过，发布前现场发现隐藏 v3 iframe 遮蔽 v2 checkbox（旧选择器 count=0、新可见单帧 count=1）；取消其 GitOps 发布且保留版本占用，新候选 1.5.4 修复选择器并补回归。
 - **规格**：[Arena 回归定位与修复计划](../docs/requirements/ARENA_V3_REGRESSION_INVESTIGATION_2026-10-18.md)。
 
 ## 2026-10-18 浏览器误杀、代理生命周期和 IPv6 固定出口（1.5.2）

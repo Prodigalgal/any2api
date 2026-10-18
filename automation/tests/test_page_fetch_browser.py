@@ -101,3 +101,38 @@ async def test_stream_owns_one_challenge_helper_and_closes_it_before_releasing_t
     finally:
         await stream.aclose()
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_recaptcha_helper_targets_one_visible_anchor_when_the_hidden_v3_frame_exists():
+    runtime = PageFetchBrowserRuntime(
+        "fixture",
+        "https://example.test",
+        allowed_domain_suffixes=("example.test",),
+        identity_fields=("user_id",),
+    )
+    clicked = AsyncMock()
+    checkbox = SimpleNamespace(
+        count=AsyncMock(return_value=1), is_visible=AsyncMock(return_value=True), click=clicked
+    )
+    visible_frame = SimpleNamespace(locator=lambda _: SimpleNamespace(first=checkbox))
+
+    class AmbiguousFrames:
+        @property
+        def first(self):
+            return visible_frame
+
+        def locator(self, _):
+            raise AssertionError("multiple visible widgets must resolve to a single frame")
+
+    class Page:
+        def frame_locator(self, selector):
+            if ":visible" not in selector:
+                raise AssertionError("the hidden v3 anchor must not shadow the visible v2 widget")
+            return AmbiguousFrames()
+
+    try:
+        await runtime._try_solve_page_recaptcha_v2(Page())
+        clicked.assert_awaited_once_with(timeout=5000)
+    finally:
+        await runtime.close()

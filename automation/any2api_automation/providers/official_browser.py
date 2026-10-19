@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -335,7 +336,12 @@ class OfficialBrowserRuntime:
                     options["proxy"] = browser_proxy_options(proxy_url)
                 browser = await playwright.chromium.launch(**options)
             browser_lease.track_process(_driver_pid(browser))
-            options = context_options(execution, backend)
+            options = context_options(
+                execution,
+                backend,
+                browser_version=getattr(browser, "version", ""),
+                headless=core_settings().registration_headless,
+            )
             if storage_state:
                 options["storage_state"] = storage_state
             context = await browser.new_context(**options)
@@ -589,7 +595,13 @@ def camoufox_launch_options(
     return prepared
 
 
-def context_options(execution: dict[str, Any], backend: str) -> dict[str, Any]:
+def context_options(
+    execution: dict[str, Any],
+    backend: str,
+    *,
+    browser_version: str = "",
+    headless: bool | None = None,
+) -> dict[str, Any]:
     options: dict[str, Any] = {"ignore_https_errors": True}
     if backend == "camoufox":
         return options
@@ -601,13 +613,24 @@ def context_options(execution: dict[str, Any], backend: str) -> dict[str, Any]:
     height = int(screen.get("height") or 900)
     options.update(
         {
-            "user_agent": str(runtime.get("user_agent") or core_settings().provider_user_agent),
             "locale": str(runtime.get("language") or "en-US"),
             "timezone_id": str(runtime.get("timezone_id") or "UTC"),
             "viewport": {"width": width, "height": height},
             "screen": {"width": width, "height": height},
         }
     )
+    user_agent = str(runtime.get("user_agent") or "")
+    if user_agent:
+        version = re.match(r"(\d+)\.", browser_version)
+        saved_version = re.search(r"Chrome/(\d+)\.", user_agent)
+        same_version = not browser_version or bool(
+            version and saved_version and version[1] == saved_version[1]
+        )
+        same_mode = headless is None or ("HeadlessChrome/" in user_agent) == headless
+        # A browser upgrade or launch-mode change must use its own default UA;
+        # restoring an older one creates an inconsistent runtime identity.
+        if same_version and same_mode:
+            options["user_agent"] = user_agent
     return options
 
 

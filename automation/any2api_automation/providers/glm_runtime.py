@@ -191,7 +191,12 @@ class GlmOfficialBrowserTransport:
         )
         with _launch_browser(backend, execution, proxy_url) as launched:
             actual_backend, browser, camoufox_config = launched
-            options = context_options(execution, actual_backend)
+            options = context_options(
+                execution,
+                actual_backend,
+                browser_version=getattr(browser, "version", ""),
+                headless=core_settings().registration_headless,
+            )
             storage_state = _storage_state(execution)
             if storage_state:
                 options["storage_state"] = storage_state
@@ -311,7 +316,12 @@ class GlmOfficialBrowserTransport:
         )
         with _launch_browser(backend, execution, proxy_url) as launched:
             actual_backend, browser, camoufox_config = launched
-            options = context_options(execution, actual_backend)
+            options = context_options(
+                execution,
+                actual_backend,
+                browser_version=getattr(browser, "version", ""),
+                headless=core_settings().registration_headless,
+            )
             storage_state = _storage_state(execution)
             if storage_state:
                 options["storage_state"] = storage_state

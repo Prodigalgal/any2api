@@ -27,6 +27,7 @@ from ..lifecycle.browser import (
 from ..lifecycle.proxy import ProxyTunnelLease, browser_proxy_options, retain_proxy_tunnel
 from ..session_pool import AccountSessionPool, SessionSlot
 from .official_browser import close_owned_browser
+from .official_browser import context_options as _context_options
 
 logger = logging.getLogger("any2api_automation.providers.minmax_browser")
 _SCHEMA_VERSION = 1
@@ -889,11 +890,16 @@ class MinmaxOfficialBrowserTransport:
                     options["proxy"] = browser_proxy_options(proxy_url)
                 browser = await playwright.chromium.launch(**options)
             browser_lease.track_process(_driver_pid(browser))
-            context_options = _context_options(execution, backend)
+            context_options = _context_options(
+                execution,
+                backend,
+                browser_version=getattr(browser, "version", ""),
+                headless=core_settings().registration_headless,
+            )
             if storage_state:
                 context_options["storage_state"] = storage_state
             context = await browser.new_context(**context_options)
-            if backend == "patchright":
+            if backend == "patchright" and context_options.get("user_agent"):
                 await context.add_init_script(
                     script=_patchright_fingerprint_script(execution.get("runtime_fingerprint"))
                 )
@@ -1119,28 +1125,6 @@ def _camoufox_launch_options(config: dict[str, Any], proxy_url: str) -> dict[str
     if proxy_url:
         prepared["proxy"] = browser_proxy_options(proxy_url)
     return prepared
-
-
-def _context_options(execution: dict[str, Any], backend: str) -> dict[str, Any]:
-    options: dict[str, Any] = {"ignore_https_errors": True}
-    if backend == "camoufox":
-        return options
-    runtime = execution.get("runtime_fingerprint")
-    if not isinstance(runtime, dict):
-        return options
-    screen = runtime.get("screen") if isinstance(runtime.get("screen"), dict) else {}
-    width = int(screen.get("width") or 1440)
-    height = int(screen.get("height") or 900)
-    options.update(
-        {
-            "user_agent": str(runtime.get("user_agent") or core_settings().provider_user_agent),
-            "locale": str(runtime.get("language") or "en-US"),
-            "timezone_id": str(runtime.get("timezone_id") or "UTC"),
-            "viewport": {"width": width, "height": height},
-            "screen": {"width": width, "height": height},
-        }
-    )
-    return options
 
 
 def _upstream_request_target(value: str) -> tuple[str, str] | None:

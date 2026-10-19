@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..blocking_work import run_cleanup
+
 logger = logging.getLogger("any2api_automation.proxy_tunnels")
 
 
@@ -182,12 +184,12 @@ class ProxyTunnelPool[Node: Hashable]:
             maintenance.cancel()
             with suppress(asyncio.CancelledError):
                 await maintenance
-            await asyncio.to_thread(self.close)
+            await run_cleanup(self.close)
 
     async def _maintain(self) -> None:
         while True:
             await asyncio.sleep(15)
-            reaping = asyncio.create_task(asyncio.to_thread(self.reap_idle))
+            reaping = asyncio.create_task(run_cleanup(self.reap_idle))
             try:
                 await asyncio.shield(reaping)
             except asyncio.CancelledError:

@@ -1,4 +1,6 @@
+import importlib
 import logging
+import time
 
 from fastapi.testclient import TestClient
 
@@ -56,3 +58,20 @@ def test_provider_internal_routers_are_discovered_from_plugins() -> None:
         json={"timeout_seconds": 60},
     )
     assert response.status_code == 404
+
+
+def test_stalled_reaper_fails_readiness_and_then_liveness_without_provider_calls(monkeypatch):
+    main = importlib.import_module("any2api_automation.main")
+    monkeypatch.setattr(registry, "capabilities", lambda: {"fixture": {"available": True}})
+    monkeypatch.setattr(main.process_reaper.stats, "last_sweep_at", time.time() - 130)
+    assert client.get("/health/ready").status_code == 503
+    assert client.get("/health/live").status_code == 200
+    monkeypatch.setattr(main.process_reaper.stats, "last_sweep_at", time.time() - 250)
+    assert client.get("/health/live").status_code == 503
+
+
+def test_cancelled_stalled_workers_are_visible_to_health_checks(monkeypatch):
+    main = importlib.import_module("any2api_automation.main")
+    monkeypatch.setattr(main, "workers_healthy", lambda grace: False)
+    assert client.get("/health/ready").status_code == 503
+    assert client.get("/health/live").status_code == 503

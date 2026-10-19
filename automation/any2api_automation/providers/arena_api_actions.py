@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import credential
 from .actions import ProviderAction, ProviderActionRequest
 from .api_transport import (
@@ -45,7 +45,7 @@ class ArenaApiActionHandler:
                 return await _models(request, current, base_url, proxy_url)
             if operation == "chat":
                 path, body, headers = await _chat_input(request, current, base_url, proxy_url)
-                return await asyncio.to_thread(
+                return await run_blocking(
                     api_request_sync,
                     base_url,
                     "POST",
@@ -89,7 +89,7 @@ async def _models(
     base_url: str,
     proxy_url: str,
 ) -> dict[str, Any]:
-    result = await asyncio.to_thread(
+    result = await run_blocking(
         api_request_sync,
         base_url,
         "GET",

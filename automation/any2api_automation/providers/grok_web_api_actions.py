@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -11,6 +10,7 @@ from uuid import uuid4
 import websockets
 from websockets.exceptions import WebSocketException
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import credential
 from .actions import ProviderAction, ProviderActionRequest
 from .api_transport import (
@@ -84,7 +84,7 @@ async def _discover_models(
             "transport_mode": "api",
         }
     async with transport_proxy_lease(dict(request.payload), check_url=base_url) as proxy_url:
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             api_request_sync,
             base_url,
             "GET",
@@ -131,7 +131,7 @@ async def _chat_stream(
         return
 
     # Step 1: Resolve user ID from session
-    session_result = await asyncio.to_thread(
+    session_result = await run_blocking(
         api_request_sync,
         base_url,
         "GET",

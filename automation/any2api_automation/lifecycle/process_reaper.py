@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..blocking_work import run_cleanup
 from ..browser_budget import BrowserProcessBudget, browser_process_budget
 from ..config import settings
 from ..process_identity import ProcessIdentity, clock_ticks_per_second, read_process_stat
@@ -274,7 +275,7 @@ class BrowserProcessReaper:
     async def _sweep_async(self) -> int:
         # Killing residual processes includes blocking filesystem reads and grace waits.
         # Shield the worker so shutdown can await it before closing browser resources.
-        task = asyncio.create_task(asyncio.to_thread(self.sweep))
+        task = asyncio.create_task(run_cleanup(self.sweep))
         self._sweep_task = task
         try:
             return await asyncio.shield(task)

@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
@@ -99,7 +100,7 @@ class GlmAutomationProvider(AutomationProvider):
         if current.get("proxy_affinity_key") and not browser_payload.get("proxy_affinity_key"):
             browser_payload["proxy_affinity_key"] = current["proxy_affinity_key"]
             browser_payload["strict_proxy_affinity"] = True
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _reauthenticate_browser(
                 page,
@@ -128,9 +129,7 @@ class GlmAutomationProvider(AutomationProvider):
             payload,
             check_url=settings().glm_base_url,
         ) as proxy_url:
-            result = await asyncio.to_thread(
-                official_browser_transport.models, current, proxy_url, plan
-            )
+            result = await run_blocking(official_browser_transport.models, current, proxy_url, plan)
         status = int(result.get("status") or 502)
         body = str(result.get("body") or "")
         if status in {401, 403}:
@@ -167,9 +166,7 @@ class GlmAutomationProvider(AutomationProvider):
             payload,
             check_url=settings().glm_base_url,
         ) as proxy_url:
-            return await asyncio.to_thread(
-                official_browser_transport.models, current, proxy_url, plan
-            )
+            return await run_blocking(official_browser_transport.models, current, proxy_url, plan)
 
     async def transport_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
         if str(payload.get("operation") or "") != "chat":
@@ -223,7 +220,7 @@ class GlmAutomationProvider(AutomationProvider):
                 finally:
                     asyncio.run_coroutine_threadsafe(queue.put({"type": "done"}), loop).result()
 
-            task = asyncio.create_task(asyncio.to_thread(worker))
+            task = asyncio.create_task(run_blocking(worker))
             try:
                 while True:
                     event = await queue.get()
@@ -233,7 +230,9 @@ class GlmAutomationProvider(AutomationProvider):
                     details = {key: value for key, value in event.items() if key != "type"}
                     yield transport_frame(event_type, **details)
             finally:
-                await task
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile(
@@ -285,7 +284,7 @@ async def _run_registration_browser(
             )
             if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
                 attempt_payload["strict_proxy_affinity"] = True
-            result = await asyncio.to_thread(
+            result = await run_blocking(
                 run_browser_flow,
                 lambda page, context, backend, proxy_url: _register_browser(
                     page,

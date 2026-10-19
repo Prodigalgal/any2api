@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -10,6 +9,8 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import uuid4
+
+from ..blocking_work import run_blocking
 
 logger = logging.getLogger("any2api_automation.providers.qwen_api_actions")
 
@@ -73,7 +74,7 @@ class QwenApiActionHandler:
                 )
             if operation == "chat":
                 path, body, headers = await _chat_input(request, current, base_url, proxy_url)
-                return await asyncio.to_thread(
+                return await run_blocking(
                     api_request_sync,
                     base_url,
                     "POST",
@@ -169,7 +170,7 @@ async def _request(
     *,
     referer_path: str,
 ) -> dict[str, Any]:
-    result = await asyncio.to_thread(
+    result = await run_blocking(
         api_request_sync,
         base_url,
         method,
@@ -207,7 +208,7 @@ async def _upload_media(
         )
         filename = str(source.get("filename") or f"upload-{uuid4().hex}.bin")
         headers = _request_headers(base_url, current, request, f"/c/{chat_id}")
-        token_result = await asyncio.to_thread(
+        token_result = await run_blocking(
             api_request_sync,
             base_url,
             "POST",
@@ -287,7 +288,7 @@ async def _upload_media(
             "aliyun_v4_request",
         )
         signature = hmac.new(signing_key, string_to_sign.encode(), hashlib.sha256).hexdigest()
-        upload_result = await asyncio.to_thread(
+        upload_result = await run_blocking(
             api_provider_put_sync,
             upload_url,
             content,

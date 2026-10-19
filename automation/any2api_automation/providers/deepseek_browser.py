@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import ctypes
 import json
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from ..blocking_work import run_blocking
 from .base import validate_semantic_command
 from .deepseek_settings import settings
 from .multimodal import text_content
@@ -170,7 +170,7 @@ class DeepseekOfficialBrowserTransport(PageFetchBrowserRuntime):
             timeout_ms=plan.active.rules.canary_timeout_seconds * 1000,
         )
         challenge = _challenge(pow_result)
-        answer = await asyncio.to_thread(solve_pow, challenge)
+        answer = await run_blocking(solve_pow, challenge)
         proof = build_pow_proof(challenge, answer)
         headers = _headers(credential, runtime_options)
         headers["X-DS-PoW-Response"] = proof

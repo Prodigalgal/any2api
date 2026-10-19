@@ -22,6 +22,7 @@ from patchright.async_api import async_playwright
 from patchright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
+from ..blocking_work import run_blocking, run_cleanup
 from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..browser_transport import manager as browser_session_manager
 from ..config import settings as global_settings
@@ -1513,7 +1514,7 @@ class QwenNativeBrowserTransport:
             from camoufox.async_api import AsyncCamoufox
 
             browser_lease = await browser_process_budget.acquire_async("provider:qwen-camoufox")
-            prepared = await asyncio.to_thread(
+            prepared = await run_blocking(
                 camoufox_launch_options,
                 normalized_fingerprint,
                 headless=settings().qwen_risk_headless,
@@ -1580,7 +1581,7 @@ class QwenNativeBrowserTransport:
                 return entry.proxy_url, entry.binding_id
 
         try:
-            return await asyncio.to_thread(resolve)
+            return await run_blocking(resolve)
         except KeyError as error:
             raise RuntimeError("Qwen transport proxy session is unavailable") from error
 
@@ -1591,13 +1592,13 @@ class QwenNativeBrowserTransport:
             return
         lease = browser_session_manager.lease(transport_session_id)
         try:
-            entry = await asyncio.to_thread(lease.__enter__)
+            entry = await run_blocking(lease.__enter__)
         except KeyError as error:
             raise RuntimeError("Qwen transport proxy session is unavailable") from error
         try:
             yield (entry.proxy_url, entry.binding_id)
         finally:
-            await asyncio.to_thread(lease.__exit__, None, None, None)
+            await run_cleanup(lease.__exit__, None, None, None)
 
     async def close(self) -> None:
         self._unregister_budget_evictors()

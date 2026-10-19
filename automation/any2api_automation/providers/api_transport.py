@@ -12,6 +12,7 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 from curl_cffi import CurlMime
 from curl_cffi.requests import Session as CurlSession
 
+from ..blocking_work import run_blocking, run_cleanup
 from ..config import settings as core_settings
 from .actions import (
     ActionBinding,
@@ -461,7 +462,7 @@ async def api_stream(
         finally:
             publish(_QUEUE_STOP)
 
-    task = asyncio.create_task(asyncio.to_thread(worker))
+    task = asyncio.create_task(run_blocking(worker))
     try:
         while True:
             event = await async_queue.get()
@@ -475,7 +476,7 @@ async def api_stream(
         close = getattr(response, "close", None)
         try:
             if callable(close):
-                await asyncio.to_thread(close)
+                await run_cleanup(close)
         finally:
             if not task.done():
                 task.cancel()

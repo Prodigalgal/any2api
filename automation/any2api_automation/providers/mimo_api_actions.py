@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import credential
 from .actions import ProviderAction, ProviderActionRequest
 from .api_transport import (
@@ -49,7 +50,7 @@ class MimoApiActionHandler:
                 return await _request(request, current, base_url, proxy_url, "GET", path, "")
             if operation == "chat":
                 path, body, headers = await _chat_input(request, current, base_url, proxy_url)
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     api_request_sync,
                     base_url,
                     "POST",
@@ -126,7 +127,7 @@ async def _request(
     path: str,
     body: str,
 ) -> dict[str, Any]:
-    result = await asyncio.to_thread(
+    result = await run_blocking(
         api_request_sync,
         base_url,
         method,
@@ -160,7 +161,7 @@ async def _upload_media(
             expected_prefix="image/",
         )
         headers = _request_headers(base_url, current, request)
-        info = await asyncio.to_thread(
+        info = await run_blocking(
             api_request_sync,
             base_url,
             "POST",
@@ -184,7 +185,7 @@ async def _upload_media(
         _require_https(resource_url, "MiMo resource URL")
         # The official page explicitly sets application/octet-stream on fetch. The Blob
         # MIME type does not replace that header, and the pre-signed URL covers this value.
-        uploaded_response = await asyncio.to_thread(
+        uploaded_response = await run_blocking(
             api_provider_put_sync,
             upload_url,
             content,
@@ -207,7 +208,7 @@ async def _upload_media(
                 + "&model="
                 + quote(str(request.semantic_command.get("model") or ""), safe="")
             )
-            parsed_result = await asyncio.to_thread(
+            parsed_result = await run_blocking(
                 api_request_sync,
                 base_url,
                 "POST",

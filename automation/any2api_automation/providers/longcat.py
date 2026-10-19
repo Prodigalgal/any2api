@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import re
 import time
@@ -6,6 +5,7 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import (
     credential,
     flow_max_attempts,
@@ -85,7 +85,7 @@ class LongcatAutomationProvider(AutomationProvider):
                 )
                 if flow_payload.get("dynamic_proxy") or flow_payload.get("proxy_pool"):
                     flow_payload["strict_proxy_affinity"] = True
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     run_browser_flow,
                     lambda page, context, backend, proxy_url, _mail=mail, _mailbox=mailbox, _password=password, _trace=trace: (
                         _email_browser_flow(
@@ -134,7 +134,7 @@ class LongcatAutomationProvider(AutomationProvider):
         if current.get("proxy_affinity_key") and not flow_payload.get("proxy_affinity_key"):
             flow_payload["proxy_affinity_key"] = current["proxy_affinity_key"]
             flow_payload["strict_proxy_affinity"] = True
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _email_browser_flow(
                 page, context, backend, mail, mailbox, password, trace

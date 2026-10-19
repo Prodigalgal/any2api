@@ -16,6 +16,8 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse
 
+from ..blocking_work import run_blocking, run_cleanup
+
 logger = logging.getLogger("any2api_automation.providers.minmax")
 
 from ..config import settings as core_settings
@@ -104,7 +106,7 @@ class MinmaxAutomationProvider(AutomationProvider):
                     )
                 if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
                     attempt_payload["strict_proxy_affinity"] = True
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     run_browser_flow,
                     lambda page, context, backend, proxy_url: _account_browser_flow(
                         page, context, backend, mail, mailbox, password
@@ -138,7 +140,7 @@ class MinmaxAutomationProvider(AutomationProvider):
         current = credential(payload)
         mail = mail_client(payload)
         mailbox = Mailbox(required(current, "email"), required(current, "mail_jwt"))
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _account_browser_flow(
                 page, context, backend, mail, mailbox, required(current, "password")
@@ -1103,11 +1105,11 @@ async def _transport_proxy_lease(payload: dict[str, Any]):
         reject_redirect_hosts=("minimaxi.com",),
         **_optional_proxy_parameters(payload),
     )
-    proxy_url = await asyncio.to_thread(lease.__enter__)
+    proxy_url = await run_blocking(lease.__enter__)
     try:
         yield proxy_url
     finally:
-        await asyncio.to_thread(lease.__exit__, None, None, None)
+        await run_cleanup(lease.__exit__, None, None, None)
 
 
 def _browser_name(user_agent: str, captured: str) -> str:

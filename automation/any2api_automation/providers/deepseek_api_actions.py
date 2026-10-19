@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import credential
 from .actions import ProviderAction, ProviderActionRequest
 from .api_transport import (
@@ -118,7 +118,7 @@ async def _chat_input(
     )
     require_api_success(challenge, "DeepSeek create POW challenge")
     challenge_value = _challenge(challenge)
-    answer = await asyncio.to_thread(solve_pow, challenge_value)
+    answer = await run_blocking(solve_pow, challenge_value)
     proof = build_pow_proof(challenge_value, answer)
     options = _runtime_options(request)
     headers = _request_headers(base_url, current, options)
@@ -143,7 +143,7 @@ async def _request(
     headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     options = _runtime_options(request)
-    result = await asyncio.to_thread(
+    result = await run_blocking(
         api_request_sync,
         base_url,
         method,

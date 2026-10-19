@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from patchright.async_api import async_playwright
 
+from ..blocking_work import blocking_wait_timeout, run_blocking
 from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..config import settings as core_settings
 from ..lifecycle.browser import (
@@ -807,7 +808,7 @@ class MinmaxOfficialBrowserTransport:
             pass
         future = asyncio.run_coroutine_threadsafe(self._sessions.evict_idle(), loop)
         try:
-            return bool(future.result(timeout=10))
+            return bool(future.result(timeout=blocking_wait_timeout(10)))
         except TimeoutError:
             future.cancel()
             logger.warning("minmax_official_browser_idle_eviction_timed_out")
@@ -871,7 +872,7 @@ class MinmaxOfficialBrowserTransport:
                 from camoufox.async_api import AsyncCamoufox
 
                 exact_config = execution.get("camoufox_config")
-                prepared = await asyncio.to_thread(
+                prepared = await run_blocking(
                     _camoufox_launch_options,
                     exact_config if isinstance(exact_config, dict) else {},
                     proxy_url,

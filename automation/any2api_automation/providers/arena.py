@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..blocking_work import run_blocking
 from ..config import settings
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
@@ -98,7 +99,7 @@ class ArenaAutomationProvider(AutomationProvider):
             try:
                 mailbox = await mail.create_address()
                 trace.mark(RegistrationStage.MAILBOX_CREATED)
-                seen_ids = await asyncio.to_thread(mail.message_ids_sync, mailbox)
+                seen_ids = await run_blocking(mail.message_ids_sync, mailbox)
                 base_url = _allowlisted_base_url(_runtime_option(payload, "base_url"))
                 flow_payload = proxy_attempt_payload(
                     {**payload, "proxy_check_url": base_url},
@@ -106,7 +107,7 @@ class ArenaAutomationProvider(AutomationProvider):
                     attempt=attempt,
                 )
                 flow_payload["strict_proxy_affinity"] = True
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     run_browser_flow,
                     lambda page, context, backend, proxy_url, m=mail, mb=mailbox, s_ids=seen_ids, fp=flow_payload: (
                         register_with_magic_link(
@@ -165,7 +166,7 @@ class ArenaAutomationProvider(AutomationProvider):
             attempt=1,
         )
         flow_payload["strict_proxy_affinity"] = True
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             run_browser_flow,
             lambda page, context, backend, proxy_url: reauthenticate_with_credentials(
                 page,

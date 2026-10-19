@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from curl_cffi.requests import Session as CurlSession
 
+from ..blocking_work import run_blocking, run_cleanup
 from ..config import settings as core_settings
 from ..lifecycle.account import credential
 from .actions import (
@@ -73,15 +74,11 @@ class MinmaxApiActionHandler:
                 raise TypeError("MinMax semantic command must be an object")
             async with _transport_proxy_lease(dict(request.payload)) as proxy_url:
                 method, path, body = await self._semantic_chat_input(current, command, proxy_url)
-                return await asyncio.to_thread(
-                    _api_request_sync, current, method, path, body, proxy_url
-                )
+                return await run_blocking(_api_request_sync, current, method, path, body, proxy_url)
         payload = request.legacy_payload(operation)
         method, path, body = _api_request_input(payload)
         async with _transport_proxy_lease(dict(request.payload)) as proxy_url:
-            return await asyncio.to_thread(
-                _api_request_sync, current, method, path, body, proxy_url
-            )
+            return await run_blocking(_api_request_sync, current, method, path, body, proxy_url)
 
     async def stream(self, request: ProviderActionRequest) -> AsyncIterator[bytes]:
         if request.action is not ProviderAction.CHAT:
@@ -110,13 +107,13 @@ class MinmaxApiActionHandler:
             )
         agent_id = prepared["agent_id"]
         if not agent_id:
-            agents = await asyncio.to_thread(
+            agents = await run_blocking(
                 _api_request_sync, current, "GET", "/archon/api/v1/agent?limit=20", "", proxy_url
             )
             require_api_success(agents, "MinMax agent list")
             agent_id = _select_agent(agents, prepared["agent_role"])
         agent_id = _path_segment(agent_id, "agent")
-        session = await asyncio.to_thread(
+        session = await run_blocking(
             _api_request_sync,
             current,
             "POST",
@@ -251,11 +248,11 @@ async def _api_stream(
         finally:
             publish(_API_QUEUE_STOP)
 
-    task = asyncio.create_task(asyncio.to_thread(worker))
+    task = asyncio.create_task(run_blocking(worker))
     try:
         while True:
             try:
-                event = await asyncio.to_thread(events.get, True, 0.2)
+                event = await run_blocking(events.get, True, 0.2)
             except queue.Empty:
                 if task.done() and events.empty():
                     break
@@ -269,7 +266,7 @@ async def _api_stream(
         response = response_holder[0]
         close = getattr(response, "close", None)
         if callable(close):
-            close()
+            await run_cleanup(close)
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
+from ..blocking_work import run_blocking
 from .qwen_challenge import (
     BACKGROUND_SELECTORS,
     CONTROL_SELECTOR,
@@ -78,7 +79,7 @@ class QwenInferenceChallengeSolver:
                     raise RuntimeError("Qwen inference slider geometry is unavailable")
                 max_travel = await _max_slider_travel(page, slider, slider_box)
                 if background_bytes and piece_bytes:
-                    estimates = await asyncio.to_thread(
+                    estimates = await run_blocking(
                         _qwen_gap_estimates, background_bytes, piece_bytes
                     )
                     if not estimates:

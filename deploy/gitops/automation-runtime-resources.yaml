@@ -9,15 +9,15 @@ spec:
         - name: automation
           env:
             - name: ANY2API_AUTOMATION_BROWSER_PROCESS_CAPACITY
-              value: "2"
+              value: "4"
           resources:
             requests:
               cpu: 500m
-              memory: 1Gi
+              memory: 2Gi
               ephemeral-storage: 512Mi
             limits:
               cpu: "2"
-              memory: 3Gi
+              memory: 6Gi
               ephemeral-storage: 2Gi
 ---
 apiVersion: apps/v1
@@ -32,11 +32,11 @@ spec:
           resources:
             requests:
               cpu: 200m
-              memory: 1Gi
+              memory: 2Gi
               ephemeral-storage: 512Mi
             limits:
               cpu: "1.5"
-              memory: 3584Mi
+              memory: 6Gi
               ephemeral-storage: 3Gi
 ---
 apiVersion: apps/v1

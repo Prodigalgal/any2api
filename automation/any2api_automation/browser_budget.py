@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
+from .blocking_work import (
+    blocking_wait_timeout,
+    browser_wait_deadline,
+    is_background_work,
+)
 from .config import settings
 from .process_identity import ProcessIdentity, read_process_stat
 
@@ -22,6 +27,8 @@ class BrowserProcessBudgetSnapshot:
     capacity: int
     in_use: int
     available: int
+    background_in_use: int
+    foreground_waiting: int
 
 
 class BrowserProcessLease:
@@ -30,6 +37,7 @@ class BrowserProcessLease:
     def __init__(self, budget: BrowserProcessBudget, label: str) -> None:
         self._budget = budget
         self.label = label
+        self.background = is_background_work()
         self._released = False
         self._lock = threading.Lock()
 
@@ -68,11 +76,20 @@ class BrowserProcessLease:
 class BrowserProcessBudget:
     """Shares one bounded browser-process budget across sync and async callers."""
 
-    def __init__(self, capacity: int, *, logger: logging.Logger | None = None) -> None:
+    def __init__(
+        self,
+        capacity: int,
+        *,
+        logger: logging.Logger | None = None,
+        acquire_timeout_seconds: float = 30,
+    ) -> None:
         if capacity < 1:
             raise ValueError("browser process capacity must be positive")
         self._capacity = capacity
         self._in_use = 0
+        self._background_in_use = 0
+        self._foreground_waiting = 0
+        self._acquire_timeout_seconds = acquire_timeout_seconds
         self._process_owners: dict[BrowserProcessLease, set[ProcessIdentity]] = {}
         self._condition = threading.Condition()
         self._logger = logger or logging.getLogger("any2api_automation.browser_budget")
@@ -106,12 +123,20 @@ class BrowserProcessBudget:
         return unregister
 
     def acquire_sync(self, label: str) -> BrowserProcessLease:
+        with browser_wait_deadline(self._acquire_timeout_seconds):
+            self._waiting_started()
+            try:
+                return self._acquire_sync(label)
+            finally:
+                self._waiting_finished()
+
+    def _acquire_sync(self, label: str) -> BrowserProcessLease:
         waited_at: float | None = None
         while True:
+            blocking_wait_timeout(_WAIT_INTERVAL_SECONDS)
             with self._condition:
-                if self._in_use < self._capacity:
-                    self._in_use += 1
-                    lease = BrowserProcessLease(self, label)
+                if self._has_capacity():
+                    lease = self._claim(label)
                     break
                 if waited_at is None:
                     waited_at = time.monotonic()
@@ -123,19 +148,26 @@ class BrowserProcessBudget:
             if self._evict_one_sync_idle(label):
                 continue
             with self._condition:
-                if self._in_use < self._capacity:
+                if self._has_capacity():
                     continue
-                self._condition.wait(timeout=_WAIT_INTERVAL_SECONDS)
+                self._condition.wait(timeout=blocking_wait_timeout(_WAIT_INTERVAL_SECONDS))
         self._log_acquired(label, waited_at)
         return lease
 
     async def acquire_async(self, label: str) -> BrowserProcessLease:
+        self._waiting_started()
+        try:
+            async with asyncio.timeout(self._acquire_timeout_seconds):
+                return await self._acquire_async(label)
+        finally:
+            self._waiting_finished()
+
+    async def _acquire_async(self, label: str) -> BrowserProcessLease:
         waited_at: float | None = None
         while True:
             with self._condition:
-                if self._in_use < self._capacity:
-                    self._in_use += 1
-                    lease = BrowserProcessLease(self, label)
+                if self._has_capacity():
+                    lease = self._claim(label)
                     break
                 if waited_at is None:
                     waited_at = time.monotonic()
@@ -157,6 +189,8 @@ class BrowserProcessBudget:
                 capacity=self._capacity,
                 in_use=in_use,
                 available=self._capacity - in_use,
+                background_in_use=self._background_in_use,
+                foreground_waiting=self._foreground_waiting,
             )
 
     def owned_processes(self) -> frozenset[ProcessIdentity]:
@@ -170,8 +204,35 @@ class BrowserProcessBudget:
             if self._in_use < 1:
                 raise RuntimeError("browser process budget released without an active lease")
             self._in_use -= 1
+            if lease.background:
+                self._background_in_use -= 1
             self._process_owners.pop(lease, None)
             self._condition.notify_all()
+
+    def _has_capacity(self) -> bool:
+        if self._in_use >= self._capacity:
+            return False
+        return not is_background_work() or (
+            self._foreground_waiting == 0 and self._background_in_use < max(1, self._capacity - 1)
+        )
+
+    def _claim(self, label: str) -> BrowserProcessLease:
+        self._in_use += 1
+        lease = BrowserProcessLease(self, label)
+        if lease.background:
+            self._background_in_use += 1
+        return lease
+
+    def _waiting_started(self) -> None:
+        if not is_background_work():
+            with self._condition:
+                self._foreground_waiting += 1
+
+    def _waiting_finished(self) -> None:
+        if not is_background_work():
+            with self._condition:
+                self._foreground_waiting -= 1
+                self._condition.notify_all()
 
     async def _evict_one_async_idle(self, label: str) -> bool:
         with self._evictor_lock:
@@ -189,6 +250,7 @@ class BrowserProcessBudget:
         with self._evictor_lock:
             evictors = tuple(self._sync_evictors)
         for evictor in evictors:
+            blocking_wait_timeout(_WAIT_INTERVAL_SECONDS)
             try:
                 if evictor():
                     self._logger.info("browser_process_budget_evicted label=%s mode=sync", label)
@@ -209,4 +271,5 @@ class BrowserProcessBudget:
 
 browser_process_budget = BrowserProcessBudget(
     settings().browser_process_capacity,
+    acquire_timeout_seconds=settings().browser_process_acquire_timeout_seconds,
 )

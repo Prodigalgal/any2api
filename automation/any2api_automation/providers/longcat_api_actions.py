@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlsplit
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import credential
 from .actions import ProviderAction, ProviderActionRequest
 from .api_transport import (
@@ -44,7 +44,7 @@ class LongcatApiActionHandler:
         base_url = _base_url(request)
         async with transport_proxy_lease(dict(request.payload), check_url=base_url) as proxy_url:
             path, body, headers = await _chat_input(request, current, base_url, proxy_url)
-            result = await asyncio.to_thread(
+            result = await run_blocking(
                 api_request_sync,
                 base_url,
                 "POST",
@@ -93,7 +93,7 @@ async def _chat_input(
     uploaded = await _upload_media(current, base_url, proxy_url, sources, request)
     prepared = build_longcat_request(command, uploaded_files=uploaded)
     session_headers = _request_headers(base_url, current, request)
-    session = await asyncio.to_thread(
+    session = await run_blocking(
         api_request_sync,
         base_url,
         "POST",
@@ -145,7 +145,7 @@ async def _upload_media(
             max_bytes=_MAX_UPLOAD_BYTES,
         )
         headers = _request_headers(base_url, current, request)
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             api_multipart_request_sync,
             base_url,
             "POST",

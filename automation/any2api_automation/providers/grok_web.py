@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import credential, flow_max_attempts, prepare_registration
 from ..lifecycle.browser import BrowserLaunchProfile, run_browser_flow
 from ..lifecycle.proxy import proxy_attempt_payload
@@ -72,7 +73,7 @@ class GrokWebAutomationProvider(AutomationProvider):
                 )
                 if flow_payload.get("dynamic_proxy") or flow_payload.get("proxy_pool"):
                     flow_payload["strict_proxy_affinity"] = True
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     run_browser_flow,
                     lambda page, context, backend, proxy_url, _mail=mail, _mailbox=mailbox, _password=password, _trace=trace, _flow=flow_payload: (
                         register_grok_web(

@@ -2,12 +2,14 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Iterable
+from contextlib import nullcontext
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from .blocking_work import background_work
 from .captcha.policy import CaptchaAiPolicy, bind_captcha_policy
 from .config import settings as core_settings
 from .observability import OperationFailure, bind_operation, failure_details, sanitize
@@ -106,7 +108,7 @@ async def execute(provider_id: str, request: ProviderOperationRequest) -> dict[s
         )
         try:
             captcha_policy = CaptchaAiPolicy.from_payload(request.payload)
-            with bind_captcha_policy(captcha_policy):
+            with bind_captcha_policy(captcha_policy), background_work():
                 budget = (
                     core_settings().inference_first_frame_timeout_seconds
                     if request.operation == "keepalive"
@@ -270,7 +272,15 @@ def _action_request(
 async def _execute_action(request: ProviderActionRequest) -> dict[str, Any]:
     try:
         _require_action_provider(request)
-        return await action_dispatcher.execute(request)
+        maintenance = request.action in {
+            ProviderAction.REGISTER,
+            ProviderAction.REAUTHENTICATE,
+            ProviderAction.KEEPALIVE,
+            ProviderAction.DAILY_CHECKIN,
+            ProviderAction.MODEL_DISCOVERY,
+        }
+        with background_work() if maintenance else nullcontext():
+            return await action_dispatcher.execute(request)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TypeError, ValueError) as exc:

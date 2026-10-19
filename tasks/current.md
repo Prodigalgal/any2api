@@ -1,7 +1,15 @@
-# 当前任务板（源码与生产 1.5.10）
+# 当前任务板（源码 1.5.11 候选、生产 1.5.10）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-19 Automation 容量与积压恢复（1.5.11）
+
+- **目标**：修复持续运行后同步等待/清理互相阻塞；按授权扩容内存，恢复真实输出和维护推进，对账历史孤立 RUNNING。
+- **变更**：后台同步工作并发 2 且与前台分离；独立清理执行器、取消传播、浏览器名额 30 秒等待与前台容量保留；共享预算 4、共享/Arena 内存 limit 各 6Gi、request 各 2Gi；内部任务进度健康检查；按当前有效租约/attempt 对账历史操作。
+- **验证**：Automation 685 passed/3 Redis 条件跳过，Ruff/143 文件格式通过；Backend 609 passed/5 live 条件跳过、bootJar；Web lint/build/TypeScript；1.5.11 源码/JAR 版本契约通过。162 条旧 RUNNING 已加密备份并回读校验；CI/生产验收待回写。
+- **边界**：不改 OpenAI/数据库结构、代理绑定、注册计划、保活周期，不新增周期生成探活；DeepSeek/Qwen 保持停用。回滚 1.5.10 镜像/资源。
+- **记录**：[规格](../docs/requirements/AUTOMATION_CAPACITY_RECOVERY_1.5.11.md)、[变更与验收](../docs/reports/AUTOMATION_CAPACITY_RECOVERY_1.5.11_2026-10-19.md)。
 
 ## 2026-10-19 全系统可靠性审计与修复（1.5.9）
 

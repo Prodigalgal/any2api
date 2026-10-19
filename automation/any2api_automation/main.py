@@ -1,8 +1,10 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Response
 
+from .blocking_work import worker_snapshot, workers_healthy
 from .browser_budget import browser_process_budget
 from .browser_transport import manager as browser_session_manager
 from .browser_transport import router as browser_transport_router
@@ -44,7 +46,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Any2API Automation",
-    version="1.5.10",
+    version="1.5.11",
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
@@ -57,15 +59,29 @@ for provider_router_extension in provider_registry.routers():
     app.include_router(provider_router_extension)
 
 
+def _background_healthy(multiplier: int) -> bool:
+    config = settings()
+    grace = max(120, config.browser_reaper_interval_seconds * multiplier)
+    last_sweep = process_reaper.stats.last_sweep_at
+    reaper_ready = (
+        not config.browser_reaper_enabled or not last_sweep or time.time() - last_sweep < grace
+    )
+    return reaper_ready and workers_healthy(grace)
+
+
 @app.get("/health/live")
-async def live() -> dict[str, object]:
-    return {"ok": True, "service": settings().service_name}
+async def live(response: Response) -> dict[str, object]:
+    healthy = _background_healthy(8)
+    response.status_code = 200 if healthy else 503
+    return {"ok": healthy, "service": settings().service_name}
 
 
 @app.get("/health/ready")
 async def ready(response: Response) -> dict[str, object]:
     capabilities = registry.capabilities()
-    local_solver_ready = any(item["available"] for item in capabilities.values())
+    local_solver_ready = any(
+        item["available"] for item in capabilities.values()
+    ) and _background_healthy(4)
     response.status_code = 200 if local_solver_ready else 503
     return {
         "ok": local_solver_ready,
@@ -85,5 +101,6 @@ async def platform_capabilities() -> dict[str, object]:
             "browser_process": browser_process_budget.snapshot().__dict__,
             "process_reaper": process_reaper.snapshot(),
             "proxy_tunnels": proxy_tunnel_pool.snapshot(),
+            "workers": worker_snapshot(),
         },
     }

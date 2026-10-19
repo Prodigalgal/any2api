@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from patchright.async_api import Page as PatchrightPage
 from patchright.async_api import async_playwright
 
+from ..blocking_work import blocking_wait_timeout, run_blocking, run_cleanup
 from ..browser_budget import BrowserProcessLease, browser_process_budget
 from ..config import settings as core_settings
 from ..lifecycle.browser import (
@@ -197,7 +198,7 @@ class OfficialBrowserRuntime:
             pass
         future = asyncio.run_coroutine_threadsafe(self._sessions.evict_idle(), loop)
         try:
-            return bool(future.result(timeout=10))
+            return bool(future.result(timeout=blocking_wait_timeout(10)))
         except TimeoutError:
             future.cancel()
             self.logger.warning("official_browser_idle_eviction_timed_out")
@@ -314,7 +315,7 @@ class OfficialBrowserRuntime:
                 from camoufox.async_api import AsyncCamoufox
 
                 exact_config = execution.get("camoufox_config")
-                prepared = await asyncio.to_thread(
+                prepared = await run_blocking(
                     camoufox_launch_options,
                     exact_config if isinstance(exact_config, dict) else {},
                     proxy_url,
@@ -510,7 +511,7 @@ async def close_owned_browser(
         finally:
             try:
                 if driver_processes:
-                    await asyncio.to_thread(
+                    await run_cleanup(
                         terminate_residual_browser_process,
                         driver_processes,
                         label=f"{provider_id} session cleanup",
@@ -526,7 +527,7 @@ async def close_owned_browser(
                         browser_lease.release()
                 finally:
                     if proxy_tunnel is not None:
-                        await asyncio.to_thread(proxy_tunnel.release)
+                        await run_cleanup(proxy_tunnel.release)
         logger.info(
             "official_browser_cleanup stage=finished duration_ms=%s",
             round((time.monotonic() - started) * 1000),

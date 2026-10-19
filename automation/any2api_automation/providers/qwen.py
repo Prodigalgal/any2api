@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from curl_cffi import requests as curl_requests
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import credential, flow_max_attempts, prepare_registration, required
 from ..lifecycle.browser import (
     BrowserContextProfile,
@@ -90,7 +91,7 @@ class QwenAutomationProvider(AutomationProvider):
                 flow_payload.setdefault(
                     "proxy_check_url", f"{settings().qwen_base_url.rstrip('/')}/auth?mode=register"
                 )
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     _register_with_fingerprint,
                     flow_payload,
                     mail,
@@ -107,7 +108,7 @@ class QwenAutomationProvider(AutomationProvider):
         raise last_error
 
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await asyncio.to_thread(
+        return await run_blocking(
             _reauthenticate_sync,
             payload,
             credential(payload),

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import hmac
@@ -11,6 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
 
+from ..blocking_work import run_blocking
 from ..config import settings as core_settings
 from ..lifecycle.account import credential
 from .actions import ProviderAction, ProviderActionRequest
@@ -57,7 +57,7 @@ class GlmApiActionHandler:
                 )
             if operation == "chat":
                 path, body, headers = await _chat_input(request, current, base_url, proxy_url)
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     api_request_sync,
                     base_url,
                     "POST",
@@ -114,7 +114,7 @@ async def _chat_input(
         user_message_id=user_message_id,
     )
     headers = _request_headers(base_url, current, request)
-    new_chat = await asyncio.to_thread(
+    new_chat = await run_blocking(
         api_request_sync,
         base_url,
         "POST",
@@ -172,7 +172,7 @@ async def _request(
     *,
     referer_path: str,
 ) -> dict[str, Any]:
-    result = await asyncio.to_thread(
+    result = await run_blocking(
         api_request_sync,
         base_url,
         method,
@@ -213,7 +213,7 @@ async def _upload_images(
         )
         filename = _image_filename(block, mime_type)
         headers = _request_headers(base_url, current, request)
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             api_multipart_request_sync,
             base_url,
             "POST",

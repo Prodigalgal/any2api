@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import logging
 import secrets
@@ -7,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from ..blocking_work import run_blocking
 from ..lifecycle.account import (
     RegistrationPasswordPolicy,
     credential,
@@ -81,7 +81,7 @@ class MimoAutomationProvider(AutomationProvider):
                 )
                 if attempt_payload.get("dynamic_proxy") or attempt_payload.get("proxy_pool"):
                     attempt_payload["strict_proxy_affinity"] = True
-                registered = await asyncio.to_thread(
+                registered = await run_blocking(
                     _register_protocol,
                     attempt_payload,
                     mail,
@@ -92,7 +92,7 @@ class MimoAutomationProvider(AutomationProvider):
                     "proxy_affinity_key"
                 ]
                 try:
-                    registered["credential"] = await asyncio.to_thread(
+                    registered["credential"] = await run_blocking(
                         _bootstrap_browser_context,
                         attempt_payload,
                         registered["credential"],
@@ -116,7 +116,7 @@ class MimoAutomationProvider(AutomationProvider):
         inference_rejected = _inference_credential_rejected(payload)
         if current.get("pass_token") and not inference_rejected:
             try:
-                patch = await asyncio.to_thread(_exchange_pass_token, payload, current)
+                patch = await run_blocking(_exchange_pass_token, payload, current)
                 candidate = {**current, **patch}
                 verification = await _browser_keepalive(payload, candidate)
                 if verification.get("healthy"):
@@ -130,7 +130,7 @@ class MimoAutomationProvider(AutomationProvider):
                 pass
         if current.get("email") and current.get("password") and current.get("mail_jwt"):
             try:
-                patch = await asyncio.to_thread(_password_otp_reauthenticate, payload, current)
+                patch = await run_blocking(_password_otp_reauthenticate, payload, current)
                 candidate = {**current, **patch}
                 verification = await _browser_keepalive(payload, candidate)
                 if verification.get("healthy"):
@@ -155,7 +155,7 @@ class MimoAutomationProvider(AutomationProvider):
                     }
         if not current.get("email") or not current.get("password"):
             return {"healthy": False, "auth_expired": True, "terminal": True}
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _login_browser(
                 page, context, backend, current, payload

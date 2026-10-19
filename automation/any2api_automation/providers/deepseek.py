@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from curl_cffi.requests import Session as CurlSession
 
+from ..blocking_work import run_blocking
 from ..captcha.policy import CaptchaAiPolicy
 from ..captcha.registry import registry
 from ..lifecycle.account import (
@@ -124,12 +125,12 @@ class DeepseekAutomationProvider(AutomationProvider):
     async def reauthenticate(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = credential(payload)
         try:
-            return await asyncio.to_thread(_reauthenticate_sync, payload, current)
+            return await run_blocking(_reauthenticate_sync, payload, current)
         except _BrowserReauthenticationRequired:
             logger.info("DeepSeek password login requires browser WAF clearance")
         flow_payload = {**payload}
         flow_payload.setdefault("proxy_check_url", settings().deepseek_base_url)
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             run_browser_flow,
             lambda page, context, backend, proxy_url: _reauthenticate_browser(page, current),
             preferred=self.manifest.browser_backend,
@@ -365,7 +366,7 @@ async def _run_registration_browser(
                 identity=current_mailbox.address,
                 attempt=attempt,
             )
-            result = await asyncio.to_thread(
+            result = await run_blocking(
                 run_browser_flow,
                 lambda page, context, backend, proxy_url, m=current_mail, mb=current_mailbox: (
                     _register_browser(page, backend, m, mb, password, trace, captcha_policy)

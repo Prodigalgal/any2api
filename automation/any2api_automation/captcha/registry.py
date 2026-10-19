@@ -20,6 +20,7 @@ from pathlib import Path
 
 import httpx
 
+from ..blocking_work import check_blocking_work
 from ..config import settings
 from ..resources import lanes
 from .models import SolverEstimate, VisualAction
@@ -194,6 +195,48 @@ class SolverRegistry:
             confidence=0.55,
             detail=f"length={len(candidate)}",
         )
+
+    def solve_visual_grid_sync(
+        self,
+        image: bytes,
+        columns: int,
+        *,
+        timeout_seconds: float,
+        ai_policy: CaptchaAiPolicy,
+    ) -> tuple[int, ...] | None:
+        if columns not in {3, 4}:
+            raise ValueError("visual grid must have 3 or 4 columns")
+        content = self._visual_completion_sync(
+            image,
+            f"Read the instruction above this {columns} by {columns} image grid. "
+            "Cells are numbered from 1 at the top left, left to right, then top to bottom. "
+            'Return exactly {"select":[all cell numbers that should be selected]}. '
+            "Ignore existing checkmarks when deciding the target set. "
+            "An empty array is valid when nothing matches. No extra keys or explanation.",
+            max_tokens=128,
+            timeout_seconds=timeout_seconds,
+            ai_policy=ai_policy,
+            max_attempts=1,
+        )
+        if not content:
+            return None
+        try:
+            value = json.loads(content)
+        except (TypeError, ValueError):
+            self._diagnostics.visual = "grid_invalid_json"
+            return None
+        if not isinstance(value, dict) or set(value) != {"select"}:
+            self._diagnostics.visual = "grid_invalid_schema"
+            return None
+        selected = value["select"]
+        if (
+            not isinstance(selected, list)
+            or any(type(cell) is not int or not 1 <= cell <= columns**2 for cell in selected)
+            or len(set(selected)) != len(selected)
+        ):
+            self._diagnostics.visual = "grid_invalid_cells"
+            return None
+        return tuple(sorted(selected))
 
     def solve_visual_choice_sync(
         self,
@@ -802,6 +845,7 @@ class SolverRegistry:
         max_tokens: int,
         timeout_seconds: float | None = None,
         ai_policy: CaptchaAiPolicy | None = None,
+        max_attempts: int | None = None,
     ) -> str:
         config = settings()
         transports = self._visual_transports(ai_policy or current_captcha_policy())
@@ -841,8 +885,15 @@ class SolverRegistry:
             ),
         )
         deadline = time.monotonic() + budget
-        max_attempts = max(3, len(transports))
+        if max_attempts is not None and (type(max_attempts) is not int or max_attempts < 1):
+            raise ValueError("visual request attempt limit must be positive")
+        max_attempts = (
+            max(3, len(transports))
+            if max_attempts is None
+            else min(max_attempts, max(3, len(transports)))
+        )
         for attempt in range(1, max_attempts + 1):
+            check_blocking_work()
             remaining = deadline - time.monotonic()
             if remaining < 1:
                 break

@@ -25,7 +25,8 @@ class ArenaSettings(AutomationProviderSettings):
         min_length=20,
         max_length=128,
     )
-    arena_recaptcha_v2_timeout_seconds: int = Field(default=30, ge=5, le=180)
+    arena_recaptcha_v2_timeout_seconds: int = Field(default=90, ge=5, le=180)
+    arena_captcha_ai_internal_model: str = "mimo/mimo-v2.6-pro"
     arena_full_name: str = "Any2API Test"
     arena_registration_mail_timeout_seconds: int = Field(default=240, ge=30, le=3600)
     arena_max_prompt_bytes: int = Field(default=512 * 1024, ge=1, le=2 * 1024 * 1024)

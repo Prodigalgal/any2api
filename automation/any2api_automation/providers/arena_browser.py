@@ -20,6 +20,7 @@ from ..lifecycle.browser import BrowserResult, credential_from_context
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import OperationFailure
+from .arena_challenge import solve_arena_image_challenge
 from .arena_settings import settings as arena_settings
 from .base import validate_semantic_command
 from .official_browser import evaluate_in_page_world
@@ -2100,6 +2101,16 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             config.arena_recaptcha_v2_site_key,
             config.arena_recaptcha_v2_timeout_seconds * 1000,
         )
+
+    async def _try_solve_page_recaptcha_v2(self, page: Any) -> None:
+        deadline = (
+            asyncio.get_running_loop().time()
+            + arena_settings().arena_recaptcha_v2_timeout_seconds
+            - 1
+        )
+        async with asyncio.timeout_at(deadline):
+            await super()._try_solve_page_recaptcha_v2(page)
+            await solve_arena_image_challenge(page, deadline=deadline)
 
     async def configure_page(
         self,

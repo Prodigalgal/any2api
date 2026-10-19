@@ -46,4 +46,33 @@ OpenAI Chat/Responses、账号权限、代理绑定、注册计划、保活周�
 
 ## 生产验收
 
-待 CI、GitOps、运行版本/资源、真实输出、维护推进和历史对账完成后回写。短窗口有效不代替长期稳定性、全部账号或桌面客户端验收；Arena 的官方 v2/账号差异继续独立记录。
+### 1.5.11 上线与运行证据
+
+- 源码 `0b3adcd6f5c47c56a99414f1c398aaab690fae64`；[CI 39186730599](https://github.com/Prodigalgal/any2api/actions/runs/39186730599) 全绿，真实 Redis 环境 **688 passed**；GitOps `d169e6dfed24b0de0b6282fcc2afbb6ec5e46706`，Argo Synced/Healthy。
+- 09:45:30 对已经停滞的共享 1.5.10 实例做一次临时重启；已有自然流量中的 Grok/MiMo/MiniMax 各恢复完整输出。该窗口与新版本验收分开，不把重启结果归因于新代码。
+- 09:51 起四个应用切换到 `20261019-v1.5.11-release-0b3adcd6f5c47c56a99414f1c398aaab690fae64`，实际版本均 1.5.11、digest 与 registry/arm64 清单一致、Ready/0 重启。两 Automation 的 cgroup limit 均 6442450944，request=2Gi；共享 capabilities capacity=4，Arena 保持 3。
+- 双入口 health/ready 200，无密钥 Chat/Responses 均为 401/OpenAI error/request_id；六家 key 的目录隔离检查通过。DeepSeek/Qwen 0 副本，代理绑定仍为原 Self Proxy 四节点。
+- 09:52:38 对账 **162 条**，超过 30 分钟/1 小时的 RUNNING 均降为 0。没有批量重置账号健康或删除待执行任务。
+- 10:00:26 快照中维护 overdue **398**（09:22 为 434），执行在推进，expired lease=0。共享 reaper sweeps=19、cleanup completed=217；取消未退出的工作已归零。共享内存峰值 3771768832（约 3.51Gi），Arena 峰值约 1.39Gi；均无 OOM。
+- 09:52 后已落库普通请求包含受控验收：Grok 11 request/14 attempt/8 有效，MiMo 14/14/11，MiniMax 9/9/9，GLM/LongCat 各 1/1/1，Arena 4/4/0。仍含 Grok/MiMo 下游取消与厂商错误，不能称为全部请求恢复。
+
+受控小文本 Responses 每家一条，共 6 条；五家有正文加 response.completed，Arena 仍准备超时：
+
+| 厂商 | 客户端耗时 | 有效输出 | request_id |
+| --- | ---: | --- | --- |
+| MiMo | 24.273s | 是 | bca3dfe2-db8a-44b3-abcf-756eaa426014 |
+| Grok | 34.586s | 是 | afac5b7a-9141-4df3-bcd1-cd2b177300eb |
+| MiniMax | 9.119s | 是 | 3dd8c8ee-cdba-4033-bc7d-dd4fcaec4146 |
+| LongCat | 18.292s | 是 | d7cbd06c-b885-45bd-826d-373d73a2d2dd |
+| GLM | 52.157s | 是 | 851369b6-3001-4150-81e4-60bc3c08cd69 |
+| Arena | 90.227s | 否 | d953ddde-3e76-49f2-8f31-2e6d97efd520 |
+
+Arena 该次选择 b1755123-d20b-4165-9d7c-460e88087dd5，后台 88.623s，TTFB 88.494s，错误保留 TimeoutError，不能推断为单一出口或验证码原因；其他请求还需独立跟踪。短窗口有效不代替长期稳定性、全部账号或桌面客户端验收。
+
+### 1.5.12 MiniMax 消费者线程饥饿补丁
+
+1.5.11 运行指标还显示共享 foreground completed 在几分钟内升至 6282，10:00 为 20720。MiniMax `_api_stream` 每读取一帧都把 Queue.get 放回生产者所在的默认线程池；线程池被生产者占满时，消费者无法取得线程排空有界队列。
+
+新增单默认线程、100 数据帧（超过原队列容量 64）的确定性回归：旧代码超时；改为 asyncio.Event 跨线程通知、get_nowait 异步消费后通过。保留队列、单帧限界和所有返回/关闭语义，移除逐帧线程任务。该修正占用新版本 1.5.12。
+
+本地 Automation **686 passed / 3 Redis 条件跳过**；Ruff/143 文件格式通过；Backend test 缓存复用、1.5.12 bootJar 通过，Web lint/build/TypeScript 通过。版本/JAR、CI 与生产验收继续回写。1.5.12 回滚点为已在线验证的 1.5.11；更早 1.5.10 含本轮复现的长期停滞风险，只作为应急短期回退。

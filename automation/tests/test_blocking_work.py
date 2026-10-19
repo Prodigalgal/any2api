@@ -249,3 +249,46 @@ async def test_glm_stream_cancellation_stops_a_worker_waiting_for_capacity(monke
     finally:
         owner.release()
         await generator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_minmax_stream_drains_bounded_queue_with_only_one_default_worker(monkeypatch):
+    import concurrent.futures
+    import importlib
+
+    module = importlib.import_module("any2api_automation.providers.minmax_api_actions")
+    asyncio.get_running_loop().set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    )
+
+    class Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def iter_lines(self):
+            for _ in range(100):
+                yield b"data: fixture"
+
+        def close(self):
+            pass
+
+    class Client(Response):
+        def __init__(self, **kwargs):
+            pass
+
+        def stream(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr(module, "CurlSession", Client)
+    monkeypatch.setattr(module, "_signed_request", lambda *args, **kwargs: ("https://fixture", {}))
+    monkeypatch.setattr(module, "credential_patch_from_response", lambda response: {})
+    async with asyncio.timeout(3):
+        frames = [event async for event in module._api_stream({}, "POST", "/fixture", "{}", "")]
+    assert len(frames) == 101
+    assert frames[0] == {"type": "status", "status": 200}
+    assert all(frame == {"type": "data", "data": "fixture"} for frame in frames[1:])

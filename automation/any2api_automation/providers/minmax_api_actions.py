@@ -178,6 +178,8 @@ async def _api_stream(
     proxy_url: str,
 ) -> AsyncIterator[dict[str, Any]]:
     events: queue.Queue[dict[str, Any] | object] = queue.Queue(maxsize=64)
+    available = asyncio.Event()
+    loop = asyncio.get_running_loop()
     stop = threading.Event()
     response_holder: list[Any] = [None]
 
@@ -185,6 +187,7 @@ async def _api_stream(
         while not stop.is_set():
             try:
                 events.put(event, timeout=0.2)
+                loop.call_soon_threadsafe(available.set)
                 return True
             except queue.Full:
                 continue
@@ -249,13 +252,16 @@ async def _api_stream(
             publish(_API_QUEUE_STOP)
 
     task = asyncio.create_task(run_blocking(worker))
+    task.add_done_callback(lambda _: available.set())
     try:
         while True:
+            available.clear()
             try:
-                event = await run_blocking(events.get, True, 0.2)
+                event = events.get_nowait()
             except queue.Empty:
                 if task.done() and events.empty():
                     break
+                await available.wait()
                 continue
             if event is _API_QUEUE_STOP:
                 break

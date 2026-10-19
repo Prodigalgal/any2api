@@ -1,4 +1,4 @@
-# 当前任务板（源码 1.5.11 候选、生产 1.5.10）
+# 当前任务板（源码 1.5.12 候选、生产 1.5.11）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
@@ -10,6 +10,8 @@
 - **验证**：Automation 685 passed/3 Redis 条件跳过，Ruff/143 文件格式通过；Backend 609 passed/5 live 条件跳过、bootJar；Web lint/build/TypeScript；1.5.11 源码/JAR 版本契约通过。162 条旧 RUNNING 已加密备份并回读校验；CI/生产验收待回写。
 - **边界**：不改 OpenAI/数据库结构、代理绑定、注册计划、保活周期，不新增周期生成探活；DeepSeek/Qwen 保持停用。回滚 1.5.10 镜像/资源。
 - **记录**：[规格](../docs/requirements/AUTOMATION_CAPACITY_RECOVERY_1.5.11.md)、[变更与验收](../docs/reports/AUTOMATION_CAPACITY_RECOVERY_1.5.11_2026-10-19.md)。
+- **1.5.11 部署**：源码 `0b3adcd`、CI `39186730599`（Automation 688 passed）、GitOps `d169e6d`，四应用实际版本/digest/Ready 通过，6Gi/预算 4 生效，162 条旧 RUNNING 完成对账。五家 Responses 有完整输出，Arena 仍准备超时；10:00 维护 overdue 从 434 降至 398，持续推进。
+- **1.5.12 补丁**：运行验收发现 MiniMax 流消费者逐帧占用生产者默认线程池，补单线程/100 帧的确定性失败回归并改成异步通知消费；版本继续升至 1.5.12。Automation 686 passed/3 Redis 条件跳过，Backend test 缓存/bootJar、Web 与 Ruff 通过，继续 CI/部署验收。
 
 ## 2026-10-19 全系统可靠性审计与修复（1.5.9）
 

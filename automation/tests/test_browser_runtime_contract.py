@@ -106,3 +106,12 @@ def test_release_build_consumes_its_own_browser_runtime_digest():
     assert "uses: ./.github/workflows/build-and-deploy.yml" in standalone
     assert "browser_runtime: true" in standalone
     assert "deploy: false" in standalone
+
+
+def test_browser_downloads_are_owned_by_the_runtime_user_without_duplicate_layers():
+    dockerfile = (AUTOMATION / "Dockerfile.browser-runtime").read_text(encoding="utf8")
+    setup = dockerfile.index("install -d -o automation -g automation")
+    user = dockerfile.index("USER 10001", setup)
+    download = dockerfile.index("RUN uv venv")
+    assert setup < user < download
+    assert "chown -R" not in dockerfile

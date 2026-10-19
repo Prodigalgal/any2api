@@ -40,6 +40,11 @@ RUN apt-get update \
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /uvx /bin/
 COPY --from=dependencies /locks/requirements.txt /opt/any2api-runtime/requirements.txt
+RUN useradd --system --uid 10001 --create-home automation \
+    && install -d -m 1777 /tmp/.X11-unix \
+    && install -d -o automation -g automation /app /ms-playwright /opt/any2api-cache
+
+USER 10001
 RUN uv venv /app/.venv \
     && uv pip install --python /app/.venv/bin/python --require-hashes \
         --requirements /opt/any2api-runtime/requirements.txt \
@@ -48,11 +53,8 @@ RUN uv venv /app/.venv \
 
 COPY check_browser_environment.py /opt/any2api-runtime/check_browser_environment.py
 
-RUN useradd --system --uid 10001 --create-home automation \
-    && install -d -m 1777 /tmp/.X11-unix \
-    && chown -R automation:automation /app /ms-playwright /opt/any2api-cache
-
 # Keep system graphics dependencies separate from large downloaded browser layers.
+USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libegl1 libgles2 \
     && rm -rf /var/lib/apt/lists/*

@@ -129,6 +129,9 @@ class ArenaAutomationProvider(AutomationProvider):
                     context_profile=self.browser_context_profile(),
                     launch_profile=self.browser_launch_profile(),
                 )
+                result = replace(
+                    result, credential=_with_proxy_context(result.credential, flow_payload)
+                )
                 return result.response()
             except OperationFailure as failure:
                 last_failure = failure
@@ -167,7 +170,7 @@ class ArenaAutomationProvider(AutomationProvider):
                 "proxy_check_url": base_url,
                 "proxy_affinity_key": current.get("proxy_affinity_key")
                 or payload.get("proxy_affinity_key"),
-                "proxy_node_offset": 0,
+                "proxy_node_offset": current.get("proxy_node_offset", 0),
             },
             identity=str(email),
             attempt=1,
@@ -207,6 +210,7 @@ class ArenaAutomationProvider(AutomationProvider):
             context_profile=context_profile,
             launch_profile=launch_profile,
         )
+        result = replace(result, credential=_with_proxy_context(result.credential, flow_payload))
         response = result.response()
         response["credential_patch"] = result.credential
         return response
@@ -282,6 +286,14 @@ class ArenaAutomationProvider(AutomationProvider):
             block_webrtc=False,
             camoufox_exclude_default_addons=True,
         )
+
+
+def _with_proxy_context(current: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **current,
+        "proxy_affinity_key": payload["proxy_affinity_key"],
+        "proxy_node_offset": payload["proxy_node_offset"],
+    }
 
 
 def _account_probe_response(result: dict[str, Any], operation: str) -> dict[str, Any]:

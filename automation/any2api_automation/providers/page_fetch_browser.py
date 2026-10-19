@@ -315,7 +315,7 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
                         )
                         if challenge_task is None or challenge_task.done():
                             challenge_task = asyncio.create_task(
-                                self._try_solve_page_recaptcha_v2(session.page)
+                                self._handle_page_recaptcha_v2(session.page, request_id)
                             )
                     if event_type == "data" and str(event.get("data") or ""):
                         data_seen = True
@@ -449,6 +449,10 @@ class PageFetchBrowserRuntime(OfficialBrowserRuntime):
         if queue is None:
             return
         queue.put_nowait({key: value for key, value in event.items() if key != "requestId"})
+
+    async def _handle_page_recaptcha_v2(self, page: Any, request_id: str) -> None:
+        del request_id
+        await self._try_solve_page_recaptcha_v2(page)
 
     async def _try_solve_page_recaptcha_v2(self, page: Any) -> None:
         """Attempt to click reCAPTCHA v2 checkbox through cross-origin iframe using Playwright."""

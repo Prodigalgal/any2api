@@ -7,6 +7,7 @@ import hashlib
 import io
 import logging
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from typing import Any
 
 from PIL import Image
@@ -21,6 +22,34 @@ _MAX_AI_CALLS = 3
 _AI_TIMEOUT_SECONDS = 20
 _CONTROL_TIMEOUT_MS = 4000
 _POLL_SECONDS = 0.25
+
+
+class ArenaChallengeOutcome(StrEnum):
+    AI_UNAVAILABLE = "ai_unavailable"
+    NOT_READY = "not_ready_or_missing"
+    UNCHANGED = "unchanged_after_submission"
+    DEADLINE = "deadline"
+    INVALID = "recognition_invalid"
+    CHANGED = "changed_during_recognition"
+    CLOSED = "widget_closed"
+    DYNAMIC = "dynamic_replacement"
+    MISMATCH = "selection_mismatch"
+    SUBMITTED = "submitted_awaiting_official_result"
+    EXHAUSTED = "recognition_budget_exhausted"
+    CANCELLED = "cancelled"
+    FAILED = "operation_failed"
+
+
+@dataclass(frozen=True)
+class ArenaChallengeResult:
+    outcome: ArenaChallengeOutcome
+    ai_calls: int
+    submissions: int
+
+    @property
+    def should_finish_pending_widget(self) -> bool:
+        return self.outcome not in {ArenaChallengeOutcome.SUBMITTED, ArenaChallengeOutcome.CLOSED}
+
 
 _GRID_STATE = """tiles => {
   const button = document.querySelector('#recaptcha-verify-button');
@@ -114,7 +143,7 @@ async def _wait_ready(
     return None
 
 
-async def solve_arena_image_challenge(page: Any, *, deadline: float) -> None:
+async def solve_arena_image_challenge(page: Any, *, deadline: float) -> ArenaChallengeResult:
     policy = current_captcha_policy()
     candidates = policy.internal_models or (
         policy.internal_model or arena_settings().arena_captcha_ai_internal_model,
@@ -129,10 +158,10 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> None:
         internal_models=models,
     )
     if not policy.enabled or not models or not registry.visual_ai_available(policy):
-        logger.info("arena_image_challenge outcome=ai_disabled ai_calls=0 submissions=0")
-        return
+        logger.info("arena_image_challenge outcome=ai_unavailable ai_calls=0 submissions=0")
+        return ArenaChallengeResult(ArenaChallengeOutcome.AI_UNAVAILABLE, 0, 0)
     calls = submissions = 0
-    outcome = "not_ready_or_missing"
+    outcome = ArenaChallengeOutcome.NOT_READY
     try:
         async with asyncio.timeout_at(deadline):
             surface = ArenaRecaptchaGrid(page)
@@ -140,12 +169,11 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> None:
             recognized: set[str] = set()
             while current is not None and calls < _MAX_AI_CALLS:
                 if current.digest in recognized:
-                    outcome = "unchanged_after_submission"
+                    outcome = ArenaChallengeOutcome.UNCHANGED
                     break
-                recognized.add(current.digest)
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining < 2:
-                    outcome = "deadline"
+                    outcome = ArenaChallengeOutcome.DEADLINE
                     break
                 calls += 1
                 recognition_budget = min(_AI_TIMEOUT_SECONDS, remaining - 1)
@@ -158,11 +186,16 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> None:
                         ai_policy=policy,
                     )
                 if target is None:
-                    outcome = "recognition_invalid"
-                    break
+                    outcome = ArenaChallengeOutcome.INVALID
+                    fresh = await surface.read()
+                    if fresh is None or not fresh.ready or fresh.digest != current.digest:
+                        break
+                    await asyncio.sleep(_POLL_SECONDS)
+                    continue
+                recognized.add(current.digest)
                 fresh = await surface.read()
                 if fresh is None or not fresh.ready or fresh.digest != current.digest:
-                    outcome = "changed_during_recognition"
+                    outcome = ArenaChallengeOutcome.CHANGED
                     break
                 changed = False
                 for cell in sorted(frozenset(target) ^ current.selected):
@@ -176,29 +209,29 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> None:
                     await surface.toggle(cell)
                 fresh = await surface.read()
                 if fresh is None:
-                    outcome = "widget_closed"
+                    outcome = ArenaChallengeOutcome.CLOSED
                     break
                 if changed or not fresh.ready or fresh.signature != current.signature:
-                    outcome = "dynamic_replacement"
+                    outcome = ArenaChallengeOutcome.DYNAMIC
                     current = await _wait_ready(surface, deadline)
                     continue
                 if fresh.selected != frozenset(target):
-                    outcome = "selection_mismatch"
+                    outcome = ArenaChallengeOutcome.MISMATCH
                     break
                 await surface.submit()
                 submissions += 1
-                outcome = "submitted_awaiting_official_result"
+                outcome = ArenaChallengeOutcome.SUBMITTED
                 current = await _wait_ready(surface, deadline, previous=fresh)
             else:
                 if calls >= _MAX_AI_CALLS and current is not None:
-                    outcome = "recognition_budget_exhausted"
+                    outcome = ArenaChallengeOutcome.EXHAUSTED
     except asyncio.CancelledError:
-        outcome = "cancelled"
+        outcome = ArenaChallengeOutcome.CANCELLED
         raise
     except TimeoutError:
-        outcome = "deadline"
+        outcome = ArenaChallengeOutcome.DEADLINE
     except Exception as error:  # noqa: BLE001 - metadata only at this optional challenge boundary
-        outcome = "operation_failed"
+        outcome = ArenaChallengeOutcome.FAILED
         logger.warning("arena_image_challenge error_type=%s", type(error).__name__)
     finally:
         logger.info(
@@ -207,3 +240,4 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> None:
             calls,
             submissions,
         )
+    return ArenaChallengeResult(outcome, calls, submissions)

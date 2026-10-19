@@ -20,7 +20,11 @@ from ..lifecycle.browser import BrowserResult, credential_from_context
 from ..lifecycle.mail import Mailbox, TempMailClient
 from ..lifecycle.registration import RegistrationStage, RegistrationTrace
 from ..observability import OperationFailure
-from .arena_challenge import solve_arena_image_challenge
+from .arena_challenge import (
+    ArenaChallengeOutcome,
+    ArenaChallengeResult,
+    solve_arena_image_challenge,
+)
 from .arena_settings import settings as arena_settings
 from .base import validate_semantic_command
 from .official_browser import evaluate_in_page_world
@@ -876,6 +880,9 @@ def _arena_ndjson_stream_script(
     let widgetId;
     let challengeTimer;
     let abortChallenge;
+    let stopChallenge;
+    let challengeState = 'timeout';
+    let failureReason = '';
     try {{
       token = await new Promise(resolve => {{
         let settled = false;
@@ -886,6 +893,12 @@ def _arena_ndjson_stream_script(
           resolve(typeof value === 'string' ? value : '');
         }};
         abortChallenge = () => finish('');
+        stopChallenge = reason => {{
+          challengeState = 'failed';
+          failureReason = String(reason || 'automatic_verification_failed');
+          finish('');
+        }};
+        controller.finishChallenge = stopChallenge;
         controller.signal.addEventListener('abort', abortChallenge, {{once: true}});
         if (controller.signal.aborted) {{ finish(''); return; }}
         challengeTimer = setTimeout(() => finish(''), {recaptcha_v2_timeout_ms});
@@ -913,8 +926,10 @@ def _arena_ndjson_stream_script(
     }} finally {{
       clearTimeout(challengeTimer);
       if (abortChallenge) controller.signal.removeEventListener('abort', abortChallenge);
+      if (controller.finishChallenge === stopChallenge) delete controller.finishChallenge;
       await emit({{type: 'recaptcha', version: 'v2',
-        state: token ? 'solved' : controller.signal.aborted ? 'aborted' : 'timeout', available: true,
+        state: token ? 'solved' : controller.signal.aborted ? 'aborted' : challengeState,
+        available: true, failureReason,
         tokenLength: String(token || '').length, triggerReason}});
       if (widgetId !== undefined && typeof enterprise.reset === 'function') {{
         try {{ enterprise.reset(widgetId); }} catch (_) {{ /* widget may already be removed */ }}
@@ -2103,14 +2118,30 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         )
 
     async def _try_solve_page_recaptcha_v2(self, page: Any) -> None:
+        await self._solve_recaptcha_v2(page)
+
+    async def _handle_page_recaptcha_v2(self, page: Any, request_id: str) -> None:
+        result = await self._solve_recaptcha_v2(page)
+        if result.should_finish_pending_widget:
+            await evaluate_in_page_world(
+                page,
+                "input => window.__any2apiArenaStreamControllers?.get(input.requestId)"
+                "?.finishChallenge?.(input.reason)",
+                {"requestId": request_id, "reason": result.outcome.value},
+            )
+
+    async def _solve_recaptcha_v2(self, page: Any) -> ArenaChallengeResult:
         deadline = (
             asyncio.get_running_loop().time()
             + arena_settings().arena_recaptcha_v2_timeout_seconds
             - 1
         )
-        async with asyncio.timeout_at(deadline):
-            await super()._try_solve_page_recaptcha_v2(page)
-            await solve_arena_image_challenge(page, deadline=deadline)
+        try:
+            async with asyncio.timeout_at(deadline):
+                await super()._try_solve_page_recaptcha_v2(page)
+        except TimeoutError:
+            return ArenaChallengeResult(ArenaChallengeOutcome.DEADLINE, 0, 0)
+        return await solve_arena_image_challenge(page, deadline=deadline)
 
     async def configure_page(
         self,

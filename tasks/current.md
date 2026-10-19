@@ -1,7 +1,14 @@
-# 当前任务板（源码 1.6.0 候选，生产 1.5.16）
+# 当前任务板（源码 1.6.1 候选，生产 1.5.16）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-19 Arena 验证失败等待与出口绑定（1.6.1，进行中）
+
+- **真实发现**：1.6.0 两账号系统 API 认证/配置匹配，内部 AI 分别 2/1 次，均 v2 timeout/403、0 正文；第二条 helper 已 recognition_invalid/0 提交，却等到整轮 109 秒。注册另发现计算好的 affinity/offset 未保存、重认证 offset 归零。
+- **修复**：显式验证结果、有效图块内最多 3 次结构失败重试；失败只结束指定 request_id 的待定 widget，不 abort 已开始的生成；注册/重认证统一保存并恢复实际代理上下文，不推测重写旧账号。
+- **本地验证**：89 项定向、784 passed/3 条件跳过，Ruff/150 文件格式、Backend test 缓存/新 JAR、Web lint/TypeScript/build、1.6.1 源码/JAR 契约通过。继续新不可变镜像和真实验收，不覆盖 1.6.0 制品。
+- **注册边界**：官方原生密码表单、单身份提交仍返回 400 `Error registering email`；现场加密保存、Job 删除、0 生成/资源归零，不盲改协议或无限注册。见[系统流程与 Changelog](../docs/reports/ARENA_SYSTEM_FLOW_1.6.0_2026-10-19.md)。
 
 ## 2026-10-19 Arena 系统完整流程（1.6.0，进行中）
 
@@ -10,6 +17,7 @@
 - **1.6.0 实现**：新增 Arena 内部视觉图块闭环，3×3/4×4、严格 JSON/编号、灰化/动态换图保护、同图去重、取消和总 deadline；最多 3 次 AI、每次仅 1 个网络请求，限次耗时对照后默认内部 MiMo Pro，禁止回调 Arena 或随机路由；保留 Camoufox 和原 affinity。默认 v2 等待 30→90 秒，不改 OpenAI/API/数据库。
 - **验证/发布**：最终全量 773 passed/3 条件跳过、图块 29 项定向回归通过；Backend test 缓存/新 JAR、Web lint/TypeScript/build、1.6.0 源码/JAR 版本契约通过。新不可变镜像与真实闭环验收继续，生产仍为 1.5.16。
 - **现场清理**：私有会话 `20261019125557` 最终 1 生成/0 输出，出现 Cloudflare 重新验证，没有可识别的新图块，新增 AI 调用 0；入口关闭、Job 删除、浏览器/代理归零。详见[系统流程报告](../docs/reports/ARENA_SYSTEM_FLOW_1.6.0_2026-10-19.md)。
+- **CI/容器**：源码 `3671b9e`、CI `39261933967` 全成功（776 passed），GitOps 跳过；Arena digest `sha256:46a8d4c58c2762affb122df54bad881b93ba5efe8c4635b06518ae6c4461205c`。真实 Camoufox iframe/图块控件 5/5 通过、同会话复用、0 厂家/AI 网络，Job 已删。继续真实系统 API 验收，不将控件成功算作官方验证通过。
 
 ## 2026-10-19 Arena 统一 Camoufox 与验证状态修正（进行中）
 

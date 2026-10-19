@@ -180,8 +180,35 @@ async def test_invalid_recognition_has_no_actions(flow):
     surface, recognize = flow
     recognize.return_value = None
     await solve()
+    assert recognize.call_count == 3
     assert surface.toggles == []
     assert surface.submissions == 0
+
+
+@pytest.mark.asyncio
+async def test_invalid_answers_can_recover_inside_the_same_three_call_budget(flow):
+    surface, recognize = flow
+    recognize.side_effect = [None, None, (1, 3)]
+    result = await challenge.solve_arena_image_challenge(
+        object(), deadline=asyncio.get_running_loop().time() + 3
+    )
+    assert result.ai_calls == 3
+    assert result.submissions == 1
+    assert not result.should_finish_pending_widget
+    assert surface.toggles == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_failed_budget_is_a_terminal_result_without_clicks(flow):
+    surface, recognize = flow
+    recognize.return_value = None
+    result = await challenge.solve_arena_image_challenge(
+        object(), deadline=asyncio.get_running_loop().time() + 3
+    )
+    assert result.outcome is challenge.ArenaChallengeOutcome.EXHAUSTED
+    assert result.ai_calls == 3
+    assert result.should_finish_pending_widget
+    assert surface.toggles == []
 
 
 @pytest.mark.asyncio

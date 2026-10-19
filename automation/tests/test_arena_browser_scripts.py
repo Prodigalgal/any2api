@@ -76,6 +76,7 @@ assert.equal(window.__any2apiArenaFetchLog, undefined);
         "v2_timeout",
         "v2_deadline",
         "v2_cancel",
+        "v2_automatic_failure",
         "v2_solved",
         "v2_rate_limit",
         "rate_limit",
@@ -85,7 +86,10 @@ assert.equal(window.__any2apiArenaFetchLog, undefined);
 )
 def test_stream_context_tokens_deadlines_and_widget_cleanup(scenario: str) -> None:
     script = _arena_ndjson_stream_script(
-        "__emit", "v3-key", "v2-key", 5000 if scenario in {"v2_deadline", "v2_cancel"} else 50
+        "__emit",
+        "v3-key",
+        "v2-key",
+        5000 if scenario in {"v2_deadline", "v2_cancel", "v2_automatic_failure"} else 50,
     )
     _run_javascript(
         "const scenario = "
@@ -139,6 +143,10 @@ window.grecaptcha = {enterprise: {
   render: (container, options) => {
     assert.equal(options.sitekey, 'v2-key');
     if (scenario.endsWith('v2_solved')) queueMicrotask(() => options.callback('single-use-v2'));
+    if (scenario === 'v2_automatic_failure') queueMicrotask(() => {
+      window.__any2apiArenaStreamControllers.get('fixture')
+        .finishChallenge('recognition_budget_exhausted');
+    });
     return 7;
   },
   reset: id => {reset.push(id);},
@@ -173,6 +181,12 @@ global.fetch = async (url, options) => {
       ? {cx: 'native-context', recaptchaV3Token: 'native-single-use-v3'} : undefined,
   });
   if (scenario.endsWith('deadline')) assert.ok(performance.now() - started < 1000);
+  if (scenario === 'v2_automatic_failure') {
+    assert.ok(performance.now() - started < 500);
+    const verification = events.filter(e => e.version === 'v2').at(-1);
+    assert.equal(verification.state, 'failed');
+    assert.equal(verification.failureReason, 'recognition_budget_exhausted');
+  }
   const errors = events.filter(event => event.type === 'error');
   if (scenario === 'missing_v3' || scenario === 'v3_deadline' || scenario === 'v3_ready_error') {
     assert.equal(sent.length, 0);

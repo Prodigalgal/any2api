@@ -8,8 +8,11 @@ import pytest
 
 from any2api_automation.browser_budget import BrowserProcessBudget
 from any2api_automation.lifecycle.browser import BrowserResult, camoufox_config_from_options
+from any2api_automation.lifecycle.mail import Mailbox
+from any2api_automation.observability import OperationFailure
 from any2api_automation.providers import arena, arena_browser, official_browser
 from any2api_automation.providers.arena_browser import ArenaOfficialBrowserTransport
+from any2api_automation.providers.arena_challenge import ArenaChallengeOutcome, ArenaChallengeResult
 from any2api_automation.providers.runtime_rules import default_runtime_plan_for_provider
 
 
@@ -280,8 +283,9 @@ async def test_invalid_saved_fingerprint_fails_without_launching_a_new_identity(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("saved_humanize", [False, True])
+@pytest.mark.parametrize("saved_offset", [0, 2])
 async def test_reauthentication_reuses_account_fingerprint_storage_and_proxy(
-    monkeypatch, saved_humanize
+    monkeypatch, saved_humanize, saved_offset
 ):
     provider = arena.ArenaAutomationProvider()
     credential = {
@@ -289,6 +293,7 @@ async def test_reauthentication_reuses_account_fingerprint_storage_and_proxy(
         "email": "account@example.test",
         "password": "fixture-password",
         "proxy_affinity_key": "saved-node-affinity",
+        "proxy_node_offset": saved_offset,
     }
     credential["browser_execution_context"]["camoufox_config"]["humanize"] = saved_humanize
     original = deepcopy(credential)
@@ -299,7 +304,7 @@ async def test_reauthentication_reuses_account_fingerprint_storage_and_proxy(
     monkeypatch.setattr(arena, "run_blocking", execute)
     monkeypatch.setattr(arena, "mail_client", lambda _: None)
     try:
-        await provider.reauthenticate(
+        response = await provider.reauthenticate(
             {"credential": credential, "proxy_affinity_key": "different", "proxy_node_offset": 3}
         )
         options = execute.await_args.kwargs
@@ -317,7 +322,9 @@ async def test_reauthentication_reuses_account_fingerprint_storage_and_proxy(
             "storage_state": {"cookies": [], "origins": []},
         }
         assert options["payload"]["proxy_affinity_key"] == "saved-node-affinity"
-        assert options["payload"]["proxy_node_offset"] == 0
+        assert options["payload"]["proxy_node_offset"] == saved_offset
+        assert response["credential"]["proxy_node_offset"] == saved_offset
+        assert response["credential_patch"]["proxy_node_offset"] == saved_offset
         assert options["payload"]["strict_proxy_affinity"] is True
         assert credential == original
         assert provider.manifest.fallback_backend is None
@@ -326,3 +333,79 @@ async def test_reauthentication_reuses_account_fingerprint_storage_and_proxy(
         }
     finally:
         await provider.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("success_attempt", [1, 2])
+async def test_registration_persists_the_effective_proxy_context(monkeypatch, success_attempt):
+    provider = arena.ArenaAutomationProvider()
+    mail = SimpleNamespace(
+        create_address=AsyncMock(return_value=Mailbox("synthetic@example.test", "fixture-mail")),
+        message_ids_sync=lambda _: set(),
+    )
+    monkeypatch.setattr(arena, "mail_client", lambda *args, **kwargs: mail)
+    monkeypatch.setattr(arena, "create_mail_client", lambda *args, **kwargs: mail)
+    attempts = []
+
+    def run_flow(*args, **kwargs):
+        attempts.append(kwargs["payload"])
+        if len(attempts) < success_attempt:
+            raise OperationFailure(
+                code="arena_domain_rejected", stage="form_submitted", message="fixture rejection"
+            )
+        return BrowserResult(
+            external_id="synthetic",
+            email="synthetic@example.test",
+            credential={"cookie": "fixture-cookie"},
+        )
+
+    async def run(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(arena, "run_browser_flow", run_flow)
+    monkeypatch.setattr(arena, "run_blocking", run)
+    payload = {"password": "FixturePassword123!", "proxy_node_offset": 2}
+    original = deepcopy(payload)
+    try:
+        result = await provider.register(payload)
+        assert result["credential"]["proxy_affinity_key"] == attempts[-1]["proxy_affinity_key"]
+        assert result["credential"]["proxy_node_offset"] == 2 + success_attempt - 1
+        assert attempts[-1]["strict_proxy_affinity"] is True
+        assert payload == original
+    finally:
+        await provider.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome,should_finish",
+    [
+        (ArenaChallengeOutcome.EXHAUSTED, True),
+        (ArenaChallengeOutcome.INVALID, True),
+        (ArenaChallengeOutcome.SUBMITTED, False),
+        (ArenaChallengeOutcome.CLOSED, False),
+    ],
+)
+async def test_challenge_failure_finishes_only_the_pending_request_widget(
+    monkeypatch, outcome, should_finish
+):
+    runtime = _runtime()
+    monkeypatch.setattr(
+        runtime,
+        "_solve_recaptcha_v2",
+        AsyncMock(return_value=ArenaChallengeResult(outcome, 3, 0)),
+    )
+    evaluate = AsyncMock()
+    monkeypatch.setattr(arena_browser, "evaluate_in_page_world", evaluate)
+    try:
+        await runtime._handle_page_recaptcha_v2(object(), "current-request")
+        assert evaluate.await_count == int(should_finish)
+        if should_finish:
+            assert evaluate.await_args.args[-1] == {
+                "requestId": "current-request",
+                "reason": outcome.value,
+            }
+            assert "finishChallenge" in evaluate.await_args.args[1]
+            assert ".abort(" not in evaluate.await_args.args[1]
+    finally:
+        await runtime.close()

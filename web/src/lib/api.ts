@@ -592,18 +592,14 @@ export const api = {
   accountDetail: (id: string) => adminJson<AccountDetail>(
     `/api/admin/v1/accounts/${id}`,
   ),
-  probeAccount: (id: string, modelId?: string) => modelId
-    ? adminJson<AccountProbeResult>(
+  probeAccount: (id: string, modelId?: string) =>
+    adminJson<AccountProbeResult>(
       "/api/admin/v1/account-probes",
       {
         method: "POST",
         body: JSON.stringify({ accountId: id, modelId }),
         signal: AbortSignal.timeout(900_000),
       },
-    )
-    : adminJson<AccountProbeResult>(
-      `/api/admin/v1/accounts/${id}/probe`,
-      { method: "POST", signal: AbortSignal.timeout(900_000) },
     ),
   deleteAccount: (id: string) => adminJson<void>(
     `/api/admin/v1/accounts/${id}`, { method: "DELETE" },

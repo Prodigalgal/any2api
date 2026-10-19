@@ -1,0 +1,28 @@
+[
+  {
+    "op": "test",
+    "path": "/spec/rules/0/timeouts/request",
+    "value": "300s"
+  },
+  {
+    "op": "test",
+    "path": "/spec/rules/0/timeouts/backendRequest",
+    "value": "300s"
+  },
+  {
+    "op": "test",
+    "path": "/spec/rules/0/matches/1/path/value",
+    "value": "/api/admin/v1/account-probes"
+  },
+  {
+    "op": "add",
+    "path": "/spec/rules/0/matches/-",
+    "value": {
+      "method": "POST",
+      "path": {
+        "type": "RegularExpression",
+        "value": "^/api/admin/v1/accounts/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/probe$"
+      }
+    }
+  }
+]

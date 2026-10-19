@@ -19,6 +19,16 @@ on:
         required: false
         default: false
         type: boolean
+  workflow_call:
+    inputs:
+      deploy:
+        required: false
+        default: false
+        type: boolean
+      browser_runtime:
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -39,6 +49,7 @@ jobs:
         id: release
         env:
           IMAGE_SHA: ${{ github.sha }}
+          IMAGE_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           python3 - <<'PY'
           import datetime
@@ -48,7 +59,7 @@ jobs:
 
           version = json.loads(Path("web/package.json").read_text())["version"]
           date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
-          suffix = f"{date}-v{version}-release-{os.environ['IMAGE_SHA']}"
+          suffix = f"{date}-v{version}-release-{os.environ['IMAGE_SHA']}-run{os.environ['IMAGE_RUN']}"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\nimage_suffix={suffix}\n")
           PY
@@ -115,9 +126,11 @@ jobs:
           npm run build
 
   build-browser-runtime:
-    if: github.event_name == 'workflow_dispatch' && inputs.browser_runtime
+    if: github.event_name != 'pull_request'
     needs: [backend-quality, automation-quality, web-quality, release-metadata]
     runs-on: ubuntu-24.04-arm
+    outputs:
+      image: docker.io/speedproxy/any2api:browser-runtime-${{ needs.release-metadata.outputs.image_suffix }}@${{ steps.runtime.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -126,6 +139,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/build-push-action@v6
+        id: runtime
         with:
           context: ./automation
           file: ./automation/Dockerfile.browser-runtime
@@ -139,7 +153,7 @@ jobs:
 
   build-images:
     if: github.event_name != 'pull_request' && !inputs.browser_runtime
-    needs: [backend-quality, automation-quality, web-quality, release-metadata]
+    needs: [build-browser-runtime, release-metadata]
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
@@ -176,6 +190,8 @@ jobs:
           file: ./${{ matrix.file }}
           push: true
           platforms: linux/arm64
+          build-args: |
+            BROWSER_RUNTIME_IMAGE=${{ needs.build-browser-runtime.outputs.image }}
           tags: docker.io/speedproxy/any2api:${{ matrix.component }}-${{ needs.release-metadata.outputs.image_suffix }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=min,scope=${{ matrix.component }}
@@ -183,7 +199,7 @@ jobs:
           sbom: true
 
   update-gitops:
-    if: github.event_name == 'push' || inputs.deploy
+    if: (github.event_name == 'push' || inputs.deploy) && !inputs.browser_runtime
     needs: [build-images, release-metadata]
     runs-on: ubuntu-latest
     steps:

@@ -1,4 +1,12 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm AS dependencies
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /uvx /bin/
+WORKDIR /locks
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --no-emit-project --no-header --no-annotate \
+    --format requirements-txt --output-file requirements.txt > /dev/null
+
+FROM python:3.12-slim-bookworm AS browser-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -13,10 +21,11 @@ WORKDIR /app
 
 ARG TARGETARCH
 ARG SING_BOX_VERSION=1.13.14
+ARG CAMOUFOX_VERSION=official/152.0.4-beta.28-3a105a2f
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl fonts-liberation fonts-noto-color-emoji \
+        ca-certificates curl fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
         libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 \
         libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 \
         libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 \
@@ -30,13 +39,18 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /uvx /bin/
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project \
-    && uv run patchright install chromium \
-    && uv run python -m camoufox fetch
+COPY --from=dependencies /locks/requirements.txt /opt/any2api-runtime/requirements.txt
+RUN uv venv /app/.venv \
+    && uv pip install --python /app/.venv/bin/python --require-hashes \
+        --requirements /opt/any2api-runtime/requirements.txt \
+    && /app/.venv/bin/patchright install chromium \
+    && /app/.venv/bin/python -m camoufox fetch "${CAMOUFOX_VERSION}"
+
+COPY check_browser_environment.py /opt/any2api-runtime/check_browser_environment.py
 
 RUN useradd --system --uid 10001 --create-home automation \
     && install -d -m 1777 /tmp/.X11-unix \
     && chown -R automation:automation /app /ms-playwright /opt/any2api-cache
 
 USER 10001
+RUN /app/.venv/bin/python /opt/any2api-runtime/check_browser_environment.py

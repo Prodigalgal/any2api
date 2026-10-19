@@ -1,7 +1,14 @@
-# 当前任务板（源码与生产 1.5.13）
+# 当前任务板（源码 1.5.14 候选，生产 1.5.13）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-19 Arena 容器与 Camoufox 对照（1.5.14 候选）
+
+- **结果**：本机 Edge 原生聊天成功；同账号/Sophia 的服务器 Chromium、Camoufox 原生“你好”均返回官方 403，暂不切换生产引擎。历史成功账号 03:49 仍有正文，03:54 开始 v2 拒绝，早于 1.5.11～1.5.13。
+- **修复**：基础镜像与当前锁文件一致并以 digest 传给全部 Automation 应用；构建时阻断依赖不匹配，补中文字体、离线非 root 双引擎/双模式检查。Patchright 1.64.1，Camoufox 保留并固定现有资产。
+- **验证**：本地 Automation 701 passed / 3 Redis 条件跳过；Backend test/bootJar、Web、Ruff、Actionlint、1.5.14 源码/JAR 版本契约通过。生产仍为 1.5.13，候选先隔离验收。
+- **记录**：[规格](../docs/requirements/ARENA_CONTAINER_RECOVERY_1.5.14.md)、[调查与 Changelog](../docs/reports/ARENA_CONTAINER_RECOVERY_1.5.14_2026-10-19.md)。
 
 ## 2026-10-19 Arena 环境与原生提交深度排查（生产保持 1.5.13）
 

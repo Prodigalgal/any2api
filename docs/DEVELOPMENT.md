@@ -76,13 +76,18 @@ Spring Data JPA and JdbcClient are blocking. They must never execute on Reactor 
 
 ## Browser runtime image
 
-The automation browser stack is published separately from application code. The immutable
-`browser-runtime-sha-*` image contains the ARM64 operating-system libraries, Python lockfile
-dependencies, Patchright Chromium, Camoufox, Firefox, sing-box, and native solver libraries. Run
-the `Build browser runtime` workflow only when `Dockerfile.browser-runtime`, `pyproject.toml`,
-`uv.lock`, a browser version, or sing-box changes. Pin the resulting immutable tag and digest in
-`automation/Dockerfile`; ordinary automation releases then copy only provider source code and do
-not rebuild browser binaries.
+Every application build first builds the browser runtime from the current production lockfile
+and passes its immutable digest as `BROWSER_RUNTIME_IMAGE` to all Automation images. The runtime
+contains the ARM64 operating-system libraries, locked Python dependencies, Patchright Chromium,
+Camoufox, sing-box, and native solver libraries. Its dependency layer uses an exported requirements
+file without the application package, so an application-only version bump reuses browser layers.
+Application builds compare that requirements file with their own lockfile and reject stale bases.
+
+The image build checks Chromium and Camoufox offline in both headless and Xvfb modes as UID 10001;
+it makes no provider generation requests. `Build browser runtime` delegates to the same quality and
+build pipeline with `browser_runtime=true`, publishes only the runtime, and never updates GitOps.
+For manual application builds, explicitly pass a matching `image@sha256:...` runtime build argument;
+the application Dockerfiles no longer contain a fallback to a historic base.
 
 The runtime remains a build-time base image, not a network service. Browser processes, provider
 flows, per-flow proxy processes, and browser-bound captcha tickets therefore stay in the same

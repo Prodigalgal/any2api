@@ -19,6 +19,7 @@
 - 先使用忽略的 `backend/build/` 诊断脚本及独立 Job，保留元数据证据和资源清理记录。
 - 用户截图补充的输入修复作为独立确定缺陷处理：截图对应 `/code/direct`，生产实际配置为 `/text/direct?model_a=max`，不将 Code 模板阻塞误记为生产 403 的根因。准备请求时若出现 `Exit template` 则退出，定位可见的 `textarea[name="message"]` 并排除 aria-hidden 测量框；填入原文后验证读回值、点击明确的 Send message，校验捕获的原生输入。
 - UI 准备中的换行按 textarea 规则规范化，规范桥接正文保持原样；空输入的附件准备占位仍保留。缺失输入框、提交内容不匹配、取消与超时均须移除本次 route，不向厂家发送准备请求。
+- 将模板必填阻塞、隐藏测量框误定位、已提交后的官方验证拒绝分别记录；保留复现条件和验证边界，详见[模板发现与修复报告](../reports/ARENA_PROMPT_TEMPLATE_1.5.17_2026-10-19.md)。
 - 上述修复占用 1.5.17 候选，补充模板/隐藏输入/换行/附件/错误/取消回归和真实网页零生成验证；未经验收不复用 1.5.16 制品或宣称 Arena 恢复。
 - 仅在 POC 能改善真实生成后修改 `providers/official_browser.py` / `arena_browser.py` 或 Arena 专属会话管理模块；沿用现有会话池、浏览器预算和代理所有权。
 - 如需持久化部署，配置限于 Arena Deployment/PVC 与版本字段，保留关闭开关和原会话恢复路径；部署 diff 不包含无关厂商。

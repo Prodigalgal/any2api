@@ -106,10 +106,9 @@ class NativePage:
     "prompt", ["[system]\nFollow tools\n[user]\n你好", "", "你好\r\n第二行\r🙂"]
 )
 async def test_native_preparation_never_generates_and_preserves_the_canonical_body(
-    monkeypatch, prompt, template
+    prompt, template
 ):
     runtime = _runtime()
-    monkeypatch.setattr(runtime, "before_stream_request", AsyncMock())
     page = NativePage(template=template)
     request = _request(prompt)
     original_body = request["body"]

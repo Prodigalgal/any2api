@@ -70,7 +70,8 @@ Job `any2api-arena-operator-20261019093217` 于约 17:32 启动，约 18:02 到�
 | 冷启动/恢复一致性（1.5.19） | `lifecycle/browser.py`、`providers/official_browser.py`、Arena 两入口 | Arena 显式排除 Camoufox 默认扩展，使新配置与保存配置恢复时行为一致；保留字体/Canvas/WebGL/GeoIP 与 humanize | 其他厂商默认扩展保持；不改变账号、代理、数据库或 OpenAI 契约 |
 | 普通控件激活（1.5.20） | `providers/arena_browser.py`、`tests/test_arena_submission.py` | Exit template 和 Send message 固定使用原生键盘 Enter，避免在 Camoufox 鼠标 performing click 阶段阻塞；原文/原生请求核对及 418 准备拦截保持 | 不采用点击失败后再提交的重试，不涉及 CAPTCHA 或引擎切换；humanize 与已有设备配置保持 |
 | 回归 | `tests/test_arena_browser_policy.py` | 覆盖保存引擎覆盖、禁止失败回退、复用/持久化、启动失败资源回收、恢复种子及重认证环境不变性 | 使用隔离夹具，不新增厂家生成探活 |
-| 统一版本 | Backend/Web/Automation 与锁文件 | 依次占用 `1.5.18`、`1.5.19`、`1.5.20`，保留已构建的所有候选 | 不覆盖既有镜像/版本；无数据库迁移 |
+| 准备延迟（1.5.21） | `providers/arena_browser.py`、就绪与提交回归 | 移除会阻塞的独立鼠标/滚轮预热与每次发送前的重复动作，普通填写/发送保持原生键盘；新增准备 `elapsed_ms` 日志 | 保留 Camoufox/humanize、账号指纹/存储/代理、SDK 等待与 ToU/许可流程；不保证消除官方 403 |
+| 统一版本 | Backend/Web/Automation 与锁文件 | 依次占用 `1.5.18` 至 `1.5.21`，保留已构建的所有候选 | 不覆盖既有镜像/版本；无数据库迁移 |
 | 诊断与文档 | 本报告、恢复规格、模板报告和当前任务板 | 记录图块验证、AI 预算、误判更正、多账号结果和临时资源关闭 | 诊断脚本/原始会话保留于忽略或私有目录，不随镜像发布 |
 
 Camoufox 官方说明支持原生指纹、GeoIP 和鼠标轨迹配置，并建议避免随意固定窗口或覆盖单项指纹。本项目沿用锁定的 `camoufox[geoip]==0.5.4` 和实际安装包支持项；配置生效并不保证验证通过。[官方参数说明](https://camoufox.com/python/usage/)
@@ -95,10 +96,36 @@ Camoufox 官方说明支持原生指纹、GeoIP 和鼠标轨迹配置，并建�
 
 Camoufox 默认加载 uBlock Origin，并支持显式排除默认扩展；本项目将 Arena 两种启动路径统一，扩展一致性与鼠标激活问题分别处理。[官方扩展说明](https://camoufox.com/fingerprint/addons/)
 
+## 1.5.20 不可变候选验收
+
+- 应用源码 `eb03e6ea9d94b6e8d5937168e3a82461bdf1c293`；[CI 39245679694](https://github.com/Prodigalgal/any2api/actions/runs/39245679694) 全部成功，Automation **743 passed**，Backend/Web/版本/所有镜像检查通过，`deploy=false`，GitOps 更新跳过。
+- Arena 镜像 digest：`sha256:8e238317dbdcf4250b9a5562561b9ee4fa5b96109b7298e8b6b890c63f72559c`。其余组件同为 1.5.20，制品按日期/版本/源码/运行编号生成并固定 digest。
+- 实际 1.5.20 镜像的 Camoufox 有窗口容器 **13/13 项通过**，没有 POC 操作替换；Windows 测试指纹、humanize 开启，使用生产同级 1500m CPU。初始夹具 GeoIP 关闭且外部网络拦截，所有验证字段均为本地合成数据，不含真实账号或厂家生成。
+- 12 次准备覆盖 6 次模板和 6 次普通输入，每次新上下文；隐藏测量框未改动、准备不会触达生成端点。复用/并发、403/429/官方验证要求、超时/取消/帧限制及失败后复用均通过。
+- 第 13 项关闭页面后重建浏览器，恢复同一指纹与 Cookie；全程共创建 2 个浏览器会话，指纹字段相等。关闭后预算 in_use=0、浏览器进程为空、夹具连接=0，Job `any2api-arena-sim-20261019114158-0` 已删除。
+- 19:40 生产只读核对仍为 1.5.16，四组件实际版本/digest/Ready/0 重启、Argo Synced/Healthy，GitOps `f65dc8ccaf167e86b4868183f2e8688e431bfe71`；DeepSeek/Qwen 为 0 副本。隔离测试未接收生产流量。
+
 ## 验证与发布状态
+
+### 1.5.21 延迟修复与对照
+
+- 首轮无账号/无外网实验在初始 `mouse.move(0, 0)` 处耗尽 180 秒外层期限，三种计划对照均未运行；这是单次动作卡住的证据，不能当作步数 A/B 的完成结果。Job 已删除、预算归零。
+- 改为每组独立浏览器、相同 Camoufox 配置/窗口、每次动作最多 15 秒的对照：单次居中移动 **2,016ms** 成功；原预热 **15,003ms 超时**；不做空闲预热的原生填写/Enter 发送 **407ms** 成功。三组 humanize 始终开启，0 真实账号、0 厂家请求，1500m CPU/6Gi 内存，Job `any2api-arena-warmup-bounded-20261019123139` 已删除、预算归零。
+- 因此产品移除不参与业务提交的预热，原生输入、SDK 初始化等待和 ToU/许可处理保留。没有关闭 humanize，也没有改指纹、引擎、代理或验证码策略；上述实验不证明 403 已解决，也不构成全链路延迟承诺。
+- 原生提交准备日志新增 `elapsed_ms`，与厂家生成耗时分开观察；回归让模板/普通输入在没有鼠标对象的情况下完成两次准备，并验证就绪/复用不执行额外鼠标动作、同意流程错误脱敏及取消传播。
+- 本地 Automation **744 passed / 3 Redis 条件跳过**；Ruff 通过。Backend test 使用有效缓存、新 1.5.21 bootJar 成功；Web lint、TypeScript 与生产构建成功。不可变制品及真实验收结果继续回写。
+
+### 1.5.20 两轮真实桥接与延迟证据
+
+- 账号 `030eb4e2` 使用原 Self Proxy `168.138.40.52`，身份查询 200 且 profile 匹配；49 个 Camoufox 字段完整恢复，humanize 保持、浏览器复用。首轮在原生准备阶段超时，耗时 73,986ms，**0 厂家生成**，不能归为新的生成 403。
+- 第二轮原生准备成功，`cx` 长度 20、v3 长度 2468，规范正文未改动，准备过程 **0 厂家生成**。之后只放行 **1 次**实际生成，1,672ms 返回官方 403，错误含 `recaptcha_v2_required` / `recaptcha validation failed`，无有效正文或完成事件。
+- 整轮耗时 89,816ms。观测到的 8 条 Google SDK/v3 网络请求均完成且为 HTTP 200；SDK/worker 约第 13 秒加载完成，reload 到约第 81 秒才开始。该记录支持继续定位发送前等待，不能证明图块验证提交链路正常，也不能据此推断官方拒绝的唯一根因。
+- 本次关闭 v2 交互，自动验证码操作 **0 次**；两轮结束后浏览器预算/代理引用归零，独立 Jobs 均已删除，没有回写未成功的账号状态。
+- 诊断字段 `plain_prompt_matches=false` 将带角色包装的 canonical 文本与字面量“你好”比较，不能用它断言正文被篡改；本轮 `canonical_unchanged=true`。后续诊断应与原 canonical 正文比较。
+- 1.5.20 的 13 项离线容器验收覆盖普通控件和桥接生命周期，其夹具替代了就绪/预热，因此不能证明真实预热耗时正常。1.5.21 单独验证并修复该路径，继续保留真实输出发布门禁。
 
 - 新引擎/恢复策略与相关所有权、上下文回归通过；最终完整 Automation 742 项中 **739 通过、3 个 Redis 集成条件跳过**，包括移除合成事件后的 JS 行为回归。Ruff 与 146 文件格式检查通过。
 - Backend `test` 使用有效缓存，`bootJar` 重新构建成功；Web lint、TypeScript 与生产构建通过；1.5.18 源码及 JAR 版本契约通过。
-- 1.5.20 本地 Automation 全量 **740 passed / 3 Redis 条件跳过**；补充按钮可见/可用交集后，相关 21 项回归再次通过。Ruff/146 文件格式、Backend test 有效缓存/新 bootJar、Web lint/TypeScript/build、源码/JAR 版本契约通过。CI 与不可变候选容器结果待回写。
+- 1.5.20 本地 Automation 全量 **740 passed / 3 Redis 条件跳过**；补充按钮可见/可用交集后，相关 21 项回归再次通过。Ruff/146 文件格式、Backend test 有效缓存/新 bootJar、Web lint/TypeScript/build、源码/JAR 版本契约通过。CI 743 passed、原镜像容器 13/13 通过；真实桥接结果继续回写。
 - **生产未提升**。当前 1.5.17 的三个账号实测及键盘 POC，均不能当作 1.5.20 不可变镜像验收。
 - 仍需解决官方验证拒绝并完成真实正文/完成事件、Chat/Responses 与连续复用验收。生产保持原稳定镜像组合；不得用模拟通过替代恢复结论。

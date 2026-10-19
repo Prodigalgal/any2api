@@ -2207,58 +2207,11 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             self._logger.warning("arena_license state=error error_type=%s", type(error).__name__)
             return
         self._logger.info("arena_license state=%s", consent_state)
-        # Use browser input only; DOM-dispatched events have isTrusted=false.
-        try:
-            await self._simulate_human_interactions(page)
-        except Exception as error:  # noqa: BLE001 - non-critical, must not block session
-            self._logger.debug(
-                "arena_human_interactions state=error error_type=%s", type(error).__name__
-            )
-
-    async def _simulate_human_interactions(self, page: Any) -> None:
-        """Use browser mouse input with Camoufox native cursor trajectories."""
-        try:
-            import random as _rnd
-
-            viewport = getattr(page, "viewport_size", None) or {"width": 1440, "height": 900}
-            w = int(viewport.get("width") or 1440)
-            h = int(viewport.get("height") or 900)
-            mouse = getattr(page, "mouse", None)
-            if mouse is None:
-                return
-
-            # Start from a natural position on screen
-            start_x = _rnd.randint(int(w * 0.15), int(w * 0.45))
-            start_y = _rnd.randint(int(h * 0.15), int(h * 0.45))
-            await mouse.move(start_x, start_y)
-
-            # Move along realistic waypoints with varying steps
-            for _ in range(_rnd.randint(2, 3)):
-                target_x = _rnd.randint(int(w * 0.25), int(w * 0.75))
-                target_y = _rnd.randint(int(h * 0.55), int(h * 0.88))
-                steps = _rnd.randint(8, 16)
-                await mouse.move(target_x, target_y, steps=steps)
-                await asyncio.sleep(_rnd.uniform(0.04, 0.09))
-
-            # Gentle wheel scroll mimicking reading behavior
-            if hasattr(mouse, "wheel"):
-                scroll_down = _rnd.randint(40, 120)
-                await mouse.wheel(0, scroll_down)
-                await asyncio.sleep(_rnd.uniform(0.05, 0.10))
-                await mouse.wheel(0, -_rnd.randint(15, max(16, scroll_down // 2)))
-
-            # Settle mouse near the prompt input / submit region
-            final_x = _rnd.randint(int(w * 0.35), int(w * 0.65))
-            final_y = _rnd.randint(int(h * 0.70), int(h * 0.88))
-            await mouse.move(final_x, final_y, steps=_rnd.randint(5, 10))
-        except Exception as error:  # noqa: BLE001 - non-critical, must not block request
-            self._logger.debug("arena_human_interaction_simulation_error error=%s", error)
-
-    async def before_stream_request(self, page: Any) -> None:
-        """Prepare browser input before obtaining this request's native context."""
-        await self._simulate_human_interactions(page)
+        # Native submission supplies the actual keyboard input. Extra mouse warmup
+        # can stall Camoufox and must not consume the preparation deadline.
 
     async def prepare_stream_request(self, page: Any, request: dict[str, Any]) -> dict[str, Any]:
+        started = time.monotonic()
         body = json.loads(request["body"])
         prompt = body["userMessage"]["content"]
         if not isinstance(prompt, str):
@@ -2277,7 +2230,8 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             await super().prepare_stream_request(page, request)
             context = await self._capture_native_submission(page, request["url"], prompt)
         self._logger.info(
-            "arena_native_submission_prepared cx_length=%s token_length=%s",
+            "arena_native_submission_prepared elapsed_ms=%s cx_length=%s token_length=%s",
+            round((time.monotonic() - started) * 1000),
             len(context["cx"]),
             len(context["recaptchaV3Token"]),
         )

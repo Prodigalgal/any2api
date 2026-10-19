@@ -1,4 +1,4 @@
-# 当前任务板（源码 1.5.20 候选，生产 1.5.16）
+# 当前任务板（源码 1.5.21 候选，生产 1.5.16）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
@@ -13,6 +13,10 @@
 - **1.5.19 本地门禁**：740 passed/3 Redis 条件跳过，Ruff/146 文件格式、Backend test 缓存与 bootJar、Web lint/build、源码/JAR 版本契约通过；继续 CI 和仅 Camoufox 的隔离容器验收。
 - **1.5.20 原生键盘修复**：1.5.19 CI `39243798646` 全成功（743 passed），原镜像模板夹具仍有 performing click 超时，扩展排除/序列化 POC 未消除。普通按钮原生 Enter 激活的零生成 POC 13/13 通过（含关闭同指纹/Cookie 恢复）；产品仅将 Exit template/Send message 固定为原生 Enter，保留 humanize/指纹与无引擎回退。新版本重新验证，未追加厂家生成或 CAPTCHA 自动操作。
 - **1.5.20 本地门禁**：全量 740 passed/3 Redis 条件跳过，补充控件可见/可用交集后 21 项定向回归通过；Ruff/格式、Backend test 缓存/bootJar、Web lint/build、源码/JAR 版本契约通过。等待新不可变镜像验收，不将 POC 当产品恢复。
+- **1.5.20 制品/容器**：源码 `eb03e6e`、CI `39245679694` 全成功（743 passed），未更新 GitOps；Arena digest `sha256:8e238317dbdcf4250b9a5562561b9ee4fa5b96109b7298e8b6b890c63f72559c`，原镜像开启 humanize 的 Camoufox 容器 13/13 通过（6 模板/6 普通、12 新上下文、关闭同指纹/Cookie 恢复），预算/进程/连接归零、Job 已删，0 厂家请求。19:40 生产 1.5.16/digest/Ready/0 重启和 Argo 正常；继续最多一次真实桥接，不追加 CAPTCHA 自动操作。
+- **1.5.20 真实桥接**：同账号/原 `.52` 节点两轮中，首轮准备超时、0 厂家生成；第二轮 canonical 未改动、原生准备成功，1 次生成在 1.7 秒内返回官方 reCAPTCHA 403，0 正文。全轮 89.8 秒，8 条 Google SDK/v3 请求均 200；图块提交未验证。两轮 Job 删除、预算/代理归零，无新增验证码操作。
+- **1.5.21 延迟修复规格**：针对原生 humanize 与手动 steps 叠加、发送前重复预热，先做同指纹/窗口的零账号零生成容器耗时对照，再最小修复；保留设备、代理与引擎，真实输出未恢复前继续隔离验收。规格已补充至恢复文档。
+- **1.5.21 实现/对照**：首轮零生成在初始鼠标归位处超时，未完成 A/B；改为限时独立浏览器对照后，单次原生移动 2.0 秒、旧预热 15 秒超时、无空闲预热的填写/Enter 发送 0.4 秒。删除独立预热及重复调用，保留 humanize/SDK 等待/同意流程，增加 native preparation elapsed_ms；744 passed/3 Redis 条件跳过，Ruff、Backend bootJar/test 缓存、Web lint/build 成功。继续新镜像验收，不据此宣称官方验证恢复。
 
 ## 2026-10-19 Arena 模板输入修复与生产恢复（进行中）
 

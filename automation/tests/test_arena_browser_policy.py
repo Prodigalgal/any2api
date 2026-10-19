@@ -1,3 +1,4 @@
+import asyncio
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ import pytest
 
 from any2api_automation.browser_budget import BrowserProcessBudget
 from any2api_automation.lifecycle.browser import BrowserResult, camoufox_config_from_options
-from any2api_automation.providers import arena, official_browser
+from any2api_automation.providers import arena, arena_browser, official_browser
 from any2api_automation.providers.arena_browser import ArenaOfficialBrowserTransport
 from any2api_automation.providers.runtime_rules import default_runtime_plan_for_provider
 
@@ -36,6 +37,54 @@ def _credential(backend="camoufox"):
             },
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_readiness_and_reused_requests_do_not_depend_on_cursor_warmup(monkeypatch):
+    page = SimpleNamespace(
+        wait_for_timeout=AsyncMock(),
+        mouse=SimpleNamespace(
+            move=AsyncMock(side_effect=AssertionError("Cursor warmup must not run")),
+            wheel=AsyncMock(side_effect=AssertionError("Cursor warmup must not run")),
+        ),
+    )
+    terms = AsyncMock(return_value="absent")
+    license_dialog = AsyncMock(return_value="absent")
+    monkeypatch.setattr(arena_browser, "_ensure_arena_tou_consent", terms)
+    monkeypatch.setattr(arena_browser, "_accept_arena_license_dialog_if_present", license_dialog)
+    runtime = _runtime()
+    await runtime.wait_until_ready(page, None)
+    for _ in range(3):
+        await runtime.before_stream_request(page)
+    terms.assert_awaited_once_with(page)
+    license_dialog.assert_awaited_once_with(page)
+    page.mouse.move.assert_not_awaited()
+    page.mouse.wheel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["terms", "license", "cancelled"])
+async def test_readiness_preserves_consent_errors_and_cancellation(monkeypatch, caplog, failure):
+    page = SimpleNamespace(wait_for_timeout=AsyncMock())
+    terms = AsyncMock(return_value="absent")
+    license_dialog = AsyncMock(return_value="absent")
+    monkeypatch.setattr(arena_browser, "_ensure_arena_tou_consent", terms)
+    monkeypatch.setattr(arena_browser, "_accept_arena_license_dialog_if_present", license_dialog)
+    failed_consent = license_dialog if failure == "license" else terms
+    failed_consent.side_effect = RuntimeError("private-page-context")
+    if failure == "cancelled":
+        failed_consent.side_effect = asyncio.CancelledError()
+    runtime = _runtime()
+    with caplog.at_level("DEBUG"):
+        if failure == "cancelled":
+            with pytest.raises(asyncio.CancelledError):
+                await runtime.wait_until_ready(page, None)
+        else:
+            await runtime.wait_until_ready(page, None)
+            assert f"arena_{failure} state=error error_type=RuntimeError" in caplog.text
+            assert "private-page-context" not in caplog.text
+    if failure != "license":
+        license_dialog.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -130,7 +130,7 @@ jobs:
     needs: [backend-quality, automation-quality, web-quality, release-metadata]
     runs-on: ubuntu-24.04-arm
     outputs:
-      image: docker.io/speedproxy/any2api:browser-runtime-${{ needs.release-metadata.outputs.image_suffix }}@${{ steps.runtime.outputs.digest }}
+      digest: ${{ steps.runtime.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -150,6 +150,11 @@ jobs:
           cache-to: type=gha,mode=max,scope=browser-runtime
           provenance: mode=max
           sbom: true
+      - name: Verify immutable browser runtime digest
+        env:
+          RUNTIME_DIGEST: ${{ steps.runtime.outputs.digest }}
+        run: |
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
 
   build-images:
     if: github.event_name != 'pull_request' && !inputs.browser_runtime
@@ -191,7 +196,7 @@ jobs:
           push: true
           platforms: linux/arm64
           build-args: |
-            BROWSER_RUNTIME_IMAGE=${{ needs.build-browser-runtime.outputs.image }}
+            BROWSER_RUNTIME_IMAGE=docker.io/speedproxy/any2api:browser-runtime-${{ needs.release-metadata.outputs.image_suffix }}@${{ needs.build-browser-runtime.outputs.digest }}
           tags: docker.io/speedproxy/any2api:${{ matrix.component }}-${{ needs.release-metadata.outputs.image_suffix }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=min,scope=${{ matrix.component }}

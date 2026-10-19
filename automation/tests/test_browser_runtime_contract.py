@@ -96,9 +96,11 @@ def test_release_build_consumes_its_own_browser_runtime_digest():
     runtime_job = workflow.split("  build-browser-runtime:\n", 1)[1].split("  build-images:", 1)[0]
     app_job = workflow.split("  build-images:\n", 1)[1].split("  update-gitops:", 1)[0]
     assert "if: github.event_name != 'pull_request'" in runtime_job
-    assert "@${{ steps.runtime.outputs.digest }}" in runtime_job
+    assert "digest: ${{ steps.runtime.outputs.digest }}" in runtime_job
+    assert "Verify immutable browser runtime digest" in runtime_job
     assert "needs: [build-browser-runtime, release-metadata]" in app_job
-    assert "BROWSER_RUNTIME_IMAGE=${{ needs.build-browser-runtime.outputs.image }}" in app_job
+    assert "BROWSER_RUNTIME_IMAGE=docker.io/speedproxy/any2api:browser-runtime-" in app_job
+    assert "@${{ needs.build-browser-runtime.outputs.digest }}" in app_job
     assert "${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     standalone = (ROOT / ".github/workflows/browser-runtime.yml").read_text(encoding="utf8")
     assert "uses: ./.github/workflows/build-and-deploy.yml" in standalone

@@ -2386,14 +2386,28 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
         self, page: Any, endpoint: str, prompt: str
     ) -> dict[str, str]:
         captured: asyncio.Future[dict[str, str]] = asyncio.get_running_loop().create_future()
+        preparation_text = (
+            (prompt or _ARENA_ATTACHMENT_PREPARATION_TEXT).replace("\r\n", "\n").replace("\r", "\n")
+        )
 
         async def capture_submission(route: Any) -> None:
             if route.request.method != "POST":
                 await route.fallback()
                 return
+            capture_error = None
             try:
                 submitted = json.loads(route.request.post_data or "{}")
                 context = {name: submitted.get(name) for name in ("cx", "recaptchaV3Token")}
+                if all(isinstance(value, str) and value for value in context.values()):
+                    user_message = submitted.get("userMessage")
+                    native_prompt = (
+                        user_message.get("content") if isinstance(user_message, dict) else None
+                    )
+                    if (
+                        not isinstance(native_prompt, str)
+                        or native_prompt.strip() != preparation_text.strip()
+                    ):
+                        capture_error = ValueError("Arena native submission prompt does not match")
             except (AttributeError, TypeError, ValueError):
                 context = {}
             finally:
@@ -2405,15 +2419,23 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
                     body='{"error":"submission_preparation_only"}',
                 )
             if not captured.done():
-                captured.set_result(context)
+                if capture_error is not None:
+                    captured.set_exception(capture_error)
+                else:
+                    captured.set_result(context)
 
         await page.route(endpoint, capture_submission)
         try:
-            composer = page.locator("textarea").first
+            exit_template = page.get_by_role("button", name="Exit template", exact=True)
+            if await exit_template.is_visible():
+                await exit_template.click()
+            composer = page.locator('textarea[name="message"]:not([aria-hidden="true"]):visible')
             # Image-only preparation needs a nonempty UI draft; the original body,
             # including its empty content and uploaded attachments, is preserved.
-            await composer.fill(prompt or _ARENA_ATTACHMENT_PREPARATION_TEXT)
-            await composer.press("Enter")
+            await composer.fill(preparation_text)
+            if await composer.input_value() != preparation_text:
+                raise ValueError("Arena composer did not retain the requested prompt")
+            await page.get_by_role("button", name="Send message", exact=True).click()
             context = await captured
             if not all(
                 isinstance(context.get(name), str) and context[name]

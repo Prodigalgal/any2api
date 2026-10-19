@@ -31,12 +31,17 @@ def _request(prompt="[user]\n你好"):
 
 
 class NativePage:
-    def __init__(self, submitted=None, *, blocked=False):
+    def __init__(self, submitted=None, *, blocked=False, template=False):
         self.submitted = submitted
         self.blocked = blocked
+        self.template = template
+        self.draft = ""
         self.handler = None
-        self.fill = AsyncMock()
-        self.press_started = asyncio.Event()
+        self.fill = AsyncMock(side_effect=self.fill_draft)
+        self.input_value = AsyncMock(side_effect=lambda: self.draft)
+        self.exit_template = AsyncMock(side_effect=self.clear_template)
+        self.submit = AsyncMock(side_effect=self.send)
+        self.submission_started = asyncio.Event()
         self.unroute = AsyncMock(side_effect=self.remove_route)
         self.fulfill = AsyncMock()
         self.goto = AsyncMock()
@@ -49,11 +54,27 @@ class NativePage:
         self.handler = None
 
     def locator(self, _selector):
-        return SimpleNamespace(first=SimpleNamespace(fill=self.fill, press=self.press))
+        return SimpleNamespace(fill=self.fill, input_value=self.input_value)
 
-    async def press(self, key):
-        assert key == "Enter"
-        self.press_started.set()
+    def get_by_role(self, role, *, name, exact):
+        assert role == "button" and exact
+        if name == "Exit template":
+            return SimpleNamespace(
+                is_visible=AsyncMock(return_value=self.template), click=self.exit_template
+            )
+        assert name == "Send message"
+        return SimpleNamespace(click=self.submit)
+
+    async def clear_template(self):
+        self.template = False
+
+    async def fill_draft(self, text):
+        if self.template:
+            raise ValueError("Template fields are still active")
+        self.draft = text
+
+    async def send(self):
+        self.submission_started.set()
         if self.blocked:
             await asyncio.Future()
         await self.handler(
@@ -65,19 +86,27 @@ class NativePage:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("prompt", ["[system]\nFollow tools\n[user]\n你好", ""])
+@pytest.mark.parametrize("template", [False, True])
+@pytest.mark.parametrize(
+    "prompt", ["[system]\nFollow tools\n[user]\n你好", "", "你好\r\n第二行\r🙂"]
+)
 async def test_native_preparation_never_generates_and_preserves_the_canonical_body(
-    monkeypatch, prompt
+    monkeypatch, prompt, template
 ):
     runtime = _runtime()
     monkeypatch.setattr(runtime, "before_stream_request", AsyncMock())
-    page = NativePage()
+    page = NativePage(template=template)
     request = _request(prompt)
     original_body = request["body"]
     tokens = []
+    expected_draft = (prompt or "[attachment]").replace("\r\n", "\n").replace("\r", "\n")
     try:
         for index in range(2):
-            page.submitted = {"cx": f"native-context-{index}", "recaptchaV3Token": f"fresh-{index}"}
+            page.submitted = {
+                "cx": f"native-context-{index}",
+                "recaptchaV3Token": f"fresh-{index}",
+                "userMessage": {"content": expected_draft},
+            }
             prepared = await runtime.prepare_stream_request(page, request)
             tokens.append(prepared["nativeSubmission"]["recaptchaV3Token"])
             assert prepared["body"] == original_body
@@ -89,7 +118,9 @@ async def test_native_preparation_never_generates_and_preserves_the_canonical_bo
             "https://arena.ai", wait_until="domcontentloaded", timeout=30_000
         )
         assert page.fulfill.await_args.kwargs["status"] == 418
-        page.fill.assert_awaited_with(prompt or "[attachment]")
+        page.fill.assert_awaited_with(expected_draft)
+        assert page.exit_template.await_count == int(template)
+        assert page.submit.await_count == 2
     finally:
         await runtime.close()
 
@@ -120,7 +151,7 @@ async def test_native_preparation_removes_its_route_on_timeout_or_cancel(monkeyp
     page = NativePage(blocked=True)
     operation = asyncio.create_task(runtime.prepare_stream_request(page, _request()))
     try:
-        await page.press_started.wait()
+        await page.submission_started.wait()
         if cancel:
             operation.cancel()
         with pytest.raises(asyncio.CancelledError if cancel else TimeoutError):
@@ -128,6 +159,78 @@ async def test_native_preparation_removes_its_route_on_timeout_or_cancel(monkeyp
         assert page.handler is None
         page.unroute.assert_awaited_once()
         page.fulfill.assert_not_awaited()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_frontend_whitespace_normalization_keeps_the_canonical_prompt_unchanged(monkeypatch):
+    runtime = _runtime()
+    monkeypatch.setattr(runtime, "before_stream_request", AsyncMock())
+    request = _request("\r\n  第一行\r\n最后一行  \n")
+    original_body = request["body"]
+    page = NativePage(
+        {
+            "cx": "context",
+            "recaptchaV3Token": "token",
+            "userMessage": {"content": "第一行\n最后一行"},
+        }
+    )
+    try:
+        prepared = await runtime.prepare_stream_request(page, request)
+        assert prepared["body"] == original_body
+        page.fill.assert_awaited_once_with("\n  第一行\n最后一行  \n")
+        assert page.handler is None
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_native_submission_with_a_template_or_stale_prompt_never_generates(monkeypatch):
+    runtime = _runtime()
+    monkeypatch.setattr(runtime, "before_stream_request", AsyncMock())
+    page = NativePage(
+        {"cx": "context", "recaptchaV3Token": "token", "userMessage": {"content": "stale template"}}
+    )
+    try:
+        with pytest.raises(ValueError, match="prompt does not match"):
+            await runtime.prepare_stream_request(page, _request())
+        page.fulfill.assert_awaited_once()
+        assert page.fulfill.await_args.kwargs["status"] == 418
+        assert page.handler is None
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_modified_composer_fails_before_submission_and_removes_the_route(monkeypatch):
+    runtime = _runtime()
+    monkeypatch.setattr(runtime, "before_stream_request", AsyncMock())
+    page = NativePage()
+    page.input_value.return_value = "different draft"
+    page.input_value.side_effect = None
+    try:
+        with pytest.raises(ValueError, match="did not retain"):
+            await runtime.prepare_stream_request(page, _request())
+        page.submit.assert_not_awaited()
+        page.fulfill.assert_not_awaited()
+        assert page.handler is None
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_template_exit_failure_cleans_up_without_filling_an_unrelated_field(monkeypatch):
+    runtime = _runtime()
+    monkeypatch.setattr(runtime, "before_stream_request", AsyncMock())
+    page = NativePage(template=True)
+    page.exit_template.side_effect = RuntimeError("template control unavailable")
+    try:
+        with pytest.raises(RuntimeError, match="template control"):
+            await runtime.prepare_stream_request(page, _request())
+        page.fill.assert_not_awaited()
+        page.submit.assert_not_awaited()
+        assert page.handler is None
     finally:
         await runtime.close()
 

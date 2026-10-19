@@ -42,6 +42,8 @@ class NativePage:
         self.exit_template = AsyncMock(side_effect=self.clear_template)
         self.submit = AsyncMock(side_effect=self.send)
         self.submission_started = asyncio.Event()
+        self.ready_controls = object()
+        self.ready_intersections = 0
         self.unroute = AsyncMock(side_effect=self.remove_route)
         self.fulfill = AsyncMock()
         self.goto = AsyncMock()
@@ -53,19 +55,31 @@ class NativePage:
         assert self.handler is handler
         self.handler = None
 
-    def locator(self, _selector):
+    def locator(self, selector):
+        if selector == ":enabled:visible":
+            return self.ready_controls
         return SimpleNamespace(fill=self.fill, input_value=self.input_value)
 
     def get_by_role(self, role, *, name, exact):
         assert role == "button" and exact
         if name == "Exit template":
-            return SimpleNamespace(
-                is_visible=AsyncMock(return_value=self.template), click=self.exit_template
+            button = SimpleNamespace(
+                is_visible=AsyncMock(return_value=self.template), press=self.exit_template
             )
-        assert name == "Send message"
-        return SimpleNamespace(click=self.submit)
+        else:
+            assert name == "Send message"
+            button = SimpleNamespace(press=self.submit)
 
-    async def clear_template(self):
+        def ready(controls):
+            assert controls is self.ready_controls
+            self.ready_intersections += 1
+            return button
+
+        button.and_ = ready
+        return button
+
+    async def clear_template(self, key):
+        assert key == "Enter"
         self.template = False
 
     async def fill_draft(self, text):
@@ -73,7 +87,8 @@ class NativePage:
             raise ValueError("Template fields are still active")
         self.draft = text
 
-    async def send(self):
+    async def send(self, key):
+        assert key == "Enter"
         self.submission_started.set()
         if self.blocked:
             await asyncio.Future()
@@ -121,6 +136,10 @@ async def test_native_preparation_never_generates_and_preserves_the_canonical_bo
         page.fill.assert_awaited_with(expected_draft)
         assert page.exit_template.await_count == int(template)
         assert page.submit.await_count == 2
+        assert page.ready_intersections == 2 + int(template)
+        page.submit.assert_awaited_with("Enter")
+        if template:
+            page.exit_template.assert_awaited_once_with("Enter")
     finally:
         await runtime.close()
 

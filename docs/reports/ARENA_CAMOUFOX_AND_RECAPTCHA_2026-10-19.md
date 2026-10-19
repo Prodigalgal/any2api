@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-2026-10-19，生产仍为 1.5.16，Arena 真实推理尚未恢复。1.5.17 已构建，修复模板输入准备；1.5.18 统一 Arena 的 Camoufox 引擎与账号环境，CI 通过后在隔离验收发现冷启动扩展不一致；后续修复占用 1.5.19，不覆盖此前制品。本文只记录有证据的状态；登录成功、指纹生效、HTTP 成功及厂家真实输出分别验收。
+2026-10-19，生产仍为 1.5.16，Arena 真实推理尚未恢复。1.5.17 修复模板准备，1.5.18 统一 Camoufox 引擎与账号环境，1.5.19 统一默认扩展；完整模板验收仍有鼠标点击阻塞，后续原生键盘修复占用 1.5.20。此前制品均保留。本文分别记录登录、指纹、协议与真实输出的证据。
 
 用户最新要求 Arena 使用 Camoufox、不设置引擎回退；同账号不因启动或重认证失败而切换到 Patchright。其余五家、原四节点代理绑定、一次入库检查和 DeepSeek/Qwen 停用状态保持。
 
@@ -59,7 +59,7 @@ Job `any2api-arena-operator-20261019093217` 于约 17:32 启动，约 18:02 到�
 
 这些证据确认 Camoufox 指纹配置已生效，尚不能证明 Google 分数提高或判定所有账号、四个出口均同因故障。本轮只覆盖两个原代理节点，未查看官方 assessment score；浏览器报告的硬件标识不代表容器实际为 Windows/NVIDIA。
 
-## 1.5.18～1.5.19 变更与兼容性
+## 1.5.18～1.5.20 变更与兼容性
 
 | 分类 | 文件/模块 | 行为变化 | 兼容性与回滚点 |
 | --- | --- | --- | --- |
@@ -68,8 +68,9 @@ Job `any2api-arena-operator-20261019093217` 于约 17:32 启动，约 18:02 到�
 | 配置一致性 | `providers/arena.py`、`providers/official_browser.py` | Camoufox 接管 locale/时区/viewport；恢复配置时启用原生 humanize，保留设备种子；避免外层固定 en-US/UTC/尺寸覆盖。损坏的保存配置明确报错，不静默生成新身份 | 不按请求再生成已有配置；无配置账号沿原 Camoufox 原生生成和 GeoIP 路径 |
 | 交互一致性 | `providers/arena_browser.py`、脚本行为回归 | 保留浏览器原生鼠标与滚轮，移除重复 DOM 合成鼠标预热；现有原生上下文、Token 获取和协议流程保留 | 合成事件的 `isTrusted=false`，未证明它是 403 根因，不承诺删除后提高分数 |
 | 冷启动/恢复一致性（1.5.19） | `lifecycle/browser.py`、`providers/official_browser.py`、Arena 两入口 | Arena 显式排除 Camoufox 默认扩展，使新配置与保存配置恢复时行为一致；保留字体/Canvas/WebGL/GeoIP 与 humanize | 其他厂商默认扩展保持；不改变账号、代理、数据库或 OpenAI 契约 |
+| 普通控件激活（1.5.20） | `providers/arena_browser.py`、`tests/test_arena_submission.py` | Exit template 和 Send message 固定使用原生键盘 Enter，避免在 Camoufox 鼠标 performing click 阶段阻塞；原文/原生请求核对及 418 准备拦截保持 | 不采用点击失败后再提交的重试，不涉及 CAPTCHA 或引擎切换；humanize 与已有设备配置保持 |
 | 回归 | `tests/test_arena_browser_policy.py` | 覆盖保存引擎覆盖、禁止失败回退、复用/持久化、启动失败资源回收、恢复种子及重认证环境不变性 | 使用隔离夹具，不新增厂家生成探活 |
-| 统一版本 | Backend/Web/Automation 与锁文件 | 先后占用 `1.5.18`、`1.5.19`，保留已构建的所有候选 | 不覆盖既有镜像/版本；无数据库迁移 |
+| 统一版本 | Backend/Web/Automation 与锁文件 | 依次占用 `1.5.18`、`1.5.19`、`1.5.20`，保留已构建的所有候选 | 不覆盖既有镜像/版本；无数据库迁移 |
 | 诊断与文档 | 本报告、恢复规格、模板报告和当前任务板 | 记录图块验证、AI 预算、误判更正、多账号结果和临时资源关闭 | 诊断脚本/原始会话保留于忽略或私有目录，不随镜像发布 |
 
 Camoufox 官方说明支持原生指纹、GeoIP 和鼠标轨迹配置，并建议避免随意固定窗口或覆盖单项指纹。本项目沿用锁定的 `camoufox[geoip]==0.5.4` 和实际安装包支持项；配置生效并不保证验证通过。[官方参数说明](https://camoufox.com/python/usage/)
@@ -85,10 +86,19 @@ Camoufox 官方说明支持原生指纹、GeoIP 和鼠标轨迹配置，并建�
 - 一轮夹具的关闭恢复校验还错误地要求保存 `http://127.0.0.1` 的 localStorage；产品按既有契约只保存 HTTPS origin，此断言不适用。夹具改为验证受允许的本地 Cookie，生产 HTTPS 存储过滤不变。
 - 所有诊断 Job 都独立删除，预算/代理归零；失败记录保留，没有发出新的厂家生成，也没有将测试断言错误写成产品认证故障。
 
+## 1.5.19 复测与原生键盘 POC
+
+- [CI 39243798646](https://github.com/Prodigalgal/any2api/actions/runs/39243798646) 全部成功，Automation **743 passed**，未更新 GitOps。源码 `cad04a0049ddc7ef9863b2d25439fc3ee33d707b`，Arena digest `sha256:c69197c297487a890b6153183ed19fad044d0a7faea5a8d6537be43baa14997a`。
+- 同级 CPU、开启 humanize 的新镜像完整模板夹具仍在 Exit template 的 performing click 阶段超时；额外剔除序列化扩展字段的 POC 同样未通过。早先扩展对照不足以单独解释完整流程，不能宣称关闭扩展已修好点击或 403。
+- 无账号、无厂家网络的控件对照已确认：相同按钮在鼠标点击超时后，原生键盘 Enter 可以激活。随后仅在本地夹具中将两个普通按钮替换为原生 Enter，13/13 项通过，包括 6 次模板/6 次普通输入、12 个新上下文、并发/403/429/验证要求/超时/取消/帧限制、关闭后同指纹和 Cookie 恢复。整个 POC 0 厂家请求，Job 已删，预算/进程/连接归零。
+- 该 POC 是定位与方案验证，不能冒称 1.5.19 原镜像已经实现该修复。产品改动进入 1.5.20，新镜像需重新验收，不关闭 humanize、不引入引擎回退或验证码操作。
+
+Camoufox 默认加载 uBlock Origin，并支持显式排除默认扩展；本项目将 Arena 两种启动路径统一，扩展一致性与鼠标激活问题分别处理。[官方扩展说明](https://camoufox.com/fingerprint/addons/)
+
 ## 验证与发布状态
 
 - 新引擎/恢复策略与相关所有权、上下文回归通过；最终完整 Automation 742 项中 **739 通过、3 个 Redis 集成条件跳过**，包括移除合成事件后的 JS 行为回归。Ruff 与 146 文件格式检查通过。
 - Backend `test` 使用有效缓存，`bootJar` 重新构建成功；Web lint、TypeScript 与生产构建通过；1.5.18 源码及 JAR 版本契约通过。
-- 1.5.19 本地 Automation **740 passed / 3 Redis 条件跳过**；Ruff/146 文件格式、Backend test 有效缓存与新 bootJar、Web lint/TypeScript/build、源码/JAR 版本契约全部通过。CI 与不可变候选容器结果待回写。
-- 1.5.18 CI 成功，隔离验收问题转入 1.5.19。**生产未提升**。当前 1.5.17 的三个账号实测不能当作后续镜像验收。
+- 1.5.20 本地 Automation 全量 **740 passed / 3 Redis 条件跳过**；补充按钮可见/可用交集后，相关 21 项回归再次通过。Ruff/146 文件格式、Backend test 有效缓存/新 bootJar、Web lint/TypeScript/build、源码/JAR 版本契约通过。CI 与不可变候选容器结果待回写。
+- **生产未提升**。当前 1.5.17 的三个账号实测及键盘 POC，均不能当作 1.5.20 不可变镜像验收。
 - 仍需解决官方验证拒绝并完成真实正文/完成事件、Chat/Responses 与连续复用验收。生产保持原稳定镜像组合；不得用模拟通过替代恢复结论。

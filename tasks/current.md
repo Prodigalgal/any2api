@@ -1,4 +1,4 @@
-# 当前任务板（源码 1.5.19 候选，生产 1.5.16）
+# 当前任务板（源码 1.5.20 候选，生产 1.5.16）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
@@ -11,6 +11,8 @@
 - **新情况回写**：内部图块 AI 的 6 次限额已用完且未通过；原“换新题”判断已更正为重复识别灰化提交状态，诊断脚本已加保护。私有入口已到期关闭、Job 已删，最终 1 生成/0 正文；不追加未确认验证码操作。见[专项报告与 Changelog](../docs/reports/ARENA_CAMOUFOX_AND_RECAPTCHA_2026-10-19.md)及[恢复规格](../docs/requirements/ARENA_PRODUCTION_RECOVERY_2026-10-19.md)。
 - **1.5.18→1.5.19**：前者 CI `39241168110` 全成功（742 passed），未更新 GitOps；开启 humanize 的完整模板隔离测试发现冷启动默认扩展与保存配置恢复不一致。同指纹零生成对照中，单独移除扩展后两个按钮点击成功。1.5.19 对 Arena 注册/重认证/推理统一排除默认扩展，保留设备指纹/humanize；其他厂商保持。新候选重新验证，不覆盖 1.5.18。
 - **1.5.19 本地门禁**：740 passed/3 Redis 条件跳过，Ruff/146 文件格式、Backend test 缓存与 bootJar、Web lint/build、源码/JAR 版本契约通过；继续 CI 和仅 Camoufox 的隔离容器验收。
+- **1.5.20 原生键盘修复**：1.5.19 CI `39243798646` 全成功（743 passed），原镜像模板夹具仍有 performing click 超时，扩展排除/序列化 POC 未消除。普通按钮原生 Enter 激活的零生成 POC 13/13 通过（含关闭同指纹/Cookie 恢复）；产品仅将 Exit template/Send message 固定为原生 Enter，保留 humanize/指纹与无引擎回退。新版本重新验证，未追加厂家生成或 CAPTCHA 自动操作。
+- **1.5.20 本地门禁**：全量 740 passed/3 Redis 条件跳过，补充控件可见/可用交集后 21 项定向回归通过；Ruff/格式、Backend test 缓存/bootJar、Web lint/build、源码/JAR 版本契约通过。等待新不可变镜像验收，不将 POC 当产品恢复。
 
 ## 2026-10-19 Arena 模板输入修复与生产恢复（进行中）
 

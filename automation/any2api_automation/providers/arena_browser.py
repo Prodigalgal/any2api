@@ -2327,16 +2327,23 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
 
         await page.route(endpoint, capture_submission)
         try:
+            ready_controls = page.locator(":enabled:visible")
             exit_template = page.get_by_role("button", name="Exit template", exact=True)
             if await exit_template.is_visible():
-                await exit_template.click()
+                await exit_template.and_(ready_controls).press("Enter")
             composer = page.locator('textarea[name="message"]:not([aria-hidden="true"]):visible')
             # Image-only preparation needs a nonempty UI draft; the original body,
             # including its empty content and uploaded attachments, is preserved.
             await composer.fill(preparation_text)
             if await composer.input_value() != preparation_text:
                 raise ValueError("Arena composer did not retain the requested prompt")
-            await page.get_by_role("button", name="Send message", exact=True).click()
+            # Native keyboard activation avoids Camoufox cursor-click stalls
+            # without changing its fingerprint or disabling humanize.
+            await (
+                page.get_by_role("button", name="Send message", exact=True)
+                .and_(ready_controls)
+                .press("Enter")
+            )
             context = await captured
             if not all(
                 isinstance(context.get(name), str) and context[name]

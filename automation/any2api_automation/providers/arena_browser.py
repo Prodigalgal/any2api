@@ -258,89 +258,6 @@ async def _accept_arena_license_dialog_if_present(page: Any) -> str:
     return str(status)
 
 
-def _arena_natural_behavior_script() -> str:
-    """Inject realistic mouse movement and scrolling to warm up reCAPTCHA v3 signals.
-
-    Executed once per browser session in ``wait_until_ready``, right after TOU/license
-    checks.  The generated events are observable by the Google reCAPTCHA Enterprise
-    library loaded on the Arena page, improving the v3 score for the first inference
-    request on a new session.
-    """
-
-    return r"""async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const rand = (lo, hi) => lo + Math.random() * (hi - lo);
-  const randInt = (lo, hi) => Math.floor(rand(lo, hi + 1));
-
-  // Dispatch a synthetic mouse-move at (x, y) with a natural-looking path
-  const moveTo = async (x, y, steps) => {
-    for (let i = 1; i <= steps; i++) {
-      document.dispatchEvent(new MouseEvent('mousemove', {
-        bubbles: true, cancelable: true,
-        clientX: Math.round(x * i / steps), clientY: Math.round(y * i / steps)
-      }));
-      await sleep(rand(20, 60));
-    }
-  };
-
-  // Three randomised waypoints with smooth curves between them
-  const w = window.innerWidth  || 1280;
-  const h = window.innerHeight || 720;
-  const points = [
-    [randInt(100, w * 0.4), randInt(80,  h * 0.4)],
-    [randInt(w * 0.4, w * 0.8), randInt(h * 0.2, h * 0.7)],
-    [randInt(80, w * 0.6), randInt(h * 0.5, h * 0.9)],
-  ];
-  for (const [px, py] of points) {
-    await moveTo(px, py, randInt(4, 8));
-    await sleep(rand(120, 350));
-  }
-
-  // Gentle scroll down then partially back up — mirrors reading behaviour
-  const scrollDown = randInt(60, 200);
-  window.scrollBy({top: scrollDown, behavior: 'smooth'});
-  await sleep(rand(400, 900));
-  window.scrollBy({top: -randInt(20, scrollDown >> 1), behavior: 'smooth'});
-  await sleep(rand(200, 500));
-
-  // A couple of idle mouse-moves near the chat input area
-  for (let i = 0; i < randInt(2, 4); i++) {
-    document.dispatchEvent(new MouseEvent('mousemove', {
-      bubbles: true, cancelable: true,
-      clientX: randInt(w * 0.2, w * 0.8), clientY: randInt(h * 0.6, h * 0.95)
-    }));
-    await sleep(rand(80, 220));
-  }
-}"""
-
-
-def _arena_pre_request_warmup_script() -> str:
-    """Light behaviour injection executed just before reCAPTCHA v3 token collection.
-
-    Returned as a self-contained JS expression so it can be embedded directly
-    inside the NDJSON stream script, ahead of ``getRecaptchaV3Token()``.
-    The warmup is brief (< 600 ms) to stay within the request timeout budget.
-    """
-
-    return r"""
-  // ── reCAPTCHA warmup: brief human-like activity before token collection ──
-  await (async () => {
-    const _r = (lo, hi) => lo + Math.random() * (hi - lo);
-    const _w = window.innerWidth  || 1280;
-    const _h = window.innerHeight || 720;
-    // Two quick mouse moves near the submit-button area
-    for (let _i = 0; _i < 2; _i++) {
-      document.dispatchEvent(new MouseEvent('mousemove', {
-        bubbles: true, cancelable: true,
-        clientX: Math.round(_r(_w * 0.25, _w * 0.75)),
-        clientY: Math.round(_r(_h * 0.65, _h * 0.92)),
-      }));
-      await new Promise(_res => setTimeout(_res, Math.round(_r(60, 160))));
-    }
-  })();
-  // ── end warmup ──"""
-
-
 def _uuid7() -> str:
     """Create a UUIDv7 without adding a third-party dependency to the worker."""
 
@@ -886,9 +803,6 @@ def _arena_ndjson_stream_script(
     binding = json.dumps(binding_name)
     v3_site_key = json.dumps(recaptcha_site_key)
     v2_site_key = json.dumps(recaptcha_v2_site_key)
-    # The warmup snippet is injected at the Python level (not via f-string
-    # substitution) to avoid escaping the JS braces inside an rf-string.
-    warmup = _arena_pre_request_warmup_script()
     return (
         rf"""async request => {{
   const emit = event => window[{binding}]({{requestId: request.requestId, ...event}});
@@ -1027,11 +941,8 @@ def _arena_ndjson_stream_script(
         const retryBody = {{...parsedBody, recaptchaV2Token: v2Token}};
         delete retryBody.recaptchaV3Token;
         return JSON.stringify(retryBody);
-      }}
-      if (!nativeV3Token) {{"""
-        + warmup
+      }}"""
         + r"""
-      }
       const recaptcha = nativeV3Token
         ? {token: nativeV3Token, available: true}
         : await getRecaptchaV3Token();
@@ -2148,9 +2059,8 @@ def reauthenticate_with_credentials(
 
 class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
     prefer_restored_cookies = True
-    # Enable Camoufox behaviour humanisation for inference sessions so that
-    # reCAPTCHA Enterprise v3 accumulates positive behavioural signals before
-    # the create-evaluation token is requested.
+    inference_backend = "camoufox"
+    inference_headless = False
     inference_humanize = True
 
     def __init__(
@@ -2296,26 +2206,16 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             self._logger.warning("arena_license state=error error_type=%s", type(error).__name__)
             return
         self._logger.info("arena_license state=%s", consent_state)
-        # Inject natural mouse-movement and scroll patterns so that the
-        # reCAPTCHA Enterprise v3 behaviour model sees user-like activity
-        # before the first create-evaluation token is requested.
+        # Use browser input only; DOM-dispatched events have isTrusted=false.
         try:
             await self._simulate_human_interactions(page)
         except Exception as error:  # noqa: BLE001 - non-critical, must not block session
             self._logger.debug(
                 "arena_human_interactions state=error error_type=%s", type(error).__name__
             )
-        try:
-            await evaluate_in_page_world(page, _arena_natural_behavior_script())
-        except Exception as error:  # noqa: BLE001 - non-critical, must not block session
-            self._logger.debug(
-                "arena_behavior_warmup state=error error_type=%s", type(error).__name__
-            )
-            return
-        self._logger.debug("arena_behavior_warmup state=complete")
 
     async def _simulate_human_interactions(self, page: Any) -> None:
-        """Simulate realistic, trusted human mouse movements and scrolls via Playwright CDP."""
+        """Use browser mouse input with Camoufox native cursor trajectories."""
         try:
             import random as _rnd
 
@@ -2354,7 +2254,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             self._logger.debug("arena_human_interaction_simulation_error error=%s", error)
 
     async def before_stream_request(self, page: Any) -> None:
-        """Inject real trusted CDP mouse movements and scrolls right before token evaluation."""
+        """Prepare browser input before obtaining this request's native context."""
         await self._simulate_human_interactions(page)
 
     async def prepare_stream_request(self, page: Any, request: dict[str, Any]) -> dict[str, Any]:

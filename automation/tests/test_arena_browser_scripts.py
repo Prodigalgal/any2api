@@ -184,7 +184,6 @@ global.fetch = async (url, options) => {
     assert.equal(sent[0].nativeSubmission, undefined);
     if (native) {
       assert.equal(contextCalls, 0);
-      assert.equal(syntheticMouseEvents, 0, 'fresh native context must not be followed by synthetic interactions');
     }
     if (scenario.endsWith('v2_solved')) {
       assert.equal(sent.length, 2);
@@ -210,6 +209,7 @@ global.fetch = async (url, options) => {
       assert.equal(errors.length, 0);
     }
   }
+  assert.equal(syntheticMouseEvents, 0, 'browser input must not be mixed with DOM-dispatched mouse events');
   if (scenario.startsWith('v2_') || scenario === 'native_v2_solved') assert.deepEqual(reset, [7]);
   assert.equal(containers.size, 0);
   assert.equal(timers.size, 0);

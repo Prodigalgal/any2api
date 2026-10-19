@@ -78,11 +78,10 @@ class OfficialBrowserSession:
 class OfficialBrowserRuntime:
     """Restores isolated account runtimes with bounded, idle-only eviction."""
 
-    # Subclasses that need Camoufox human-behaviour emulation during inference
-    # sessions (e.g. providers with behavioural anti-bot scoring) should set
-    # this to True.  It enables the camoufox ``humanize`` option which injects
-    # randomised mouse movement and timing into page interactions, improving
-    # reCAPTCHA v3 scores without any changes to the request payload.
+    # Provider policies override saved engine/mode only when explicitly selected.
+    inference_backend: str | None = None
+    inference_headless: bool | None = None
+    # Camoufox supplies native cursor trajectories; this does not prove a score.
     inference_humanize: bool = False
 
     def __init__(
@@ -300,7 +299,19 @@ class OfficialBrowserRuntime:
         selection: RuntimeRuleSelection,
     ) -> OfficialBrowserSession:
         execution = self.execution_context(credential)
-        backend = str(execution.get("backend") or "camoufox")
+        backend = self.inference_backend or str(execution.get("backend") or "camoufox")
+        exact_config = execution.get("camoufox_config")
+        if (
+            backend == "camoufox"
+            and exact_config is not None
+            and not isinstance(exact_config, dict)
+        ):
+            raise TypeError(f"{self.provider_id} Camoufox configuration must be an object")
+        headless = (
+            self.inference_headless
+            if self.inference_headless is not None
+            else core_settings().registration_headless
+        )
         storage_state = self._storage_state(execution)
         browser_manager = None
         playwright = None
@@ -315,12 +326,12 @@ class OfficialBrowserRuntime:
             if backend == "camoufox":
                 from camoufox.async_api import AsyncCamoufox
 
-                exact_config = execution.get("camoufox_config")
                 prepared = await run_blocking(
                     camoufox_launch_options,
                     exact_config if isinstance(exact_config, dict) else {},
                     proxy_url,
                     humanize=self.inference_humanize,
+                    headless=headless,
                 )
                 camoufox_config = camoufox_config_from_options(prepared)
                 browser_manager = AsyncCamoufox(from_options=prepared)
@@ -330,7 +341,7 @@ class OfficialBrowserRuntime:
                 playwright = await async_playwright().start()
                 browser_lease.track_process(_driver_pid(playwright))
                 options: dict[str, Any] = {
-                    "headless": core_settings().registration_headless,
+                    "headless": headless,
                 }
                 if proxy_url:
                     options["proxy"] = browser_proxy_options(proxy_url)
@@ -340,7 +351,7 @@ class OfficialBrowserRuntime:
                 execution,
                 backend,
                 browser_version=getattr(browser, "version", ""),
-                headless=core_settings().registration_headless,
+                headless=headless,
             )
             if storage_state:
                 options["storage_state"] = storage_state
@@ -559,14 +570,22 @@ def digest(value: dict[str, Any]) -> str:
 
 
 def camoufox_launch_options(
-    config: dict[str, Any], proxy_url: str, *, humanize: bool = False
+    config: dict[str, Any],
+    proxy_url: str,
+    *,
+    humanize: bool = False,
+    headless: bool | None = None,
 ) -> dict[str, Any]:
     from camoufox.utils import get_env_vars, get_target_os, launch_options
 
+    headless = core_settings().registration_headless if headless is None else headless
     if config:
+        exact_config = deepcopy(config)
+        if humanize:
+            exact_config["humanize"] = True
         prepared = launch_options(
-            config=deepcopy(config),
-            headless=core_settings().registration_headless,
+            config=deepcopy(exact_config),
+            headless=headless,
             humanize=humanize,
             geoip=False,
             proxy=None,
@@ -578,12 +597,12 @@ def camoufox_launch_options(
         for name in tuple(prepared_env):
             if name.startswith("CAMOU_CONFIG_"):
                 prepared_env.pop(name)
-        prepared_env.update(get_env_vars(config, get_target_os(config)))
+        prepared_env.update(get_env_vars(exact_config, get_target_os(exact_config)))
         prepared["env"] = prepared_env
     else:
         prepared = launch_options(
             os="windows",
-            headless=core_settings().registration_headless,
+            headless=headless,
             humanize=humanize,
             geoip=True,
             proxy=browser_proxy_options(proxy_url) if proxy_url else None,

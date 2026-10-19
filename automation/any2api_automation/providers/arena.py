@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any
 
 from ..blocking_work import run_blocking
@@ -42,7 +43,7 @@ class ArenaAutomationProvider(AutomationProvider):
     manifest = AutomationProviderManifest(
         id="arena",
         browser_backend="camoufox",
-        fallback_backend="patchright",
+        fallback_backend=None,
         isolation="process",
         challenge_types=("email_magic_link",),
         operations=("register", "reauthenticate", "keepalive"),
@@ -161,11 +162,35 @@ class ArenaAutomationProvider(AutomationProvider):
 
         base_url = _allowlisted_base_url(_runtime_option(payload, "base_url"))
         flow_payload = proxy_attempt_payload(
-            {**payload, "proxy_check_url": base_url},
+            {
+                **payload,
+                "proxy_check_url": base_url,
+                "proxy_affinity_key": current.get("proxy_affinity_key")
+                or payload.get("proxy_affinity_key"),
+                "proxy_node_offset": 0,
+            },
             identity=str(email),
             attempt=1,
         )
         flow_payload["strict_proxy_affinity"] = True
+        transport = self._transport(payload)
+        execution = transport.execution_context(current)
+        saved_config = execution.get("camoufox_config")
+        if saved_config is not None and not isinstance(saved_config, dict):
+            raise TypeError("arena Camoufox configuration must be an object")
+        if isinstance(saved_config, dict) and saved_config:
+            saved_config["humanize"] = True
+        launch_profile = replace(
+            self.browser_launch_profile(),
+            camoufox_config=saved_config if isinstance(saved_config, dict) else None,
+        )
+        saved_state = execution.get("storage_state")
+        if saved_state is not None and not isinstance(saved_state, dict):
+            raise TypeError("arena browser storage state must be an object")
+        context_profile = replace(
+            self.browser_context_profile(),
+            storage_state=transport.filter_storage_state(saved_state) if saved_state else None,
+        )
         result = await run_blocking(
             run_browser_flow,
             lambda page, context, backend, proxy_url: reauthenticate_with_credentials(
@@ -179,8 +204,8 @@ class ArenaAutomationProvider(AutomationProvider):
             preferred=self.manifest.browser_backend,
             fallback=self.manifest.fallback_backend,
             payload=flow_payload,
-            context_profile=self.browser_context_profile(),
-            launch_profile=self.browser_launch_profile(),
+            context_profile=context_profile,
+            launch_profile=launch_profile,
         )
         response = result.response()
         response["credential_patch"] = result.credential
@@ -246,11 +271,7 @@ class ArenaAutomationProvider(AutomationProvider):
     def browser_context_profile(self) -> BrowserContextProfile:
         return BrowserContextProfile(
             ignore_https_errors=True,
-            locale="en-US",
-            timezone_id="UTC",
-            viewport_width=1440,
-            viewport_height=900,
-            accept_language="en-US,en;q=0.9",
+            camoufox_managed_fingerprint=True,
         )
 
     def browser_launch_profile(self) -> BrowserLaunchProfile:

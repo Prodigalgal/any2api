@@ -1,17 +1,21 @@
-# 当前任务板（源码 1.5.12 候选、生产 1.5.11）
+# 当前任务板（源码与生产 1.5.13）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-19 Automation 容量与积压恢复（1.5.11）
+## 2026-10-19 Automation 容量与积压恢复（1.5.11～1.5.13）
 
 - **目标**：修复持续运行后同步等待/清理互相阻塞；按授权扩容内存，恢复真实输出和维护推进，对账历史孤立 RUNNING。
 - **变更**：后台同步工作并发 2 且与前台分离；独立清理执行器、取消传播、浏览器名额 30 秒等待与前台容量保留；共享预算 4、共享/Arena 内存 limit 各 6Gi、request 各 2Gi；内部任务进度健康检查；按当前有效租约/attempt 对账历史操作。
-- **验证**：Automation 685 passed/3 Redis 条件跳过，Ruff/143 文件格式通过；Backend 609 passed/5 live 条件跳过、bootJar；Web lint/build/TypeScript；1.5.11 源码/JAR 版本契约通过。162 条旧 RUNNING 已加密备份并回读校验；CI/生产验收待回写。
-- **边界**：不改 OpenAI/数据库结构、代理绑定、注册计划、保活周期，不新增周期生成探活；DeepSeek/Qwen 保持停用。回滚 1.5.10 镜像/资源。
+- **验证**：最终 1.5.13 CI Automation 697 passed，Ruff/144 文件格式通过；Backend 609 passed/5 live 条件跳过（本地后续 test 缓存复用）、bootJar；Web lint/build/TypeScript；1.5.13 源码/JAR 契约与运行版本/digest/路由通过。162 条旧 RUNNING 已加密备份并回读校验。
+- **边界**：不改 OpenAI/数据库结构、代理绑定、注册计划、保活周期，不新增周期生成探活；DeepSeek/Qwen 保持停用。应用回滚 1.5.12，保留扩容、长请求兼容路由和历史终态修正。
 - **记录**：[规格](../docs/requirements/AUTOMATION_CAPACITY_RECOVERY_1.5.11.md)、[变更与验收](../docs/reports/AUTOMATION_CAPACITY_RECOVERY_1.5.11_2026-10-19.md)。
 - **1.5.11 部署**：源码 `0b3adcd`、CI `39186730599`（Automation 688 passed）、GitOps `d169e6d`，四应用实际版本/digest/Ready 通过，6Gi/预算 4 生效，162 条旧 RUNNING 完成对账。五家 Responses 有完整输出，Arena 仍准备超时；10:00 维护 overdue 从 434 降至 398，持续推进。
-- **1.5.12 补丁**：运行验收发现 MiniMax 流消费者逐帧占用生产者默认线程池，补单线程/100 帧的确定性失败回归并改成异步通知消费；版本继续升至 1.5.12。Automation 686 passed/3 Redis 条件跳过，Backend test 缓存/bootJar、Web 与 Ruff 通过，继续 CI/部署验收。
+- **1.5.12 补丁**：运行验收发现 MiniMax 流消费者逐帧占用生产者默认线程池，补单线程/100 帧的确定性失败回归并改成异步通知消费；版本继续升至 1.5.12。Automation 686 passed/3 Redis 条件跳过，Backend test 缓存/bootJar、Web 与 Ruff 通过，CI/部署结果见下一条。
+- **1.5.12 已部署**：源码 `a26668d`、CI `39188142233`（689 passed）、GitOps `e587062`/配额 `c0cf0f1`，四应用实际版本/digest/Ready/0 重启通过。五家 Responses 完整输出；18 Read 端点各 2 次均 200，常用读取约 0.40～0.51s、全目录 0.69s；10:22 overdue 降至 337、旧 RUNNING/过期租约为 0。Namespace 配额已扩至 memory request=12Gi/limit=32Gi、CPU limit=12，正常 Pod CPU 不变。
+- **1.5.13 验收后修正**：新 Edge 账号安全独立入库，首次验证因旧单账号 probe 未匹配长超时路由，在约 15 秒被网关取消；唯一检查预算保持。前端统一 `/account-probes`、兼容旧 UUID probe POST 的 300 秒路由、版本化滚动配额；8 项契约回归及完整 Kustomize 渲染通过。本地 Automation 694 passed/3 Redis 条件跳过，其他质量及 JAR 版本通过；源码 `bae94d4`，CI `39190180615`，最终部署见下文。
+- **Arena 新会话边界**：Edge 有真实回答；仅迁移其 Arena 域 Cookie 后，生产 Action API 的一次定向 Max 请求仍为上游 403/v2，0 正文（48.103s）。新账号继续未启用，旧账号和一次入库预算保持；未导出完整 Edge storage/验证上下文，不能声称完整会话迁移或 Arena 已恢复。
+- **1.5.13 已部署**：CI `39190180615`（697 passed）、GitOps `af27df0`，四应用实际 1.5.13/digest/Ready/0 重启，双公网与路由契约通过；滚动 quota FailedCreate=0。MiniMax Chat 10.3s 完成；18 Read 各 2 次均 200，常用约 0.42～0.55s、全目录 0.65s。10:41 overdue=276，旧 RUNNING/过期租约=0、reaper/清理推进、无 OOM；Grok/MiMo/MiniMax 有当前业务有效输出，后两家仍有下游取消，Arena 仍未恢复。
 
 ## 2026-10-19 全系统可靠性审计与修复（1.5.9）
 

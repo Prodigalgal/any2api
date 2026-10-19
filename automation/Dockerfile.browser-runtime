@@ -52,5 +52,10 @@ RUN useradd --system --uid 10001 --create-home automation \
     && install -d -m 1777 /tmp/.X11-unix \
     && chown -R automation:automation /app /ms-playwright /opt/any2api-cache
 
+# Keep system graphics dependencies separate from large downloaded browser layers.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libegl1 libgles2 \
+    && rm -rf /var/lib/apt/lists/*
+
 USER 10001
 RUN /app/.venv/bin/python /opt/any2api-runtime/check_browser_environment.py

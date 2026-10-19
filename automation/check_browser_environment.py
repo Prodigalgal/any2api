@@ -1,6 +1,7 @@
 """Exercise installed browser binaries offline as the image's non-root user."""
 
 import asyncio
+import ctypes.util
 import importlib.metadata
 import json
 import os
@@ -59,6 +60,7 @@ async def check_page(browser, engine: str, headless: bool) -> dict[str, object]:
             """() => ({
               text: document.body.textContent,
               canvas: !!document.createElement('canvas').getContext('2d'),
+              webgl: !!document.createElement('canvas').getContext('webgl'),
               characterWidth: (() => {
                 const ctx = document.createElement('canvas').getContext('2d');
                 return ctx ? ctx.measureText('容器运行检查').width : 0;
@@ -69,7 +71,12 @@ async def check_page(browser, engine: str, headless: bool) -> dict[str, object]:
             raise RuntimeError(f"{engine} could not render the local check page")
         if result["characterWidth"] <= 0:
             raise RuntimeError(f"{engine} could not measure Chinese text")
-        return {"engine": engine, "headless": headless, "version": browser.version}
+        return {
+            "engine": engine,
+            "headless": headless,
+            "version": browser.version,
+            "webgl": result["webgl"],
+        }
     finally:
         async with asyncio.timeout(10):
             await context.close()
@@ -95,6 +102,9 @@ async def check_browsers() -> list[dict[str, object]]:
 def main() -> None:
     if os.getuid() == 0:
         raise SystemExit("Browser environment check must run as the non-root application user")
+    missing_libraries = [name for name in ("EGL", "GLESv2") if not ctypes.util.find_library(name)]
+    if missing_libraries:
+        raise SystemExit(f"Browser runtime is missing graphics libraries: {missing_libraries}")
     fonts = subprocess.run(
         ["fc-list", ":lang=zh", "family"], check=True, capture_output=True, text=True, timeout=10
     ).stdout.splitlines()

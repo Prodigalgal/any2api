@@ -264,6 +264,7 @@ class BrowserLaunchProfile:
     window_height: int | None = None
     block_webrtc: bool | None = None
     camoufox_fingerprint_preset: bool | None = None
+    camoufox_exclude_default_addons: bool = False
     firefox_user_prefs: tuple[tuple[str, Any], ...] = ()
     patchright_args: tuple[str, ...] = ()
     patchright_ignore_default_args: tuple[str, ...] = ()
@@ -405,6 +406,10 @@ def launch_browser(
                 }
                 if effective_profile.camoufox_os:
                     manager_options["os"] = effective_profile.camoufox_os
+                if effective_profile.camoufox_exclude_default_addons:
+                    from camoufox.addons import DefaultAddons
+
+                    manager_options["exclude_addons"] = list(DefaultAddons)
                 if effective_profile.window_width and effective_profile.window_height:
                     manager_options["window"] = (
                         effective_profile.window_width,

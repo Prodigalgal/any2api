@@ -81,6 +81,7 @@ class OfficialBrowserRuntime:
     # Provider policies override saved engine/mode only when explicitly selected.
     inference_backend: str | None = None
     inference_headless: bool | None = None
+    inference_exclude_default_addons: bool = False
     # Camoufox supplies native cursor trajectories; this does not prove a score.
     inference_humanize: bool = False
 
@@ -332,6 +333,7 @@ class OfficialBrowserRuntime:
                     proxy_url,
                     humanize=self.inference_humanize,
                     headless=headless,
+                    exclude_default_addons=self.inference_exclude_default_addons,
                 )
                 camoufox_config = camoufox_config_from_options(prepared)
                 browser_manager = AsyncCamoufox(from_options=prepared)
@@ -575,10 +577,16 @@ def camoufox_launch_options(
     *,
     humanize: bool = False,
     headless: bool | None = None,
+    exclude_default_addons: bool = False,
 ) -> dict[str, Any]:
     from camoufox.utils import get_env_vars, get_target_os, launch_options
 
     headless = core_settings().registration_headless if headless is None else headless
+    addon_options: dict[str, Any] = {}
+    if exclude_default_addons:
+        from camoufox.addons import DefaultAddons
+
+        addon_options["exclude_addons"] = list(DefaultAddons)
     if config:
         exact_config = deepcopy(config)
         if humanize:
@@ -592,6 +600,7 @@ def camoufox_launch_options(
             env={**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
             firefox_user_prefs={"security.sandbox.content.level": 0},
             i_know_what_im_doing=True,
+            **addon_options,
         )
         prepared_env = dict(prepared.get("env") or {})
         for name in tuple(prepared_env):
@@ -608,6 +617,7 @@ def camoufox_launch_options(
             proxy=browser_proxy_options(proxy_url) if proxy_url else None,
             env={**os.environ, "MOZ_DISABLE_CONTENT_SANDBOX": "1"},
             firefox_user_prefs={"security.sandbox.content.level": 0},
+            **addon_options,
         )
     if proxy_url:
         prepared["proxy"] = browser_proxy_options(proxy_url)

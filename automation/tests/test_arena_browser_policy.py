@@ -132,6 +132,7 @@ async def test_arena_uses_only_camoufox_and_owns_its_session_until_cleanup(
             "http://proxy:8080",
             humanize=True,
             headless=False,
+            exclude_default_addons=True,
         )
         patchright.assert_not_called()
         assert credential == original
@@ -175,12 +176,21 @@ def test_camoufox_replay_keeps_device_seeds_and_applies_requested_cursor_policy(
     assert "CAMOU_CONFIG_2" not in prepared["env"]
 
 
-def test_new_camoufox_identity_is_generated_with_native_surfaces_and_proxy_geoip(monkeypatch):
+@pytest.mark.parametrize("exclude_default_addons", [False, True])
+def test_new_camoufox_identity_is_generated_with_native_surfaces_and_proxy_geoip(
+    monkeypatch, exclude_default_addons
+):
     import camoufox.utils
 
     launch = Mock(return_value={})
     monkeypatch.setattr(camoufox.utils, "launch_options", launch)
-    official_browser.camoufox_launch_options({}, "http://proxy:8080", humanize=True, headless=False)
+    official_browser.camoufox_launch_options(
+        {},
+        "http://proxy:8080",
+        humanize=True,
+        headless=False,
+        exclude_default_addons=exclude_default_addons,
+    )
     options = launch.call_args.kwargs
     assert options["os"] == "windows"
     assert options["geoip"] is True
@@ -188,6 +198,12 @@ def test_new_camoufox_identity_is_generated_with_native_surfaces_and_proxy_geoip
     assert options["headless"] is False
     assert options["proxy"] == {"server": "http://proxy:8080"}
     assert not any(name in options for name in ("block_webgl", "block_images", "fingerprint"))
+    if exclude_default_addons:
+        from camoufox.addons import DefaultAddons
+
+        assert options["exclude_addons"] == list(DefaultAddons)
+    else:
+        assert "exclude_addons" not in options
 
 
 @pytest.mark.asyncio
@@ -242,6 +258,7 @@ async def test_reauthentication_reuses_account_fingerprint_storage_and_proxy(
         assert options["fallback"] is None
         assert options["launch_profile"].headless is False
         assert options["launch_profile"].humanize is True
+        assert options["launch_profile"].camoufox_exclude_default_addons is True
         assert options["launch_profile"].camoufox_config == {
             **original["browser_execution_context"]["camoufox_config"],
             "humanize": True,

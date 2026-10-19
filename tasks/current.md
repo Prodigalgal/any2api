@@ -1,4 +1,4 @@
-# 当前任务板（源码 1.5.18 候选，生产 1.5.16）
+# 当前任务板（源码 1.5.19 候选，生产 1.5.16）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
@@ -9,6 +9,8 @@
 - **多账号实测**：三个不同账号各自原节点/49 字段 Camoufox 配置，认证身份匹配、WebGL 可用、webdriver=false、浏览器复用；各一条“你好”仍为官方 403，0 正文，3 Jobs 已删、预算/代理归零。此轮为 1.5.17 镜像，不冒称新候选验收。
 - **验证与发布**：最终 Automation 全量 739 passed/3 Redis 条件跳过（含移除合成事件后的脚本行为回归）；Ruff/146 文件格式、Backend test 缓存及新 JAR、Web lint/build 与源码/JAR 版本契约通过。CI/不可变候选容器验收继续；生产尚未提升，其他五家/四节点/初检预算保持，DeepSeek/Qwen 继续停用。
 - **新情况回写**：内部图块 AI 的 6 次限额已用完且未通过；原“换新题”判断已更正为重复识别灰化提交状态，诊断脚本已加保护。私有入口已到期关闭、Job 已删，最终 1 生成/0 正文；不追加未确认验证码操作。见[专项报告与 Changelog](../docs/reports/ARENA_CAMOUFOX_AND_RECAPTCHA_2026-10-19.md)及[恢复规格](../docs/requirements/ARENA_PRODUCTION_RECOVERY_2026-10-19.md)。
+- **1.5.18→1.5.19**：前者 CI `39241168110` 全成功（742 passed），未更新 GitOps；开启 humanize 的完整模板隔离测试发现冷启动默认扩展与保存配置恢复不一致。同指纹零生成对照中，单独移除扩展后两个按钮点击成功。1.5.19 对 Arena 注册/重认证/推理统一排除默认扩展，保留设备指纹/humanize；其他厂商保持。新候选重新验证，不覆盖 1.5.18。
+- **1.5.19 本地门禁**：740 passed/3 Redis 条件跳过，Ruff/146 文件格式、Backend test 缓存与 bootJar、Web lint/build、源码/JAR 版本契约通过；继续 CI 和仅 Camoufox 的隔离容器验收。
 
 ## 2026-10-19 Arena 模板输入修复与生产恢复（进行中）
 

@@ -2061,6 +2061,7 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
     prefer_restored_cookies = True
     inference_backend = "camoufox"
     inference_headless = False
+    inference_exclude_default_addons = True
     inference_humanize = True
 
     def __init__(

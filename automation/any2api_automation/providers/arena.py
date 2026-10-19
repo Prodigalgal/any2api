@@ -280,6 +280,7 @@ class ArenaAutomationProvider(AutomationProvider):
             humanize=True,
             camoufox_os="windows",
             block_webrtc=False,
+            camoufox_exclude_default_addons=True,
         )
 
 

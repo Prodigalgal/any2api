@@ -1,13 +1,17 @@
-# 当前任务板（源码 1.5.14 候选，生产 1.5.13）
+# 当前任务板（源码与生产 1.5.16）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
-## 2026-10-19 Arena 容器与 Camoufox 对照（1.5.14 候选）
+## 2026-10-19 Arena 容器与 Camoufox 对照（1.5.16 已发布）
 
-- **结果**：本机 Edge 原生聊天成功；同账号/Sophia 的服务器 Chromium、Camoufox 原生“你好”均返回官方 403，暂不切换生产引擎。历史成功账号 03:49 仍有正文，03:54 开始 v2 拒绝，早于 1.5.11～1.5.13。
-- **修复**：基础镜像与当前锁文件一致并以 digest 传给全部 Automation 应用；构建时阻断依赖不匹配，补中文字体、离线非 root 双引擎/双模式检查。Patchright 1.64.1，Camoufox 保留并固定现有资产。
-- **验证**：本地 Automation 701 passed / 3 Redis 条件跳过；Backend test/bootJar、Web、Ruff、Actionlint、1.5.14 源码/JAR 版本契约通过。生产仍为 1.5.13，候选先隔离验收。
+- **Arena 边界**：本机 Edge 原生聊天成功；同账号/Sophia 的服务器 Chromium 149/156、Camoufox 原生“你好”均为官方 403。03:49 仍有正文，03:54 开始拒绝，处于同一 1.5.10 部署时段；不记为 Arena 恢复、不切换生产引擎或追加重复验证请求。
+- **0.x 对照**：0.30.0 部署后 10 月 12 日 23:52 有 6056 字符及结束记录；0.30.0/0.30.1/1.5.13 Arena Dockerfile 内容相同，两个实际发布镜像前 11 层相同。用户的历史可用性有证据，不能将故障简单归因于跨到 1.x 后基础容器变化。
+- **容器修复**：基础镜像按当前锁文件构建并以 digest 传给应用，构建时拒绝过时依赖；Patchright 1.64.1/Chromium 156、中文字体/EGL/GLES、非 root 双引擎双模式检查。运行用户直接安装取代递归 chown，1.5.15 压缩镜像从 3710MiB 降至 1989MiB，约减少 46%。
+- **兼容修复**：1.5.16 按实际引擎版本/模式恢复 UA，过时保存值回退浏览器默认；Official Browser、GLM、MiniMax 共用规则，Cookie/语言/时区等保留，Camoufox 配置不变。
+- **验证**：最终 CI `39218673239`（Automation 720 passed），Backend/Web/Ruff/Actionlint/版本契约通过；本地 717 passed/3 Redis 条件跳过。1.5.13、1.5.15、最终 1.5.16 三组模拟均 36/36 通过；复核修正超时可在 POST 前取消的过强计数断言，逐请求验证无重复。EGL/GLES/字体生效，有窗口 Chromium WebGL 仍不可用，全部临时 Job 已清理。
+- **生产**：应用源码 `cf044d0`、GitOps `f65dc8c`；16:13 四应用实际 1.5.16/digest/Ready/零重启与 Argo Synced/Healthy 通过，双公网健康/鉴权/六家目录通过。五次限次 Responses 均有正文和完成：MiMo 8.9s、MiniMax 8.8s、Grok 35.7s、GLM 66.6s、LongCat 7.0s；不代替长期性能验收。1.5.14/1.5.15 保留为隔离候选，不复用版本号。
+- **回滚**：原 1.5.13 不可变镜像组合，无数据库迁移，保留配额/原四节点绑定/一次入库验证预算/DeepSeek 与 Qwen 停用；浏览器回退须先核对新保存 UA 兼容性。
 - **记录**：[规格](../docs/requirements/ARENA_CONTAINER_RECOVERY_1.5.14.md)、[调查与 Changelog](../docs/reports/ARENA_CONTAINER_RECOVERY_1.5.14_2026-10-19.md)。
 
 ## 2026-10-19 Arena 环境与原生提交深度排查（生产保持 1.5.13）
@@ -15,7 +19,7 @@
 - **结果**：固定新导入账号和原 Sophia 出口，3 组零生成准备均字段/模型/内容对齐；两次限次原生生成均 403。第二次正常网络、有窗口、浏览器默认环境、有效登录身份仍为 `recaptcha validation failed`，当前故障可不经过桥接复现。
 - **排除与边界**：旧 Headless UA 会随运行指纹恢复，清除该诊断干扰仍未恢复；`/api/me` 的资料 ID 与 Supabase subject 不同，最终认证身份匹配。不能把 SDK/登录正常记为生成正常，官方内部拒绝原因仍未知。
 - **运行与交付**：无应用代码/生产配置变更；4 个临时 Job 全部删除、预算和代理引用归零；新账号继续 PENDING/disabled，唯一初检不重置。12:13 实际四组件 1.5.13/digest/Ready/0 重启与 Argo Synced/Healthy 复核通过。
-- **后续**：Work 禁用本地浏览器访问，已请求恢复；恢复后核对原 Edge 当前 Arena 同源状态，并关闭本轮空白诊断页。不自动解验证、不新增人工验证 API、不继续重复生成。
+- **后续回写**：本地浏览器权限已恢复并完成原 Edge 同源对照，页面原生聊天可用；没有自动解验证或新增人工验证 API，结果见本页 1.5.16 条目。
 - **记录**：[规格](../docs/requirements/ARENA_ENVIRONMENT_INVESTIGATION_2026-10-19.md)、[对照证据与 Changelog](../docs/reports/ARENA_ENVIRONMENT_INVESTIGATION_2026-10-19.md)。
 
 ## 2026-10-19 Automation 容量与积压恢复（1.5.11～1.5.13）

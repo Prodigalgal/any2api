@@ -89,6 +89,14 @@ build pipeline with `browser_runtime=true`, publishes only the runtime, and neve
 For manual application builds, explicitly pass a matching `image@sha256:...` runtime build argument;
 the application Dockerfiles no longer contain a fallback to a historic base.
 
+For a full local Compose build, set `BROWSER_RUNTIME_IMAGE` to that matching immutable
+runtime reference, pass it to the build, and then start the built images:
+
+```powershell
+docker compose build --build-arg "BROWSER_RUNTIME_IMAGE=$env:BROWSER_RUNTIME_IMAGE"
+docker compose up -d --no-build
+```
+
 The runtime remains a build-time base image, not a network service. Browser processes, provider
 flows, per-flow proxy processes, and browser-bound captcha tickets therefore stay in the same
 automation Pod lifecycle.

@@ -3,6 +3,14 @@
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
 
+## 2026-10-19 Arena 环境与原生提交深度排查（生产保持 1.5.13）
+
+- **结果**：固定新导入账号和原 Sophia 出口，3 组零生成准备均字段/模型/内容对齐；两次限次原生生成均 403。第二次正常网络、有窗口、浏览器默认环境、有效登录身份仍为 `recaptcha validation failed`，当前故障可不经过桥接复现。
+- **排除与边界**：旧 Headless UA 会随运行指纹恢复，清除该诊断干扰仍未恢复；`/api/me` 的资料 ID 与 Supabase subject 不同，最终认证身份匹配。不能把 SDK/登录正常记为生成正常，官方内部拒绝原因仍未知。
+- **运行与交付**：无应用代码/生产配置变更；4 个临时 Job 全部删除、预算和代理引用归零；新账号继续 PENDING/disabled，唯一初检不重置。12:13 实际四组件 1.5.13/digest/Ready/0 重启与 Argo Synced/Healthy 复核通过。
+- **后续**：Work 禁用本地浏览器访问，已请求恢复；恢复后核对原 Edge 当前 Arena 同源状态，并关闭本轮空白诊断页。不自动解验证、不新增人工验证 API、不继续重复生成。
+- **记录**：[规格](../docs/requirements/ARENA_ENVIRONMENT_INVESTIGATION_2026-10-19.md)、[对照证据与 Changelog](../docs/reports/ARENA_ENVIRONMENT_INVESTIGATION_2026-10-19.md)。
+
 ## 2026-10-19 Automation 容量与积压恢复（1.5.11～1.5.13）
 
 - **目标**：修复持续运行后同步等待/清理互相阻塞；按授权扩容内存，恢复真实输出和维护推进，对账历史孤立 RUNNING。

@@ -69,6 +69,42 @@ def test_mimo_builds_provider_body_from_semantic_command() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "search_options", [{}, {"web_search_status": "enabled"}, {"web_search": True}]
+)
+def test_mimo_image_input_disables_search_even_when_requested(search_options) -> None:
+    command = _semantic_command()
+    command["providerOptions"] = search_options
+    command["messages"] = [
+        {
+            "role": "user",
+            "content": [{"type": "image_url", "image_url": "data:image/png;base64,aW1hZ2U="}],
+        }
+    ]
+    original = deepcopy(command)
+    media = [{"mediaType": "image", "fileName": "grid.png", "fileUrl": "fixture-image"}]
+    body = build_mimo_chat_request(command, uploaded_media=media)
+    assert body["modelConfig"]["webSearchStatus"] == "disabled"
+    assert body["multiMedias"] == media
+    assert command == original
+
+
+@pytest.mark.parametrize("control", [{"tool_choice": "none"}, {"web_search": False}])
+def test_mimo_disabling_tools_or_search_wins_over_search_status(control) -> None:
+    command = _semantic_command()
+    command["controls"].update(control)
+    command["providerOptions"] = {"web_search_status": "enabled"}
+    body = build_mimo_chat_request(command)
+    assert body["modelConfig"]["webSearchStatus"] == "disabled"
+
+
+@pytest.mark.parametrize("status", ["enabled", "auto", "disabled"])
+def test_mimo_text_only_preserves_explicit_search_mode(status) -> None:
+    command = _semantic_command()
+    command["providerOptions"] = {"web_search_status": status}
+    assert build_mimo_chat_request(command)["modelConfig"]["webSearchStatus"] == status
+
+
 def test_mimo_tool_contract_keeps_unicode_and_full_schema_without_escape_expansion() -> None:
     command = _semantic_command()
     description = "完整中文工具说明" * 200

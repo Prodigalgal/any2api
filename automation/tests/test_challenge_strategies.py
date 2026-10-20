@@ -392,6 +392,7 @@ def test_visual_solver_parses_normalized_points_without_exposing_response(
     assert request["url"] == "https://gateway.example/multimodal-random/v1/chat/completions"
     assert request["json"]["model"] == "random"
     assert request["json"]["reasoning_effort"] == "none"
+    assert request["json"]["tool_choice"] == "none"
     assert "max_completion_tokens" not in request["json"]
     assert request["headers"] == {"Authorization": "Bearer fixture-secret"}
 
@@ -555,10 +556,10 @@ def test_visual_completion_auto_mode_falls_back_to_configured_external_solver(
     monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_MODEL", "vision-model")
     settings.cache_clear()
     responses = iter((_VisionGatewayErrorResponse(), _VisionActionResponse()))
-    requests: list[tuple[str, str]] = []
+    requests: list[tuple[str, str, object]] = []
 
     def post(url, **kwargs):
-        requests.append((url, kwargs["json"]["model"]))
+        requests.append((url, kwargs["json"]["model"], kwargs["json"].get("tool_choice")))
         return next(responses)
 
     monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
@@ -574,8 +575,8 @@ def test_visual_completion_auto_mode_falls_back_to_configured_external_solver(
     settings.cache_clear()
     assert content.startswith("ACTIONS=")
     assert requests == [
-        ("http://localhost:8080/multimodal-random/v1/chat/completions", "random"),
-        ("https://solver.example/v1/chat/completions", "vision-model"),
+        ("http://localhost:8080/multimodal-random/v1/chat/completions", "random", "none"),
+        ("https://solver.example/v1/chat/completions", "vision-model", None),
     ]
     assert "transport=external" in registry.visual_diagnostic()
 

@@ -39,6 +39,111 @@ def test_grid_selection_is_strict_and_has_one_network_attempt(monkeypatch, conte
         == expected
     )
     assert complete.call_args.kwargs["max_attempts"] == 1
+    assert complete.call_args.kwargs["function"]["name"] == "select_grid"
+    schema = complete.call_args.kwargs["function"]["parameters"]
+    assert schema["properties"]["select"]["items"]["maximum"] == 9
+
+
+@pytest.mark.parametrize("columns", [3, 4])
+def test_grid_numbering_only_changes_cell_pixels_and_keeps_the_raw_image(columns):
+    buffer = io.BytesIO()
+    Image.new("RGB", (480, 600), "#1a73e8").save(buffer, format="PNG")
+    raw = buffer.getvalue()
+    cell = 480 / columns
+    boxes = [
+        [col / columns, (120 + row * cell) / 600, 1 / columns, cell / 600]
+        for row in range(columns)
+        for col in range(columns)
+    ]
+    numbered = challenge._numbered_grid_image(raw, boxes)
+    with Image.open(io.BytesIO(raw)) as original, Image.open(io.BytesIO(numbered)) as result:
+        assert result.size == original.size
+        assert result.crop((0, 0, 480, 120)).tobytes() == original.crop((0, 0, 480, 120)).tobytes()
+        for col, row in ((col, row) for row in range(columns) for col in range(columns)):
+            bounds = (round(col * cell) + 2, round(120 + row * cell) + 2)
+            assert result.getpixel(bounds) == (0, 0, 0)
+    assert buffer.getvalue() == raw
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [[-0.1, 0, 0.1, 0.1], [0, 0, 0, 0.1], [0, 0.9, 0.1, 0.2], [float("nan"), 0, 0.1, 0.1]],
+)
+def test_grid_numbering_rejects_invalid_geometry(bounds):
+    buffer = io.BytesIO()
+    Image.new("RGB", (480, 600), "blue").save(buffer, format="PNG")
+    with pytest.raises(ValueError, match="Arena challenge cell"):
+        challenge._numbered_grid_image(buffer.getvalue(), [bounds] * 9)
+
+
+@pytest.mark.parametrize(
+    "calls",
+    [
+        None,
+        [],
+        [None],
+        [{"type": "custom", "function": {"name": "select_grid", "arguments": '{"select":[1]}'}}],
+        [{"type": "function", "function": {"name": "different", "arguments": '{"select":[1]}'}}],
+        [{"type": "function", "function": {"name": "select_grid", "arguments": {"select": [1]}}}],
+        [{"type": "function"}, {"type": "function"}],
+    ],
+)
+def test_grid_rejects_missing_wrong_or_multiple_function_calls(calls):
+    assert (
+        SolverRegistry._visual_function_arguments(
+            {"content": '{"select":[1]}', "tool_calls": calls}, "select_grid"
+        )
+        == ""
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments,expected", [('{"select":[7,8,9]}', (7, 8, 9)), ('{"select":[7,8,9]},9]}', None)]
+)
+def test_grid_uses_required_function_arguments_without_repairing_json(
+    monkeypatch, arguments, expected
+):
+    monkeypatch.setenv("ANY2API_AUTOMATION_CAPTCHA_AI_ENABLED", "true")
+    monkeypatch.setenv("ANY2API_PUBLIC_API_KEY", "fixture-key")
+    settings.cache_clear()
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "https://gateway.example"),
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "function": {"name": "select_grid", "arguments": arguments},
+                            }
+                        ],
+                    }
+                }
+            ]
+        },
+    )
+    post = Mock(return_value=response)
+    monkeypatch.setattr("any2api_automation.captcha.registry.httpx.post", post)
+    try:
+        assert (
+            SolverRegistry().solve_visual_grid_sync(
+                b"challenge-only",
+                3,
+                timeout_seconds=4,
+                ai_policy=CaptchaAiPolicy(internal_model="mimo/mimo-v2.6-pro"),
+            )
+            == expected
+        )
+        assert post.call_count == 1
+        request = post.call_args.kwargs["json"]
+        assert request["tool_choice"] == {"type": "function", "function": {"name": "select_grid"}}
+        assert request["parallel_tool_calls"] is False
+        assert request["reasoning_effort"] == "none"
+    finally:
+        settings.cache_clear()
 
 
 def test_grid_request_does_not_retry_gateway_failure(monkeypatch):
@@ -96,6 +201,7 @@ class Surface:
         self.dynamic = False
         self.toggles = []
         self.submissions = 0
+        self.recognition_image = None
 
     async def read(self):
         if self.closed:
@@ -106,6 +212,7 @@ class Surface:
             selected=frozenset(self.selected),
             columns=3,
             ready=self.ready,
+            recognition_image=self.recognition_image,
         )
 
     async def toggle(self, cell):
@@ -148,6 +255,18 @@ async def test_static_grid_reconciles_selection_and_submits_once(flow):
     assert surface.selected == {1, 3}
     assert surface.toggles == [1, 2, 3]
     assert surface.submissions == recognize.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_grid_recognition_uses_labeled_copy_and_a_bounded_complete_response_window(flow):
+    surface, recognize = flow
+    surface.recognition_image = b"numbered-grid-only"
+    await challenge.solve_arena_image_challenge(
+        object(), deadline=asyncio.get_running_loop().time() + 90
+    )
+    assert recognize.call_args.args[0] == b"numbered-grid-only"
+    assert recognize.call_args.kwargs["timeout_seconds"] == 30
+    assert surface.submissions == 1
 
 
 @pytest.mark.asyncio

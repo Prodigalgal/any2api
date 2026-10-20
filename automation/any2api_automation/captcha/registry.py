@@ -17,6 +17,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 import httpx
 
@@ -35,6 +36,13 @@ class _VisualTransport:
     endpoint: str
     api_key: str
     model: str
+
+
+class _VisualFunction(TypedDict):
+    name: str
+    description: str
+    strict: bool
+    parameters: dict[str, object]
 
 
 def _captcha_text_candidate(content: str) -> str | None:
@@ -209,7 +217,8 @@ class SolverRegistry:
         content = self._visual_completion_sync(
             image,
             f"Read the instruction above this {columns} by {columns} image grid. "
-            "Cells are numbered from 1 at the top left, left to right, then top to bottom. "
+            "Each photo has its cell number printed in the top-left corner. "
+            "Include every matching photo, including partially visible objects. "
             'Return exactly {"select":[all cell numbers that should be selected]}. '
             "Ignore existing checkmarks when deciding the target set. "
             "An empty array is valid when nothing matches. No extra keys or explanation.",
@@ -217,6 +226,22 @@ class SolverRegistry:
             timeout_seconds=timeout_seconds,
             ai_policy=ai_policy,
             max_attempts=1,
+            function={
+                "name": "select_grid",
+                "description": "Return all matching cell numbers from the provided image grid.",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "select": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 1, "maximum": columns**2},
+                        }
+                    },
+                    "required": ["select"],
+                    "additionalProperties": False,
+                },
+            },
         )
         if not content:
             return None
@@ -846,6 +871,7 @@ class SolverRegistry:
         timeout_seconds: float | None = None,
         ai_policy: CaptchaAiPolicy | None = None,
         max_attempts: int | None = None,
+        function: _VisualFunction | None = None,
     ) -> str:
         config = settings()
         transports = self._visual_transports(ai_policy or current_captcha_policy())
@@ -874,6 +900,12 @@ class SolverRegistry:
                 },
             ],
         }
+        if function is not None:
+            request_body.update(
+                tools=[{"type": "function", "function": function}],
+                tool_choice={"type": "function", "function": {"name": function["name"]}},
+                parallel_tool_calls=False,
+            )
         budget = max(
             1,
             min(
@@ -901,8 +933,12 @@ class SolverRegistry:
             request_body["model"] = transport.model
             if transport.kind == "internal":
                 request_body["reasoning_effort"] = "none"
+                if function is None:
+                    request_body["tool_choice"] = "none"
             else:
                 request_body.pop("reasoning_effort", None)
+                if function is None:
+                    request_body.pop("tool_choice", None)
             try:
                 response = httpx.post(
                     transport.endpoint,
@@ -923,9 +959,14 @@ class SolverRegistry:
                     continue
                 response.raise_for_status()
                 payload = response.json()
-                content = ((payload.get("choices") or [{}])[0].get("message") or {}).get(
-                    "content", ""
-                )
+                message = (payload.get("choices") or [{}])[0].get("message") or {}
+                if function is None:
+                    content = message.get("content", "")
+                else:
+                    content = self._visual_function_arguments(message, function["name"])
+                    if not content:
+                        self._diagnostics.visual = "response_without_required_function"
+                        return ""
                 if isinstance(content, list):
                     content = "".join(
                         value if isinstance(value, str) else str(value.get("text") or "")
@@ -972,6 +1013,20 @@ class SolverRegistry:
                 self._diagnostics.visual = f"request_error:{type(error).__name__}"
                 return ""
         return ""
+
+    @staticmethod
+    def _visual_function_arguments(message: object, name: str) -> str:
+        if not isinstance(message, dict):
+            return ""
+        calls = message.get("tool_calls")
+        if not isinstance(calls, list) or len(calls) != 1 or not isinstance(calls[0], dict):
+            return ""
+        call = calls[0]
+        definition = call.get("function")
+        if call.get("type") != "function" or not isinstance(definition, dict):
+            return ""
+        arguments = definition.get("arguments")
+        return arguments if definition.get("name") == name and isinstance(arguments, str) else ""
 
     def _visual_transports(self, policy: CaptchaAiPolicy) -> list[_VisualTransport]:
         config = settings()

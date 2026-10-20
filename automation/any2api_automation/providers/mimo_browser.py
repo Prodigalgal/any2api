@@ -591,6 +591,9 @@ def build_mimo_chat_request(
         or controls.get("web_search_status")
         or default_status
     )
+    # The official composer disables search when attachments are present.
+    if media_blocks or tool_choice == "none" or raw_web_search is False:
+        web_search_status = "disabled"
     if uploaded_media is None:
         uploaded_media = command.get("uploadedMedia") or []
     if not isinstance(uploaded_media, list):

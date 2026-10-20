@@ -6,11 +6,12 @@ import asyncio
 import hashlib
 import io
 import logging
+import math
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from ..blocking_work import run_blocking
 from ..captcha.policy import current_captcha_policy
@@ -19,7 +20,7 @@ from .arena_settings import settings as arena_settings
 
 logger = logging.getLogger(__name__)
 _MAX_AI_CALLS = 3
-_AI_TIMEOUT_SECONDS = 20
+_AI_TIMEOUT_SECONDS = 30
 _CONTROL_TIMEOUT_MS = 4000
 _POLL_SECONDS = 0.25
 
@@ -54,9 +55,16 @@ class ArenaChallengeResult:
 _GRID_STATE = """tiles => {
   const button = document.querySelector('#recaptcha-verify-button');
   const instruction = document.querySelector('.rc-imageselect-desc-wrapper');
+  const payload = document.querySelector('.rc-imageselect-payload').getBoundingClientRect();
   const pending = tiles.some(tile => tile.classList.contains('rc-imageselect-dynamic-selected')
     || Array.from(tile.querySelectorAll('img')).some(image => !image.complete));
   return {
+    cellBoxes: tiles.map(tile => {
+      const bounds = tile.getBoundingClientRect();
+      return [(bounds.left - payload.left) / payload.width,
+        (bounds.top - payload.top) / payload.height,
+        bounds.width / payload.width, bounds.height / payload.height];
+    }),
     signature: JSON.stringify([instruction?.textContent || '', tiles.map(tile =>
       Array.from(tile.querySelectorAll('img')).map(image => image.currentSrc || image.src))]),
     selected: tiles.flatMap((tile, index) =>
@@ -74,6 +82,7 @@ class GridSnapshot:
     selected: frozenset[int]
     columns: int
     ready: bool
+    recognition_image: bytes | None = None
 
     @property
     def digest(self) -> str:
@@ -93,6 +102,40 @@ def _active_challenge_image(image: bytes) -> bool:
     )
 
 
+def _numbered_grid_image(image: bytes, cell_boxes: list[list[float]]) -> bytes:
+    if len(cell_boxes) not in {9, 16}:
+        raise ValueError("unsupported Arena challenge cell geometry")
+    with Image.open(io.BytesIO(image)) as source:
+        numbered = source.convert("RGB")
+    draw = ImageDraw.Draw(numbered)
+    font = ImageFont.load_default(size=14)
+    for index, bounds in enumerate(cell_boxes, start=1):
+        if len(bounds) != 4 or any(
+            type(value) not in {int, float} or not math.isfinite(value) for value in bounds
+        ):
+            raise ValueError("invalid Arena challenge cell geometry")
+        left, top, width, height = bounds
+        if (
+            min(left, top) < 0
+            or min(width, height) <= 0
+            or left + width > 1.000001
+            or top + height > 1.000001
+        ):
+            raise ValueError("Arena challenge cell is outside the image")
+        label = str(index)
+        _, _, text_width, text_height = draw.textbbox((0, 0), label, font=font)
+        if numbered.width * width < text_width + 8 or numbered.height * height < text_height + 8:
+            raise ValueError("Arena challenge cell is too small to label")
+        x, y = round(left * numbered.width) + 2, round(top * numbered.height) + 2
+        draw.rectangle(
+            (x, y, x + text_width + 6, y + text_height + 6), fill="white", outline="black"
+        )
+        draw.text((x + 3, y + 2), label, fill="black", font=font)
+    output = io.BytesIO()
+    numbered.save(output, format="PNG")
+    return output.getvalue()
+
+
 class ArenaRecaptchaGrid:
     def __init__(self, page: Any) -> None:
         frame = page.frame_locator('iframe[src*="recaptcha"][src*="bframe"]:visible').first
@@ -108,12 +151,14 @@ class ArenaRecaptchaGrid:
             raise ValueError("unsupported Arena challenge layout")
         state = await self.tiles.evaluate_all(_GRID_STATE)
         image = await self.payload.screenshot(type="png", timeout=_CONTROL_TIMEOUT_MS)
+        ready = state["ready"] and _active_challenge_image(image)
         return GridSnapshot(
             image=image,
             signature=state["signature"],
             selected=frozenset(state["selected"]),
             columns=3 if count == 9 else 4,
-            ready=state["ready"] and _active_challenge_image(image),
+            ready=ready,
+            recognition_image=_numbered_grid_image(image, state["cellBoxes"]) if ready else None,
         )
 
     async def toggle(self, cell: int) -> None:
@@ -180,7 +225,7 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> ArenaCha
                 async with asyncio.timeout(recognition_budget):
                     target = await run_blocking(
                         registry.solve_visual_grid_sync,
-                        current.image,
+                        current.recognition_image or current.image,
                         current.columns,
                         timeout_seconds=recognition_budget,
                         ai_policy=policy,

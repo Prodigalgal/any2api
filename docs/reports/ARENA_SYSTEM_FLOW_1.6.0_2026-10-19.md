@@ -1,8 +1,8 @@
-# Arena 系统完整流程与 1.6.0～1.6.3 候选
+# Arena 系统完整流程与 1.6.0～1.6.4 候选
 
 ## 当前结论
 
-用户 2026-10-19 21:07 授权“自行注册、自行识别、自行测试”，随后明确要求系统自身完整流程。2026-10-22 再次只读核对生产四组件均为 1.5.16、Ready=1，当前无诊断 Job；10-20 的完整运行态校验为版本/digest 匹配、0 重启、Argo Synced/Healthy。Arena 尚未取得新的真实正文。1.6.2 CI 与不可变制品已成功；另发现同账号必要验证 Cookie 在保存/恢复时被删除，1.6.3 修复该缺陷，继续隔离验收，未提升生产。
+用户 2026-10-19 21:07 授权“自行注册、自行识别、自行测试”，随后明确要求系统自身完整流程。2026-10-22 10:35 完整只读校验生产四组件均为 1.5.16、版本/digest 匹配、当前 Pod Ready/0 重启、Argo Synced/Healthy；另有一次历史 shared automation 临时磁盘驱逐，不能用新 Pod 0 重启掩盖。Arena 尚未取得新的真实正文。1.6.3 的必要验证 Cookie 修复已通过两账号实际冷恢复及网络携带检查，真实生成仍触发 v2；随后定位到 1.6.2 新增图块编号的 2px 边界遗漏，1.6.4 修正该回归，继续隔离验收，未提升生产。
 
 此前将 Windows UI 的验证码逐次确认规则扩展到 Linux/Camoufox 是错误解释，已纠正。服务器流程沿用用户当前授权、有限请求及失败停止条件，不重复等待确认。
 
@@ -141,3 +141,30 @@ Google 将 `_GRECAPTCHA` 说明为用于风险分析的必要 Cookie，因此删
 - 本地定向 **75 passed**，全量 Automation **827 passed / 3 Redis 条件跳过 / 1 既有 Starlette 弃用警告**；Ruff 与 151 文件格式检查通过。Backend test 有效缓存、新 bootJar、Web lint/TypeScript/build、1.6.3 源码/JAR 版本契约通过。
 - 新不可变镜像、官方 SDK 冷恢复与有界真实生成继续验收；当前没有生产部署或生产账号修改。旧版本已删除的 Cookie 无法凭空恢复，只由该账号官方 SDK 后续执行重新产生，禁止跨账号移植。
 - 遗留：Arena 真实正文/完成事件、完整注册设置密码 400、控件间歇超时、MiMo 文本尾段及内部视觉延迟。回滚点仍为生产 1.5.16 镜像组；隔离失败则删除自有 Job，不重置账号预算或批量换出口。
+
+### 1.6.3 不可变容器与两账号真实结果
+
+- 源码 `3e08809eebb6707edf6c2ffa8ca554fe7958eafe`，[CI 39711670339](https://github.com/Prodigalgal/any2api/actions/runs/39711670339) 全成功，Automation **830 passed**（含 Redis），七组件制品齐全，GitOps skipped；Arena digest `sha256:5ebd9bdcdcf1f4187cfaa7455e7e4dcf709c1879e9ae6c42ee0916b4179a5c5d`。
+- 两账号原 `.52` / `.214` 节点，各两次官方 SDK、0 模型生成；浏览器关闭重建前后 Cookie 均为 1，身份/保存配置一致，Google anchor/reload 请求从首次无 Cookie 变为恢复后携带 Cookie。证据 `any2api-arena-cookie-030eb4e2-20261022024614.json`、`any2api-arena-cookie-28682cbe-20261022025006.json`；不保存或复用 Token，不跨账号合并。
+- 原镜像离线 Camoufox/humanize 控件 **5/5**，同会话复用，0 外网/AI。首次夹具因镜像拉取超过 160 秒而未执行任何用例；扩大诊断启动窗口后以同一不可变镜像重测，结果 `arena-grid-container-v163-20261022024911.json`。两次结果均保留，不能将启动失败计为厂家失败。
+
+| 账号前缀 | 认证/配置/出口 | 生成/AI/提交 | 官方结果 | 整轮 |
+| --- | --- | --- | --- | --- |
+| `030eb4e2` | 匹配 / 原配置 / `.52` | 1 / 0 / 0 | v2 required→failed、403、0 正文 | 26.6 秒 |
+| `28682cbe` | 匹配 / 原配置 / `.214` | 1 / 0 / 0 | 同上，图块布局错误已加密采集 | 25.3 秒 |
+
+这两次使用各自冷恢复检查后的状态；图块 helper 在内部 AI 前抛出 `ValueError`，不能归为模型识别错误或仅凭它反推 Google 分数。Job 均删除、浏览器/代理归零，未回写生产账号。
+
+### 容器环境对照与历史范围
+
+- 两账号页面均 focus=true、visible、webdriver=false。实际 Xvfb 1365×900，浏览器保留各自原屏幕/窗口配置；第二账号以同配置、零账号/零 SDK/零外网，比较 1365×900 与 5840×2160 的中心/右侧/底部可信点击，均 3/3、约 1.4～2.3 秒。没有依据扩大生产 Xvfb 或宣称其提高分数；仍保留原环境。
+- `git log -S` 定位：通用 Cookie 过滤来自 `4bcfd5a`（0.4.0），Arena 的仅本站域名规则来自 `69a37f9`（0.15.0）。这是长期缺陷；当前证据尚不能将全部故障锁定为某次 1.x 更新。
+- 10:35 生产运行态校验遇到启动日志已轮换，改从已部署 `/app/app.jar` 的 manifest 只读提取版本；并将历史 Failed Pod 与当前 Running Pod 分开校验、同时保留故障记录。证据 `production-v1516-verified-20261022.json`。
+- shared automation 的旧 Pod 在 **2026-10-21 17:33** 因 `Pod ephemeral local storage usage exceeds the total limit of containers 2Gi` 被驱逐，新 Pod 已接替。当前 ephemeral 约 486MB，其中 rootfs 478MB、日志 7.6MB；15 个 Chromium 临时 profile 中 4 个被当前进程引用，11 个未引用约 379MB。尚未执行删除、扩大配额或修改清理器；这些数据需要按归属和关闭路径继续排查，不将所有未引用目录直接判作可删。
+
+## 1.6.4 真实图块边界回归修复
+
+- 第二账号现场的 CAPTCHA 裁图为 **386×520**，9 个单元格组成 **390px** 宽表格，左右各溢出 2 CSS px；`min_left=-0.005181347`、`max_right=1.005181347`。图片和数字边界加密保存，明文仅导出 CAPTCHA 区域供核对，未发送侧栏或对话内容。
+- 这是 **1.6.2 新增编号校验处理不全**：原有严格检查把实际 Google 布局误判为异常，离线夹具未覆盖。新回归先复现 **4 failed / 8 passed**，失败为 3×3/4×4、1×/2× 截图的正常 2px 溢出；不是放宽 AI 输出结构或修剪非法 JSON。
+- 修复仅在 `_GRID_STATE` 对不超过 2 CSS px 的边缘计算与截图的交集；编号顺序和原生 DOM 点击保持。超过 2px 的布局继续拒绝，所有原有灰化、动态换图、deadline、取消和 3 次 AI 上限保持；不修改 Xvfb、引擎、指纹、代理、OpenAI 或数据库。
+- `providers/arena_challenge.py`、`tests/test_arena_grid_geometry.py` 及统一版本占用 **1.6.4**；定向 **78 passed**，全量 **839 passed / 3 Redis 条件跳过 / 1 既有弃用警告**，Ruff/152 文件格式、Backend test 有效缓存/新 bootJar、Web lint/TypeScript/build、源码/JAR 版本契约通过。不可变镜像及真实图块验证继续。当前不提升生产，回滚仍为 1.5.16 镜像组。

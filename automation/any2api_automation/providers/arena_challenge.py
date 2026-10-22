@@ -58,12 +58,20 @@ _GRID_STATE = """tiles => {
   const payload = document.querySelector('.rc-imageselect-payload').getBoundingClientRect();
   const pending = tiles.some(tile => tile.classList.contains('rc-imageselect-dynamic-selected')
     || Array.from(tile.querySelectorAll('img')).some(image => !image.complete));
+  const maxBorderOverhang = 2;
   return {
     cellBoxes: tiles.map(tile => {
       const bounds = tile.getBoundingClientRect();
-      return [(bounds.left - payload.left) / payload.width,
-        (bounds.top - payload.top) / payload.height,
-        bounds.width / payload.width, bounds.height / payload.height];
+      // Google's real table extends 2 CSS px beyond the screenshot on either edge.
+      // Intersect only that observed overflow; larger geometry errors stay invalid.
+      const clipEdges = Math.max(payload.left - bounds.left, payload.top - bounds.top,
+        bounds.right - payload.right, bounds.bottom - payload.bottom) <= maxBorderOverhang + 1e-6;
+      const left = clipEdges ? Math.max(bounds.left, payload.left) : bounds.left;
+      const top = clipEdges ? Math.max(bounds.top, payload.top) : bounds.top;
+      const right = clipEdges ? Math.min(bounds.right, payload.right) : bounds.right;
+      const bottom = clipEdges ? Math.min(bounds.bottom, payload.bottom) : bounds.bottom;
+      return [(left - payload.left) / payload.width, (top - payload.top) / payload.height,
+        (right - left) / payload.width, (bottom - top) / payload.height];
     }),
     signature: JSON.stringify([instruction?.textContent || '', tiles.map(tile =>
       Array.from(tile.querySelectorAll('img')).map(image => image.currentSrc || image.src))]),

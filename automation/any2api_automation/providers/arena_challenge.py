@@ -56,8 +56,23 @@ _GRID_STATE = """tiles => {
   const button = document.querySelector('#recaptcha-verify-button');
   const instruction = document.querySelector('.rc-imageselect-desc-wrapper');
   const payload = document.querySelector('.rc-imageselect-payload').getBoundingClientRect();
-  const pending = tiles.some(tile => tile.classList.contains('rc-imageselect-dynamic-selected')
-    || Array.from(tile.querySelectorAll('img')).some(image => !image.complete));
+  const visible = element => {
+    const style = getComputedStyle(element);
+    return Number(style.opacity) >= 0.99 && style.visibility === 'visible' && style.display !== 'none';
+  };
+  const cells = tiles.map(tile => {
+    const images = Array.from(tile.querySelectorAll('img'));
+    return {
+      sources: images.map(image => image.currentSrc || image.src),
+      ready: !tile.classList.contains('rc-imageselect-dynamic-selected') && visible(tile)
+        && images.length > 0 && images.every(image => image.complete && image.naturalWidth > 0
+          && visible(image))
+    };
+  });
+  const controlsReady = Boolean(button && !button.disabled && visible(button)
+    && button.getAttribute('aria-disabled') !== 'true'
+    && !button.classList.contains('rc-button-disabled'));
+  const instructionText = instruction?.textContent || '';
   const maxBorderOverhang = 2;
   return {
     cellBoxes: tiles.map(tile => {
@@ -73,14 +88,21 @@ _GRID_STATE = """tiles => {
       return [(left - payload.left) / payload.width, (top - payload.top) / payload.height,
         (right - left) / payload.width, (bottom - top) / payload.height];
     }),
-    signature: JSON.stringify([instruction?.textContent || '', tiles.map(tile =>
-      Array.from(tile.querySelectorAll('img')).map(image => image.currentSrc || image.src))]),
+    instruction: instructionText,
+    cells: cells.map(cell => ({signature: JSON.stringify(cell.sources), ready: cell.ready})),
+    controlsReady,
+    signature: JSON.stringify([instructionText, cells.map(cell => cell.sources)]),
     selected: tiles.flatMap((tile, index) =>
       tile.classList.contains('rc-imageselect-tileselected') ? [index + 1] : []),
-    ready: Boolean(button && !button.disabled && button.getAttribute('aria-disabled') !== 'true'
-      && !button.classList.contains('rc-button-disabled') && !pending)
+    ready: controlsReady && cells.every(cell => cell.ready)
   };
 }"""
+
+
+@dataclass(frozen=True)
+class GridCellSnapshot:
+    signature: str
+    ready: bool
 
 
 @dataclass(frozen=True)
@@ -91,6 +113,9 @@ class GridSnapshot:
     columns: int
     ready: bool
     recognition_image: bytes | None = None
+    instruction: str = ""
+    cells: tuple[GridCellSnapshot, ...] = ()
+    controls_ready: bool = False
 
     @property
     def digest(self) -> str:
@@ -159,7 +184,8 @@ class ArenaRecaptchaGrid:
             raise ValueError("unsupported Arena challenge layout")
         state = await self.tiles.evaluate_all(_GRID_STATE)
         image = await self.payload.screenshot(type="png", timeout=_CONTROL_TIMEOUT_MS)
-        ready = state["ready"] and _active_challenge_image(image)
+        active = _active_challenge_image(image)
+        ready = state["ready"] and active
         return GridSnapshot(
             image=image,
             signature=state["signature"],
@@ -167,6 +193,11 @@ class ArenaRecaptchaGrid:
             columns=3 if count == 9 else 4,
             ready=ready,
             recognition_image=_numbered_grid_image(image, state["cellBoxes"]) if ready else None,
+            instruction=state["instruction"],
+            cells=tuple(
+                GridCellSnapshot(cell["signature"], cell["ready"]) for cell in state["cells"]
+            ),
+            controls_ready=state["controlsReady"] and active,
         )
 
     async def toggle(self, cell: int) -> None:
@@ -174,6 +205,23 @@ class ArenaRecaptchaGrid:
 
     async def submit(self) -> None:
         await self.submit_button.press("Enter", timeout=_CONTROL_TIMEOUT_MS)
+
+
+def _answer_cell_is_current(expected: GridSnapshot, current: GridSnapshot, cell: int) -> bool:
+    if not expected.cells or not current.cells:
+        return current.ready and current.signature == expected.signature
+    if (
+        not current.controls_ready
+        or current.columns != expected.columns
+        or current.instruction != expected.instruction
+        or len(current.cells) != len(expected.cells)
+        or len(current.cells) != current.columns**2
+        or not 1 <= cell <= len(current.cells)
+    ):
+        return False
+    original = expected.cells[cell - 1]
+    latest = current.cells[cell - 1]
+    return original.ready and latest.ready and original.signature == latest.signature
 
 
 async def _wait_ready(
@@ -261,10 +309,7 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> ArenaCha
                 changed = False
                 for cell in sorted(frozenset(target) ^ current.selected):
                     fresh = await surface.read()
-                    if fresh is None or not fresh.ready:
-                        changed = True
-                        break
-                    if fresh.signature != current.signature:
+                    if fresh is None or not _answer_cell_is_current(current, fresh, cell):
                         changed = True
                         break
                     await surface.toggle(cell)

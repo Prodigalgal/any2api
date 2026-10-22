@@ -1,5 +1,7 @@
 import asyncio
 import io
+import json
+from dataclasses import replace
 from unittest.mock import Mock
 
 import httpx
@@ -225,6 +227,86 @@ class Surface:
     async def submit(self):
         self.submissions += 1
         self.closed = True
+
+
+class DynamicCellSurface(Surface):
+    def __init__(self):
+        super().__init__()
+        self.selected.clear()
+        self.sources = list(range(9))
+        self.instruction = "synthetic dynamic instruction"
+        self.controls_ready = True
+        self.pending = set()
+        self.after_toggle = None
+        self.clicked_while_other_pending = []
+
+    async def read(self):
+        snapshot = await super().read()
+        if snapshot is None:
+            return None
+        return replace(
+            snapshot,
+            signature=json.dumps([self.instruction, self.sources]),
+            instruction=self.instruction,
+            cells=tuple(
+                challenge.GridCellSnapshot(str(source), index + 1 not in self.pending)
+                for index, source in enumerate(self.sources)
+            ),
+            controls_ready=self.controls_ready,
+            ready=self.ready and self.controls_ready and not self.pending,
+        )
+
+    async def toggle(self, cell):
+        if self.pending:
+            self.clicked_while_other_pending.append(cell)
+        self.toggles.append(cell)
+        if cell in {1, 3}:
+            self.sources[cell - 1] += 100
+            self.content += 1
+            self.pending.add(cell)
+            asyncio.get_running_loop().call_later(0.02, self.pending.discard, cell)
+        else:
+            self.selected.symmetric_difference_update({cell})
+        if self.after_toggle:
+            self.after_toggle(cell)
+
+
+@pytest.mark.asyncio
+async def test_dynamic_click_keeps_answers_for_other_unchanged_cells(flow, monkeypatch):
+    _, recognize = flow
+    surface = DynamicCellSurface()
+    monkeypatch.setattr(challenge, "ArenaRecaptchaGrid", lambda _: surface)
+    recognize.side_effect = [(1, 3), ()]
+    await solve()
+    assert surface.toggles == [1, 3]
+    assert surface.clicked_while_other_pending == [3]
+    assert recognize.call_count == 2
+    assert surface.submissions == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["instruction", "target", "controls"])
+async def test_dynamic_click_rejects_stale_or_inactive_target(flow, monkeypatch, changed):
+    _, recognize = flow
+    surface = DynamicCellSurface()
+    monkeypatch.setattr(challenge, "ArenaRecaptchaGrid", lambda _: surface)
+
+    def change_after_first(cell):
+        if cell != 1:
+            return
+        if changed == "instruction":
+            surface.instruction = "different task"
+        elif changed == "target":
+            surface.sources[2] += 1000
+        else:
+            surface.controls_ready = False
+
+    surface.after_toggle = change_after_first
+    recognize.side_effect = [(1, 3), (9,)]
+    await solve()
+    assert 3 not in surface.toggles
+    assert surface.toggles == ([1] if changed == "controls" else [1, 9])
+    assert surface.submissions == (0 if changed == "controls" else 1)
 
 
 @pytest.fixture

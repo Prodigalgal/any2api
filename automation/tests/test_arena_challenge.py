@@ -278,7 +278,86 @@ async def test_changed_image_after_ai_never_applies_stale_answer(flow):
         return (1, 3)
 
     recognize.side_effect = changed
-    await solve()
+    result = await challenge.solve_arena_image_challenge(
+        object(), deadline=asyncio.get_running_loop().time() + 3
+    )
+    assert recognize.call_count == 3
+    assert result.outcome is challenge.ArenaChallengeOutcome.EXHAUSTED
+    assert surface.toggles == []
+    assert surface.submissions == 0
+
+
+@pytest.mark.asyncio
+async def test_changed_images_are_recognized_again_before_using_only_the_current_answer(flow):
+    surface, recognize = flow
+
+    def next_answer(*args, **kwargs):
+        if recognize.call_count < 3:
+            surface.content += 1
+            surface.selected.clear()
+            return (1, 3)
+        return (7,)
+
+    recognize.side_effect = next_answer
+    result = await challenge.solve_arena_image_challenge(
+        object(), deadline=asyncio.get_running_loop().time() + 3
+    )
+    assert [call.args[0] for call in recognize.call_args_list] == [b"0:[2]", b"1:[]", b"2:[]"]
+    assert surface.toggles == [7]
+    assert surface.submissions == 1
+    assert result.ai_calls == 3
+    assert not result.should_finish_pending_widget
+
+
+@pytest.mark.asyncio
+async def test_unready_replacement_is_waited_for_without_using_the_previous_answer(flow):
+    surface, recognize = flow
+
+    def next_answer(*args, **kwargs):
+        if recognize.call_count == 1:
+            surface.content += 1
+            surface.selected.clear()
+            surface.ready = False
+            asyncio.get_running_loop().call_soon(lambda: setattr(surface, "ready", True))
+            return (1, 3)
+        return (9,)
+
+    recognize.side_effect = next_answer
+    result = await challenge.solve_arena_image_challenge(
+        object(), deadline=asyncio.get_running_loop().time() + 3
+    )
+    assert recognize.call_count == 2
+    assert surface.toggles == [9]
+    assert surface.submissions == 1
+    assert not result.should_finish_pending_widget
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_replacement_wait_preserves_deadline_and_cancellation(flow, cancelled):
+    surface, recognize = flow
+    started = asyncio.Event()
+
+    def changed(*args, **kwargs):
+        surface.content += 1
+        surface.ready = False
+        started.set()
+        return (1,)
+
+    recognize.side_effect = changed
+    task = asyncio.create_task(
+        challenge.solve_arena_image_challenge(
+            object(), deadline=asyncio.get_running_loop().time() + 3
+        )
+    )
+    if cancelled:
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        result = await task
+        assert result.outcome is challenge.ArenaChallengeOutcome.DEADLINE
     assert recognize.call_count == 1
     assert surface.toggles == []
     assert surface.submissions == 0

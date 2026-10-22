@@ -247,9 +247,17 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> ArenaCha
                     continue
                 recognized.add(current.digest)
                 fresh = await surface.read()
-                if fresh is None or not fresh.ready or fresh.digest != current.digest:
-                    outcome = ArenaChallengeOutcome.CHANGED
+                if fresh is None:
+                    outcome = ArenaChallengeOutcome.CLOSED
                     break
+                if not fresh.ready:
+                    outcome = ArenaChallengeOutcome.CHANGED
+                    current = await _wait_ready(surface, deadline)
+                    continue
+                if fresh.digest != current.digest or fresh.signature != current.signature:
+                    outcome = ArenaChallengeOutcome.CHANGED
+                    current = fresh
+                    continue
                 changed = False
                 for cell in sorted(frozenset(target) ^ current.selected):
                     fresh = await surface.read()

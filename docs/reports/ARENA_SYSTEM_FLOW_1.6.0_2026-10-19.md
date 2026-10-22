@@ -1,8 +1,8 @@
-# Arena 系统完整流程与 1.6.0～1.6.2 候选
+# Arena 系统完整流程与 1.6.0～1.6.3 候选
 
 ## 当前结论
 
-用户 2026-10-19 21:07 授权“自行注册、自行识别、自行测试”，随后明确要求系统自身完整流程。2026-10-20 08:35 只读复核生产仍为 1.5.16，四组件 Ready/0 重启、Argo Synced/Healthy；Arena 尚未取得新的真实正文。1.6.1 已完成 CI/容器及两账号真实验收，失败等待修复生效，但内部视觉时限和返回结构仍有缺口，继续以新候选 1.6.2 修正，未提升生产。
+用户 2026-10-19 21:07 授权“自行注册、自行识别、自行测试”，随后明确要求系统自身完整流程。2026-10-22 再次只读核对生产四组件均为 1.5.16、Ready=1，当前无诊断 Job；10-20 的完整运行态校验为版本/digest 匹配、0 重启、Argo Synced/Healthy。Arena 尚未取得新的真实正文。1.6.2 CI 与不可变制品已成功；另发现同账号必要验证 Cookie 在保存/恢复时被删除，1.6.3 修复该缺陷，继续隔离验收，未提升生产。
 
 此前将 Windows UI 的验证码逐次确认规则扩展到 Linux/Camoufox 是错误解释，已纠正。服务器流程沿用用户当前授权、有限请求及失败停止条件，不重复等待确认。
 
@@ -118,3 +118,26 @@
 | 截止与版本 | Arena/六处统一版本 | 单次 30 秒，整体预算不变；候选占用 1.6.2，依赖版本未改，不复用既有制品 |
 
 定向 **151 项**通过；全量 **808 passed / 3 Redis 条件跳过**，Ruff/150 文件格式通过；Backend test 复用有效缓存、新 1.6.2 JAR、Web lint/TypeScript/build、源码/JAR 版本契约通过。新不可变容器和真实官方验证继续。没有 OpenAI API/数据库迁移或生产部署；完整注册的密码设置 400、间歇点击、MiMo 普通文本尾段和 Arena 官方通过率继续保留为风险。回滚仍是生产 1.5.16 不可变镜像组。
+
+### 1.6.2 制品与补充失败证据
+
+- 源码 `bc01f966c408bd38e74c9b69c22f5f4ee386e341`；[CI 39351684433](https://github.com/Prodigalgal/any2api/actions/runs/39351684433) 全部成功，七组件不可变制品已解析，`deploy=false`、GitOps skipped。Arena digest `sha256:7f3a3ed46788331e3801be8b8e1af17de66572235f2f6c8a4c9d2c1abd19bd31`。
+- `arena-grid-product-v162-20261020010528.json` 将新 registry 模块接入仍为生产 1.5.16 的 MiMo worker，一次内部请求 30.5 秒读取超时；这既不是同版本完整验收，也不能用此前 15.1 秒的函数 POC 掩盖该失败。新候选的真实识别链路需单独验收。
+
+## 2026-10-22：环境一致性与 1.6.3 Changelog
+
+### 已证实的会话缺陷
+
+证据 `backend/build/any2api-arena-cookie-030eb4e2-20261020011804.json`：固定 1.6.2 镜像，同账号原 `.52` 节点与保存 Camoufox 配置；认证身份匹配，官方 SDK 一次 `chat_submit` 返回 Token 元数据（不保存或复用 Token），0 模型生成、0 AI。SDK 后 `_GRECAPTCHA` 为 1 条，`credential_patch` 保存后为 0 条，过滤状态恢复仍为 0 条；直接恢复原始状态为 1 条且值一致。Job 已删除、浏览器/代理归零，完整敏感状态仅加密封存在服务器管理 private 目录，没有回写生产。
+
+Google 将 `_GRECAPTCHA` 说明为用于风险分析的必要 Cookie，因此删除它会破坏同账号验证状态的持久化。[Google 官方说明](https://developers.google.com/recaptcha/docs/faq)。该证据尚不能证明是 403 的唯一原因，也没有 Arena 后端的 Google assessment score。v3 是官方正常无感评估机制；v2 追加验证与容器/会话/网络/站点策略均需排查，不能仅凭版本或弹窗反推具体分数。[v3 官方说明](https://developers.google.com/recaptcha/docs/v3)。
+
+| 分类 | 关键文件/模块 | 行为变化与兼容性 |
+| --- | --- | --- |
+| 会话持久化修复 | `providers/arena_browser.py` | Arena 局部覆写 `filter_storage_state`，在已有 Arena Cookie/origin 过滤基础上，只额外保留同账号 `_GRECAPTCHA`、精确官方域名、`/recaptcha` 路径和 Secure；不扩大共享 Runtime 白名单 |
+| 隔离和拒绝规则 | `tests/test_arena_storage_state.py` | 覆盖保存/读取、深拷贝、不同账号状态不合并、旧凭据缺失兼容，以及 NID/SID/错误域名/伪装后缀/错误路径/非布尔 Secure 拒绝；Google origin 仍排除 |
+| 版本与制品 | Backend/Web/Automation 六处统一版本 | 新候选占用 1.6.3，依赖版本未变，没有 API/数据库迁移；1.6.2 及生产 1.5.16 镜像均保留 |
+
+- 本地定向 **75 passed**，全量 Automation **827 passed / 3 Redis 条件跳过 / 1 既有 Starlette 弃用警告**；Ruff 与 151 文件格式检查通过。Backend test 有效缓存、新 bootJar、Web lint/TypeScript/build、1.6.3 源码/JAR 版本契约通过。
+- 新不可变镜像、官方 SDK 冷恢复与有界真实生成继续验收；当前没有生产部署或生产账号修改。旧版本已删除的 Cookie 无法凭空恢复，只由该账号官方 SDK 后续执行重新产生，禁止跨账号移植。
+- 遗留：Arena 真实正文/完成事件、完整注册设置密码 400、控件间歇超时、MiMo 文本尾段及内部视觉延迟。回滚点仍为生产 1.5.16 镜像组；隔离失败则删除自有 Job，不重置账号预算或批量换出口。

@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
@@ -73,6 +74,7 @@ _ARENA_PROVISIONAL_ID_TIMEOUT_MS = 12_000
 _ARENA_NAVIGATION_RETRY_LIMIT = 3
 _ARENA_NATIVE_SUBMISSION_TIMEOUT_SECONDS = 30
 _ARENA_ATTACHMENT_PREPARATION_TEXT = "[attachment]"
+_ARENA_RECAPTCHA_COOKIE_HOSTS = frozenset({"www.google.com", "www.recaptcha.net"})
 
 
 def _arena_terms_script() -> str:
@@ -2107,6 +2109,23 @@ class ArenaOfficialBrowserTransport(PageFetchBrowserRuntime):
             require_cookie=False,
             page_url=f"{base_url}{page_path}",
         )
+
+    def filter_storage_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        filtered = super().filter_storage_state(state)
+        # The official SDK's risk cookie must survive the same account's browser restart.
+        # Keep this exception local; unrelated Google cookies and origins stay excluded.
+        for cookie in state.get("cookies", []):
+            if not isinstance(cookie, dict) or cookie.get("name") != "_GRECAPTCHA":
+                continue
+            domain = cookie.get("domain")
+            if (
+                isinstance(domain, str)
+                and domain.lower().removeprefix(".") in _ARENA_RECAPTCHA_COOKIE_HOSTS
+                and cookie.get("path") == "/recaptcha"
+                and cookie.get("secure") is True
+            ):
+                filtered["cookies"].append(deepcopy(cookie))
+        return filtered
 
     def stream_request_script(self) -> str:
         config = arena_settings()

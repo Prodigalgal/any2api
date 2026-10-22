@@ -239,6 +239,7 @@ class DynamicCellSurface(Surface):
         self.pending = set()
         self.after_toggle = None
         self.clicked_while_other_pending = []
+        self.replacement_delay = 0.02
 
     async def read(self):
         snapshot = await super().read()
@@ -264,7 +265,9 @@ class DynamicCellSurface(Surface):
             self.sources[cell - 1] += 100
             self.content += 1
             self.pending.add(cell)
-            asyncio.get_running_loop().call_later(0.02, self.pending.discard, cell)
+            asyncio.get_running_loop().call_later(
+                self.replacement_delay, self.pending.discard, cell
+            )
         else:
             self.selected.symmetric_difference_update({cell})
         if self.after_toggle:
@@ -307,6 +310,45 @@ async def test_dynamic_click_rejects_stale_or_inactive_target(flow, monkeypatch,
     assert 3 not in surface.toggles
     assert surface.toggles == ([1] if changed == "controls" else [1, 9])
     assert surface.submissions == (0 if changed == "controls" else 1)
+
+
+@pytest.mark.asyncio
+async def test_dynamic_replacement_may_finish_after_five_seconds_inside_the_total_budget(
+    flow, monkeypatch
+):
+    _, recognize = flow
+    surface = DynamicCellSurface()
+    surface.replacement_delay = 5.2
+    monkeypatch.setattr(challenge, "ArenaRecaptchaGrid", lambda _: surface)
+    recognize.side_effect = [(1, 3), ()]
+    result = await challenge.solve_arena_image_challenge(
+        object(), deadline=asyncio.get_running_loop().time() + 9
+    )
+    assert surface.toggles == [1, 3]
+    assert recognize.call_count == 2
+    assert result.submissions == 1
+    assert not result.should_finish_pending_widget
+
+
+@pytest.mark.asyncio
+async def test_closed_widget_ends_replacement_wait_without_consuming_the_remaining_budget(
+    flow, monkeypatch
+):
+    _, recognize = flow
+    surface = DynamicCellSurface()
+    surface.replacement_delay = 8
+    monkeypatch.setattr(challenge, "ArenaRecaptchaGrid", lambda _: surface)
+    surface.after_toggle = lambda _: asyncio.get_running_loop().call_later(
+        0.01, setattr, surface, "closed", True
+    )
+    await asyncio.wait_for(
+        challenge.solve_arena_image_challenge(
+            object(), deadline=asyncio.get_running_loop().time() + 12
+        ),
+        timeout=1,
+    )
+    assert recognize.call_count == 1
+    assert surface.submissions == 0
 
 
 @pytest.fixture

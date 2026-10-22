@@ -225,14 +225,18 @@ def _answer_cell_is_current(expected: GridSnapshot, current: GridSnapshot, cell:
 
 
 async def _wait_ready(
-    surface: ArenaRecaptchaGrid, deadline: float, *, previous: GridSnapshot | None = None
+    surface: ArenaRecaptchaGrid,
+    deadline: float,
+    *,
+    previous: GridSnapshot | None = None,
+    replacement: bool = False,
 ) -> GridSnapshot | None:
     loop = asyncio.get_running_loop()
-    wait_deadline = min(deadline, loop.time() + 5)
+    wait_deadline = deadline if replacement else min(deadline, loop.time() + 5)
     while loop.time() < wait_deadline:
         current = await surface.read()
         if current is None:
-            if previous is not None:
+            if previous is not None or replacement:
                 return None
         elif current.ready and (
             previous is None
@@ -300,7 +304,7 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> ArenaCha
                     break
                 if not fresh.ready:
                     outcome = ArenaChallengeOutcome.CHANGED
-                    current = await _wait_ready(surface, deadline)
+                    current = await _wait_ready(surface, deadline, replacement=True)
                     continue
                 if fresh.digest != current.digest or fresh.signature != current.signature:
                     outcome = ArenaChallengeOutcome.CHANGED
@@ -319,7 +323,7 @@ async def solve_arena_image_challenge(page: Any, *, deadline: float) -> ArenaCha
                     break
                 if changed or not fresh.ready or fresh.signature != current.signature:
                     outcome = ArenaChallengeOutcome.DYNAMIC
-                    current = await _wait_ready(surface, deadline)
+                    current = await _wait_ready(surface, deadline, replacement=True)
                     continue
                 if fresh.selected != frozenset(target):
                     outcome = ArenaChallengeOutcome.MISMATCH

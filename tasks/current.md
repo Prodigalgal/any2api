@@ -1,7 +1,16 @@
-# 当前任务板（源码 1.6.8 候选，生产 1.5.16）
+# 当前任务板（源码 1.6.9 候选，生产 1.5.16）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-28 Arena 上游 Turbopack 交互混淆与 Stream 协议适配（1.6.9，进行中）
+
+- **实测定位**：Arena 上游升级 Next.js / Turbopack 编译打包，混淆导出了客户端交互模块（`encodeClientInteraction`，导出名 `k`/`a`）与上传函数（`generateUploadUrl`，导出名 `K`），导致原有 `buildProgrammaticClientInteraction` hook 失败，请求缺少 `cx` 触发 403 `recaptcha validation failed`；同时上游推流新增 `ah:`（引用）、`a8:`/`a9:`/`aa:`/`ab:`（工具）及 `routed_model`/`heartbeat` 等元数据帧，在缺少规范化与白名单时被判定为 `provider_protocol_violation`。
+- **修复/范围**：
+  - Automation 侧：`_arena_turbopack_uploader_init_script` 增加对混淆模块特征及语义签名的捕获与 fallback 扫描，自动暴露 `window.__any2apiArenaClientInteraction` 与 `window.__any2apiArenaUploadFile`，向下兼容旧命名。
+  - Backend 侧：`ArenaEventDecoder.java` 引入渠道前缀规范化（剥离 `a`/`b` 前缀统一解析），补充忽略引用/工具/思考签名等辅助帧，并在 `SetLike.METADATA_TYPES` 中增加 `routed_model`、`heartbeat`、`webdev` 白名单，安全跳过元数据。
+- **本地门禁**：全量 864 passed/3 条件跳过，Java 全量通过（BUILD SUCCESSFUL），Web build 成功，Ruff 全部通过。
+- **验证与部署**：递增统一版本 1.6.9，触发不可变镜像构建与部署验收。
 
 ## 2026-10-22 Arena 原生轨迹边界 ACK（1.6.8，进行中）
 

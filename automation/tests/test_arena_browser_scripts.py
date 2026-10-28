@@ -66,6 +66,55 @@ assert.equal(window.__any2apiArenaFetchLog, undefined);
     )
 
 
+def test_page_modules_capture_minified_turbopack_upload_and_interaction() -> None:
+    _run_javascript(
+        """
+const assert = require('node:assert/strict');
+global.window = global;
+global.document = {scripts: []};
+window.fetch = async () => {};
+"""
+        + _arena_turbopack_uploader_init_script()
+        + """
+let defined = 0;
+const evaluateChunk = chunk => {
+  for (let index = 1; index + 1 < chunk.length; index += 2) {
+    chunk[index + 1]({s: definitions => {defined++;}});
+  }
+};
+global.TURBOPACK = {push: evaluateChunk};
+let capturedMinifiedInteraction;
+let minifiedInteractionCalls = 0;
+global.TURBOPACK.push(['fixture-minified', 'upload-min', module => {
+  function E() {
+    return {generateUploadUrl: 'url', getSignedUrl: 'signed'};
+  }
+  module.s(['K', 0, E]);
+}, 'interaction-min', module => {
+  const CLIENT_INTERACTION_FIELD = 'cx';
+  function encodeClientInteraction(e, salt) {
+    return 'encoded:' + e.kind + ':' + salt;
+  }
+  module.s([
+    'k', 0, () => {
+      minifiedInteractionCalls++;
+      return capturedMinifiedInteraction = {kind: 'programmatic', submitTrusted: null};
+    },
+    'a', 0, interaction => {
+      assert.equal(interaction, capturedMinifiedInteraction);
+      return encodeClientInteraction(interaction, 'test-salt');
+    },
+  ]);
+}]);
+assert.equal(defined, 2);
+assert.equal(typeof window.__any2apiArenaUploadFile, 'function');
+assert.equal(window.__any2apiArenaUploadFile().generateUploadUrl, 'url');
+assert.equal(window.__any2apiArenaClientInteraction(), 'encoded:programmatic:test-salt');
+assert.equal(minifiedInteractionCalls, 1);
+"""
+    )
+
+
 @pytest.mark.parametrize(
     "scenario",
     [

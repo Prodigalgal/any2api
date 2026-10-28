@@ -165,6 +165,51 @@ class ArenaProtocolTest {
     }
 
     @Test
+    void ignoresChannelPrefixedAnnotationsCitationsAndToolFrames() {
+        var decoder = new ArenaEventDecoder("arena-request");
+
+        var events = decoder.decode("2:[{\"type\":\"routed_model\",\"organization\":\"arena\"}]");
+        events.addAll(decoder.decode("2:[{\"type\":\"heartbeat\"}]"));
+        events.addAll(decoder.decode("a8:{\"annotation\":\"search_result\"}"));
+        events.addAll(decoder.decode("a9:{\"toolCallId\":\"tool-1\",\"toolName\":\"web_search\"}"));
+        events.addAll(decoder.decode("aa:{\"toolCallId\":\"tool-1\",\"result\":{\"status\":\"success\"}}"));
+        events.addAll(decoder.decode("ab:{\"toolCallId\":\"tool-2\"}"));
+        events.addAll(decoder.decode("ac:{\"toolCallId\":\"tool-2\",\"argsTextDelta\":\"{}\"}"));
+        events.addAll(decoder.decode("ah:[{\"url\":\"https://example.com\",\"title\":\"example\"}]"));
+        events.addAll(decoder.decode("ai:{\"redacted\":true}"));
+        events.addAll(decoder.decode("aj:{\"signature\":\"sig-123\"}"));
+        events.addAll(decoder.decode("af:{\"messageId\":\"msg-1\"}"));
+        events.addAll(decoder.decode("ag:\"thinking process\""));
+        events.addAll(decoder.decode("a0:\"final answer\""));
+        events.addAll(decoder.decode("ad:{\"finishReason\":\"stop\",\"usage\":{\"promptTokens\":10,\"completionTokens\":20}}"));
+
+        assertThat(events).extracting(CanonicalEvent::getClass)
+            .containsExactly(
+                CanonicalEvent.ResponseStarted.class,
+                CanonicalEvent.ReasoningDelta.class,
+                CanonicalEvent.OutputTextDelta.class,
+                CanonicalEvent.Usage.class,
+                CanonicalEvent.Completed.class);
+        assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed);
+    }
+
+    @Test
+    void supportsChannelBPrefixedFrames() {
+        var decoder = new ArenaEventDecoder("arena-request");
+
+        var events = decoder.decode("bf:{\"messageId\":\"msg-b\"}");
+        events.addAll(decoder.decode("b0:\"channel b answer\""));
+        events.addAll(decoder.decode("bd:{\"finishReason\":\"stop\"}"));
+
+        assertThat(events).extracting(CanonicalEvent::getClass)
+            .containsExactly(
+                CanonicalEvent.ResponseStarted.class,
+                CanonicalEvent.OutputTextDelta.class,
+                CanonicalEvent.Completed.class);
+        assertThat(events).noneMatch(event -> event instanceof CanonicalEvent.Failed);
+    }
+
+    @Test
     void classifiesUserNotFoundAsCredentialFailure() {
         var decoder = new ArenaEventDecoder("arena-request");
 

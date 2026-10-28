@@ -48,31 +48,33 @@ final class ArenaEventDecoder {
             fail(output, "provider_protocol_violation");
             return output;
         }
-        switch (code) {
-            case "0", "a0" -> text(value, output);
+        var normalizedCode = (code.length() >= 2 && (code.charAt(0) == 'a' || code.charAt(0) == 'b'))
+            ? code.substring(1)
+            : code;
+        switch (normalizedCode) {
+            case "0" -> text(value, output);
             case "2" -> data(value, output);
-            case "a2" -> metadata(value, output);
-            case "3", "a3" -> fail(output, classifyError(textValue(value)));
-            case "8", "9", "a", "b", "c", "ac", "h", "i", "j" -> {
-                /* Arena emits annotations, tool frames, and reasoning metadata around text. */
+            case "3" -> fail(output, classifyError(textValue(value)));
+            case "8", "9", "a", "b", "c", "h", "i", "j" -> {
+                /* Arena emits annotations, tool frames, citations, and reasoning metadata around text. */
             }
-            case "k", "ak" -> fail(output, "unsupported_model_output");
-            case "d", "ad" -> {
+            case "k" -> fail(output, "unsupported_model_output");
+            case "d" -> {
                 usage(value.path("usage"), output);
                 complete(output, firstText(value, "finishReason", "finish_reason", "reason", "stop"));
             }
-            case "e", "ae" -> {
+            case "e" -> {
                 if (!value.path("isContinued").asBoolean(false)) {
                     usage(value.path("usage"), output);
                     complete(output, firstText(value, "finishReason", "finish_reason", "reason", "stop"));
                 }
             }
-            case "f", "af" -> {
+            case "f" -> {
                 var id = firstText(value, "messageId", "message_id", "id", "responseId");
                 if (!id.isBlank()) responseId = id;
                 start(output);
             }
-            case "g", "ag" -> reasoning(value, output);
+            case "g" -> reasoning(value, output);
             default -> fail(output, "provider_protocol_violation");
         }
         return output;
@@ -120,15 +122,11 @@ final class ArenaEventDecoder {
             } else if (SetLike.MEDIA_TYPES.contains(type)) {
                 fail(output, "unsupported_model_output");
                 return;
-            } else if (!SetLike.SEARCH_TYPES.contains(type)) {
+            } else if (!SetLike.SEARCH_TYPES.contains(type) && !SetLike.METADATA_TYPES.contains(type)) {
                 fail(output, "provider_protocol_violation");
                 return;
             }
         }
-    }
-
-    private void metadata(JsonNode value, List<CanonicalEvent> output) {
-        if (!value.isArray()) fail(output, "provider_protocol_violation");
     }
 
     private void usage(JsonNode value, List<CanonicalEvent> output) {
@@ -233,6 +231,8 @@ final class ArenaEventDecoder {
             "image", "image_url", "video", "file", "attachment");
         private static final java.util.Set<String> SEARCH_TYPES = java.util.Set.of(
             "search", "source", "sources");
+        private static final java.util.Set<String> METADATA_TYPES = java.util.Set.of(
+            "routed_model", "heartbeat", "webdev");
 
         private SetLike() {}
     }

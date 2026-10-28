@@ -1177,8 +1177,10 @@ def _arena_turbopack_uploader_init_script() -> str:
     if (typeof factory !== 'function') return factory;
     const source = String(factory);
     const uploader = source.includes('generateUploadUrl') && source.includes('getSignedUrl');
-    const interaction = source.includes('buildProgrammaticClientInteraction')
-      && source.includes('packClientInteraction');
+    const interaction = (source.includes('buildProgrammaticClientInteraction')
+      && source.includes('packClientInteraction'))
+      || (source.includes('encodeClientInteraction')
+      && (source.includes('CLIENT_INTERACTION_') || source.includes('inspectIntegrity') || source.includes('__playwright__binding__')));
     if (!uploader && !interaction) {
       return factory;
     }
@@ -1191,15 +1193,35 @@ def _arena_turbopack_uploader_init_script() -> str:
             let buildInteraction;
             let packInteraction;
             for (let index = 0; index + 2 < definitions.length; index += 3) {
-              if (definitions[index] === 'uploadFile'
-                  && typeof definitions[index + 2] === 'function') {
-                window.__any2apiArenaUploadFile = definitions[index + 2];
+              const name = definitions[index];
+              const value = definitions[index + 2];
+              if (typeof value === 'function') {
+                if (name === 'uploadFile'
+                    || (uploader && (name === 'K' || /generateUploadUrl|getSignedUrl/.test(String(value))))) {
+                  window.__any2apiArenaUploadFile = value;
+                }
+                if (name === 'buildProgrammaticClientInteraction'
+                    || (interaction && (name === 'k' || /["']programmatic["']/.test(String(value))))) {
+                  buildInteraction = value;
+                }
+                if (name === 'packClientInteraction'
+                    || (interaction && (name === 'a' || /encodeClientInteraction/.test(String(value))))) {
+                  packInteraction = value;
+                }
               }
-              if (definitions[index] === 'buildProgrammaticClientInteraction') {
-                buildInteraction = definitions[index + 2];
-              }
-              if (definitions[index] === 'packClientInteraction') {
-                packInteraction = definitions[index + 2];
+            }
+            if (interaction && (!buildInteraction || !packInteraction)) {
+              for (let index = 0; index + 2 < definitions.length; index += 3) {
+                const value = definitions[index + 2];
+                if (typeof value === 'function') {
+                  const fnStr = String(value);
+                  if (!buildInteraction && /["']programmatic["']/.test(fnStr)) {
+                    buildInteraction = value;
+                  }
+                  if (!packInteraction && /encodeClientInteraction/.test(fnStr)) {
+                    packInteraction = value;
+                  }
+                }
               }
             }
             if (typeof buildInteraction === 'function' && typeof packInteraction === 'function') {

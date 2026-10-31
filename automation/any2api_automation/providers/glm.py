@@ -201,10 +201,11 @@ class GlmAutomationProvider(AutomationProvider):
                         timeout_seconds=timeout_seconds,
                     ):
                         asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
-                except Exception as error:  # noqa: BLE001 - normalized stream boundary
+                except Exception as error:
                     logger.warning(
-                        "glm_transport_worker_failed error_type=%s",
-                        type(error).__name__,
+                        "glm_transport_worker_failed error=%s",
+                        error,
+                        exc_info=True,
                     )
                     asyncio.run_coroutine_threadsafe(
                         queue.put(

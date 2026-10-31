@@ -44,7 +44,16 @@ _GLM_IMAGE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 _CREATE_CHAT = r"""async input => {
   const runtime = window.__any2apiGlmOfficialRuntime;
   if (!runtime?.newChat) throw new Error('GLM official new-chat function is unavailable');
-  const result = await runtime.newChat('default', input.chat, undefined);
+  let result;
+  try {
+    result = await runtime.newChat(input.chat);
+  } catch (err) {
+    try {
+      result = await runtime.newChat('default', input.chat, undefined);
+    } catch {
+      throw new Error(String(err?.detail || err?.message || err));
+    }
+  }
   if (result?.err) throw new Error(String(result.err.detail || result.err.code || result.err));
   const chatId = String(result?.id || '');
   if (!chatId) throw new Error('GLM official new-chat function returned no chat id');
@@ -271,10 +280,11 @@ class GlmOfficialBrowserTransport:
                         camoufox_config,
                     ),
                 }
-            except Exception as error:  # noqa: BLE001 - provider stream boundary
+            except Exception as error:
                 logger.warning(
-                    "glm_official_browser_stream_failed error_type=%s",
-                    type(error).__name__,
+                    "glm_official_browser_stream_failed error=%s",
+                    error,
+                    exc_info=True,
                 )
                 if page is not None:
                     try:

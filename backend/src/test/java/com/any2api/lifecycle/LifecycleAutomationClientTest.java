@@ -113,6 +113,31 @@ class LifecycleAutomationClientTest {
     }
 
     @Test
+    void routesGlmToCustomProviderUrlWhenConfigured() {
+        var properties = new Any2ApiProperties();
+        properties.getAutomation().getProviderUrls().put(
+            "glm", URI.create("http://any2api-automation-glm:8090"));
+        var mapper = new ObjectMapper();
+        var recordedUri = new AtomicReference<URI>();
+
+        ExchangeFunction exchange = request -> {
+            recordedUri.set(request.url());
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .body("{\"ok\":true}")
+                .build());
+        };
+        var client = new LifecycleAutomationClient(
+            WebClient.builder().exchangeFunction(exchange),
+            properties, mapper);
+
+        client.execute("glm", "keepalive", mapper.createObjectNode()).block();
+
+        assertThat(recordedUri.get().toString())
+            .startsWith("http://any2api-automation-glm:8090/internal/v1/providers/glm/execute");
+    }
+
+    @Test
     void rejectsConfiguredAutomationResponseLimitOutsideSafeBounds() {
         var properties = new Any2ApiProperties();
 

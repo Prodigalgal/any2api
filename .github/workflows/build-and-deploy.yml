@@ -179,6 +179,9 @@ jobs:
           - component: automation-qwen
             context: automation
             file: automation/Dockerfile.qwen
+          - component: automation-glm
+            context: automation
+            file: automation/Dockerfile.glm
           - component: web
             context: web
             file: web/Dockerfile
@@ -263,6 +266,25 @@ jobs:
           elif "name: any2api-automation-deepseek" in content:
               components.append("automation-deepseek")
 
+          glm_manifest = Path(os.environ["GITHUB_WORKSPACE"]) / "deploy/kubernetes/any2api-automation-glm.yaml"
+          if glm_manifest.exists():
+              target_manifest = path.parent / "automation-glm.yaml"
+              shutil.copyfile(glm_manifest, target_manifest)
+              if "automation-glm.yaml" not in content:
+                  if re.search(r"^resources:\s*$", content, re.MULTILINE):
+                      content = re.sub(r"^resources:\s*$", "resources:\n  - automation-glm.yaml", content, count=1, flags=re.MULTILINE)
+                  elif re.search(r"^resources:", content, re.MULTILINE):
+                      content = re.sub(r"(resources:\n)", r"\1  - automation-glm.yaml\n", content, count=1)
+              if "name: any2api-automation-glm" not in content:
+                  if re.search(r"^images:\s*$", content, re.MULTILINE):
+                      content = re.sub(r"^images:\s*$", f"images:\n  - name: any2api-automation-glm\n    newName: docker.io/speedproxy/any2api\n    newTag: automation-glm-{suffix}", content, count=1, flags=re.MULTILINE)
+                  elif re.search(r"^images:", content, re.MULTILINE):
+                      content = re.sub(r"(images:\n)", f"images:\n  - name: any2api-automation-glm\n    newName: docker.io/speedproxy/any2api\n    newTag: automation-glm-{suffix}\n", content, count=1)
+              if "automation-glm" not in components:
+                  components.append("automation-glm")
+          elif "name: any2api-automation-glm" in content:
+              components.append("automation-glm")
+
           for component in components:
               pattern = rf"(name: any2api-{component}\n\s+newName: .*\n\s+newTag: ).*"
               content, count = re.subn(pattern, rf"\g<1>{component}-{suffix}", content)
@@ -294,7 +316,7 @@ jobs:
           PY
           git config user.name any2api-ci
           git config user.email any2api-ci@users.noreply.github.com
-          git add any2api/oracle/kustomization.yaml any2api/oracle/server-database-affinity.yaml any2api/oracle/automation-runtime-resources.yaml any2api/oracle/namespace-runtime-quota.yaml any2api/oracle/admin-account-probe-timeouts.json any2api/oracle/automation-deepseek.yaml
+          git add any2api/oracle/kustomization.yaml any2api/oracle/server-database-affinity.yaml any2api/oracle/automation-runtime-resources.yaml any2api/oracle/namespace-runtime-quota.yaml any2api/oracle/admin-account-probe-timeouts.json any2api/oracle/automation-deepseek.yaml any2api/oracle/automation-glm.yaml
           if git diff --cached --quiet; then
             exit 0
           fi

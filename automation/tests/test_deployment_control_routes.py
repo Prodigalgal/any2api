@@ -44,7 +44,14 @@ def test_release_update_copies_patches_with_target_and_preserves_existing_patche
         f"  - name: any2api-{component}\n"
         "    newName: docker.io/speedproxy/any2api\n"
         f"    newTag: {component}-previous\n"
-        for component in ("server", "automation", "automation-arena", "automation-deepseek", "web")
+        for component in (
+            "server",
+            "automation",
+            "automation-arena",
+            "automation-deepseek",
+            "automation-glm",
+            "web",
+        )
     )
     manifest = oracle / "kustomization.yaml"
     manifest.write_text(

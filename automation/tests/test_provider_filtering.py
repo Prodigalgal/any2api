@@ -22,3 +22,12 @@ def test_discover_only_arena_when_filtered():
         providers = _discover()
         provider_ids = {p.manifest.id for p in providers}
         assert provider_ids == {"arena"}
+
+
+def test_discover_only_glm_when_filtered():
+    with patch(
+        "any2api_automation.providers.settings", return_value=Settings(enabled_providers="glm")
+    ):
+        providers = _discover()
+        provider_ids = {p.manifest.id for p in providers}
+        assert provider_ids == {"glm"}

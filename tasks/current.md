@@ -1,7 +1,23 @@
-# 当前任务板（源码 1.6.9 候选，生产 1.5.16）
+# 当前任务板（源码 1.7.0 候选，生产 1.6.9）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-10-31 GLM 彻底修复与专属容器隔离（1.7.0，进行中）
+
+- **根因定位**：GLM（Z.ai / chatglm）前端 bundle 近期重构了 `newChat` 导出函数签名，由原先的 `(folder, chat, project_id)` 演进为 `(chat, project_id)`（参数 1 为 chat 实体，参数 2 为 project_id）。自动化执行层原代码固定调用 `runtime.newChat('default', input.chat, undefined)`，导致传递给上游 `/chats/new` 的请求体为 `{chat: 'default', project_id: ...}`，上游因参数类型错误返回 400/422 拒绝创建会话；抛出的异常被 Playwright 包装为 `Error: Page.evaluate: undefined`，自动化层 `stream()` 的异常处理捕获后仅记录了 `type(error).__name__`（即 `Error`），将错误信息遮蔽为 `official browser stream failed (Error)`。
+- **彻底修复**：
+  - `automation/any2api_automation/providers/glm_runtime.py`：重构 `_CREATE_CHAT`，优先适配现代签名 `runtime.newChat(input.chat)`，并在捕获异常时自动兜底旧版三参数调用；增强异常日志记录，输出完整 `error` 实例及堆栈，杜绝吞异常与单纯输出 `Error` 类型的现象。
+  - `automation/any2api_automation/providers/glm.py`：同步增强 worker 异常捕获日志输出，确保完整上下文可观测。
+- **GLM 专属容器与隔离编排**：
+  - 新增 `automation/Dockerfile.glm`，基于 `BROWSER_RUNTIME_IMAGE`，配置 `ANY2API_AUTOMATION_ENABLED_PROVIDERS=glm` 与 `ANY2API_AUTOMATION_SERVICE_NAME=any2api-automation-glm`。
+  - 新增 `deploy/kubernetes/any2api-automation-glm.yaml`（ClusterIP 8090 Service 与 1 副本 RollingUpdate Deployment，配置 200m/1Gi requests 与 1.5/3Gi limits，挂载 dshm 与 runtime 卷，配置 live/ready 探针）。
+  - `deploy/gitops/automation-runtime-resources.yaml` 补充 `any2api-automation-glm` 资源管控配置。
+  - `.github/workflows/build-and-deploy.yml` 纳入 `automation-glm` 多镜像构建矩阵，并在 `update-gitops` 步骤中自动同步清单、添加镜像配置、注册组件。
+  - `backend/src/main/resources/application.yml` 增加 `any2api.automation.provider-urls.glm` 动态路由配置；`LifecycleAutomationClientTest.java` 补充测试用例。
+- **本地质量门禁与版本合规**：
+  - 递增全局业务版本为 `1.7.0`（包含 Dockerfile/Deployment/CI 矩阵拓展与 GLM 协议修复，符合 SemVer minor 规约）。
+  - 全量自动化测试 865 passed / 3 skipped；Ruff format & check 154 文件通过；check_versions.py 7 组件全量 PASS；Backend Gradle 测试通过。
 
 ## 2026-10-28 Arena 上游 Turbopack 交互混淆与 Stream 协议适配（1.6.9，进行中）
 

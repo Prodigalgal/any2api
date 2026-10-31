@@ -57,3 +57,22 @@ spec:
               cpu: "1.5"
               memory: 3584Mi
               ephemeral-storage: 3Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: any2api-automation-glm
+spec:
+  template:
+    spec:
+      containers:
+        - name: automation-glm
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+              ephemeral-storage: 512Mi
+            limits:
+              cpu: "1.5"
+              memory: 3Gi
+              ephemeral-storage: 3Gi

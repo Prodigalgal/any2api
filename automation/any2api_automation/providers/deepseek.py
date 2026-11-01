@@ -73,7 +73,7 @@ class DeepseekAutomationProvider(AutomationProvider):
             "hcaptcha_grid",
             "hcaptcha_semantic_drag",
         ),
-        operations=("reauthenticate", "keepalive"),
+        operations=("register", "reauthenticate", "keepalive"),
         realtime=True,
         inference_transport=True,
         inference_runtime="camoufox_browser_runtime",

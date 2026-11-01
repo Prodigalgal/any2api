@@ -548,7 +548,7 @@ async def test_default_recognition_is_internal_and_cannot_reenter_arena(flow):
     await solve()
     policy = recognize.call_args.kwargs["ai_policy"]
     assert policy.mode == "internal"
-    assert policy.internal_models == ("mimo/mimo-v2.6-pro",)
+    assert policy.internal_models == ("mimo/mimo-v2.5", "mimo/mimo-v2.6-flash")
 
 
 @pytest.mark.asyncio

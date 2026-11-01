@@ -251,7 +251,10 @@ async def _wait_ready(
 async def solve_arena_image_challenge(page: Any, *, deadline: float) -> ArenaChallengeResult:
     policy = current_captcha_policy()
     candidates = policy.internal_models or (
-        policy.internal_model or arena_settings().arena_captcha_ai_internal_model,
+        (policy.internal_model,)
+        if policy.internal_model
+        else getattr(arena_settings(), "arena_captcha_ai_internal_models", None)
+        or (arena_settings().arena_captcha_ai_internal_model,)
     )
     models = tuple(
         model for model in candidates if "/" in model and model.split("/", 1)[0].lower() != "arena"

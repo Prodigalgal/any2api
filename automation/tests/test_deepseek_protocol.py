@@ -47,6 +47,15 @@ def test_manifest_is_discovered_with_full_lifecycle_operations() -> None:
         "hcaptcha_grid",
         "hcaptcha_semantic_drag",
     )
+    policy = provider.browser_fingerprint_policy()
+    assert policy is not None
+    assert policy.camoufox_mode == "real"
+    assert len(policy.variants) == 3
+    launch = provider.browser_launch_profile()
+    assert launch.camoufox_os == "windows"
+    assert launch.humanize is True
+    context = provider.browser_context_profile()
+    assert context.timezone_id == "Asia/Tokyo"
 
 
 @pytest.mark.asyncio

@@ -250,6 +250,48 @@ class DeepseekAutomationProvider(AutomationProvider):
 
         return api_action_bindings(self, DeepseekApiActionHandler())
 
+    def browser_context_profile(self) -> BrowserContextProfile:
+        return BrowserContextProfile(
+            ignore_https_errors=True,
+            locale="en-US",
+            timezone_id="Asia/Tokyo",
+            viewport_width=1440,
+            viewport_height=900,
+            accept_language="en-US,en;q=0.9",
+        )
+
+    def browser_launch_profile(self) -> BrowserLaunchProfile:
+        return BrowserLaunchProfile(
+            headless=False,
+            humanize=True,
+            camoufox_os="windows",
+            firefox_user_prefs=(
+                ("webgl.force-enabled", True),
+                ("webgl.disabled", False),
+                ("layers.acceleration.force-enabled", True),
+                ("privacy.trackingprotection.enabled", False),
+                ("privacy.trackingprotection.pbmode.enabled", False),
+                ("network.cookie.cookieBehavior", 0),
+            ),
+        )
+
+    def browser_fingerprint_policy(self) -> BrowserFingerprintPolicy:
+        return BrowserFingerprintPolicy(
+            variants=tuple(
+                BrowserFingerprintVariant(
+                    id=f"deepseek-windows-{width}x{height}",
+                    os="windows",
+                    locale="en-US",
+                    timezone_id="Asia/Tokyo",
+                    viewport_width=width,
+                    viewport_height=height,
+                    accept_language="en-US,en;q=0.9",
+                )
+                for width, height in ((1365, 900), (1440, 900), (1536, 864))
+            ),
+            camoufox_mode="real",
+        )
+
 
 def _runtime_base_url(payload: dict[str, Any]) -> str:
     options = payload.get("runtime_options")
@@ -302,48 +344,6 @@ def _catalog_available(body: dict[str, Any]) -> bool:
     if not isinstance(settings_body, dict):
         return False
     return isinstance(settings_body.get("model_configs"), dict)
-
-    def browser_context_profile(self) -> BrowserContextProfile:
-        return BrowserContextProfile(
-            ignore_https_errors=True,
-            locale="en-US",
-            timezone_id="Asia/Tokyo",
-            viewport_width=1440,
-            viewport_height=900,
-            accept_language="en-US,en;q=0.9",
-        )
-
-    def browser_launch_profile(self) -> BrowserLaunchProfile:
-        return BrowserLaunchProfile(
-            headless=False,
-            humanize=True,
-            camoufox_os="windows",
-            firefox_user_prefs=(
-                ("webgl.force-enabled", True),
-                ("webgl.disabled", False),
-                ("layers.acceleration.force-enabled", True),
-                ("privacy.trackingprotection.enabled", False),
-                ("privacy.trackingprotection.pbmode.enabled", False),
-                ("network.cookie.cookieBehavior", 0),
-            ),
-        )
-
-    def browser_fingerprint_policy(self) -> BrowserFingerprintPolicy:
-        return BrowserFingerprintPolicy(
-            variants=tuple(
-                BrowserFingerprintVariant(
-                    id=f"deepseek-windows-{width}x{height}",
-                    os="windows",
-                    locale="en-US",
-                    timezone_id="Asia/Tokyo",
-                    viewport_width=width,
-                    viewport_height=height,
-                    accept_language="en-US,en;q=0.9",
-                )
-                for width, height in ((1365, 900), (1440, 900), (1536, 864))
-            ),
-            camoufox_mode="real",
-        )
 
 
 async def _run_registration_browser(

@@ -70,7 +70,12 @@ public final class AgentInteropServer {
     private static final List<Map<String,Object>> REQUESTS = new java.util.concurrent.CopyOnWriteArrayList<>();
     private static reactor.netty.DisposableServer server;
 
-    @Configuration @EnableWebFlux @EnableWebFluxSecurity static class WebConfiguration {}
+    @Configuration @EnableWebFlux @EnableWebFluxSecurity static class WebConfiguration
+        implements org.springframework.web.reactive.config.WebFluxConfigurer {
+        @Override public void configureHttpMessageCodecs(org.springframework.http.codec.ServerCodecConfigurer codecs) {
+            codecs.defaultCodecs().maxInMemorySize(16 << 20);
+        }
+    }
 
     @RestController static class FixtureControl {
         @GetMapping("/__fixture/health") public Map<String,Object> health() {
@@ -94,6 +99,8 @@ public final class AgentInteropServer {
             var parser = new CanonicalRequestParser(mapper);
             var authorization = new ApiKeyAuthorization();
             var features = new ApiKeyRequestFeatureDetector();
+            var inputFiles=new com.any2api.media.input.InputFileService(database.inputFiles(),authorization,executor);
+            var inputImages=new com.any2api.media.input.InputImageResolver(inputFiles);
             var responses = new ResponsesService(database.store(mapper),new ProviderResponseStateStore(database.jdbc,mapper),
                 parser,writer,authorization,features,mapper,properties,executor);
             var mimoMapper = new MimoRequestMapper(mapper);
@@ -116,6 +123,9 @@ public final class AgentInteropServer {
             when(authenticator.authenticate(any())).thenAnswer(call -> Mono.just(switch((String)call.getArgument(0)) {
                 case "fixture-primary" -> Optional.of(primary);
                 case "fixture-other" -> Optional.of(other);
+                case "fixture-text-only" -> Optional.of(new ApiKeyGrant(InteropDatabase.PRIMARY_KEY,"text-only",
+                    Map.of("mimo",com.any2api.auth.ApiKeyProviderScope.allModels("mimo")),
+                    Set.of(com.any2api.auth.ApiKeyProtocol.CHAT_COMPLETIONS,com.any2api.auth.ApiKeyProtocol.RESPONSES),Set.of(),null,false));
                 default -> Optional.empty();
             }));
             context.register(WebConfiguration.class, SecurityConfiguration.class);
@@ -126,7 +136,10 @@ public final class AgentInteropServer {
                 ()->new com.any2api.auth.AdminSessionWebFilter(sessions));
             context.registerBean(ObjectMapper.class,()->mapper);
             context.registerBean(OpenAiGatewayController.class,()->new OpenAiGatewayController(new ProviderRouteResolver(registry),
-                parser,coordinator,writer,mock(RandomInferenceRouter.class),authorization,features,responses));
+                parser,coordinator,writer,mock(RandomInferenceRouter.class),authorization,features,responses,
+                inputImages));
+            context.registerBean(com.any2api.api.openai.InputFilesController.class,
+                ()->new com.any2api.api.openai.InputFilesController(inputFiles,authorization));
             context.registerBean(ResponsesResourceController.class,()->new ResponsesResourceController(responses,authorization));
             context.registerBean(ModelsController.class,()->new ModelsController(registry,catalog,authorization,runtimeGuard));
             context.registerBean(ApiExceptionHandler.class,ApiExceptionHandler::new);
@@ -164,7 +177,8 @@ public final class AgentInteropServer {
                     if(message.path("content").isArray()) message.path("content").forEach(parts::add);
                     return parts.stream();
                 }).filter(part -> List.of("input_image", "image_url", "image").contains(part.path("type").asText())).count(),
-                "tools",prepared.tools().stream().map(tool->tool.name()).toList()));
+                "tools",prepared.tools().stream().map(tool->tool.name()).toList(),
+                "image_sha256",imageHashes(safe)));
             var id=request.requestId();
             var events = new ArrayList<CanonicalEvent>();
             var text = safe.messages().stream().map(message->contentText(message.path("content")))
@@ -203,6 +217,8 @@ public final class AgentInteropServer {
                     events.add(new CanonicalEvent.ToolArgumentsDelta(1,id,events.size(),callId,arguments));
                     events.add(new CanonicalEvent.ToolCallCompleted(1,id,events.size(),callId,arguments));
                 }
+            } else if(text.contains("fixture:image-contract")) {
+                events.add(new CanonicalEvent.OutputTextDelta(1,id,events.size(),"{\"schema_version\":\"1.0\",\"objects\":[]}"));
             } else {
                 events.add(new CanonicalEvent.OutputTextDelta(1,id,events.size(),"SDK_"));
                 events.add(new CanonicalEvent.OutputTextDelta(1,id,events.size(),"TEXT_OK"));
@@ -212,6 +228,23 @@ public final class AgentInteropServer {
                 :!hasResult&&!prepared.tools().isEmpty()?"tool_calls":"stop"));
             return CanonicalEventStream.enforce(safe,Flux.fromIterable(events).delayElements(Duration.ofMillis(25)));
         });
+    }
+
+    private static List<String> imageHashes(CanonicalRequest request) {
+        var result=new ArrayList<String>();
+        for(var message:request.messages()) {
+            if(!message.path("content").isArray())continue;
+            for(var part:message.path("content")) {
+                if(!Set.of("image_url","input_image","image").contains(part.path("type").asText()))continue;
+                var value=part.path("image_url");
+                var url=value.isTextual()?value.asText():value.path("url").asText("");
+                try {
+                    var content=java.util.Base64.getDecoder().decode(url.substring(url.indexOf(',')+1));
+                    result.add(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(content)));
+                }catch(Exception error){result.add("unavailable");}
+            }
+        }
+        return List.copyOf(result);
     }
 
     private static String contentText(tools.jackson.databind.JsonNode content) {

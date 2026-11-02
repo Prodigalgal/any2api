@@ -30,6 +30,7 @@ public class OpenAiGatewayController {
     private final ApiKeyAuthorization authorization;
     private final ApiKeyRequestFeatureDetector featureDetector;
     private final com.any2api.protocol.state.ResponsesService responses;
+    private final com.any2api.media.input.InputImageResolver inputImages;
 
     public OpenAiGatewayController(
         ProviderRouteResolver routeResolver,
@@ -39,7 +40,8 @@ public class OpenAiGatewayController {
         RandomInferenceRouter randomRouter,
         ApiKeyAuthorization authorization,
         ApiKeyRequestFeatureDetector featureDetector,
-        com.any2api.protocol.state.ResponsesService responses
+        com.any2api.protocol.state.ResponsesService responses,
+        com.any2api.media.input.InputImageResolver inputImages
     ) {
         this.routeResolver = routeResolver;
         this.requestParser = requestParser;
@@ -49,6 +51,7 @@ public class OpenAiGatewayController {
         this.authorization = authorization;
         this.featureDetector = featureDetector;
         this.responses = responses;
+        this.inputImages = inputImages;
     }
 
     @PostMapping({
@@ -116,6 +119,12 @@ public class OpenAiGatewayController {
         authorization.require(
             grant, authorization.protocol(protocol), route.providerId(), route.upstreamModel());
         authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
+        return inputImages.resolve(request,grant).flatMap(resolved -> executeResolved(resolved,exchange,protocol,route,grant));
+    }
+
+    private Mono<Void> executeResolved(ObjectNode request, ServerWebExchange exchange,
+        CanonicalRequest.Protocol protocol, com.any2api.routing.ResolvedRoute route,
+        com.any2api.auth.ApiKeyGrant grant) {
         if (protocol == CanonicalRequest.Protocol.RESPONSES) {
             return responses.prepare(request, route, grant, RequestIdWebFilter.get(exchange))
                 .flatMap(prepared -> responseWriter.write(prepared.responseRequest(),
@@ -143,6 +152,11 @@ public class OpenAiGatewayController {
                 "API key does not allow this protocol");
         }
         authorization.requireFeatures(grant, featureDetector.requiredFeatures(request));
+        return inputImages.resolve(request,grant).flatMap(resolved -> executeResolvedRandom(resolved,exchange,protocol,role,grant));
+    }
+
+    private Mono<Void> executeResolvedRandom(ObjectNode request, ServerWebExchange exchange,
+        CanonicalRequest.Protocol protocol, RandomModelRole role, com.any2api.auth.ApiKeyGrant grant) {
         var requestId = RequestIdWebFilter.get(exchange);
         RandomInferenceRouter.requireRandomModel(request);
         if (protocol == CanonicalRequest.Protocol.RESPONSES) {

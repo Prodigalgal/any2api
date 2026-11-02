@@ -42,11 +42,13 @@ class OpenAiGatewayControllerTest {
     private final InferenceCoordinator coordinator = mock(InferenceCoordinator.class);
     private final RandomInferenceRouter random = mock(RandomInferenceRouter.class);
     private final ResponsesService responses = mock(ResponsesService.class);
+    private final com.any2api.media.input.InputImageResolver inputImages = new com.any2api.media.input.InputImageResolver(
+        mock(com.any2api.media.input.InputFileService.class));
     private final ApiKeyGrant grant = new ApiKeyGrant(UUID.randomUUID(), "client",
         Map.of("alpha", ApiKeyProviderScope.allModels("alpha"), "beta", ApiKeyProviderScope.allModels("beta")),
         Set.of(ApiKeyProtocol.CHAT_COMPLETIONS, ApiKeyProtocol.RESPONSES), Set.of(), null, false, ProviderTransportMode.API);
     private final OpenAiGatewayController controller = new OpenAiGatewayController(mock(ProviderRouteResolver.class),
-        parser, coordinator, new OpenAiResponseWriter(mapper), random, new ApiKeyAuthorization(), new ApiKeyRequestFeatureDetector(), responses);
+        parser, coordinator, new OpenAiResponseWriter(mapper), random, new ApiKeyAuthorization(), new ApiKeyRequestFeatureDetector(), responses,inputImages);
 
     @Test void cascadesBeforeStreamingAndRetainsTheSubscribedSuccessfulSource() {
         var raw = mapper.createObjectNode().put("model", "random").put("stream", true);

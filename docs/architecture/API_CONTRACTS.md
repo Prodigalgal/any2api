@@ -411,6 +411,35 @@ namespace per candidate provider; each candidate validates only its own namespac
 
 ## Provider protocol matrix
 
+### Owned image files (1.8.0)
+
+`POST /v1/files` (also `/{provider}/v1/files`) accepts streaming multipart parts
+`purpose=vision` and one binary `file` (JPEG/PNG/WebP, at most 8 MiB). Both
+`FILE_UPLOADS` and `MULTIMODAL_INPUT` scopes are required. Optional `Idempotency-Key`
+binds the same owner, content digest, media type and filename; conflicting replay
+is 409. The response is a file object with `id`, `bytes`, `sha256`, `media_type`,
+`created_at`, `expires_at`, `filename` and `purpose`. Identical replay renews its
+15-minute TTL. `GET /v1/files/{id}` returns owned metadata; `DELETE` is idempotent.
+Missing, expired, revoked-key or differently owned files cannot be used; no raw
+content endpoint is exposed. Provider-prefixed file routes also require access
+to that provider. The legacy global API key has the existing shared system scope.
+
+Responses accepts `{type:"input_image",file_id:"file_..."}`. Chat Completions
+supports the Any2API extension `{type:"image_url",image_url:{file_id:"file_..."}}`.
+Image references cannot be combined with another source in the same block. The
+gateway resolves only image content blocks, never tool arguments or schemas.
+Per-request image expansion and eight concurrent upload/resolution operations per process
+bound memory; storage limits are 64 MiB/512 files per key and 256 MiB/2048 globally.
+These are logical live-row quotas, not PostgreSQL physical-disk limits. Expired
+rows are cleaned periodically and during upload; backup/WAL policy remains an
+operations responsibility. Quota/busy errors are 429, oversized files 413.
+
+Stored IDs refer to original bytes owned by the gateway, not provider-native
+attachments. Each inference still uploads using its selected account and proxy;
+native attachment IDs never cross account contexts. Existing inline requests
+remain supported. Stored Responses retain the existing response-state size
+limits; this file API does not turn them into unlimited media archives.
+
 All rows use the same canonical event stream and central Chat/Responses renderer. `Emulated` means
 the provider adapter injects a provider-local prompt contract and parses the model output; it does
 not mean the field is forwarded natively. A vendor's product-level multimodal marketing claim does
@@ -441,14 +470,15 @@ in the same account/proxy context. A provider marked `Unsupported` fails before 
 the runtime must never flatten or silently discard that content. Grok Web's separate media API is
 not a declaration that Gateway chat accepts arbitrary content blocks.
 
-Qwen, MiMo, MinMax, GLM, and LongCat currently declare image input only for inline base64 data URLs
+Qwen, MiMo, MinMax, GLM, and LongCat provider adapters currently accept image input as inline base64 data URLs
 because their page upload protocols require browser-side bytes. LongCat additionally declares one
 inline-base64 document upload per chat, using the authenticated page's `/api/v1/appendix-upload`
 route and the returned `fileUrl`/`fileKey` object in the same chat request. LongCat accepts up to
 nine images or one document in this adapter; image and document inputs cannot be mixed. GLM exposes
 the capability only for models whose authenticated official catalog metadata contains
 `capabilities.vision=true`; other GLM models remain text-only. Their Java adapters reject remote
-URLs and file IDs before account leasing; this source restriction is part of the provider contract,
+URLs and unrecognized provider-native file IDs before account leasing. Owned gateway image-file
+references above are resolved to the original bytes first; this source restriction is part of the provider contract,
 not a fallback to text. The runtime schema records all canonical image/audio/video/file block
 aliases, while provider capability, model metadata, and source policy decide whether a block can
 proceed. Audio and video are not declared as LongCat chat input capabilities; their presence in

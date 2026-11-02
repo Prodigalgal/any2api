@@ -48,5 +48,14 @@ public final class InteropDatabase implements AutoCloseable {
         return (GatewayResponseStore) proxy.getProxy();
     }
 
+    public com.any2api.media.input.InputFileStore inputFiles() {
+        var target=new com.any2api.media.input.InputFileStore(jdbc,new com.any2api.coordination.PostgresAdvisoryLocks(jdbc));
+        var proxy=new ProxyFactory(target);
+        proxy.setProxyTargetClass(true);
+        proxy.addAdvice(new TransactionInterceptor(new DataSourceTransactionManager(dataSource),
+            new AnnotationTransactionAttributeSource()));
+        return (com.any2api.media.input.InputFileStore) proxy.getProxy();
+    }
+
     @Override public void close() throws Exception { postgres.close(); }
 }

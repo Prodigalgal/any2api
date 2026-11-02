@@ -18,6 +18,13 @@ import org.springframework.web.server.ServerWebExchange;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(com.any2api.media.input.InputFileException.class)
+    public ResponseEntity<Map<String,Object>> inputFile(
+        com.any2api.media.input.InputFileException error, ServerWebExchange exchange
+    ) {
+        return ResponseEntity.status(error.status()).body(response("invalid_request_error",error.code(),
+            error.getMessage(),"file",error.status()==429,exchange,Map.of()));
+    }
     @ExceptionHandler(com.any2api.coordination.CoordinationUnavailableException.class)
     public ResponseEntity<Map<String, Object>> coordinationUnavailable(
         com.any2api.coordination.CoordinationUnavailableException error, ServerWebExchange exchange

@@ -23,7 +23,7 @@ metadata:
     app.kubernetes.io/name: any2api-automation-deepseek
     app.kubernetes.io/part-of: any2api
 spec:
-  replicas: 1
+  replicas: 0
   revisionHistoryLimit: 10
   strategy:
     type: RollingUpdate

@@ -66,7 +66,7 @@ class DeepseekAutomationProvider(AutomationProvider):
     manifest = AutomationProviderManifest(
         id="deepseek",
         browser_backend="camoufox",
-        fallback_backend="patchright",
+        fallback_backend=None,
         isolation="process",
         challenge_types=(
             "hcaptcha_area_select",

@@ -12,6 +12,7 @@ import com.any2api.provider.ProviderFailure;
 import com.any2api.provider.ProviderManifest;
 import com.any2api.provider.ProviderFailureSignals;
 import com.any2api.provider.ProviderProtocolContract;
+import com.any2api.provider.ProviderRetryPolicy;
 import com.any2api.provider.WebParameterAdaptation;
 import com.any2api.provider.ProviderRequestValidation;
 import com.any2api.provider.ProviderTransportMode;
@@ -120,6 +121,11 @@ public final class GlmProvider implements InferenceProvider {
         return modelSupportsVision(model) ? contract.withInputMedia("image") : contract;
     }
 
+
+    @Override
+    public ProviderRetryPolicy retryPolicy() {
+        return ProviderRetryPolicy.standardWith(3, "credential_rejected", "provider_upstream_error");
+    }
 
     @Override public Duration accountProbeTimeout() { return properties.getAccountVerificationTimeout(); }
 

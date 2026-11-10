@@ -7,6 +7,8 @@ server:
     min-response-size: 1024
 
 spring:
+  codec:
+    max-in-memory-size: ${SPRING_CODEC_MAX_IN_MEMORY_SIZE:20MB}
   application:
     name: any2api-server
   datasource:
@@ -14,7 +16,7 @@ spring:
     username: ${DATABASE_USERNAME:any2api}
     password: ${DATABASE_PASSWORD:any2api}
     hikari:
-      maximum-pool-size: ${DATABASE_POOL_SIZE:20}
+      maximum-pool-size: ${DATABASE_POOL_SIZE:40}
       minimum-idle: ${DATABASE_POOL_MIN_IDLE:2}
   jpa:
     open-in-view: false
@@ -61,8 +63,8 @@ any2api:
     max-state-bytes: ${ANY2API_RESPONSES_MAX_STATE_BYTES:2097152}
     max-stored-per-key: ${ANY2API_RESPONSES_MAX_STORED_PER_KEY:1000}
   model-runtime:
-    max-concurrent-requests: ${ANY2API_MODEL_MAX_CONCURRENCY:32}
-    max-queue-wait: ${ANY2API_MODEL_MAX_QUEUE_WAIT:2s}
+    max-concurrent-requests: ${ANY2API_MODEL_MAX_CONCURRENCY:64}
+    max-queue-wait: ${ANY2API_MODEL_MAX_QUEUE_WAIT:5s}
   lifecycle:
     action-concurrency: ${ANY2API_LIFECYCLE_ACTION_CONCURRENCY:2}
     conditional-registration:
@@ -79,8 +81,8 @@ any2api:
       batch-size: ${ANY2API_ACCOUNT_PURGE_BATCH_SIZE:100}
   egress-gate:
     enabled: ${ANY2API_EGRESS_GATE_ENABLED:true}
-    default-node-concurrency: ${ANY2API_EGRESS_GATE_NODE_CONCURRENCY:6}
-    default-provider-concurrency: ${ANY2API_EGRESS_GATE_PROVIDER_CONCURRENCY:12}
+    default-node-concurrency: ${ANY2API_EGRESS_GATE_NODE_CONCURRENCY:12}
+    default-provider-concurrency: ${ANY2API_EGRESS_GATE_PROVIDER_CONCURRENCY:24}
     acquire-timeout: ${ANY2API_EGRESS_GATE_ACQUIRE_TIMEOUT:120s}
     default-stagger: ${ANY2API_EGRESS_GATE_STAGGER:300ms}
     provider-concurrency:
@@ -89,9 +91,9 @@ any2api:
       glm: 8
       arena: 12
       grok_web: 8
-      longcat: 8
-      mimo: 12
-      minmax: 12
+      longcat: 24
+      mimo: 48
+      minmax: 24
   observability:
     operation-retention: ${ANY2API_OBSERVABILITY_OPERATION_RETENTION:30d}
     usage-retention: ${ANY2API_OBSERVABILITY_USAGE_RETENTION:90d}

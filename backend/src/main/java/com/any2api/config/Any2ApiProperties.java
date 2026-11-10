@@ -358,8 +358,8 @@ public class Any2ApiProperties {
     }
 
     public static class ModelRuntime {
-        private int maxConcurrentRequests = 32;
-        private Duration maxQueueWait = Duration.ofSeconds(2);
+        private int maxConcurrentRequests = 64;
+        private Duration maxQueueWait = Duration.ofSeconds(5);
         public int getMaxConcurrentRequests() { return maxConcurrentRequests; }
         public void setMaxConcurrentRequests(int value) { maxConcurrentRequests = positive(value, "max concurrent requests"); }
         public Duration getMaxQueueWait() { return maxQueueWait; }
@@ -398,8 +398,8 @@ public class Any2ApiProperties {
 
     public static class EgressGate {
         private boolean enabled = true;
-        private int defaultNodeConcurrency = 6;
-        private int defaultProviderConcurrency = 12;
+        private int defaultNodeConcurrency = 12;
+        private int defaultProviderConcurrency = 24;
         private Duration defaultStagger = Duration.ofMillis(300);
         private Duration acquireTimeout = Duration.ofSeconds(120);
         private java.util.Map<String, Integer> providerConcurrency = new java.util.HashMap<>();

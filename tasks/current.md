@@ -1,7 +1,36 @@
-# 当前任务板（源码 1.7.0 候选，生产 1.6.9）
+# 当前任务板（源码 1.8.1 候选，生产 1.8.0）
 
 > 当前源码事实以代码和 [API 契约](../docs/architecture/API_CONTRACTS.md)为准；
 > 历史任务与运行态快照已归档。
+
+## 2026-11-10 MiMo 多账号透明切号容错、服务并发提速与打码链路增强（1.8.1，进行中）
+
+- **实测根因定位**：
+  1. **MiMo 凭据失效击穿下游（HTTP 502 / credential_rejected）**：
+     - 在多账号池架构下，个别 MiMo 账号 Session/Cookie（`serviceToken`/`xiaomichatbot_ph`）过期返回上游 HTTP 401。
+     - `MimoProvider` 原未覆盖 `retryPolicy()`，继承默认仅重试 5xx/网络故障的策略（缺少 `credential_rejected`）。
+     - 导致请求一旦租借到失效账号，立即直接向客户端抛出 `HTTP 502 Bad Gateway`（`type: credential_rejected`），未能利用池中其余 230 个健康活跃账号。
+  2. **并发瓶颈**：
+     - `egress-gate.provider-concurrency.mimo` 默认硬编码限制为 12，`default-node-concurrency` 为 6，`max-concurrent-requests` 为 32，导致高并发请求过度排队堆积。
+  3. **视觉动作解析与打码容错**：
+     - `mimo-v2.6-flash` 等推理模型输出思考链 CoT、Markdown 代码块或单字典动作时，原简单的括号截取抛出 `SyntaxError` 与 `TypeError`。
+     - DeepSeek 自动化在遇到验证码重试时回退到 Patchright 触发 `device_environment_rejected`。
+- **彻底修复**：
+  - **后端 Provider 切号重试**：
+    - `MimoProvider.java`、`LongcatProvider.java`、`GlmProvider.java` 重写 `retryPolicy()`，配置 `ProviderRetryPolicy.standardWith(3, "credential_rejected", "provider_upstream_error")`，实现单账号凭据失效自动排除并无缝借出下一账号重试。
+  - **并发与网络缓冲提速**：
+    - `application.yml` 与 `Any2ApiProperties.java`：
+      - `spring.codec.max-in-memory-size` 显式开放至 `20MB`（支持多模态大图数据传输）。
+      - `model-runtime.max-concurrent-requests` 提升至 64，排队等待 `max-queue-wait` 提升至 5s。
+      - `egress-gate.default-node-concurrency` 提升至 12，`default-provider-concurrency` 提升至 24。
+      - `egress-gate.provider-concurrency`: mimo 提升至 48，longcat 提升至 24，minmax 提升至 24。
+      - Hikari 数据库连接池大小提升至 40。
+  - **自动化与打码**：
+    - `registry.py`：实现代码块/逆向 ACTIONS/JSON 数组/单字典/坐标正则的多策略容错提取；`_normalize_visual_actions` 支持单字典输入。
+    - `deepseek.py`：锁定 Camoufox 为唯一浏览器后端（`fallback_backend=None`）。
+- **版本契约与测试**：
+  - 递增统一业务版本为 `1.8.1`，7 组件版本一致（`check_versions.py` 全通过）。
+  - 后端编译与测试全绿通过；自动化工程 115 项测试全绿通过。
 
 ## 2026-10-31 GLM 彻底修复与专属容器隔离（1.7.0，进行中）
 

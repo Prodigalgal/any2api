@@ -17,7 +17,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import httpx
 
@@ -701,39 +701,96 @@ class SolverRegistry:
                 offset += 4
         return actions
 
+    @staticmethod
+    def _parse_candidate_json(text: str) -> Any:
+        source = text.strip()
+        source = re.sub(r"^```(?:json)?\s*", "", source, flags=re.IGNORECASE)
+        source = re.sub(r"\s*```.*$", "", source, flags=re.DOTALL).strip()
+        try:
+            decoded, _ = json.JSONDecoder().raw_decode(source)
+            return decoded
+        except (json.JSONDecodeError, ValueError, SyntaxError):
+            pass
+        try:
+            return json.loads(source)
+        except (json.JSONDecodeError, ValueError, SyntaxError):
+            pass
+        try:
+            return ast.literal_eval(source)
+        except (ValueError, SyntaxError):
+            pass
+        start_idx = source.find("[")
+        end_idx = source.rfind("]")
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            sub = source[start_idx : end_idx + 1]
+            try:
+                return json.loads(sub)
+            except (json.JSONDecodeError, ValueError, SyntaxError):
+                pass
+            try:
+                return ast.literal_eval(sub)
+            except (ValueError, SyntaxError):
+                pass
+        start_d = source.find("{")
+        end_d = source.rfind("}")
+        if start_d != -1 and end_d != -1 and end_d > start_d:
+            sub = source[start_d : end_d + 1]
+            try:
+                return json.loads(sub)
+            except (json.JSONDecodeError, ValueError, SyntaxError):
+                pass
+            try:
+                return ast.literal_eval(sub)
+            except (ValueError, SyntaxError):
+                pass
+        return None
+
+    def _extract_visual_actions_raw(self, content: str) -> Any:
+        for block in re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", content, re.IGNORECASE):
+            decoded = self._parse_candidate_json(block)
+            if decoded is not None:
+                return decoded
+        markers = list(re.finditer(r"ACTIONS\s*=", content, re.IGNORECASE))
+        for m in reversed(markers):
+            decoded = self._parse_candidate_json(content[m.end() :])
+            if decoded is not None:
+                return decoded
+        for match in re.finditer(r"\[\s*\{[\s\S]*?\}\s*\]", content):
+            decoded = self._parse_candidate_json(match.group(0))
+            if decoded is not None:
+                return decoded
+        for match in re.finditer(
+            r"\{\s*[\"\']type[\"\']\s*:\s*[\"\'](?:click|drag)[\"\'][\s\S]*?\}", content
+        ):
+            decoded = self._parse_candidate_json(match.group(0))
+            if decoded is not None:
+                return decoded
+        drags = re.findall(
+            r"from\s*[:=]?\s*\[\s*([\d\.]+)\s*,\s*([\d\.]+)\s*\][\s\S]*?to\s*[:=]?\s*\[\s*([\d\.]+)\s*,\s*([\d\.]+)\s*\]",
+            content,
+            re.IGNORECASE,
+        )
+        if drags:
+            return [
+                {"type": "drag", "from": [float(x1), float(y1)], "to": [float(x2), float(y2)]}
+                for x1, y1, x2, y2 in drags
+            ]
+        clicks = re.findall(
+            r"(?:click|at)\s*[:=]?\s*\[\s*([\d\.]+)\s*,\s*([\d\.]+)\s*\]",
+            content,
+            re.IGNORECASE,
+        )
+        if clicks:
+            return [{"type": "click", "at": [float(x), float(y)]} for x, y in clicks]
+        return None
+
     def _parse_visual_actions(self, image: bytes, content: str) -> list[VisualAction]:
         try:
-            marker = re.search(r"ACTIONS\s*=", content, re.IGNORECASE)
-            if marker is not None:
-                source = content[marker.end() :].lstrip()
-            else:
-                array_match = re.search(r"\[\s*\{", content)
-                if array_match is None:
-                    self._diagnostics.visual = "response_without_actions"
-                    return []
-                source = content[array_match.start() :].lstrip()
-
-            source = re.sub(r"^```(?:json)?\s*", "", source, flags=re.IGNORECASE)
-            source = re.sub(r"\s*```.*$", "", source, flags=re.DOTALL)
-            source = source.strip()
-
-            try:
-                decoded, _ = json.JSONDecoder().raw_decode(source)
-            except json.JSONDecodeError:
-                try:
-                    decoded = ast.literal_eval(source)
-                except (ValueError, SyntaxError):
-                    start_idx = source.find("[")
-                    end_idx = source.rfind("]")
-                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                        sub = source[start_idx : end_idx + 1]
-                        try:
-                            decoded = json.loads(sub)
-                        except (ValueError, SyntaxError):
-                            decoded = ast.literal_eval(sub)
-                    else:
-                        raise
-            decoded = self._normalize_visual_actions(decoded)
+            raw = self._extract_visual_actions_raw(content)
+            if raw is None:
+                self._diagnostics.visual = "response_without_actions"
+                return []
+            decoded = self._normalize_visual_actions(raw)
             if not 1 <= len(decoded) <= 9:
                 self._diagnostics.visual = "invalid_action_count"
                 return []
@@ -781,6 +838,8 @@ class SolverRegistry:
             return []
 
     def _normalize_visual_actions(self, decoded: object) -> list[dict[str, object]]:
+        if isinstance(decoded, dict):
+            decoded = [decoded]
         if not isinstance(decoded, list | tuple):
             raise TypeError("visual actions must be a list")
         normalized: list[dict[str, object]] = []
